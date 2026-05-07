@@ -68,6 +68,7 @@ import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
+import { ChatTabs } from "./chat-tabs";
 
 type TabDef = {
   path: string;
@@ -338,6 +339,7 @@ export function ChatFirstLayout() {
       <ResizablePanel defaultSize={40} minSize={20} id="chat-panel">
         <div className="flex flex-col h-full overflow-hidden">
           <ChatPanelHeader />
+          <ChatTabs />
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
             <ChatPage embedded />
           </div>

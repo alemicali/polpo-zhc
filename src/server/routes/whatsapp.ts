@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { basename, join, resolve as resolvePath } from "node:path";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { WhatsAppBridge, WhatsAppChannel } from "../../notifications/channels/whatsapp.js";
+import { resolveAllowedPaths, assertPathAllowed } from "../../tools/path-sandbox.js";
+import type { Orchestrator } from "../../core/orchestrator.js";
 
 type LoginStatus = "starting" | "qr" | "connected" | "error" | "expired" | "cancelled";
 
@@ -74,9 +76,38 @@ function listProfiles(polpoDir: string) {
     });
 }
 
+/** Resolve a free-form recipient (phone, contact name, or already-JID)
+ *  to a JID, mirroring the same logic used by the agent tools. */
+function resolveJid(input: string, store: { resolveContact: (s: string) => { jid: string } | undefined }): string {
+  if (input.includes("@")) return input;
+  const contact = store.resolveContact(input);
+  if (contact) return contact.jid;
+  const clean = input.replace(/[+\s-]/g, "");
+  return `${clean}@s.whatsapp.net`;
+}
+
+const SendTextSchema = z.object({
+  to: z.string().min(1, "Recipient required"),
+  message: z.string().min(1, "Message required"),
+});
+
+const SendFileSchema = z.object({
+  to: z.string().min(1, "Recipient required"),
+  path: z.string().min(1, "File path required"),
+  caption: z.string().optional(),
+  mediaKind: z.enum(["auto", "image", "video", "audio", "document"]).optional(),
+  mimeType: z.string().optional(),
+  fileName: z.string().optional(),
+  viewOnce: z.boolean().optional(),
+});
+
 export function whatsappRoutes(getDeps: () => {
   polpoDir: string;
   reloadConfig?: () => Promise<boolean>;
+  /** Optional — supplied by createApp so the chat approval-gate REST
+   *  endpoints can invoke the live WhatsAppBridge. Login/logout flows
+   *  don't need it. */
+  orchestrator?: Orchestrator;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -149,6 +180,76 @@ export function whatsappRoutes(getDeps: () => {
     if (!session) return c.json({ ok: false, error: "WhatsApp login session not found" }, 404);
     finishSession(session, "cancelled", "WhatsApp login was cancelled.");
     return c.json({ ok: true, data: { session: serializeSession(session) } });
+  });
+
+  // ── Approval-gate endpoints ─────────────────────────────────────────
+  // POST /send and /send-file are invoked by the chat UI after the user
+  // confirms a `whatsapp_preview` shown by the LLM. They call the live
+  // bridge directly — same code path as the agent tools, just with
+  // human approval upstream.
+
+  app.post("/send", async (c) => {
+    const parsed = SendTextSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      return c.json({ ok: false, error: parsed.error.issues.map(i => i.message).join("; ") }, 400);
+    }
+    const { orchestrator } = getDeps();
+    const bridge = orchestrator?.getWhatsAppBridge?.();
+    const store = orchestrator?.getWhatsAppStore?.();
+    if (!bridge || !store) {
+      return c.json({ ok: false, error: "WhatsApp is not connected on this instance." }, 503);
+    }
+    try {
+      const jid = resolveJid(parsed.data.to, store);
+      const id = await bridge.sendMessage(jid, parsed.data.message);
+      // Mirror the agent tool: persist the outbound message so the user
+      // sees it in subsequent whatsapp_read calls.
+      if (id) {
+        store.appendMessage({
+          id, chatJid: jid, senderJid: "me",
+          text: parsed.data.message, fromMe: true,
+          timestamp: Math.floor(Date.now() / 1000),
+        });
+      }
+      return c.json({ ok: true, data: { id, jid } });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  app.post("/send-file", async (c) => {
+    const parsed = SendFileSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      return c.json({ ok: false, error: parsed.error.issues.map(i => i.message).join("; ") }, 400);
+    }
+    const { orchestrator } = getDeps();
+    const bridge = orchestrator?.getWhatsAppBridge?.();
+    const store = orchestrator?.getWhatsAppStore?.();
+    if (!orchestrator || !bridge || !store) {
+      return c.json({ ok: false, error: "WhatsApp is not connected on this instance." }, 503);
+    }
+    try {
+      const cwd = orchestrator.getAgentWorkDir();
+      const sandbox = resolveAllowedPaths(cwd, undefined);
+      const filePath = resolvePath(cwd, parsed.data.path);
+      assertPathAllowed(filePath, sandbox, "whatsapp_send_file");
+      const stat = statSync(filePath);
+      if (!stat.isFile()) {
+        return c.json({ ok: false, error: "Path is not a file" }, 400);
+      }
+      const jid = resolveJid(parsed.data.to, store);
+      const id = await bridge.sendMediaMessage(jid, {
+        path: filePath,
+        caption: parsed.data.caption,
+        mimeType: parsed.data.mimeType,
+        fileName: parsed.data.fileName ?? basename(filePath),
+        mediaKind: parsed.data.mediaKind ?? "auto",
+        viewOnce: parsed.data.viewOnce,
+      });
+      return c.json({ ok: true, data: { id, jid } });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   app.post("/logout", async (c) => {

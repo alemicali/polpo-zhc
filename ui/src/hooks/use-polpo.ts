@@ -58,6 +58,40 @@ export interface VaultPreviewData {
 
 export type VaultPreviewAction = "confirm" | "cancel";
 
+// Local mirror of SDK whatsapp / email preview types — approval gate
+// for side-effect tools (whatsapp_send, whatsapp_send_file, email_send).
+// Same lifecycle as MissionPreview: server emits the chunk, UI shows a
+// card, user picks Send / Refine / Cancel. Send fires the matching REST
+// endpoint; Refine sends feedback back to the LLM; Cancel just informs
+// the LLM the user declined.
+export interface WhatsAppPreviewData {
+  /** "text" → POST /whatsapp/send. "file" → POST /whatsapp/send-file. */
+  kind: "text" | "file";
+  to: string;
+  message?: string;
+  path?: string;
+  caption?: string;
+  mediaKind?: string;
+  mimeType?: string;
+  fileName?: string;
+  viewOnce?: boolean;
+}
+
+export interface EmailPreviewData {
+  to: string | string[];
+  subject: string;
+  body: string;
+  html?: boolean;
+  cc?: string | string[];
+  bcc?: string | string[];
+  from?: string;
+  reply_to?: string;
+  attachments?: Array<{ path: string; filename?: string }>;
+}
+
+/** Send → REST API. Refine → user feedback → LLM. Cancel → informs LLM. */
+export type SendPreviewAction = "send" | "refine" | "cancel";
+
 // Local mirror of SDK widget render types — display-only intercept.
 // Renders self-contained HTML inside a sandboxed iframe; the turn ends
 // after the widget is shown. No user response is required (unlike
@@ -192,6 +226,8 @@ export interface ChatMessageWithQuestions extends ChatMessage {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
+  whatsappPreview?: WhatsAppPreviewData;
+  emailPreview?: EmailPreviewData;
   /** Inline interactive HTML widgets emitted by render_widget. Multiple
    *  widgets can be emitted in the same turn — they're rendered in
    *  order, each as its own card/canvas. */
@@ -222,6 +258,8 @@ interface SessionPendingState {
   questions: AskUserQuestion[] | null;
   mission: MissionPreviewData | null;
   vault: VaultPreviewData | null;
+  whatsapp: WhatsAppPreviewData | null;
+  email: EmailPreviewData | null;
   openFile: OpenFileData | null;
   navigateTo: NavigateToData | null;
   openTab: OpenTabData | null;
@@ -262,6 +300,15 @@ export function useChat() {
   const turnIdsBySessionRef = useRef<Map<string, string>>(new Map());
   /** Abort controllers for in-flight resume SSE streams, keyed by session. */
   const resumeAbortBySessionRef = useRef<Map<string, AbortController>>(new Map());
+  /**
+   * Sessions whose messages have been fetched into messagesBySession at least
+   * once during this app lifetime. Used by loadSession to act like a
+   * browser-tab switch (instant, in-memory) instead of re-fetching/clobbering
+   * cached state when the user clicks back to an already-warm session via the
+   * tab strip. The cache is invalidated on visibilitychange refresh, on
+   * deleteSession, on clear(), and on logout (full unmount).
+   */
+  const loadedSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     activeSessionKeyRef.current = activeSessionKey;
@@ -278,6 +325,8 @@ export function useChat() {
   const pendingQuestions = pendingState?.questions ?? null;
   const pendingMission = pendingState?.mission ?? null;
   const pendingVault = pendingState?.vault ?? null;
+  const pendingWhatsApp = pendingState?.whatsapp ?? null;
+  const pendingEmail = pendingState?.email ?? null;
   const pendingOpenFile = pendingState?.openFile ?? null;
   const pendingNavigateTo = pendingState?.navigateTo ?? null;
   const pendingOpenTab = pendingState?.openTab ?? null;
@@ -314,6 +363,8 @@ export function useChat() {
         questions: null,
         mission: null,
         vault: null,
+        whatsapp: null,
+        email: null,
         openFile: null,
         navigateTo: null,
         openTab: null,
@@ -334,6 +385,8 @@ export function useChat() {
       questions: null,
       mission: null,
       vault: null,
+      whatsapp: null,
+      email: null,
       openFile: null,
       navigateTo: null,
       openTab: null,
@@ -394,6 +447,16 @@ export function useChat() {
       resumeAbortBySessionRef.current.set(toKey, resumeAbort);
       resumeAbortBySessionRef.current.delete(fromKey);
     }
+    if (loadedSessionsRef.current.has(fromKey)) {
+      loadedSessionsRef.current.add(toKey);
+      loadedSessionsRef.current.delete(fromKey);
+    } else {
+      // First send of a brand-new session migrates from the local placeholder
+      // key to the server-assigned id; the in-memory cache is now the source
+      // of truth for this id, so mark it loaded — re-clicking its tab must
+      // not trigger a redundant getMessages round-trip.
+      loadedSessionsRef.current.add(toKey);
+    }
   }, []);
 
   const resetToLocalNewSession = useCallback((opts?: { selectedAgent?: string | null }) => {
@@ -452,6 +515,39 @@ export function useChat() {
         };
         lastMsg.vaultPreview = vaultPreview;
         setSessionPending(key, { vault: vaultPreview });
+      } else if ((tc.name === "whatsapp_send" || tc.name === "whatsapp_send_file") && tc.arguments) {
+        // Side-effect gate intercept survived a refresh — restore the
+        // pending preview card so the user can still confirm/refine.
+        const args = tc.arguments as Record<string, unknown>;
+        const isFile = tc.name === "whatsapp_send_file";
+        const wp: WhatsAppPreviewData = {
+          kind: isFile ? "file" : "text",
+          to: (args.to as string) ?? "",
+          message: isFile ? undefined : ((args.message as string) ?? ""),
+          path: isFile ? ((args.path as string) ?? "") : undefined,
+          caption: args.caption as string | undefined,
+          mediaKind: args.mediaKind as string | undefined,
+          mimeType: args.mimeType as string | undefined,
+          fileName: args.fileName as string | undefined,
+          viewOnce: args.viewOnce as boolean | undefined,
+        };
+        lastMsg.whatsappPreview = wp;
+        setSessionPending(key, { whatsapp: wp });
+      } else if (tc.name === "email_send" && tc.arguments) {
+        const args = tc.arguments as Record<string, unknown>;
+        const ep: EmailPreviewData = {
+          to: (args.to as string | string[]) ?? "",
+          subject: (args.subject as string) ?? "",
+          body: (args.body as string) ?? "",
+          html: args.html as boolean | undefined,
+          cc: args.cc as string | string[] | undefined,
+          bcc: args.bcc as string | string[] | undefined,
+          from: args.from as string | undefined,
+          reply_to: args.reply_to as string | undefined,
+          attachments: args.attachments as Array<{ path: string; filename?: string }> | undefined,
+        };
+        lastMsg.emailPreview = ep;
+        setSessionPending(key, { email: ep });
       } else if (tc.name === "render_widget") {
         // Già gestito da toUiMessages (per ogni messaggio, non solo
         // l'ultimo). Niente da fare qui — render_widget non è una
@@ -732,20 +828,36 @@ export function useChat() {
       activeSessionKeyRef.current = id;
       wantsNewSessionRef.current = false;
       setSessionId(id);
-      setMessagesLoading(true);
-      clearSessionPending(id);
       // Restore agent scope from the loaded session
       const session = sessions.find((s) => s.id === id);
       setSelectedAgent(session?.agent ?? null);
 
       if (streamsBySessionRef.current.has(id) || resumeAbortBySessionRef.current.has(id)) {
+        // In-flight stream/resume — local state is the live source of truth.
         setMessagesLoading(false);
         return;
       }
 
+      // ── Warm-cache fast path (browser-tab switch semantics) ──────────
+      // If we've already loaded this session into the in-memory store and
+      // there is no in-flight network operation for it, treat the click as
+      // a pure tab switch: do NOT clobber the cached messages, do NOT show
+      // the messages-loading skeleton, do NOT clear pending interactive
+      // state (the user might have an open ask_user/mission/vault prompt
+      // they're mid-way through reviewing). The visibilitychange handler
+      // below still refreshes the active session opportunistically.
+      if (loadedSessionsRef.current.has(id)) {
+        setMessagesLoading(false);
+        return;
+      }
+
+      setMessagesLoading(true);
+      clearSessionPending(id);
+
       try {
         const raw = await getMessages(id);
         const msgs = applyServerMessages(id, raw);
+        loadedSessionsRef.current.add(id);
 
         // Resume detection: if the server has an in-flight turn for this
         // session (because the previous client disconnected), reattach to
@@ -1073,7 +1185,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { questions: stream.askUser.questions, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
+        setSessionPending(streamSessionKey, { questions: stream.askUser.questions, mission: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.missionPreview) {
         // Mission preview — show interactive card for user to Execute/Draft/Refine/Cancel
@@ -1089,7 +1201,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { mission: preview, questions: null, vault: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
+        setSessionPending(streamSessionKey, { mission: preview, questions: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.vaultPreview) {
         // Vault preview — show interactive card for user to Confirm/Cancel
@@ -1107,7 +1219,34 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
+        setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
+      } else if ((stream as any).whatsappPreview) {
+        // WhatsApp preview — Side-effect approval gate. Server emitted
+        // whatsapp_preview after intercepting whatsapp_send /
+        // whatsapp_send_file. UI shows a card with Send/Refine/Cancel.
+        const wp = (stream as any).whatsappPreview as WhatsAppPreviewData;
+        updateSessionMessages(streamSessionKey, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, ...messagePatch(), whatsappPreview: wp }
+            : m
+          )
+        );
+        setSessionPending(streamSessionKey, { whatsapp: wp, questions: null, mission: null, vault: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
+        appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
+      } else if ((stream as any).emailPreview) {
+        // Email preview — Side-effect approval gate. Server emitted
+        // email_preview after intercepting email_send.
+        const ep = (stream as any).emailPreview as EmailPreviewData;
+        updateSessionMessages(streamSessionKey, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, ...messagePatch(), emailPreview: ep }
+            : m
+          )
+        );
+        setSessionPending(streamSessionKey, { email: ep, questions: null, mission: null, vault: null, whatsapp: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openFile) {
         // Client-side open_file — open file preview dialog
@@ -1122,7 +1261,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null, navigateTo: null, openTab: null, setDesign: null });
+        setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null, whatsapp: null, email: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).navigateTo) {
         // Client-side navigate_to — navigate the UI to a specific page
@@ -1141,7 +1280,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null, openFile: null, openTab: null, setDesign: null });
+        setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).openTab) {
         // Client-side open_tab — open URL in new browser tab
@@ -1157,7 +1296,7 @@ export function useChat() {
             : m
           )
         );
-        setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, setDesign: null });
+        setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if ((stream as any).setDesign) {
         // Client-side set_design — show preview card and wait for user confirmation
@@ -1208,7 +1347,7 @@ export function useChat() {
             },
           ];
         });
-        setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, openFile: null, navigateTo: null, openTab: null });
+        setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (widgets.length > 0 || (stream as any).widgetRender) {
         // Widget render — display-only intercept. N widget catturati in
@@ -1569,6 +1708,117 @@ export function useChat() {
     [appendUserAndStream, client, pendingVault, setSessionPending]
   );
 
+  // ── WhatsApp / Email approval-gate response handlers ───────────────
+  // Same conversational loop as respondToMission: Send → REST API +
+  // continue chat with a status message; Refine → user feedback to LLM;
+  // Cancel → inform the LLM the user declined.
+
+  const postJson = useCallback(async (path: string, body: unknown) => {
+    const base = appConfig.baseUrl || "";
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+    const res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.ok === false) {
+      const msg = data?.error ?? `HTTP ${res.status}`;
+      throw new Error(typeof msg === "string" ? msg : "Request failed");
+    }
+    return data?.data ?? data;
+  }, []);
+
+  const respondToWhatsApp = useCallback(
+    async (action: SendPreviewAction, feedback?: string): Promise<{ id?: string; error?: string }> => {
+      if (!pendingWhatsApp) return {};
+      const wp = pendingWhatsApp;
+
+      if (action === "send") {
+        setSessionPending(activeSessionKeyRef.current, { whatsapp: null });
+        try {
+          const path = wp.kind === "file" ? "/api/v1/whatsapp/send-file" : "/api/v1/whatsapp/send";
+          const body = wp.kind === "file"
+            ? { to: wp.to, path: wp.path, caption: wp.caption, mediaKind: wp.mediaKind, mimeType: wp.mimeType, fileName: wp.fileName, viewOnce: wp.viewOnce }
+            : { to: wp.to, message: wp.message };
+          const result = await postJson(path, body) as { id?: string; jid?: string };
+          await appendUserAndStream(
+            `I confirmed the WhatsApp ${wp.kind === "file" ? "file " : ""}send to ${wp.to}. ` +
+            `Message ${result.id ? `id ${result.id}` : "sent"}. Continue with the final answer.`,
+          );
+          return { id: result.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          // Surface failure inline so the user sees what happened. The
+          // LLM is also told so it can react / retry with different text.
+          await appendUserAndStream(`WhatsApp send failed: ${errMsg}. Don't retry automatically — wait for new instructions.`);
+          return { error: errMsg };
+        }
+      }
+
+      if (action === "cancel") {
+        setSessionPending(activeSessionKeyRef.current, { whatsapp: null });
+        await appendUserAndStream(`I declined the WhatsApp send to ${wp.to}. Let's move on.`);
+        return {};
+      }
+
+      if (action === "refine" && feedback?.trim()) {
+        setSessionPending(activeSessionKeyRef.current, { whatsapp: null });
+        await appendUserAndStream(`Please revise the WhatsApp message before sending: ${feedback.trim()}`);
+      }
+
+      return {};
+    },
+    [appendUserAndStream, pendingWhatsApp, postJson, setSessionPending],
+  );
+
+  const respondToEmail = useCallback(
+    async (action: SendPreviewAction, feedback?: string): Promise<{ id?: string; error?: string }> => {
+      if (!pendingEmail) return {};
+      const ep = pendingEmail;
+
+      if (action === "send") {
+        setSessionPending(activeSessionKeyRef.current, { email: null });
+        try {
+          const result = await postJson("/api/v1/email/send", {
+            ...ep,
+            // Pass the agent scope so the REST endpoint resolves the
+            // right vault + per-agent emailAllowedDomains override
+            // (parity with email_send when run inside the agent loop).
+            agent: selectedAgentRef.current ?? undefined,
+          }) as { id?: string };
+          const recipient = Array.isArray(ep.to) ? ep.to.join(", ") : ep.to;
+          await appendUserAndStream(
+            `I confirmed the email send to ${recipient} with subject "${ep.subject}". ` +
+            `Message ${result.id ? `id ${result.id}` : "sent"}. Continue with the final answer.`,
+          );
+          return { id: result.id };
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          await appendUserAndStream(`Email send failed: ${errMsg}. Don't retry automatically — wait for new instructions.`);
+          return { error: errMsg };
+        }
+      }
+
+      if (action === "cancel") {
+        setSessionPending(activeSessionKeyRef.current, { email: null });
+        const recipient = Array.isArray(ep.to) ? ep.to.join(", ") : ep.to;
+        await appendUserAndStream(`I declined the email send to ${recipient}. Let's move on.`);
+        return {};
+      }
+
+      if (action === "refine" && feedback?.trim()) {
+        setSessionPending(activeSessionKeyRef.current, { email: null });
+        await appendUserAndStream(`Please revise the email before sending: ${feedback.trim()}`);
+      }
+
+      return {};
+    },
+    [appendUserAndStream, pendingEmail, postJson, setSessionPending],
+  );
+
   // Consume the preview_file pending state after the dialog is opened.
   // The dialog is opened by the page component; this resumes the LLM conversation.
   const consumeOpenFile = useCallback(() => {
@@ -1635,6 +1885,7 @@ export function useChat() {
         resumeAbortBySessionRef.current.get(id)?.abort();
         resumeAbortBySessionRef.current.delete(id);
         turnIdsBySessionRef.current.delete(id);
+        loadedSessionsRef.current.delete(id);
         setSessionStreaming(id, false);
       } catch {
         // silent
@@ -1644,9 +1895,11 @@ export function useChat() {
   );
 
   const clear = useCallback(() => {
-    updateSessionMessages(activeSessionKeyRef.current, []);
-    clearSessionPending(activeSessionKeyRef.current);
-    conversationBySessionRef.current.delete(activeSessionKeyRef.current);
+    const key = activeSessionKeyRef.current;
+    updateSessionMessages(key, []);
+    clearSessionPending(key);
+    conversationBySessionRef.current.delete(key);
+    loadedSessionsRef.current.delete(key);
     resetToLocalNewSession({ selectedAgent: selectedAgentRef.current });
   }, [clearSessionPending, resetToLocalNewSession, updateSessionMessages]);
 
@@ -1661,6 +1914,8 @@ export function useChat() {
     pendingQuestions,
     pendingMission,
     pendingVault,
+    pendingWhatsApp,
+    pendingEmail,
     pendingOpenFile,
     pendingNavigateTo,
     pendingOpenTab,
@@ -1670,6 +1925,8 @@ export function useChat() {
     answerQuestions,
     respondToMission,
     respondToVault,
+    respondToWhatsApp,
+    respondToEmail,
     consumeOpenFile,
     consumeNavigateTo,
     consumeOpenTab,

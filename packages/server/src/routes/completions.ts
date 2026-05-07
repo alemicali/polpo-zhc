@@ -45,23 +45,37 @@ function emitFileChanged(
 }
 
 /**
- * Redact sensitive credential values from vault tool call arguments before persistence.
+ * Redact sensitive credential values from tool call arguments before persistence.
  * Returns a sanitized copy — original is NOT mutated.
+ *
+ * Covers:
+ *   - set_vault_entry / update_vault_credentials → wholesale `credentials` redaction
+ *   - email_send (gated approval-preview path) → SMTP password override
+ *
+ * The vault tools store creds permanently in the encrypted vault, so chat
+ * persistence must NEVER hold the plain values. email_send only carries
+ * smtp_pass when the LLM hand-rolls one (rare — usually resolved from
+ * vault/env), but redact defensively.
  */
 function redactVaultToolCalls(toolCalls: any[]): any[] {
   // @ts-ignore — ToolCallInfo shape preserved via duck typing
   return toolCalls.map(tc => {
-    if ((tc.name !== "set_vault_entry" && tc.name !== "update_vault_credentials") || !tc.arguments) return tc;
-    const args = { ...tc.arguments };
-    if (args.credentials && typeof args.credentials === "object") {
-      // Replace each credential value with a redacted marker, preserve keys for display
-      const redacted: Record<string, string> = {};
-      for (const key of Object.keys(args.credentials as Record<string, string>)) {
-        redacted[key] = "[REDACTED]";
+    if (!tc.arguments) return tc;
+    if (tc.name === "set_vault_entry" || tc.name === "update_vault_credentials") {
+      const args = { ...tc.arguments };
+      if (args.credentials && typeof args.credentials === "object") {
+        const redacted: Record<string, string> = {};
+        for (const key of Object.keys(args.credentials as Record<string, string>)) {
+          redacted[key] = "[REDACTED]";
+        }
+        args.credentials = redacted;
       }
-      args.credentials = redacted;
+      return { ...tc, arguments: args };
     }
-    return { ...tc, arguments: args };
+    if (tc.name === "email_send" && typeof tc.arguments.smtp_pass === "string") {
+      return { ...tc, arguments: { ...tc.arguments, smtp_pass: "[REDACTED]" } };
+    }
+    return tc;
   });
 }
 
@@ -724,6 +738,53 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     fontFamily: args.fontFamily as string | undefined,
                   },
                 }));
+              } else if (interactiveCall.name === "whatsapp_send") {
+                // Side-effect gate: emit a preview chunk so the UI can
+                // show the outbound text + recipient and require explicit
+                // confirmation before the message actually goes out.
+                // After confirmation the UI POSTs /api/v1/whatsapp/send.
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, "whatsapp_preview", {
+                  whatsapp_preview: {
+                    kind: "text",
+                    to: args.to as string,
+                    message: args.message as string,
+                  },
+                }));
+              } else if (interactiveCall.name === "whatsapp_send_file") {
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, "whatsapp_preview", {
+                  whatsapp_preview: {
+                    kind: "file",
+                    to: args.to as string,
+                    path: args.path as string,
+                    caption: args.caption as string | undefined,
+                    mediaKind: args.mediaKind as string | undefined,
+                    mimeType: args.mimeType as string | undefined,
+                    fileName: args.fileName as string | undefined,
+                    viewOnce: args.viewOnce as boolean | undefined,
+                  },
+                }));
+              } else if (interactiveCall.name === "email_send") {
+                // Side-effect gate: emit a preview chunk so the UI can
+                // show the outbound email and require explicit
+                // confirmation before SMTP fires. The REST handler still
+                // re-validates emailAllowedDomains at send time — the
+                // preview UI is NOT a security boundary, only a UX gate.
+                const args = interactiveCall.arguments as Record<string, unknown>;
+                await emit(sseChunk(completionId, {}, "email_preview", {
+                  email_preview: {
+                    to: args.to,
+                    subject: args.subject as string,
+                    body: args.body as string,
+                    html: args.html as boolean | undefined,
+                    cc: args.cc,
+                    bcc: args.bcc,
+                    from: args.from as string | undefined,
+                    reply_to: args.reply_to as string | undefined,
+                    attachments: args.attachments as Array<{ path: string; filename?: string }> | undefined,
+                  },
+                }));
               }
               await emit("[DONE]");
               return; // finally block will persist whatever finalText we have
@@ -1050,6 +1111,68 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     description: (args.description as string | undefined) ?? null,
                     chrome: (args.chrome as boolean | undefined) ?? true,
                     stream: (args.stream as boolean | undefined) ?? false,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "whatsapp_send") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "whatsapp_preview" as const,
+                  whatsapp_preview: {
+                    kind: "text",
+                    to: args.to as string,
+                    message: args.message as string,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "whatsapp_send_file") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "whatsapp_preview" as const,
+                  whatsapp_preview: {
+                    kind: "file",
+                    to: args.to as string,
+                    path: args.path as string,
+                    caption: args.caption as string | undefined,
+                    mediaKind: args.mediaKind as string | undefined,
+                    mimeType: args.mimeType as string | undefined,
+                    fileName: args.fileName as string | undefined,
+                    viewOnce: args.viewOnce as boolean | undefined,
+                  },
+                }],
+              });
+            }
+
+            if (interactiveCall.name === "email_send") {
+              const args = interactiveCall.arguments as Record<string, unknown>;
+              return c.json({
+                ...baseResponse,
+                choices: [{
+                  index: 0,
+                  message: { role: "assistant" as const, content: finalText },
+                  finish_reason: "email_preview" as const,
+                  email_preview: {
+                    to: args.to,
+                    subject: args.subject as string,
+                    body: args.body as string,
+                    html: args.html as boolean | undefined,
+                    cc: args.cc,
+                    bcc: args.bcc,
+                    from: args.from as string | undefined,
+                    reply_to: args.reply_to as string | undefined,
+                    attachments: args.attachments as Array<{ path: string; filename?: string }> | undefined,
                   },
                 }],
               });

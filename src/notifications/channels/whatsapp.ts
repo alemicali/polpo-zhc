@@ -28,8 +28,8 @@
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
 import type { WhatsAppStore } from "../../stores/whatsapp-store.js";
-import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { basename, extname, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 // ─── Types ─────────────────────────────────────
 
@@ -226,6 +226,7 @@ export class WhatsAppBridge {
   private sock?: WASocket;
   private channel: WhatsAppChannel;
   private profilePath: string;
+  private mediaDir: string;
   private gateway?: WhatsAppGatewayHandler;
   private store?: WhatsAppStore;
   private stopping = false;
@@ -242,6 +243,8 @@ export class WhatsAppBridge {
   ) {
     this.channel = channel;
     this.profilePath = channel.getProfilePath();
+    this.mediaDir = join(this.profilePath, "..", "..", "whatsapp-media");
+    mkdirSync(this.mediaDir, { recursive: true });
     this.log = log ?? ((level, msg) => console.error(`[polpo/whatsapp] [${level}] ${msg}`));
   }
 
@@ -285,6 +288,49 @@ export class WhatsAppBridge {
     return msgId;
   }
 
+  /** Send a file/media message to a JID and return the message ID. */
+  async sendMediaMessage(jid: string, opts: {
+    path: string;
+    caption?: string;
+    mimeType?: string;
+    fileName?: string;
+    mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+    viewOnce?: boolean;
+  }): Promise<string | undefined> {
+    const sock = this.channel.getSocket();
+    if (!sock) throw new Error("WhatsApp not connected");
+    const content = buildMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+    const result = await sock.sendMessage(jid, content as any);
+    const msgId = result?.key?.id ?? undefined;
+
+    if (this.store && msgId) {
+      const mime = opts.mimeType ?? guessMime(opts.path);
+      const kind = resolveMediaKind(opts.mediaKind, mime);
+      this.store.appendMessage({
+        id: msgId,
+        chatJid: jid,
+        senderJid: this.selfJid ?? "me",
+        text: opts.caption || `[${kind}: ${opts.fileName ?? basename(opts.path)}]`,
+        fromMe: true,
+        timestamp: Math.floor(Date.now() / 1000),
+        mediaType: kind,
+        mediaPath: opts.path,
+        mimeType: mime,
+        fileName: opts.fileName ?? basename(opts.path),
+      });
+    }
+
+    return msgId;
+  }
+
+  /** Send WhatsApp read receipts for message keys. */
+  async markRead(keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]): Promise<void> {
+    const sock = this.channel.getSocket();
+    if (!sock || keys.length === 0) return;
+    await sock.readMessages(keys as any);
+    this.store?.markRead(keys.map(k => k.id));
+  }
+
   /** Start the Baileys connection. Returns when initially connected (or throws on auth failure). */
   async start(): Promise<void> {
     this.stopping = false;
@@ -313,6 +359,7 @@ export class WhatsAppBridge {
       fetchLatestBaileysVersion,
       makeCacheableSignalKeyStore,
       Browsers,
+      downloadMediaMessage,
     } = await import("@whiskeysockets/baileys");
 
     const { state, saveCreds } = await useMultiFileAuthState(this.profilePath);
@@ -390,7 +437,7 @@ export class WhatsAppBridge {
     });
 
     // ── History sync (initial connect — bulk message import) ──
-    sock.ev.on("messaging-history.set", ({ messages: historyMsgs, contacts: historyContacts }) => {
+    sock.ev.on("messaging-history.set", async ({ messages: historyMsgs, contacts: historyContacts }) => {
       if (!this.store) return;
 
       // Buffer historical contacts
@@ -414,41 +461,7 @@ export class WhatsAppBridge {
         for (const msg of historyMsgs) {
           if (!msg.message) continue;
 
-          const text =
-            msg.message.conversation ??
-            msg.message.extendedTextMessage?.text ??
-            msg.message.imageMessage?.caption ??
-            msg.message.videoMessage?.caption ??
-            msg.message.documentMessage?.caption ??
-            undefined;
-
-          const mediaType = msg.message.imageMessage ? "image"
-            : msg.message.videoMessage ? "video"
-            : msg.message.audioMessage ? "audio"
-            : msg.message.documentMessage ? "document"
-            : undefined;
-
-          const chatId = msg.key.remoteJid ?? "";
-          const messageId = msg.key.id ?? undefined;
-          const isFromMe = !!msg.key.fromMe;
-          const pushName = msg.pushName ?? undefined;
-          const senderId = msg.key.remoteJid ?? "";
-          const rawTs = msg.messageTimestamp;
-          const timestamp = typeof rawTs === "number" ? rawTs
-            : typeof rawTs === "object" && rawTs !== null && "toNumber" in rawTs ? (rawTs as { toNumber(): number }).toNumber()
-            : Math.floor(Date.now() / 1000);
-
-          if (messageId && (text || mediaType)) {
-            this.store!.appendMessage({
-              id: messageId,
-              chatJid: chatId,
-              senderJid: isFromMe ? (this.selfJid ?? "me") : senderId,
-              senderName: isFromMe ? undefined : pushName,
-              text: text ?? `[${mediaType}]`,
-              fromMe: isFromMe,
-              timestamp,
-              mediaType,
-            });
+          if (await this.persistMessage(msg, downloadMediaMessage, sock)) {
             msgCount++;
           }
         }
@@ -465,22 +478,6 @@ export class WhatsAppBridge {
       for (const msg of messages) {
         if (!msg.message) continue;
 
-        // Extract text from various message types
-        const text =
-          msg.message.conversation ??
-          msg.message.extendedTextMessage?.text ??
-          msg.message.imageMessage?.caption ??
-          msg.message.videoMessage?.caption ??
-          msg.message.documentMessage?.caption ??
-          undefined;
-
-        // Detect media type
-        const mediaType = msg.message.imageMessage ? "image"
-          : msg.message.videoMessage ? "video"
-          : msg.message.audioMessage ? "audio"
-          : msg.message.documentMessage ? "document"
-          : undefined;
-
         const senderId = msg.key.remoteJid ?? "";
         const chatId = msg.key.remoteJid ?? "";
         const pushName = msg.pushName ?? undefined;
@@ -491,24 +488,12 @@ export class WhatsAppBridge {
           : typeof rawTs === "object" && rawTs !== null && "toNumber" in rawTs ? (rawTs as { toNumber(): number }).toNumber()
           : Math.floor(Date.now() / 1000);
 
+        const text = getMessageText(msg.message);
+
         // ── Store: buffer ALL messages (history + realtime, inbound + outbound) ──
         // This gives agents complete conversation history via whatsapp_* tools
-        if (this.store && messageId && (text || mediaType)) {
-          this.store.appendMessage({
-            id: messageId,
-            chatJid: chatId,
-            senderJid: isFromMe ? (this.selfJid ?? "me") : senderId,
-            senderName: isFromMe ? undefined : pushName,
-            text: text ?? `[${mediaType}]`,
-            fromMe: isFromMe,
-            timestamp,
-            mediaType,
-          });
-
-          // Upsert contact from pushName (inbound messages)
-          if (!isFromMe && pushName && senderId && !senderId.endsWith("@g.us")) {
-            this.store.upsertContact(senderId, pushName, timestamp);
-          }
+        if (await this.persistMessage(msg, downloadMediaMessage, sock)) {
+          if (!isFromMe && pushName && senderId && !senderId.endsWith("@g.us")) this.store?.upsertContact(senderId, pushName, timestamp);
         }
 
         // ── Gateway routing: only new real-time messages ──
@@ -635,4 +620,156 @@ export class WhatsAppBridge {
       });
     });
   }
+
+  private async persistMessage(
+    msg: any,
+    downloadMediaMessage: (message: any, type: "buffer", options: any, ctx?: any) => Promise<Buffer>,
+    sock: WASocket,
+  ): Promise<boolean> {
+    if (!this.store || !msg.message) return false;
+    const messageId = msg.key?.id;
+    const chatId = msg.key?.remoteJid ?? "";
+    if (!messageId || !chatId) return false;
+
+    const media = getMediaInfo(msg.message);
+    const text = getMessageText(msg.message);
+    if (!text && !media.mediaType) return false;
+
+    const isFromMe = !!msg.key?.fromMe;
+    const rawTs = msg.messageTimestamp;
+    const timestamp = typeof rawTs === "number" ? rawTs
+      : typeof rawTs === "object" && rawTs !== null && "toNumber" in rawTs ? (rawTs as { toNumber(): number }).toNumber()
+      : Math.floor(Date.now() / 1000);
+
+    let downloaded: { mediaPath?: string; mediaSize?: number } = {};
+    if (media.mediaType) {
+      downloaded = await this.downloadMedia(msg, downloadMediaMessage, sock, chatId, messageId, media, timestamp);
+    }
+
+    this.store.appendMessage({
+      id: messageId,
+      chatJid: chatId,
+      senderJid: isFromMe ? (this.selfJid ?? "me") : (msg.key?.participant ?? msg.key?.remoteJid ?? ""),
+      senderName: isFromMe ? undefined : msg.pushName ?? undefined,
+      text: text ?? `[${media.mediaType}${media.fileName ? `: ${media.fileName}` : ""}]`,
+      fromMe: isFromMe,
+      timestamp,
+      mediaType: media.mediaType,
+      mediaPath: downloaded.mediaPath,
+      mediaSize: downloaded.mediaSize,
+      mimeType: media.mimeType,
+      fileName: media.fileName,
+      readAt: isFromMe ? timestamp : undefined,
+    });
+    return true;
+  }
+
+  private async downloadMedia(
+    msg: any,
+    downloadMediaMessage: (message: any, type: "buffer", options: any, ctx?: any) => Promise<Buffer>,
+    sock: WASocket,
+    chatId: string,
+    messageId: string,
+    media: { mediaType?: string; mimeType?: string; fileName?: string },
+    timestamp: number,
+  ): Promise<{ mediaPath?: string; mediaSize?: number }> {
+    try {
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { reuploadRequest: (sock as any).updateMediaMessage });
+      if (!buffer?.length) return {};
+      const chatDir = sanitizePathPart(chatId);
+      const ext = mediaExt(media.mediaType, media.mimeType, media.fileName);
+      const fileName = `${timestamp}-${sanitizePathPart(messageId)}${ext}`;
+      const dir = join(this.mediaDir, chatDir);
+      mkdirSync(dir, { recursive: true });
+      const filePath = join(dir, fileName);
+      writeFileSync(filePath, buffer);
+      return { mediaPath: filePath, mediaSize: buffer.length };
+    } catch (err) {
+      this.log("warn", `WhatsApp media download failed: ${err instanceof Error ? err.message : String(err)}`);
+      return {};
+    }
+  }
+}
+
+function getMessageText(message: any): string | undefined {
+  return message.conversation
+    ?? message.extendedTextMessage?.text
+    ?? message.imageMessage?.caption
+    ?? message.videoMessage?.caption
+    ?? message.documentMessage?.caption
+    ?? undefined;
+}
+
+function getMediaInfo(message: any): { mediaType?: "image" | "video" | "audio" | "document" | "sticker"; mimeType?: string; fileName?: string } {
+  const mediaMessage = message.imageMessage ?? message.videoMessage ?? message.audioMessage ?? message.documentMessage ?? message.stickerMessage;
+  const mediaType = message.imageMessage ? "image"
+    : message.videoMessage ? "video"
+    : message.audioMessage ? "audio"
+    : message.documentMessage ? "document"
+    : message.stickerMessage ? "sticker"
+    : undefined;
+  return {
+    mediaType,
+    mimeType: mediaMessage?.mimetype,
+    fileName: mediaMessage?.fileName,
+  };
+}
+
+function buildMediaContent(
+  path: string,
+  mimeType?: string,
+  fileName?: string,
+  caption?: string,
+  mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
+  viewOnce?: boolean,
+): Record<string, unknown> {
+  const mime = mimeType ?? guessMime(path);
+  const kind = resolveMediaKind(mediaKind, mime);
+  const file = { url: path };
+  const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
+  if (kind === "image") return { image: file, ...base };
+  if (kind === "video") return { video: file, ...base };
+  if (kind === "audio") return { audio: file, mimetype: mime };
+  return { document: file, fileName: fileName ?? basename(path), ...base };
+}
+
+function resolveMediaKind(kind: string | undefined, mime: string): "image" | "video" | "audio" | "document" {
+  if (kind && kind !== "auto" && kind !== "sticker") return kind as "image" | "video" | "audio" | "document";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function guessMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
+}
+
+function mediaExt(mediaType?: string, mimeType?: string, fileName?: string): string {
+  const existing = fileName ? extname(fileName) : "";
+  if (existing) return existing;
+  const byMime: Record<string, string> = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif",
+    "video/mp4": ".mp4", "video/quicktime": ".mov", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    "audio/ogg": ".ogg", "audio/wav": ".wav", "application/pdf": ".pdf",
+  };
+  if (mimeType && byMime[mimeType]) return byMime[mimeType];
+  if (mediaType === "image") return ".jpg";
+  if (mediaType === "video") return ".mp4";
+  if (mediaType === "audio") return ".ogg";
+  return ".bin";
+}
+
+function sanitizePathPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
 }

@@ -96,6 +96,134 @@ function validateRecipientDomains(addresses: string | string[], allowedDomains: 
   }
 }
 
+/**
+ * Public params for sending an email — mirrors the email_send tool
+ * schema 1:1 so the chat preview gate (which sees the raw tool args)
+ * can hand them off to this helper without translation.
+ */
+export interface SendEmailParams {
+  to: string | string[];
+  subject: string;
+  body: string;
+  html?: boolean;
+  cc?: string | string[];
+  bcc?: string | string[];
+  from?: string;
+  reply_to?: string;
+  attachments?: Array<{ path: string; filename?: string }>;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_user?: string;
+  smtp_pass?: string;
+  smtp_secure?: boolean;
+}
+
+export interface SendEmailResult {
+  messageId?: string;
+  /** Recipients accepted by the SMTP server. Nodemailer returns either
+   *  string addresses or `{ name, address }` objects depending on the
+   *  source — normalised here to plain strings for serialisation. */
+  accepted: string[];
+  rejected: string[];
+  recipients: number;
+  attachments: number;
+}
+
+function normaliseAddress(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "address" in value) {
+    return String((value as { address: unknown }).address ?? "");
+  }
+  return String(value ?? "");
+}
+
+/**
+ * Shared SMTP send used by BOTH the email_send agent tool and the chat
+ * approval-gate REST endpoint (POST /api/v1/email/send). Keeps the two
+ * paths byte-identical so the gate is a pure UX layer — same SMTP
+ * config resolution, same domain allowlist check, same nodemailer
+ * call. Throws on configuration / validation / SMTP failure.
+ *
+ * SECURITY: emailAllowedDomains is enforced here unconditionally — the
+ * chat preview is NOT a security boundary, it only adds a confirmation
+ * step. A user that accidentally typed an out-of-policy address into
+ * the preview dialog still gets rejected here.
+ */
+export async function sendEmail(
+  params: SendEmailParams,
+  cwd: string,
+  allowedPaths?: string[],
+  vault?: ResolvedVault,
+  emailAllowedDomains?: string[],
+): Promise<SendEmailResult> {
+  const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+
+  const vaultSmtp = vault?.getSmtp();
+  const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
+  const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
+  const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
+  const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
+  const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM;
+
+  if (!host) throw new Error("SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter.");
+  if (!from) throw new Error("Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter.");
+
+  if (emailAllowedDomains && emailAllowedDomains.length > 0) {
+    validateRecipientDomains(params.to, emailAllowedDomains);
+    if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
+    if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
+  }
+
+  const nodemailer = await import("nodemailer");
+  const secure = params.smtp_secure ?? vaultSmtp?.secure ?? (port === 465);
+  const transporter = nodemailer.default.createTransport({
+    host, port, secure,
+    auth: user ? { user, pass } : undefined,
+  });
+
+  const attachments: Array<{ filename: string; content: Buffer }> = [];
+  if (params.attachments) {
+    for (const att of params.attachments) {
+      const attPath = resolve(cwd, att.path);
+      assertPathAllowed(attPath, sandbox, "email_send");
+      if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
+      attachments.push({
+        filename: att.filename ?? basename(attPath),
+        content: readFileSync(attPath),
+      });
+    }
+  }
+
+  const isHtml = params.html ?? (params.body.includes("<") && params.body.includes(">"));
+  const mailOptions: Record<string, any> = {
+    from,
+    to: Array.isArray(params.to) ? params.to.join(", ") : params.to,
+    subject: params.subject,
+    ...(isHtml ? { html: params.body } : { text: params.body }),
+    ...(params.cc && { cc: Array.isArray(params.cc) ? params.cc.join(", ") : params.cc }),
+    ...(params.bcc && { bcc: Array.isArray(params.bcc) ? params.bcc.join(", ") : params.bcc }),
+    ...(params.reply_to && { replyTo: params.reply_to }),
+    ...(attachments.length > 0 && { attachments }),
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  if (info.rejected?.length) {
+    throw new Error(`Email rejected by server for: ${info.rejected.join(", ")}`);
+  }
+
+  const recipientCount = (Array.isArray(params.to) ? params.to.length : 1) +
+    (params.cc ? (Array.isArray(params.cc) ? params.cc.length : 1) : 0) +
+    (params.bcc ? (Array.isArray(params.bcc) ? params.bcc.length : 1) : 0);
+
+  return {
+    messageId: info.messageId,
+    accepted: (info.accepted ?? []).map(normaliseAddress),
+    rejected: (info.rejected ?? []).map(normaliseAddress),
+    recipients: recipientCount,
+    attachments: attachments.length,
+  };
+}
+
 function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailSendSchema> {
   return {
     name: "email_send",

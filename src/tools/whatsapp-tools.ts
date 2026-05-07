@@ -9,6 +9,9 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import { basename, extname, resolve } from "node:path";
+import { statSync } from "node:fs";
+import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 
 // ─── Schemas ──────────────────────────────────
 
@@ -19,11 +22,28 @@ const WhatsAppListSchema = Type.Object({
 const WhatsAppReadSchema = Type.Object({
   chat: Type.String({ description: "Phone number, contact name, or JID of the chat to read" }),
   limit: Type.Optional(Type.Number({ description: "Max messages to return (default 30)", default: 30 })),
+  markRead: Type.Optional(Type.Boolean({ description: "Send WhatsApp read receipts for returned inbound messages (default false = hidden/local read only)", default: false })),
 });
 
 const WhatsAppSendSchema = Type.Object({
   to: Type.String({ description: "Recipient phone number (with country code, no +), contact name, or JID" }),
   message: Type.String({ description: "Message text to send" }),
+});
+
+const WhatsAppSendFileSchema = Type.Object({
+  to: Type.String({ description: "Recipient phone number, contact name, or JID" }),
+  path: Type.String({ description: "Local file path to send" }),
+  caption: Type.Optional(Type.String({ description: "Optional caption for image/video/document messages" })),
+  mediaKind: Type.Optional(Type.Union([
+    Type.Literal("auto"),
+    Type.Literal("image"),
+    Type.Literal("video"),
+    Type.Literal("audio"),
+    Type.Literal("document"),
+  ], { description: "Force WhatsApp media kind (default auto from MIME)" })),
+  mimeType: Type.Optional(Type.String({ description: "Override MIME type" })),
+  fileName: Type.Optional(Type.String({ description: "Override displayed filename for documents" })),
+  viewOnce: Type.Optional(Type.Boolean({ description: "Send supported media as view-once" })),
 });
 
 const WhatsAppSearchSchema = Type.Object({
@@ -62,6 +82,15 @@ function formatTimestamp(ts: number): string {
 interface WhatsAppToolDeps {
   store: WhatsAppStore;
   sendMessage: (jid: string, text: string) => Promise<string | undefined>;
+  sendMedia?: (jid: string, opts: {
+    path: string;
+    caption?: string;
+    mimeType?: string;
+    fileName?: string;
+    mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+    viewOnce?: boolean;
+  }) => Promise<string | undefined>;
+  markRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
 }
 
 function createWhatsAppListTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsAppListSchema> {
@@ -114,15 +143,29 @@ function createWhatsAppReadTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
         const sender = m.fromMe ? "You" : (m.senderName ?? m.senderJid.replace(/@.*/, ""));
         const time = formatTimestamp(m.timestamp);
         const media = m.mediaType ? ` [${m.mediaType}]` : "";
-        return `[${time}] ${sender}${media}: ${m.text}`;
+        const file = m.mediaPath ? `\n   attachment: ${m.mediaPath}${m.mimeType ? ` (${m.mimeType})` : ""}${m.mediaSize ? ` ${(m.mediaSize / 1024).toFixed(1)} KB` : ""}` : "";
+        const read = m.readAt ? " read" : "";
+        return `[${time}]${read} ${sender}${media}: ${m.text}${file}`;
       });
+
+      let markedRead = 0;
+      if (params.markRead && deps.markRead) {
+        const keys = messages
+          .filter(m => !m.fromMe && !m.readAt)
+          .map(m => ({ remoteJid: m.chatJid, id: m.id, fromMe: false, participant: m.chatJid.endsWith("@g.us") ? m.senderJid : undefined }));
+        if (keys.length > 0) {
+          await deps.markRead(keys);
+          deps.store.markRead(keys.map(k => k.id));
+          markedRead = keys.length;
+        }
+      }
 
       const contact = deps.store.resolveContact(params.chat);
       const header = contact ? `${contact.name} (${contact.phone})` : params.chat;
 
       return {
-        content: [{ type: "text", text: `Messages with ${header} (${messages.length}):\n\n${lines.join("\n")}` }],
-        details: { count: messages.length, chatJid: jid },
+        content: [{ type: "text", text: `Messages with ${header} (${messages.length}${params.markRead ? `, marked read: ${markedRead}` : ", hidden read"}):\n\n${lines.join("\n")}` }],
+        details: { count: messages.length, chatJid: jid, markedRead },
       };
     },
   };
@@ -167,6 +210,44 @@ function createWhatsAppSendTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
   };
 }
 
+function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox: string[]): AgentTool<typeof WhatsAppSendFileSchema> {
+  return {
+    name: "whatsapp_send_file",
+    label: "Send WhatsApp File",
+    description: "Send a local file/media attachment over WhatsApp. Supports image, video, audio, and document messages via Baileys.",
+    parameters: WhatsAppSendFileSchema,
+    async execute(_id, params) {
+      if (!deps.sendMedia) {
+        return { content: [{ type: "text", text: "WhatsApp media sending is not available in this runtime." }], details: { error: "sendMedia unavailable" } };
+      }
+      const jid = resolveJid(params.to, deps.store);
+      const filePath = resolve(cwd, params.path);
+      try {
+        assertPathAllowed(filePath, sandbox, "whatsapp_send_file");
+        const stat = statSync(filePath);
+        if (!stat.isFile()) throw new Error("Path is not a file");
+        const mimeType = params.mimeType ?? guessMime(filePath);
+        const fileName = params.fileName ?? basename(filePath);
+        const msgId = await deps.sendMedia(jid, {
+          path: filePath,
+          caption: params.caption,
+          mimeType,
+          fileName,
+          mediaKind: params.mediaKind ?? "auto",
+          viewOnce: params.viewOnce,
+        });
+        return {
+          content: [{ type: "text", text: `WhatsApp attachment sent to ${params.to}: ${fileName} (${mimeType}, ${(stat.size / 1024).toFixed(1)} KB).` }],
+          details: { jid, messageId: msgId, path: filePath, mimeType, fileName, size: stat.size },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text", text: `Failed to send WhatsApp attachment: ${msg}` }], details: { error: msg } };
+      }
+    },
+  };
+}
+
 function createWhatsAppSearchTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsAppSearchSchema> {
   return {
     name: "whatsapp_search",
@@ -185,7 +266,8 @@ function createWhatsAppSearchTool(deps: WhatsAppToolDeps): AgentTool<typeof What
         const sender = m.fromMe ? "You" : (m.senderName ?? m.senderJid.replace(/@.*/, ""));
         const time = formatTimestamp(m.timestamp);
         const chat = m.chatJid.replace(/@.*/, "");
-        return `[${time}] ${chat} — ${sender}: ${m.text.slice(0, 120)}`;
+        const media = m.mediaType ? ` [${m.mediaType}${m.mediaPath ? `: ${m.mediaPath}` : ""}]` : "";
+        return `[${time}] ${chat} — ${sender}${media}: ${m.text.slice(0, 120)}`;
       });
 
       return {
@@ -231,6 +313,7 @@ export type WhatsAppToolName =
   | "whatsapp_list"
   | "whatsapp_read"
   | "whatsapp_send"
+  | "whatsapp_send_file"
   | "whatsapp_search"
   | "whatsapp_contacts";
 
@@ -238,6 +321,7 @@ export const ALL_WHATSAPP_TOOL_NAMES: WhatsAppToolName[] = [
   "whatsapp_list",
   "whatsapp_read",
   "whatsapp_send",
+  "whatsapp_send_file",
   "whatsapp_search",
   "whatsapp_contacts",
 ];
@@ -245,11 +329,15 @@ export const ALL_WHATSAPP_TOOL_NAMES: WhatsAppToolName[] = [
 export function createWhatsAppTools(
   deps: WhatsAppToolDeps,
   allowedTools?: string[],
+  cwd = process.cwd(),
+  allowedPaths?: string[],
 ): AgentTool<any>[] {
+  const sandbox = resolveAllowedPaths(cwd, allowedPaths);
   const factories: Record<WhatsAppToolName, () => AgentTool<any>> = {
     whatsapp_list: () => createWhatsAppListTool(deps),
     whatsapp_read: () => createWhatsAppReadTool(deps),
     whatsapp_send: () => createWhatsAppSendTool(deps),
+    whatsapp_send_file: () => createWhatsAppSendFileTool(deps, cwd, sandbox),
     whatsapp_search: () => createWhatsAppSearchTool(deps),
     whatsapp_contacts: () => createWhatsAppContactsTool(deps),
   };
@@ -259,4 +347,18 @@ export function createWhatsAppTools(
     : ALL_WHATSAPP_TOOL_NAMES;
 
   return names.map(n => factories[n]());
+}
+
+function guessMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
 }

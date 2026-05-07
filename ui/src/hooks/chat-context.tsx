@@ -25,6 +25,8 @@ import type {
   AskUserQuestion,
   MissionPreviewData,
   VaultPreviewData,
+  WhatsAppPreviewData,
+  EmailPreviewData,
   OpenFileData,
   NavigateToData,
   OpenTabData,
@@ -33,6 +35,7 @@ import type {
   AskUserAnswer,
   MissionPreviewAction,
   VaultPreviewAction,
+  SendPreviewAction,
 } from "./use-polpo";
 
 // ═══════════════════════════════════════════════════════
@@ -127,6 +130,8 @@ export interface ChatStateValue {
   pendingQuestions: AskUserQuestion[] | null;
   pendingMission: MissionPreviewData | null;
   pendingVault: VaultPreviewData | null;
+  pendingWhatsApp: WhatsAppPreviewData | null;
+  pendingEmail: EmailPreviewData | null;
   pendingOpenFile: OpenFileData | null;
   pendingNavigateTo: NavigateToData | null;
   pendingOpenTab: OpenTabData | null;
@@ -142,6 +147,8 @@ export interface ChatActionsValue {
   answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
   respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;
   respondToVault: (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => Promise<void>;
+  respondToWhatsApp: (action: SendPreviewAction, feedback?: string) => Promise<{ id?: string; error?: string }>;
+  respondToEmail: (action: SendPreviewAction, feedback?: string) => Promise<{ id?: string; error?: string }>;
   consumeOpenFile: () => void;
   consumeNavigateTo: () => void;
   consumeOpenTab: () => void;
@@ -171,6 +178,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     pendingQuestions: chat.pendingQuestions,
     pendingMission: chat.pendingMission,
     pendingVault: chat.pendingVault,
+    pendingWhatsApp: chat.pendingWhatsApp,
+    pendingEmail: chat.pendingEmail,
     pendingOpenFile: chat.pendingOpenFile,
     pendingNavigateTo: chat.pendingNavigateTo,
     pendingOpenTab: chat.pendingOpenTab,
@@ -180,6 +189,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.messages, chat.isLoading, chat.messagesLoading,
     chat.sessionId, chat.sessions, chat.sessionsLoading, chat.streamingSessionIds,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
+    chat.pendingWhatsApp, chat.pendingEmail,
     chat.pendingOpenFile, chat.pendingNavigateTo,
     chat.pendingOpenTab, chat.pendingSetDesign, chat.selectedAgent,
   ]);
@@ -190,6 +200,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     answerQuestions: chat.answerQuestions,
     respondToMission: chat.respondToMission,
     respondToVault: chat.respondToVault,
+    respondToWhatsApp: chat.respondToWhatsApp,
+    respondToEmail: chat.respondToEmail,
     consumeOpenFile: chat.consumeOpenFile,
     consumeNavigateTo: chat.consumeNavigateTo,
     consumeOpenTab: chat.consumeOpenTab,
@@ -202,6 +214,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }), [
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
+    chat.respondToWhatsApp, chat.respondToEmail,
     chat.consumeOpenFile, chat.consumeNavigateTo,
     chat.consumeOpenTab, chat.consumeSetDesign,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
@@ -238,11 +251,13 @@ export function useChatActions(): ChatActionsValue {
 export function useChatInputDisabled(options?: { includeLoading?: boolean }): boolean {
   const {
     isLoading, pendingQuestions, pendingMission, pendingVault,
+    pendingWhatsApp, pendingEmail,
     pendingOpenFile, pendingNavigateTo, pendingOpenTab, pendingSetDesign,
   } = useChatState();
   const includeLoading = options?.includeLoading ?? true;
   return (
     (includeLoading && isLoading) || !!pendingQuestions || !!pendingMission || !!pendingVault
+    || !!pendingWhatsApp || !!pendingEmail
     || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab || !!pendingSetDesign
   );
 }

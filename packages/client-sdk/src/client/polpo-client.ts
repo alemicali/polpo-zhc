@@ -50,6 +50,8 @@ import type {
   OpenTabPayload,
   SetDesignPayload,
   WidgetRenderPayload,
+  WhatsAppPreviewPayload,
+  EmailPreviewPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -119,6 +121,12 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "widget_render", this contains the inline widget. */
   widgetRender: WidgetRenderPayload | null = null;
+
+  /** If the stream ended with finish_reason "whatsapp_preview", this contains the proposed WhatsApp message. */
+  whatsappPreview: WhatsAppPreviewPayload | null = null;
+
+  /** If the stream ended with finish_reason "email_preview", this contains the proposed email. */
+  emailPreview: EmailPreviewPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -245,6 +253,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture widget_render payload from the chunk
             if (choice?.finish_reason === "widget_render" && choice.widget_render) {
               this.widgetRender = choice.widget_render;
+            }
+            // Capture whatsapp_preview payload from the chunk
+            if (choice?.finish_reason === "whatsapp_preview" && choice.whatsapp_preview) {
+              this.whatsappPreview = choice.whatsapp_preview;
+            }
+            // Capture email_preview payload from the chunk
+            if (choice?.finish_reason === "email_preview" && choice.email_preview) {
+              this.emailPreview = choice.email_preview;
             }
             yield chunk;
           } catch {

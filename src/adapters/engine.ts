@@ -102,8 +102,9 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "",
       "**WhatsApp:**",
       "- `whatsapp_send` — send a WhatsApp message (WARNING: irreversible side effect)",
+      "- `whatsapp_send_file` — send image/video/audio/document attachments from a local file path",
       "- `whatsapp_list` — list recent conversations",
-      "- `whatsapp_read` — read messages in a conversation",
+      "- `whatsapp_read` — read messages in a conversation; default markRead=false is hidden/local, set markRead=true only when asked",
       "- `whatsapp_search` — search messages",
       "- `whatsapp_contacts` — list contacts",
     );
@@ -407,6 +408,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = undefined;
   }
 
+  if (ctx?.polpoDir && agentConfig.allowedTools?.some(t => t.toLowerCase().startsWith("whatsapp_"))) {
+    const whatsappMediaDir = join(ctx.polpoDir, "whatsapp-media");
+    effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
+  }
+
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
   const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
@@ -557,6 +563,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           outputDir,
           whatsappStore: ctx?.whatsappStore,
           whatsappSendMessage: ctx?.whatsappSendMessage,
+          whatsappSendMedia: ctx?.whatsappSendMedia,
+          whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
         });
       }

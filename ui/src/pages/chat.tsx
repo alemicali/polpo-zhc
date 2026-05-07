@@ -71,7 +71,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle, type StateSnapshot } from "react-virtuoso";
 import {
   Message,
   MessageContent,
@@ -96,7 +96,8 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
+import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, WhatsAppPreviewData, EmailPreviewData, SendPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
@@ -116,6 +117,29 @@ function chatTimeAgo(date: Date): string {
   if (diffMs < 30_000) return "just now";
   return formatDistanceToNow(date, { addSuffix: true });
 }
+
+// ── Per-session UI-state caches (browser-tab semantics) ────────────────
+//
+// The chat tab strip lets the user freely jump between open conversations
+// without "losing context" — same expectation as desktop browsers. Two
+// pieces of UI-local state would otherwise be wiped on each switch:
+//
+//   1) Virtuoso scroll position (item index + measurements). Stored as
+//      `StateSnapshot` per session id; captured before the Virtuoso
+//      instance unmounts on session change, replayed via Virtuoso's
+//      `restoreStateFrom` prop on the next mount.
+//   2) The composer textarea draft. The PromptInputTextarea is uncontrolled
+//      and the surrounding form auto-resets after submit, so we snapshot
+//      the live `value` per session id and rehydrate after each switch.
+//
+// Module-level Maps are intentional: they survive React strict-mode double
+// renders and any local re-mounts of the consuming components, but they
+// are lost on a hard refresh — which is the desired "browser tab" semantic
+// (a closed-and-reopened browser doesn't restore unsubmitted drafts).
+const chatScrollStates: Map<string, StateSnapshot> = new Map();
+const chatInputDrafts: Map<string, string> = new Map();
+/** Sentinel session-id used for the unsaved "new session" placeholder. */
+const NEW_SESSION_DRAFT_KEY = "__new__";
 
 // ── Speech-to-text hook (Web Speech API) ──
 
@@ -2873,8 +2897,8 @@ function ChatEmptyState() {
 // ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
 
 function ChatMessages() {
-  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
-  const { answerQuestions, respondToMission, respondToVault, consumeSetDesign } = useChatActions();
+  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
+  const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign } = useChatActions();
 
   // Resolve agent config for agent-direct sessions
   const { agents } = useAgents();
@@ -2887,6 +2911,23 @@ function ChatMessages() {
 
   const [atBottom, setAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // ── Per-session scroll-state preservation ──────────────────────────
+  // Tab strip is browser-tab-style: switching tabs must NOT scroll back to
+  // bottom. We continuously snapshot the Virtuoso state into a per-session
+  // map (`chatScrollStates`) and hand the latest snapshot to the next
+  // mounted Virtuoso via `restoreStateFrom` when the user returns. Capture
+  // is done on `isScrolling=false` (scroll settled) and on `rangeChanged`
+  // (item-size measurements grew) — both cheap, both synchronous.
+  const sessionKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
+  const restoredState = chatScrollStates.get(sessionKey);
+  const captureScrollState = useCallback(() => {
+    const handle = virtuosoRef.current;
+    if (!handle) return;
+    handle.getState((snapshot) => {
+      chatScrollStates.set(sessionKey, snapshot);
+    });
+  }, [sessionKey]);
 
   // File preview for inline open_file indicators (re-open on click)
   const { previewState, openPreview, closePreview } = useFilePreview();
@@ -2903,13 +2944,23 @@ function ChatMessages() {
         <ChatEmptyState />
       ) : (
         <Virtuoso
+          // Re-mount on session change so each session gets a clean Virtuoso
+          // with its own item-size measurements; restoreStateFrom seeds the
+          // new instance with the previously captured scroll position.
+          key={sessionKey}
           ref={virtuosoRef}
           data={messages}
           followOutput="smooth"
           initialTopMostItemIndex={messages.length - 1}
+          restoreStateFrom={restoredState}
           atBottomStateChange={setAtBottom}
           atBottomThreshold={80}
           increaseViewportBy={600}
+          // Snapshot scroll state on settle and on item-range changes; the
+          // latest snapshot for this session id is what we replay when the
+          // user comes back to this tab.
+          isScrolling={(scrolling) => { if (!scrolling) captureScrollState(); }}
+          rangeChanged={captureScrollState}
           itemContent={(i, msg) => {
             const isStreaming = isLoading && i === messages.length - 1;
 
@@ -3081,7 +3132,7 @@ function ChatMessages() {
                             </MessageContent>
                           </>
                         )}
-                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && !msg.setDesign && (
+                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && !msg.whatsappPreview && !msg.emailPreview && !msg.setDesign && (
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
                             {msg.content.trim() && <SpeakAction text={msg.content} />}
@@ -3106,6 +3157,20 @@ function ChatMessages() {
                             preview={msg.vaultPreview}
                             onRespond={respondToVault}
                             disabled={isLoading || !pendingVault}
+                          />
+                        )}
+                        {msg.whatsappPreview && (
+                          <WhatsAppPreviewCard
+                            preview={msg.whatsappPreview}
+                            onRespond={respondToWhatsApp}
+                            disabled={isLoading || !pendingWhatsApp}
+                          />
+                        )}
+                        {msg.emailPreview && (
+                          <EmailPreviewCard
+                            preview={msg.emailPreview}
+                            onRespond={respondToEmail}
+                            disabled={isLoading || !pendingEmail}
                           />
                         )}
                         {/* I widget sono renderizzati INLINE nei segments
@@ -3180,7 +3245,7 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
+  const { isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
@@ -3265,9 +3330,16 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       const images = message.files
         .filter((f) => f.url && f.mediaType?.startsWith("image/"))
         .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
+      // PromptInput resets the form on successful submit — drop any cached
+      // draft for this session so a later tab-switch does not rehydrate it.
+      // We clear both the current id key and the new-session sentinel to
+      // cover the first-send-from-new-session case where sessionId is still
+      // null at this point and only flips after the stream returns.
+      chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+      chatInputDrafts.delete(NEW_SESSION_DRAFT_KEY);
       await send(resolvedText, images.length > 0 ? images : undefined);
     },
-    [isLoading, send]
+    [isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -3278,6 +3350,44 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     nativeSetter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }, []);
+
+  // ── Per-session draft preservation ─────────────────────────────────
+  // The composer is uncontrolled. When the user switches tabs we need to
+  // (a) snapshot the current draft under the OUTGOING session id, and
+  // (b) hydrate the textarea with the INCOMING session id's draft (if any).
+  // The submit path triggers form.reset() in PromptInput, which clears the
+  // textarea after a successful send — `chatInputDrafts.delete` in
+  // handleSubmit keeps our cache aligned. The cleanup also saves on
+  // unmount (e.g. compact-mode sidebar takeover).
+  const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
+  const prevDraftKeyRef = useRef<string>(draftKey);
+  useEffect(() => {
+    const prevKey = prevDraftKeyRef.current;
+    const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+    if (textarea && prevKey !== draftKey) {
+      // Save outgoing draft (only if non-empty — keeps the map small)
+      const outgoing = textarea.value;
+      if (outgoing) chatInputDrafts.set(prevKey, outgoing);
+      else chatInputDrafts.delete(prevKey);
+      // Hydrate incoming draft. Use the native setter so React's synthetic
+      // event tracking is bypassed — same trick as the speech-to-text path.
+      const incoming = chatInputDrafts.get(draftKey) ?? "";
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeSetter?.call(textarea, incoming);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    prevDraftKeyRef.current = draftKey;
+    return () => {
+      const ta = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+      if (!ta) return;
+      const v = ta.value;
+      if (v) chatInputDrafts.set(draftKey, v);
+      else chatInputDrafts.delete(draftKey);
+    };
+  }, [draftKey]);
 
   // Resolve selected agent config for display
   const currentAgentName =
@@ -3361,7 +3471,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <AttachmentPreview />
             <PromptInputTextarea
               ref={textareaRef}
-              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
+              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
               onKeyDown={(e) => {
                 mentionRef.current?.handleTextareaKeyDown(e);

@@ -27,7 +27,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("pdf_")) caps.push("pdf_read, pdf_create, pdf_merge, pdf_info");
   if (hasPattern("docx_")) caps.push("docx_read, docx_create");
   if (hasPattern("search_")) caps.push("search_web (Exa AI web search), search_find_similar (find similar pages)");
-  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read, whatsapp_send, whatsapp_search, whatsapp_contacts");
+  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -987,14 +987,15 @@ export async function buildChatSystemPrompt(
     ``,
     `### WhatsApp`,
     ``,
-    `**Tools**: whatsapp_send, whatsapp_read.`,
+    `**Tools**: whatsapp_send, whatsapp_send_file, whatsapp_read.`,
     `You can send and read WhatsApp messages directly — no need to delegate to an agent.`,
     `Requires a WhatsApp channel configured in polpo.json and connected via \`polpo whatsapp login\`.`,
     ``,
     `- **whatsapp_send**: Send a message to a contact. Resolve by name, phone number, or JID.`,
     `  "send a WhatsApp message to Marco" → whatsapp_send with to="Marco", text="...".`,
     `  "text 393387172954" → whatsapp_send with to="393387172954", text="...".`,
-    `- **whatsapp_read**: Read messages. Four actions:`,
+    `- **whatsapp_send_file**: Send a local image, video, audio, or document attachment from a file path.`,
+    `- **whatsapp_read**: Read messages. Four actions. Reads are hidden/local unless markRead=true is explicitly requested:`,
     `  - \`list_chats\`: List recent conversations with message counts and last message preview.`,
     `    "show WhatsApp chats" → whatsapp_read with action="list_chats".`,
     `  - \`read_chat\`: Read messages from a specific chat. Requires chatId (phone, name, or JID).`,
@@ -1200,7 +1201,7 @@ export async function buildChatSystemPrompt(
     `- For PDFs: "Use pdf_read/pdf_create" (requires pdf_* in allowedTools)`,
     `- For Word docs: "Use docx_read/docx_create" (requires docx_* in allowedTools)`,
     `- For web search/research: "Use search_web to find..." (requires search_* in allowedTools + vault exa key or EXA_API_KEY env var)`,
-    `- For WhatsApp messaging: "Use whatsapp_send to send..." / "Use whatsapp_read to check messages" (requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
+    `- For WhatsApp messaging: "Use whatsapp_send to send text..." / "Use whatsapp_send_file to send attachments..." / "Use whatsapp_read to check messages" (markRead=false keeps reads hidden; requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
     `- For vault credentials: agents always have vault_get/vault_list (core tools, always available).`,
     `- For git and dependency management: use bash.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,

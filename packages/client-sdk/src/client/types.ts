@@ -1169,7 +1169,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design" | "widget_render";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design" | "widget_render" | "whatsapp_preview" | "email_preview";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -1186,6 +1186,10 @@ export interface ChatCompletionChoice {
   set_design?: SetDesignPayload;
   /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
   widget_render?: WidgetRenderPayload;
+  /** Present when finish_reason is "whatsapp_preview" — proposed WhatsApp message awaiting user confirmation. */
+  whatsapp_preview?: WhatsAppPreviewPayload;
+  /** Present when finish_reason is "email_preview" — proposed email awaiting user confirmation. */
+  email_preview?: EmailPreviewPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1250,6 +1254,10 @@ export interface ChatCompletionChunk {
     set_design?: SetDesignPayload;
     /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
     widget_render?: WidgetRenderPayload;
+    /** Present when finish_reason is "whatsapp_preview" — proposed WhatsApp message. */
+    whatsapp_preview?: WhatsAppPreviewPayload;
+    /** Present when finish_reason is "email_preview" — proposed email. */
+    email_preview?: EmailPreviewPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
     /** Present when the model is emitting thinking/reasoning tokens. */
@@ -1431,4 +1439,61 @@ export interface WidgetRenderPayload {
   chrome?: boolean;
   /** Opt-in chunk-by-chunk live preview during stream. Default false. */
   stream?: boolean;
+}
+
+// === WhatsApp Preview (interactive approval gate before send) ===
+
+/** Payload for whatsapp_preview — proposed outbound WhatsApp message. The
+ *  user must explicitly confirm via the UI before the bridge actually
+ *  sends. Confirm path: POST /api/v1/whatsapp/send (text) or
+ *  POST /api/v1/whatsapp/send-file (media). */
+export interface WhatsAppPreviewPayload {
+  /** Discriminator: "text" → whatsapp_send, "file" → whatsapp_send_file. */
+  kind: "text" | "file";
+  /** Recipient phone, contact name, or JID — passed straight from the
+   *  tool args. The REST endpoint will resolve it to a JID using the
+   *  WhatsApp store contact map. */
+  to: string;
+  /** Text body (kind="text" only). */
+  message?: string;
+  /** Local file path (kind="file" only) — relative to the agent workdir
+   *  unless absolute, sandboxed by allowedPaths at send time. */
+  path?: string;
+  /** Optional caption for image / video / document attachments. */
+  caption?: string;
+  /** Force the WhatsApp media kind. Default "auto" (sniffed from MIME). */
+  mediaKind?: string;
+  /** Override MIME type. */
+  mimeType?: string;
+  /** Override displayed filename for documents. */
+  fileName?: string;
+  /** Send as view-once (image/video only). */
+  viewOnce?: boolean;
+}
+
+// === Email Preview (interactive approval gate before send) ===
+
+/** Payload for email_preview — proposed outbound email. The user must
+ *  explicitly confirm via the UI before SMTP fires. Confirm path:
+ *  POST /api/v1/email/send. The REST handler re-validates
+ *  emailAllowedDomains at send time. */
+export interface EmailPreviewPayload {
+  /** Recipient(s) — string or array of strings. */
+  to: string | string[];
+  /** Subject line. */
+  subject: string;
+  /** Body content (plain text or HTML). */
+  body: string;
+  /** Treat body as HTML (default: auto-detect from `<...>` markers). */
+  html?: boolean;
+  /** CC recipients. */
+  cc?: string | string[];
+  /** BCC recipients. */
+  bcc?: string | string[];
+  /** Sender override (otherwise resolved from vault / env). */
+  from?: string;
+  /** Reply-To override. */
+  reply_to?: string;
+  /** File attachments — paths sandboxed by allowedPaths at send time. */
+  attachments?: Array<{ path: string; filename?: string }>;
 }

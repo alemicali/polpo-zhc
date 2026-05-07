@@ -13,7 +13,7 @@ import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
-import { join, resolve, relative, isAbsolute, dirname } from "path";
+import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
@@ -1265,9 +1265,29 @@ const whatsappSendTool: Tool = {
   }),
 };
 
+const whatsappSendFileTool: Tool = {
+  name: "whatsapp_send_file",
+  description: "Send a WhatsApp file/media attachment from a local file path. Supports image, video, audio, and document messages. Requires a WhatsApp channel configured and connected.",
+  parameters: Type.Object({
+    to: Type.String({ description: "Recipient: phone number, contact name, or JID" }),
+    path: Type.String({ description: "Local file path to send. Relative paths resolve from the agent workspace." }),
+    caption: Type.Optional(Type.String({ description: "Optional caption" })),
+    mediaKind: Type.Optional(Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("image"),
+      Type.Literal("video"),
+      Type.Literal("audio"),
+      Type.Literal("document"),
+    ], { description: "Force media kind (default auto)" })),
+    mimeType: Type.Optional(Type.String({ description: "Override MIME type" })),
+    fileName: Type.Optional(Type.String({ description: "Override displayed filename" })),
+    viewOnce: Type.Optional(Type.Boolean({ description: "Send supported media as view-once" })),
+  }),
+};
+
 const whatsappReadTool: Tool = {
   name: "whatsapp_read",
-  description: "Read WhatsApp messages. List recent chats, read messages from a specific chat, or search across all chats. Requires a WhatsApp channel configured.",
+  description: "Read WhatsApp messages. Defaults to hidden/local reads; set markRead=true only when the user explicitly wants WhatsApp read receipts.",
   parameters: Type.Object({
     action: Type.Union([
       Type.Literal("list_chats"),
@@ -1278,6 +1298,7 @@ const whatsappReadTool: Tool = {
     chatId: Type.Optional(Type.String({ description: "Chat phone/name/JID for read_chat (required for read_chat)" })),
     query: Type.Optional(Type.String({ description: "Search query (required for search)" })),
     limit: Type.Optional(Type.Number({ description: "Max results (default: 30)" })),
+    markRead: Type.Optional(Type.Boolean({ description: "For read_chat only: send WhatsApp read receipts for returned inbound messages (default false)" })),
   }),
 };
 
@@ -1669,12 +1690,31 @@ export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vau
 export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
 export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
 
+/**
+ * Side-effect tools that ship a real-world message (WhatsApp / email)
+ * the moment they execute. In CHAT mode we gate them behind an
+ * approval preview (Invia / Refine / Annulla) — exactly like
+ * `create_mission`. The TASK runner is unaffected: tasks are agentic and
+ * the user already authorised them upstream when the task was created.
+ *
+ * The actual gate lives in `resolveAgentTools` (src/server/app.ts) and in
+ * the orchestrator path (src/server/app.ts:resolveOrchestratorContext).
+ * The intercept emits `whatsapp_preview` / `email_preview` chunks; the
+ * UI then calls REST endpoints to perform the send after explicit user
+ * confirmation.
+ */
+export const SIDE_EFFECT_GATED_TOOLS = new Set(["whatsapp_send", "whatsapp_send_file", "email_send"]);
+
+export function isSideEffectGated(toolName: string): boolean {
+  return SIDE_EFFECT_GATED_TOOLS.has(toolName);
+}
+
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
 }
 
 export function isInteractive(toolName: string): boolean {
-  return INTERACTIVE_TOOLS.has(toolName);
+  return INTERACTIVE_TOOLS.has(toolName) || SIDE_EFFECT_GATED_TOOLS.has(toolName);
 }
 
 export function isClientSideChatTool(toolName: string): boolean {
@@ -1732,8 +1772,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Phone (7)
   phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
   phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
-  // WhatsApp (2)
-  whatsappSendTool, whatsappReadTool,
+  // WhatsApp (3)
+  whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
   askUserTool, renderWidgetTool,
   // Client-side (4)
@@ -2056,7 +2096,8 @@ export async function executeOrchestratorTool(
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
-      case "whatsapp_read":    return execWhatsAppRead(polpo, args);
+      case "whatsapp_send_file": return await execWhatsAppSendFile(polpo, args);
+      case "whatsapp_read":    return await execWhatsAppRead(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
@@ -4312,24 +4353,10 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const text = args.text as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
 
-  // Resolve recipient to JID
-  let jid: string;
-  if (to.includes("@")) {
-    // Already a JID
-    jid = to;
-  } else if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) {
-    // Phone number
-    const clean = to.replace(/[+\s-]/g, "");
-    jid = `${clean}@s.whatsapp.net`;
-  } else if (store) {
-    // Try resolving by contact name
-    const contact = store.resolveContact(to);
-    if (!contact) return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
-    jid = contact.jid;
-  } else {
-    return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
-  }
+  const jid = jidOrError;
 
   try {
     const msgId = await bridge.sendMessage(jid, text);
@@ -4341,7 +4368,41 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   }
 }
 
-function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execWhatsAppSendFile(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const bridge = polpo.getWhatsAppBridge();
+  if (!bridge) return "Error: WhatsApp not configured or not connected. Configure a WhatsApp channel in polpo.json.";
+
+  const store = polpo.getWhatsAppStore();
+  const to = args.to as string;
+  const path = args.path as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
+
+  const baseDir = polpo.getAgentWorkDir();
+  const filePath = resolve(baseDir, path);
+  const rel = relative(baseDir, filePath);
+  if (rel.startsWith("..") || isAbsolute(rel)) return "Error: WhatsApp attachments must be inside the agent workspace.";
+  if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+  const stat = statSync(filePath);
+  if (!stat.isFile()) return `Error: Not a file: ${filePath}`;
+
+  try {
+    const msgId = await bridge.sendMediaMessage(jidOrError, {
+      path: filePath,
+      caption: args.caption as string | undefined,
+      mimeType: (args.mimeType as string | undefined) ?? guessWhatsAppMime(filePath),
+      fileName: (args.fileName as string | undefined) ?? basename(filePath),
+      mediaKind: (args.mediaKind as "auto" | "image" | "video" | "audio" | "document" | undefined) ?? "auto",
+      viewOnce: args.viewOnce as boolean | undefined,
+    });
+    return `WhatsApp attachment sent to ${jidOrError.replace(/@.*$/, "")}: ${basename(filePath)}${msgId ? ` (id: ${msgId})` : ""}.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error sending WhatsApp attachment: ${msg}`;
+  }
+}
+
+async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const store = polpo.getWhatsAppStore();
   if (!store) return "Error: WhatsApp store not available. Configure a WhatsApp channel in polpo.json.";
 
@@ -4381,15 +4442,26 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
       const messages = store.listMessages(jid, limit);
       if (messages.length === 0) return `No messages found for ${chatId}.`;
 
+      const markRead = args.markRead === true;
+      if (markRead) {
+        const bridge = polpo.getWhatsAppBridge();
+        if (!bridge) return "Error: Cannot mark read because WhatsApp is not connected.";
+        const keys = messages
+          .filter(m => !m.fromMe && !m.readAt)
+          .map(m => ({ remoteJid: m.chatJid, id: m.id, fromMe: false, participant: m.chatJid.endsWith("@g.us") ? m.senderJid : undefined }));
+        if (keys.length > 0) await bridge.markRead(keys);
+      }
+
       // Reverse to chronological order
       const sorted = [...messages].reverse();
       const lines = sorted.map(m => {
         const ts = new Date(m.timestamp * 1000).toLocaleString();
         const sender = m.fromMe ? "Me" : (m.senderName ?? m.senderJid.replace(/@.*$/, ""));
         const media = m.mediaType ? ` [${m.mediaType}]` : "";
-        return `  [${ts}] ${sender}: ${m.text}${media}`;
+        const file = m.mediaPath ? `\n     attachment: ${m.mediaPath}${m.mimeType ? ` (${m.mimeType})` : ""}` : "";
+        return `  [${ts}] ${sender}: ${m.text}${media}${file}`;
       });
-      return `${messages.length} message(s) from ${chatId}:\n${lines.join("\n")}`;
+      return `${messages.length} message(s) from ${chatId}${markRead ? " (marked read)" : " (hidden read)"}:\n${lines.join("\n")}`;
     }
 
     case "search": {
@@ -4421,6 +4493,31 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
     default:
       return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
+}
+
+function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): string {
+  if (to.includes("@")) return to;
+  if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) return `${to.replace(/[+\s-]/g, "")}@s.whatsapp.net`;
+  if (store) {
+    const contact = store.resolveContact(to);
+    if (contact) return contact.jid;
+    return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
+  }
+  return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
+}
+
+function guessWhatsAppMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
 }
 
 // ═══════════════════════════════════════════════════════

@@ -13,7 +13,7 @@
  */
 
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
@@ -78,6 +78,46 @@ async function readConfigFromDb(): Promise<RunnerConfig> {
 function errorResult(err: unknown): TaskResult {
   const msg = err instanceof Error ? err.message : String(err);
   return { exitCode: 1, stdout: "", stderr: `Runner error: ${msg}`, duration: 0 };
+}
+
+function buildWaMediaContent(
+  path: string,
+  mimeType?: string,
+  fileName?: string,
+  caption?: string,
+  mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
+  viewOnce?: boolean,
+): any {
+  const mime = mimeType ?? guessMime(path);
+  const kind = resolveMediaKind(mediaKind, mime);
+  const file = { url: path };
+  const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
+  if (kind === "image") return { image: file, ...base };
+  if (kind === "video") return { video: file, ...base };
+  if (kind === "audio") return { audio: file, mimetype: mime };
+  return { document: file, fileName: fileName ?? basename(path), ...base };
+}
+
+function resolveMediaKind(kind: string | undefined, mime: string): "image" | "video" | "audio" | "document" {
+  if (kind && kind !== "auto") return kind as "image" | "video" | "audio" | "document";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function guessMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
 }
 
 /** Persistent per-run activity log (JSONL file in .polpo/logs/) */
@@ -192,6 +232,15 @@ async function main(): Promise<void> {
     // WhatsApp store + send function (if configured)
     let waStore: WhatsAppStore | undefined;
     let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;
+    let waSendMedia: ((jid: string, opts: {
+      path: string;
+      caption?: string;
+      mimeType?: string;
+      fileName?: string;
+      mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+      viewOnce?: boolean;
+    }) => Promise<string | undefined>) | undefined;
+    let waMarkRead: ((keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>) | undefined;
     if (config.whatsappDbPath && config.whatsappProfilePath) {
       try {
         const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
@@ -199,7 +248,7 @@ async function main(): Promise<void> {
 
         // Lazy Baileys connection for sending — only connects when first send is called
         let waSock: any;
-        waSendMessage = async (jid: string, text: string): Promise<string | undefined> => {
+        const ensureWaSock = async () => {
           if (!waSock) {
             const {
               default: makeWASocket,
@@ -227,8 +276,23 @@ async function main(): Promise<void> {
               });
             });
           }
-          const result = await waSock.sendMessage(jid, { text });
+          return waSock;
+        };
+        waSendMessage = async (jid: string, text: string): Promise<string | undefined> => {
+          const sock = await ensureWaSock();
+          const result = await sock.sendMessage(jid, { text });
           return result?.key?.id ?? undefined;
+        };
+        waSendMedia = async (jid, opts) => {
+          const sock = await ensureWaSock();
+          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+          const result = await sock.sendMessage(jid, content);
+          return result?.key?.id ?? undefined;
+        };
+        waMarkRead = async (keys) => {
+          const sock = await ensureWaSock();
+          await sock.readMessages(keys);
+          waStore?.markRead(keys.map(k => k.id));
         };
       } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
     }
@@ -241,6 +305,8 @@ async function main(): Promise<void> {
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
+      whatsappSendMedia: waSendMedia,
+      whatsappMarkRead: waMarkRead,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log

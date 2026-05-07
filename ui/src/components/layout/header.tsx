@@ -22,6 +22,7 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
 
@@ -162,6 +163,7 @@ export function Header() {
   const isOnChatPage = pathname === "/chat";
 
   return (
+    <>
     <header className="relative flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
       {/* Mobile: hamburger + logo + title */}
       <div className="flex min-w-0 items-center gap-1.5 lg:hidden">
@@ -319,5 +321,7 @@ export function Header() {
         )}
       </div>
     </header>
+    {isOnChatPage && <ChatTabs />}
+    </>
   );
 }

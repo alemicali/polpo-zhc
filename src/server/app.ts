@@ -44,6 +44,7 @@ import { audioRoutes } from "./routes/audio.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
+import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
@@ -176,6 +177,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const {
         CLIENT_SIDE_CHAT_TOOLS,
         isClientSideChatTool,
+        isSideEffectGated,
         renderWidgetTool,
         validateRenderWidgetArgs,
       } = await import("../llm/orchestrator-tools.js");
@@ -272,7 +274,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           return `Error: ${err.message}`;
         }
       };
-      return { tools, executor, isInteractive: isClientSideChatTool };
+      // Side-effect gate: in CHAT mode (real-time conversation) we
+      // intercept whatsapp_send / whatsapp_send_file / email_send and
+      // emit a preview chunk so the user can confirm before the message
+      // actually goes out. The TASK runner is unaffected — tasks are
+      // pre-authorised by the user when they're queued. See
+      // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
+      const isInteractive = (name: string) => isClientSideChatTool(name) || isSideEffectGated(name);
+      return { tools, executor, isInteractive };
     },
     streamLLM: streamSimple as any,
     resolveOrchestratorContext: async () => {
@@ -479,7 +488,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/whatsapp", whatsappRoutes(() => ({
     polpoDir: o.getPolpoDir(),
     reloadConfig: () => o.reloadConfig(),
+    // Approval-gate /send and /send-file need the live WhatsAppBridge
+    // (resolved through the orchestrator). Login flows still work without
+    // it because they spin up their own bridge per session.
+    orchestrator: o,
   })));
+
+  // Approval-gate REST: invoked by the chat UI after the user confirms
+  // an `email_send` preview. Re-uses the same SMTP code path as the
+  // email_send agent tool (sendEmail() in src/tools/email-tools.ts).
+  authed.route("/email", emailRoutes(() => ({ orchestrator: o })));
 
   authed.route("/coding", codingRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),

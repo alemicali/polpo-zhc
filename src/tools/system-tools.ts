@@ -500,6 +500,17 @@ export interface CreateAllToolsOptions {
   whatsappStore?: WhatsAppStore;
   /** WhatsApp send function (for whatsapp_send tool). */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
+  /** WhatsApp media send function (for whatsapp_send_file tool). */
+  whatsappSendMedia?: (jid: string, opts: {
+    path: string;
+    caption?: string;
+    mimeType?: string;
+    fileName?: string;
+    mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+    viewOnce?: boolean;
+  }) => Promise<string | undefined>;
+  /** WhatsApp read receipt function (for whatsapp_read markRead). */
+  whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
   /** Polpo directory (.polpo/) for Ink tools. */
   polpoDir?: string;
   /** FileSystem implementation (default: NodeFileSystem). */
@@ -585,8 +596,15 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   // WhatsApp tools — activated when any whatsapp_* tool is in allowedTools AND store is available
   if (categoryRequested(ALL_WHATSAPP_TOOL_NAMES) && options.whatsappStore && options.whatsappSendMessage) {
     tools.push(...createWhatsAppTools(
-      { store: options.whatsappStore, sendMessage: options.whatsappSendMessage },
+      {
+        store: options.whatsappStore,
+        sendMessage: options.whatsappSendMessage,
+        sendMedia: options.whatsappSendMedia,
+        markRead: options.whatsappMarkRead,
+      },
       allowedTools,
+      cwd,
+      allowedPaths,
     ));
   }
 

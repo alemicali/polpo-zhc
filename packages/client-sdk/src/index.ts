@@ -104,6 +104,8 @@ export type {
   AskUserPayload,
   AskUserAnswer,
   MissionPreviewPayload,
+  WhatsAppPreviewPayload,
+  EmailPreviewPayload,
   VaultEntryMeta,
   VaultPreviewPayload,
   AuthProfileStatus,
