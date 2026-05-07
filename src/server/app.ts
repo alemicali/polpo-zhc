@@ -196,16 +196,24 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const browserProfileDir = polpoDir
         ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
         : undefined;
-      // WhatsApp send wiring: il WhatsAppBridge live dell'orchestrator ha
-      // un sendMessage(jid, text) che ritorna l'id del messaggio. Senza
-      // questo `createAllTools` skip-pava silenziosamente l'intera categoria
-      // whatsapp_* (vedi system-tools.ts: il branch richiede ENTRAMBI store
-      // E sendMessage). Risultato pre-fix: agent in chat con whatsapp_* in
-      // allowedTools non vedeva i tool. Bind al bridge se disponibile, altrimenti
-      // undefined (i tool whatsapp_* restano disattivati come prima).
+      // WhatsApp send wiring: il WhatsAppBridge live dell'orchestrator
+      // espone sendMessage / sendMediaMessage / markRead. createAllTools
+      // attiva la categoria whatsapp_* solo se store + sendMessage sono
+      // entrambi presenti; sendMedia e markRead sono opzionali ma
+      // necessari per `whatsapp_send_file` e per i read-receipt
+      // (`markRead=true` su whatsapp_read). Bind a tutti e tre se il
+      // bridge è attivo.
       const waBridge = o.getWhatsAppBridge?.();
       const whatsappSendMessage = waBridge
         ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
+        : undefined;
+      const whatsappSendMedia = waBridge
+        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean }) =>
+            waBridge.sendMediaMessage(jid, opts)
+        : undefined;
+      const whatsappMarkRead = waBridge
+        ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
+            waBridge.markRead(keys)
         : undefined;
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
@@ -218,6 +226,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         outputDir: undefined,
         whatsappStore: o.getWhatsAppStore?.(),
         whatsappSendMessage,
+        whatsappSendMedia,
+        whatsappMarkRead,
         polpoDir,
       });
       const memoryStore = o.getMemoryStore();
