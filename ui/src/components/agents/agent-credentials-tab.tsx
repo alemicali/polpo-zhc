@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useAgentDetail } from "./agent-detail-provider";
-import { usePolpo } from "@polpo-ai/react";
+import { usePolpo, useAgents } from "@polpo-ai/react";
 import type { VaultEntryMeta } from "@polpo-ai/react";
 import { toast } from "sonner";
 
@@ -117,6 +117,9 @@ interface FormState {
   /** Logical mailbox account — groups SMTP+IMAP of the same mailbox.
    *  Empty string = "no account override" (resolver falls back to `service`). */
   account: string;
+  /** Other agent names allowed to use this credential (shared). Owner
+   *  always implicit. Empty array = owner-private. */
+  allowedAgents: string[];
   // smtp / imap
   host: string;
   port: string;
@@ -148,6 +151,7 @@ function defaultForm(type: VaultType): FormState {
     label: "",
     type,
     account: "",
+    allowedAgents: [],
     host: "",
     port: type === "smtp" ? "587" : type === "imap" ? "993" : "",
     user: "",
@@ -384,7 +388,7 @@ function VaultEntryCard({
           <TypeIcon className="h-3.5 w-3.5" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-medium">{entry.service}</span>
             {entry.account && (entry.type === "smtp" || entry.type === "imap") && (
               <Badge
@@ -393,6 +397,24 @@ function VaultEntryCard({
                 title={`Mailbox account: ${entry.account}`}
               >
                 @{entry.account}
+              </Badge>
+            )}
+            {entry.sharedFrom && (
+              <Badge
+                variant="outline"
+                className="text-[9px] py-0 px-1.5 h-4 border-amber-500/40 text-amber-500"
+                title={`Inherited from agent "${entry.sharedFrom}". Edit there if you need to change it.`}
+              >
+                shared from {entry.sharedFrom}
+              </Badge>
+            )}
+            {!entry.sharedFrom && entry.allowedAgents && entry.allowedAgents.length > 0 && (
+              <Badge
+                variant="outline"
+                className="text-[9px] py-0 px-1.5 h-4 border-sky-500/40 text-sky-500"
+                title={`Shared with: ${entry.allowedAgents.join(", ")}`}
+              >
+                shared ({entry.allowedAgents.length})
               </Badge>
             )}
           </div>
@@ -404,24 +426,35 @@ function VaultEntryCard({
           {meta.label}
         </Badge>
         <div className="flex items-center gap-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onEdit}
-            title="Edit credential"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive"
-            onClick={onDelete}
-            title="Delete credential"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          {entry.readOnly ? (
+            <span
+              className="text-[10px] text-muted-foreground italic px-1.5"
+              title="Inherited entry — edit from the owner agent's vault."
+            >
+              read-only
+            </span>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onEdit}
+                title="Edit credential"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-destructive hover:text-destructive"
+                onClick={onDelete}
+                title="Delete credential"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5 ml-9.5">
@@ -751,6 +784,63 @@ function CustomForm({
   );
 }
 
+// ── Share-with selector (multi-agent chip toggle) ──
+
+function ShareWithSelector({
+  ownerAgent,
+  selected,
+  onChange,
+}: {
+  ownerAgent: string;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const { agents } = useAgents();
+  const others = (agents ?? []).filter((a) => a.name !== ownerAgent);
+
+  const toggle = (name: string) => {
+    if (selected.includes(name)) {
+      onChange(selected.filter(n => n !== name));
+    } else {
+      onChange([...selected, name]);
+    }
+  };
+
+  return (
+    <Field
+      label="Shared with"
+      hint="Other agents that can read and use this credential. Owner agent is always implicit. Owner-private if no one is selected."
+    >
+      {others.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground italic">No other agents available to share with.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {others.map((a) => {
+            const active = selected.includes(a.name);
+            return (
+              <button
+                key={a.name}
+                type="button"
+                onClick={() => toggle(a.name)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors",
+                  active
+                    ? "bg-primary/15 border-primary/40 text-primary"
+                    : "bg-card border-border/40 text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                title={a.identity?.displayName ?? a.name}
+              >
+                {active && <Check className="h-3 w-3" />}
+                {a.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </Field>
+  );
+}
+
 // ── Main wizard dialog ──
 
 function CredentialDialog({
@@ -764,7 +854,7 @@ function CredentialDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   agent: string;
-  initial: { type: VaultType; service: string; label?: string; account?: string } | null;
+  initial: { type: VaultType; service: string; label?: string; account?: string; allowedAgents?: string[] } | null;
   isEdit: boolean;
   onSaved: () => void;
 }) {
@@ -777,6 +867,7 @@ function CredentialDialog({
       f.service = initial.service;
       f.label = initial.label ?? "";
       f.account = initial.account ?? "";
+      f.allowedAgents = initial.allowedAgents ?? [];
       return f;
     }
     return defaultForm("api_key");
@@ -786,12 +877,13 @@ function CredentialDialog({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Reset state when (re)opened
-  const resetTo = (init: { type: VaultType; service: string; label?: string; account?: string } | null) => {
+  const resetTo = (init: { type: VaultType; service: string; label?: string; account?: string; allowedAgents?: string[] } | null) => {
     if (init) {
       const f = defaultForm(init.type);
       f.service = init.service;
       f.label = init.label ?? "";
       f.account = init.account ?? "";
+      f.allowedAgents = init.allowedAgents ?? [];
       setForm(f);
       setStep(2);
     } else {
@@ -840,11 +932,17 @@ function CredentialDialog({
       const accountValue = (form.type === "smtp" || form.type === "imap")
         ? (form.account.trim() || undefined)
         : undefined;
+      // Owner cannot share with itself; UI selector should already prevent
+      // it but filter defensively.
+      const allowedAgents = form.allowedAgents.filter(n => n && n !== agent);
       if (isEdit) {
         await client.patchVaultEntry(agent, form.service.trim(), {
           type: form.type,
           label: form.label.trim() || undefined,
           account: accountValue,
+          // Always send the list on patch so the user can clear sharing
+          // by deselecting everything (REPLACE semantics).
+          allowedAgents,
           credentials,
         });
         toast.success(`Updated credential "${form.service.trim()}"`);
@@ -855,6 +953,7 @@ function CredentialDialog({
           type: form.type,
           label: form.label.trim() || undefined,
           account: accountValue,
+          ...(allowedAgents.length > 0 ? { allowedAgents } : {}),
           credentials,
         });
         toast.success(`Added credential "${form.service.trim()}"`);
@@ -968,6 +1067,14 @@ function CredentialDialog({
                 )}
               </div>
 
+              <div className="border-t border-border/40 pt-4">
+                <ShareWithSelector
+                  ownerAgent={agent}
+                  selected={form.allowedAgents}
+                  onChange={(next) => updateForm({ allowedAgents: next })}
+                />
+              </div>
+
               {submitError && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
                   <p className="text-xs text-destructive">{submitError}</p>
@@ -1016,7 +1123,7 @@ export function AgentCredentialsTab() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogKey, setDialogKey] = useState(0);
-  const [editing, setEditing] = useState<{ type: VaultType; service: string; label?: string; account?: string } | null>(null);
+  const [editing, setEditing] = useState<{ type: VaultType; service: string; label?: string; account?: string; allowedAgents?: string[] } | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<VaultEntryMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1028,7 +1135,13 @@ export function AgentCredentialsTab() {
   };
 
   const openEdit = (entry: VaultEntryMeta) => {
-    setEditing({ type: entry.type, service: entry.service, label: entry.label, account: entry.account });
+    setEditing({
+      type: entry.type,
+      service: entry.service,
+      label: entry.label,
+      account: entry.account,
+      allowedAgents: entry.allowedAgents,
+    });
     setDialogKey((k) => k + 1);
     setDialogOpen(true);
   };

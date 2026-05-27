@@ -1330,6 +1330,17 @@ export interface VaultEntryMeta {
    *  SMTP and IMAP entries that form one mailbox. When null, falls back
    *  to `service` for grouping purposes. */
   account?: string;
+  /** Other agent names allowed to use this credential. Empty/undefined →
+   *  owner-private. Owner is implicit (the agent on the PK) and not listed. */
+  allowedAgents?: string[];
+  /** When the entry is inherited from another agent via `allowedAgents`,
+   *  this carries the owner's name. Populated only by listVaultEntries when
+   *  the row was shared; the UI uses it to render a read-only "shared from
+   *  X" badge. NEVER stored — computed at read-time. */
+  sharedFrom?: string;
+  /** True when the entry is inherited (sharedFrom !== undefined). The UI
+   *  uses this to gate edit/delete actions. */
+  readOnly?: boolean;
   /** Credential field names (e.g. ["host", "port", "user", "pass"]) — values are NOT exposed */
   keys: string[];
 }

@@ -244,14 +244,15 @@ export async function ensurePgSchema(db: any): Promise<void> {
   )`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS vault (
-    agent       TEXT NOT NULL,
-    service     TEXT NOT NULL,
-    type        TEXT NOT NULL,
-    label       TEXT,
-    account     TEXT,
-    credentials TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
+    agent          TEXT NOT NULL,
+    service        TEXT NOT NULL,
+    type           TEXT NOT NULL,
+    label          TEXT,
+    account        TEXT,
+    allowed_agents TEXT,
+    credentials    TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
     PRIMARY KEY (agent, service)
   )`);
 
@@ -263,6 +264,18 @@ export async function ensurePgSchema(db: any): Promise<void> {
         WHERE table_name = 'vault' AND column_name = 'account'
       ) THEN
         ALTER TABLE vault ADD COLUMN account TEXT;
+      END IF;
+    END $$;
+  `);
+
+  // Migration: add allowed_agents column for shared credentials (v0.3.x → multi-agent sharing).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'vault' AND column_name = 'allowed_agents'
+      ) THEN
+        ALTER TABLE vault ADD COLUMN allowed_agents TEXT;
       END IF;
     END $$;
   `);

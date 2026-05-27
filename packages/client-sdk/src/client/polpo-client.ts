@@ -525,6 +525,8 @@ export class PolpoClient {
     label?: string;
     /** Logical mailbox account (groups SMTP+IMAP of the same mailbox). */
     account?: string;
+    /** Other agent names allowed to use this credential (shared). */
+    allowedAgents?: string[];
     credentials: Record<string, string>;
   }): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.post<{ agent: string; service: string; type: string; keys: string[] }>("/vault/entries", req);
@@ -537,7 +539,7 @@ export class PolpoClient {
   patchVaultEntry(
     agent: string,
     service: string,
-    patch: { type?: string; label?: string; account?: string; credentials?: Record<string, string> },
+    patch: { type?: string; label?: string; account?: string; allowedAgents?: string[]; credentials?: Record<string, string> },
   ): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
       `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,

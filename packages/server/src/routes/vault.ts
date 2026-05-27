@@ -26,11 +26,12 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
         content: {
           "application/json": {
             schema: z.object({
-              agent: z.string().min(1).describe("Agent name"),
+              agent: z.string().min(1).describe("Agent name (owner)"),
               service: z.string().min(1).describe("Service name (vault key)"),
               type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]).describe("Credential type"),
               label: z.string().optional().describe("Human-readable label"),
               account: z.string().optional().describe("Logical mailbox account (groups SMTP+IMAP of the same mailbox). Optional — defaults to `service` for grouping purposes."),
+              allowedAgents: z.array(z.string()).optional().describe("Other agent names allowed to use this credential (shared). Owner is always implicit and never in this list. Empty/omitted = owner-private."),
               credentials: z.record(z.string(), z.string()).describe("Key-value credential fields"),
             }),
           },
@@ -68,10 +69,14 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const body = c.req.valid("json");
+    // Defensive: owner can't list themselves in allowedAgents (it would
+    // be a no-op anyway since the owner is always implicit).
+    const allowedAgents = (body.allowedAgents ?? []).filter((n: string) => n && n !== body.agent);
     const entry: VaultEntry = {
       type: body.type,
       ...(body.label ? { label: body.label } : {}),
       ...(body.account ? { account: body.account } : {}),
+      ...(allowedAgents.length > 0 ? { allowedAgents } : {}),
       credentials: body.credentials,
     };
 
@@ -112,6 +117,9 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
                 type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]),
                 label: z.string().optional(),
                 account: z.string().optional(),
+                allowedAgents: z.array(z.string()).optional(),
+                sharedFrom: z.string().optional().describe("Set when this entry is inherited via shared credentials. Identifies the owner agent."),
+                readOnly: z.boolean().optional().describe("True for inherited entries — UI should disable edit/delete."),
                 keys: z.array(z.string()),
               })),
             }),
@@ -156,6 +164,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
               type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]).optional().describe("Update credential type"),
               label: z.string().optional().describe("Update human-readable label"),
               account: z.string().optional().describe("Update logical mailbox account name. Pass empty string to clear."),
+              allowedAgents: z.array(z.string()).optional().describe("Replace the list of agents allowed to use this credential. Pass [] to revoke all shares (turn back into owner-private)."),
               credentials: z.record(z.string(), z.string()).optional().describe("Credential fields to add or update (merged with existing)"),
             }),
           },
@@ -203,10 +212,14 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const body = c.req.valid("json");
+    const allowedAgents = body.allowedAgents
+      ? body.allowedAgents.filter((n: string) => n && n !== agent)
+      : undefined;
     const mergedKeys = await vaultStore.patch(agent, service, {
       type: body.type,
       label: body.label,
       account: body.account,
+      allowedAgents,
       credentials: body.credentials,
     });
 

@@ -27,17 +27,31 @@ export interface VaultStore {
   patch(
     agent: string,
     service: string,
-    partial: { type?: VaultEntry["type"]; label?: string; credentials?: Record<string, string> },
+    partial: {
+      type?: VaultEntry["type"];
+      label?: string;
+      /** Logical mailbox account (groups SMTP+IMAP). Pass empty string to clear. */
+      account?: string;
+      /** REPLACES the sharing list. Owner is implicit. Pass [] to revoke all shares. */
+      allowedAgents?: string[];
+      credentials?: Record<string, string>;
+    },
   ): Promise<string[]>;
 
   /** Remove a vault entry. Returns true if found. */
   remove(agent: string, service: string): Promise<boolean>;
 
-  /** List all services for an agent (metadata only — values masked). */
+  /** List all services for an agent (metadata only — values masked).
+   *  Includes both owner-private and inherited shared entries. Inherited
+   *  entries carry `sharedFrom` (owner name) and `readOnly: true`. */
   list(agent: string): Promise<Array<{
     service: string;
     type: VaultEntry["type"];
     label?: string;
+    account?: string;
+    allowedAgents?: string[];
+    sharedFrom?: string;
+    readOnly?: boolean;
     keys: string[];
   }>>;
 
