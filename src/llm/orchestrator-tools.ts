@@ -1706,6 +1706,26 @@ export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vau
 export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
 export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
 
+/** Server-side tool that renames the current chat session. Available to
+ *  every agent (orchestrator + agent-direct) — the intercept in
+ *  completions.ts resolves the sessionId from the X-Session-Id header,
+ *  calls `sessionStore.renameSession`, and emits a `session_title`
+ *  SSE chunk so the sidebar refreshes in real time. The tool is sticky:
+ *  agents may call it any time but should ONLY do so on the first turn
+ *  of a new session or when the user explicitly asks for a rename.
+ *  The system prompt is augmented on first-turn to force the call. */
+export const setSessionTitleTool: Tool = {
+  name: "set_session_title",
+  description:
+    "Rename the current chat session with a short, meaningful title (≤50 characters) that summarises what the user is asking. " +
+    "MUST be called once at the very beginning of a new session — the system prompt will remind you on the first turn. " +
+    "On later turns, call it ONLY when the user explicitly asks to rename the conversation. " +
+    "Do not include emojis or quotes; use plain Title Case.",
+  parameters: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: 80, description: "New title for the session — short and descriptive (≤50 chars recommended)." }),
+  }),
+};
+
 /**
  * Side-effect tools that ship a real-world message (WhatsApp / email)
  * the moment they execute. In CHAT mode we gate them behind an
@@ -1794,6 +1814,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   askUserTool, renderWidgetTool,
   // Client-side (4)
   openFileTool, navigateToTool, openTabTool, setDesignTool,
+  // Session meta (1)
+  setSessionTitleTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1883,6 +1905,7 @@ const TOOL_LABELS: Record<string, string> = {
   // Client-side
   open_tab: "Open Tab",
   set_design: "Set Design",
+  set_session_title: "Set Session Title",
   render_widget: "Render Widget",
   // Ink Hub
   ink_search: "Search Ink Hub",

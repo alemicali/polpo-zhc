@@ -190,6 +190,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         isSideEffectGated,
         renderWidgetTool,
         validateRenderWidgetArgs,
+        setSessionTitleTool,
       } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
       const { join } = await import("node:path");
@@ -248,6 +249,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
       }
+      // Session meta — every agent gets `set_session_title` so the
+      // first-turn nudge in completions.ts has somewhere to land. The
+      // executor returns a placeholder string; the actual rename is
+      // intercepted server-side in completions.ts before this executor
+      // is invoked. See: orchestrator-tools.ts:setSessionTitleTool.
+      if (!existingToolNames.has("set_session_title")) {
+        tools.push(setSessionTitleTool);
+      }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
       // CLIENT_SIDE_CHAT_TOOLS perché è un display tool potente: lo
@@ -274,6 +283,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         }
         if (isClientSideChatTool(name)) {
           return `Client-side tool ${name} completed.`;
+        }
+        if (name === "set_session_title") {
+          // Normally intercepted in completions.ts before reaching this
+          // executor — this fallback only fires if the intercept missed
+          // (defensive). The rename itself is a no-op here; the model
+          // gets a placeholder result and the UI sees no chunk.
+          return `Session title acknowledged (rename will be applied by server intercept).`;
         }
         const tool = toolMap.get(name);
         if (!tool) return `Error: Unknown tool "${name}"`;

@@ -528,6 +528,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     const rawSessionHeader = c.req.header("x-session-id") ?? null;
     const forceNewSession = rawSessionHeader === "new";
     let sessionId: string | null = forceNewSession ? null : rawSessionHeader;
+    // Tracks whether this is the FIRST turn of the session (no prior
+    // messages persisted). Drives the system-prompt addendum that forces
+    // the agent to call set_session_title at the end of its reply.
+    let isFirstTurn = false;
     if (sessionStore) {
       if (!sessionId) {
         const firstUserMsg = body.messages.find(m => m.role === "user");
@@ -538,6 +542,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
           sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+          isFirstTurn = true;
         } else {
           // Reuse latest session if recent (< 30 min), scoped by agent
           const latest = await sessionStore.getLatestSession(agentScope);
@@ -546,14 +551,32 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             sessionId = latest.id;
           } else {
             sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+            isFirstTurn = true;
           }
         }
+      } else {
+        // Reused an existing session id — check whether it already has
+        // messages. If not, treat this as a first turn (covers the case
+        // where the UI pre-created the session id before the first send).
+        try {
+          const existing = await sessionStore.getSession(sessionId);
+          if (existing && (existing.messageCount ?? 0) === 0) isFirstTurn = true;
+        } catch { /* non-fatal */ }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
       const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
         await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
       }
+    }
+
+    // First-turn nudge: inject a system addendum telling the agent to call
+    // `set_session_title` once it's done responding. The tool is available
+    // on every turn but we only force it here — later turns rely on the
+    // tool's own description to remind the model not to re-rename unless
+    // the user explicitly asks. Applied after fullSystemPrompt is built.
+    if (isFirstTurn) {
+      fullSystemPrompt = `${fullSystemPrompt}\n\n## First-turn directive\nThis is the FIRST message of a brand new chat session. After completing your response (or as your final tool call), you MUST call \`set_session_title\` with a SHORT (≤50 chars), meaningful title summarising what the user is asking. Do not over-think it — one line in Title Case. On future turns do NOT call set_session_title unless the user explicitly asks for a rename.`;
     }
 
     // Expose session ID to the client so it can track which session is active
@@ -842,6 +865,67 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               await emit(sseChunk(completionId, {}, null, {
                 tool_call: { id: call.id, name: call.name, arguments: call.arguments, state: "calling" },
               }));
+
+              // ── set_session_title intercept ──
+              // Server-side rename: doesn't need the executor (orchestrator
+              // / agent path agnostic). Validates input, hits the session
+              // store directly, emits a `session_title` SSE chunk so the
+              // sidebar refreshes in real time. Result text is fed back to
+              // the model so it knows the rename succeeded.
+              if (call.name === "set_session_title") {
+                const args = (call.arguments ?? {}) as Record<string, unknown>;
+                const raw = typeof args.title === "string" ? args.title : "";
+                const title = raw.trim().slice(0, 80);
+                let resultText: string;
+                let isErr = false;
+                if (!title) {
+                  resultText = "Error: title must be a non-empty string.";
+                  isErr = true;
+                } else if (!sessionId) {
+                  resultText = "Error: no session in context — cannot rename.";
+                  isErr = true;
+                } else if (!sessionStore) {
+                  resultText = "Error: session store unavailable.";
+                  isErr = true;
+                } else {
+                  try {
+                    const ok = await sessionStore.renameSession(sessionId, title);
+                    if (ok) {
+                      resultText = `Session title set to: "${title}".`;
+                      await emit(sseChunk(completionId, {}, null, {
+                        session_title: { sessionId, title },
+                      }));
+                    } else {
+                      resultText = "Error: session not found.";
+                      isErr = true;
+                    }
+                  } catch (e: any) {
+                    resultText = `Error: ${e?.message ?? "rename failed"}`;
+                    isErr = true;
+                  }
+                }
+                toolCallsAccum.push({
+                  id: call.id,
+                  name: call.name,
+                  arguments: call.arguments,
+                  result: resultText,
+                  state: isErr ? "error" : "completed",
+                });
+                if (!abortController.signal.aborted) {
+                  await emit(sseChunk(completionId, {}, null, {
+                    tool_call: { id: call.id, name: call.name, result: resultText, state: isErr ? "error" : "completed" },
+                  }));
+                }
+                messages.push({
+                  role: "toolResult",
+                  toolCallId: call.id,
+                  toolName: call.name,
+                  content: [{ type: "text", text: resultText }],
+                  isError: isErr,
+                  timestamp: Date.now(),
+                });
+                continue;
+              }
 
               const result = await effectiveToolExecutor(call.name, call.arguments);
               const isError = result.startsWith("Error:");
