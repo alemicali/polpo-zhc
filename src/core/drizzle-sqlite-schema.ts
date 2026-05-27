@@ -220,6 +220,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       service TEXT NOT NULL,
       type TEXT NOT NULL,
       label TEXT,
+      account TEXT,
       credentials TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -241,6 +242,12 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
 
   try {
     db.exec(`ALTER TABLE messages ADD COLUMN segments TEXT;`);
+  } catch {
+    // Column already exists on databases created after this migration.
+  }
+
+  try {
+    db.exec(`ALTER TABLE vault ADD COLUMN account TEXT;`);
   } catch {
     // Column already exists on databases created after this migration.
   }

@@ -50,6 +50,7 @@ export class DrizzleVaultStore implements VaultStore {
       service,
       type: entry.type,
       label: entry.label ?? null,
+      account: entry.account ?? null,
       credentials: encCreds,
       createdAt: now,
       updatedAt: now,
@@ -61,6 +62,7 @@ export class DrizzleVaultStore implements VaultStore {
         set: {
           type: entry.type,
           label: entry.label ?? null,
+          account: entry.account ?? null,
           credentials: encCreds,
           updatedAt: now,
         },
@@ -70,7 +72,7 @@ export class DrizzleVaultStore implements VaultStore {
   async patch(
     agent: string,
     service: string,
-    partial: { type?: VaultEntry["type"]; label?: string; credentials?: Record<string, string> },
+    partial: { type?: VaultEntry["type"]; label?: string; account?: string; credentials?: Record<string, string> },
   ): Promise<string[]> {
     const existing = await this.get(agent, service);
     if (!existing && !partial.type) {
@@ -79,6 +81,7 @@ export class DrizzleVaultStore implements VaultStore {
     const merged: VaultEntry = {
       type: partial.type ?? existing?.type ?? "custom",
       ...(partial.label !== undefined ? { label: partial.label } : existing?.label ? { label: existing.label } : {}),
+      ...(partial.account !== undefined ? { account: partial.account } : existing?.account ? { account: existing.account } : {}),
       credentials: { ...(existing?.credentials ?? {}), ...(partial.credentials ?? {}) },
     };
     await this.set(agent, service, merged);
@@ -97,6 +100,7 @@ export class DrizzleVaultStore implements VaultStore {
     service: string;
     type: VaultEntry["type"];
     label?: string;
+    account?: string;
     keys: string[];
   }>> {
     const rows: any[] = await this.db.select().from(this.vault)
@@ -107,6 +111,7 @@ export class DrizzleVaultStore implements VaultStore {
         service: row.service,
         type: row.type as VaultEntry["type"],
         label: row.label ?? undefined,
+        account: row.account ?? undefined,
         keys: Object.keys(creds),
       };
     });
@@ -161,6 +166,7 @@ export class DrizzleVaultStore implements VaultStore {
     return {
       type: row.type as VaultEntry["type"],
       ...(row.label ? { label: row.label } : {}),
+      ...(row.account ? { account: row.account } : {}),
       credentials: creds,
     };
   }
