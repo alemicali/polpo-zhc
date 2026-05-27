@@ -1326,6 +1326,10 @@ export interface VaultEntryMeta {
   type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
   /** Human-readable label */
   label?: string;
+  /** Logical mailbox account this entry belongs to. Same value across the
+   *  SMTP and IMAP entries that form one mailbox. When null, falls back
+   *  to `service` for grouping purposes. */
+  account?: string;
   /** Credential field names (e.g. ["host", "port", "user", "pass"]) — values are NOT exposed */
   keys: string[];
 }

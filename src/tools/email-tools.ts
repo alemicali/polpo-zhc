@@ -45,6 +45,7 @@ const EmailSendSchema = Type.Object({
     }),
     { description: "File attachments" },
   )),
+  account: Type.Optional(Type.String({ description: "Mailbox account name (e.g. 'work'). REQUIRED when the agent has more than one mailbox configured — call list_email_accounts to discover names. Omitted = uses the only mailbox (single-account agents)." })),
   // SMTP config overrides (optional - defaults to vault then env vars)
   smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides vault/env)" })),
   smtp_port: Type.Optional(Type.Number({ description: "SMTP port (overrides vault/env)" })),
@@ -72,6 +73,7 @@ const EmailDraftSchema = Type.Object({
     }),
     { description: "File attachments" },
   )),
+  account: Type.Optional(Type.String({ description: "Mailbox account name (e.g. 'work'). REQUIRED when the agent has more than one mailbox — call list_email_accounts to discover names." })),
   folder: Type.Optional(Type.String({ description: "Drafts folder path (default: auto-detect from IMAP special-use, then 'Drafts')" })),
   imap_host: Type.Optional(Type.String({ description: "IMAP host (overrides vault/env)" })),
   imap_port: Type.Optional(Type.Number({ description: "IMAP port (overrides vault/env)" })),
@@ -111,11 +113,37 @@ export interface SendEmailParams {
   from?: string;
   reply_to?: string;
   attachments?: Array<{ path: string; filename?: string }>;
+  /** Mailbox account selector. Routes the call to `vault.getSmtp(account)`.
+   *  Required when the agent has multiple mailboxes — single-mailbox
+   *  agents work without it (vault falls back to the first SMTP entry). */
+  account?: string;
   smtp_host?: string;
   smtp_port?: number;
   smtp_user?: string;
   smtp_pass?: string;
   smtp_secure?: boolean;
+}
+
+/** Resolve a mailbox selector with a friendly error when the agent has
+ *  more than one mailbox configured and didn't specify which to use.
+ *  Returns the account name (possibly undefined for single-mailbox or
+ *  when the caller bypassed the vault via tool params). */
+function resolveAccount(vault: ResolvedVault | undefined, account: string | undefined, opName: string): string | undefined {
+  if (!vault) return account;
+  const mailboxes = vault.listMailboxes();
+  if (account) {
+    const found = mailboxes.some(m => m.name === account);
+    if (!found) {
+      const available = mailboxes.map(m => m.name).join(", ") || "(none)";
+      throw new Error(`${opName}: unknown mailbox "${account}". Available: ${available}.`);
+    }
+    return account;
+  }
+  if (mailboxes.length > 1) {
+    const names = mailboxes.map(m => m.name).join(", ");
+    throw new Error(`${opName}: multiple mailboxes available — specify "account". Available: ${names}.`);
+  }
+  return undefined; // 0 or 1 mailbox → caller falls back to vault default
 }
 
 export interface SendEmailResult {
@@ -158,7 +186,12 @@ export async function sendEmail(
 ): Promise<SendEmailResult> {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
-  const vaultSmtp = vault?.getSmtp();
+  // Mailbox selector. If params carry explicit smtp_* overrides, the
+  // resolve is skipped (caller knows what they're doing) — otherwise we
+  // pick the named mailbox or error if ambiguous.
+  const hasInlineSmtp = !!(params.smtp_host || params.smtp_user || params.smtp_pass);
+  const accountName = hasInlineSmtp ? undefined : resolveAccount(vault, params.account, "email_send");
+  const vaultSmtp = vault?.getSmtp(accountName);
   const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
   const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
   const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
@@ -232,82 +265,15 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
       "file attachments, and reply-to. Credentials are resolved from: tool params > agent vault > env vars.",
     parameters: EmailSendSchema,
     async execute(_id, params) {
-      // Resolve SMTP config: tool params > vault > env vars
-      const vaultSmtp = vault?.getSmtp();
-      const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
-      const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
-      const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
-      const pass = params.smtp_pass ?? vaultSmtp?.pass ?? process.env.SMTP_PASS;
-      const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM;
-
-      if (!host) throw new Error("SMTP host not configured. Set SMTP_HOST env var, configure vault, or pass smtp_host parameter.");
-      if (!from) throw new Error("Sender address not configured. Set SMTP_FROM env var, configure vault, or pass 'from' parameter.");
-
-      // Validate recipient domains against allowlist
-      if (emailAllowedDomains && emailAllowedDomains.length > 0) {
-        validateRecipientDomains(params.to, emailAllowedDomains);
-        if (params.cc) validateRecipientDomains(params.cc, emailAllowedDomains);
-        if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
-      }
-
-      const nodemailer = await import("nodemailer");
-
-      const secure = params.smtp_secure ?? vaultSmtp?.secure ?? (port === 465);
-      const transporter = nodemailer.default.createTransport({
-        host,
-        port,
-        secure,
-        auth: user ? { user, pass } : undefined,
-      });
-
-      // Process attachments
-      const attachments: Array<{ filename: string; content: Buffer }> = [];
-      if (params.attachments) {
-        for (const att of params.attachments) {
-          const attPath = resolve(cwd, att.path);
-          assertPathAllowed(attPath, sandbox, "email_send");
-          if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
-          attachments.push({
-            filename: att.filename ?? basename(attPath),
-            content: readFileSync(attPath),
-          });
-        }
-      }
-
-      // Detect HTML
-      const isHtml = params.html ?? (params.body.includes("<") && params.body.includes(">"));
-
-      const mailOptions: Record<string, any> = {
-        from,
-        to: Array.isArray(params.to) ? params.to.join(", ") : params.to,
-        subject: params.subject,
-        ...(isHtml ? { html: params.body } : { text: params.body }),
-        ...(params.cc && { cc: Array.isArray(params.cc) ? params.cc.join(", ") : params.cc }),
-        ...(params.bcc && { bcc: Array.isArray(params.bcc) ? params.bcc.join(", ") : params.bcc }),
-        ...(params.reply_to && { replyTo: params.reply_to }),
-        ...(attachments.length > 0 && { attachments }),
-      };
-
-      const info = await transporter.sendMail(mailOptions);
-
-      // Check for rejected recipients
-      if (info.rejected?.length) {
-        throw new Error(`Email rejected by server for: ${info.rejected.join(", ")}`);
-      }
-
-      const recipientCount = (Array.isArray(params.to) ? params.to.length : 1) +
-        (params.cc ? (Array.isArray(params.cc) ? params.cc.length : 1) : 0) +
-        (params.bcc ? (Array.isArray(params.bcc) ? params.bcc.length : 1) : 0);
-
+      // Delegates to the shared sendEmail helper so the agent tool, the
+      // chat approval-gate REST endpoint, and any other surface that
+      // dispatches a send go through one code path (multi-mailbox
+      // resolution, allowlist check, nodemailer, attachments).
+      const result = await sendEmail(params, cwd, sandbox, vault, emailAllowedDomains);
+      const summary = `Email sent successfully!\nTo: ${params.to}\nSubject: ${params.subject}\nMessage ID: ${result.messageId}\nRecipients: ${result.recipients}${result.attachments ? `\nAttachments: ${result.attachments}` : ""}`;
       return {
-        content: [{ type: "text", text: `Email sent successfully!\nTo: ${params.to}\nSubject: ${params.subject}\nMessage ID: ${info.messageId}\nRecipients: ${recipientCount}${attachments.length ? `\nAttachments: ${attachments.length}` : ""}` }],
-        details: {
-          messageId: info.messageId,
-          accepted: info.accepted,
-          rejected: info.rejected,
-          recipients: recipientCount,
-          attachments: attachments.length,
-        },
+        content: [{ type: "text", text: summary }],
+        details: result as any,
       };
     },
   };
@@ -327,8 +293,10 @@ function createEmailDraftTool(cwd: string, sandbox: string[], vault?: ResolvedVa
         if (params.bcc) validateRecipientDomains(params.bcc, emailAllowedDomains);
       }
 
-      const vaultSmtp = vault?.getSmtp();
-      const vaultImap = vault?.getImap();
+      const hasInlineImap = !!(params.imap_host || params.imap_user || params.imap_pass);
+      const accountName = hasInlineImap ? undefined : resolveAccount(vault, params.account, "email_draft");
+      const vaultSmtp = vault?.getSmtp(accountName);
+      const vaultImap = vault?.getImap(accountName);
       const from = params.from ?? vaultSmtp?.from ?? process.env.SMTP_FROM ?? vaultImap?.user ?? process.env.IMAP_USER;
 
       const attachments: Array<{ filename: string; content: Buffer }> = [];
@@ -403,6 +371,7 @@ function createEmailDraftTool(cwd: string, sandbox: string[], vault?: ResolvedVa
 // ─── Tool: email_verify ───
 
 const EmailVerifySchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   smtp_host: Type.Optional(Type.String({ description: "SMTP host (overrides vault/env)" })),
   smtp_port: Type.Optional(Type.Number({ description: "SMTP port" })),
   smtp_user: Type.Optional(Type.String({ description: "SMTP user" })),
@@ -416,7 +385,9 @@ function createEmailVerifyTool(vault?: ResolvedVault): AgentTool<typeof EmailVer
     description: "Verify SMTP connection and credentials. Use to check that email is properly configured before sending.",
     parameters: EmailVerifySchema,
     async execute(_id, params) {
-      const vaultSmtp = vault?.getSmtp();
+      const hasInlineSmtp = !!(params.smtp_host || params.smtp_user || params.smtp_pass);
+      const accountName = hasInlineSmtp ? undefined : resolveAccount(vault, params.account, "email_verify");
+      const vaultSmtp = vault?.getSmtp(accountName);
       const host = params.smtp_host ?? vaultSmtp?.host ?? process.env.SMTP_HOST;
       const port = params.smtp_port ?? vaultSmtp?.port ?? Number(process.env.SMTP_PORT ?? "587");
       const user = params.smtp_user ?? vaultSmtp?.user ?? process.env.SMTP_USER;
@@ -452,10 +423,18 @@ type ImapConnectionOverrides = {
   user?: string;
   pass?: string;
   tls?: boolean;
+  /** Mailbox account selector. Same semantics as the email_* tool param. */
+  account?: string;
+  /** Op name used in the friendly "multiple mailboxes available" error. */
+  opName?: string;
 };
 
 async function connectImap(vault?: ResolvedVault, overrides?: ImapConnectionOverrides) {
-  const vaultImap = vault?.getImap();
+  const hasInlineImap = !!(overrides?.host || overrides?.user || overrides?.pass);
+  const accountName = hasInlineImap
+    ? undefined
+    : resolveAccount(vault, overrides?.account, overrides?.opName ?? "email IMAP op");
+  const vaultImap = vault?.getImap(accountName);
   const host = overrides?.host ?? vaultImap?.host ?? process.env.IMAP_HOST;
   const port = overrides?.port ?? vaultImap?.port ?? Number(process.env.IMAP_PORT ?? "993");
   const user = overrides?.user ?? vaultImap?.user ?? process.env.IMAP_USER;
@@ -500,6 +479,7 @@ async function detectDraftFolder(client: any): Promise<string> {
 // ─── Tool: email_list ───
 
 const EmailListSchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
   limit: Type.Optional(Type.Number({ description: "Max emails to return (default: 20)" })),
   unseen_only: Type.Optional(Type.Boolean({ description: "Only show unread emails (default: false)" })),
@@ -512,7 +492,7 @@ function createEmailListTool(vault?: ResolvedVault): AgentTool<typeof EmailListS
     description: "List recent emails from the inbox (or specified folder). Returns subject, from, date, and UID for each message. Use email_read to get full content.",
     parameters: EmailListSchema,
     async execute(_id, params) {
-      const client = await connectImap(vault);
+      const client = await connectImap(vault, { account: params.account, opName: "email_list" });
       const folder = params.folder ?? "INBOX";
       const limit = params.limit ?? 20;
 
@@ -610,6 +590,7 @@ function findAttachments(node: any, path: number[] = []): AttachmentInfo[] {
 // ─── Tool: email_read ───
 
 const EmailReadSchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   uid: Type.Number({ description: "Email UID (from email_list)" }),
   folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
   mark_read: Type.Optional(Type.Boolean({ description: "Mark as read after fetching (default: true)" })),
@@ -624,7 +605,7 @@ function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?
       "Set download_attachments=true to save all attachments to the output directory, or use email_download_attachment for selective download.",
     parameters: EmailReadSchema,
     async execute(_id, params) {
-      const client = await connectImap(vault);
+      const client = await connectImap(vault, { account: params.account, opName: "email_read" });
       const folder = params.folder ?? "INBOX";
       const markRead = params.mark_read ?? true;
 
@@ -728,6 +709,7 @@ function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?
 // ─── Tool: email_download_attachment ───
 
 const EmailDownloadAttachmentSchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   uid: Type.Number({ description: "Email UID (from email_list or email_read)" }),
   part: Type.String({ description: "MIME part number of the attachment (from email_read attachment list, e.g. '2', '1.2')" }),
   folder: Type.Optional(Type.String({ description: "Mail folder (default: INBOX)" })),
@@ -743,7 +725,7 @@ function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, 
       "Use email_read first to see the list of attachments with their part numbers.",
     parameters: EmailDownloadAttachmentSchema,
     async execute(_id, params) {
-      const client = await connectImap(vault);
+      const client = await connectImap(vault, { account: params.account, opName: "email_download_attachment" });
       const folder = params.folder ?? "INBOX";
 
       const lock = await client.getMailboxLock(folder);
@@ -812,6 +794,7 @@ function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, 
 // ─── Tool: email_search ───
 
 const EmailSearchSchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   from: Type.Optional(Type.String({ description: "Search by sender address" })),
   to: Type.Optional(Type.String({ description: "Search by recipient address" })),
   subject: Type.Optional(Type.String({ description: "Search by subject (substring)" })),
@@ -834,7 +817,7 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
         throw new Error("Provide at least one search criterion (from, to, subject, since, before, body, or answered)");
       }
 
-      const client = await connectImap(vault);
+      const client = await connectImap(vault, { account: params.account, opName: "email_search" });
       const folder = params.folder ?? "INBOX";
       const limit = params.limit ?? 20;
 
@@ -883,6 +866,7 @@ function createEmailSearchTool(vault?: ResolvedVault): AgentTool<typeof EmailSea
 // ─── Tool: email_count ───
 
 const EmailCountSchema = Type.Object({
+  account: Type.Optional(Type.String({ description: "Mailbox account name. Required if the agent has multiple mailboxes." })),
   from: Type.Optional(Type.String({ description: "Count emails from sender" })),
   to: Type.Optional(Type.String({ description: "Count emails to recipient" })),
   subject: Type.Optional(Type.String({ description: "Count emails matching subject (substring)" })),
@@ -902,7 +886,7 @@ function createEmailCountTool(vault?: ResolvedVault): AgentTool<typeof EmailCoun
       "Returns total and unread counts. With no filters, counts all emails in the folder.",
     parameters: EmailCountSchema,
     async execute(_id, params) {
-      const client = await connectImap(vault);
+      const client = await connectImap(vault, { account: params.account, opName: "email_count" });
       const folder = params.folder ?? "INBOX";
 
       const lock = await client.getMailboxLock(folder);
@@ -952,11 +936,42 @@ function createEmailCountTool(vault?: ResolvedVault): AgentTool<typeof EmailCoun
   };
 }
 
+// ─── Tool: list_email_accounts ───
+// Enumerates mailbox accounts available to the agent. Returned shape mirrors
+// ResolvedVault.listMailboxes() so the model can discover `account` names
+// for email_* tools at runtime — complements the system-prompt listing.
+
+const ListEmailAccountsSchema = Type.Object({});
+
+function createListEmailAccountsTool(vault?: ResolvedVault): AgentTool<typeof ListEmailAccountsSchema> {
+  return {
+    name: "list_email_accounts",
+    label: "List Email Accounts",
+    description: "List the mailbox accounts available to this agent. " +
+      "Returns one object per account: { name, from, canSend, canRead, label }. " +
+      "Use the `name` as the `account` parameter when calling email_* tools.",
+    parameters: ListEmailAccountsSchema,
+    async execute() {
+      const mailboxes = vault?.listMailboxes() ?? [];
+      const summary = mailboxes.length === 0
+        ? "No email accounts configured for this agent."
+        : `${mailboxes.length} account(s) available:\n${mailboxes.map(m => {
+            const caps = [m.canSend ? "send" : null, m.canRead ? "read" : null].filter(Boolean).join("+");
+            return `- ${m.name} (${caps}${m.from ? `, from: ${m.from}` : ""}${m.label ? `, ${m.label}` : ""})`;
+          }).join("\n")}`;
+      return {
+        content: [{ type: "text", text: summary }],
+        details: { accounts: mailboxes },
+      };
+    },
+  };
+}
+
 // ─── Factory ───
 
-export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search" | "email_count" | "email_download_attachment";
+export type EmailToolName = "email_send" | "email_draft" | "email_verify" | "email_list" | "email_read" | "email_search" | "email_count" | "email_download_attachment" | "list_email_accounts";
 
-export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search", "email_count", "email_download_attachment"];
+export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft", "email_verify", "email_list", "email_read", "email_search", "email_count", "email_download_attachment", "list_email_accounts"];
 
 /**
  * Create email tools.
@@ -980,10 +995,20 @@ export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTo
     email_search: () => createEmailSearchTool(vault),
     email_count: () => createEmailCountTool(vault),
     email_download_attachment: () => createEmailDownloadAttachmentTool(vault, cwd, outputDir, sandbox),
+    list_email_accounts: () => createListEmailAccountsTool(vault),
   };
 
+  // list_email_accounts is auto-included whenever ANY email_* tool is
+  // requested — the model needs it to discover account names when the
+  // agent has multiple mailboxes. No agent should be able to email
+  // without first knowing which mailbox to use.
+  const wantsAnyEmailTool = !allowedTools
+    || allowedTools.some(a => {
+      const lc = a.toLowerCase();
+      return lc.startsWith("email_") || lc === "list_email_accounts";
+    });
   const names = allowedTools
-    ? ALL_EMAIL_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
+    ? ALL_EMAIL_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n) || (n === "list_email_accounts" && wantsAnyEmailTool))
     : ALL_EMAIL_TOOL_NAMES;
 
   return names.map(n => factories[n]());

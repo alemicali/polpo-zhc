@@ -523,6 +523,8 @@ export class PolpoClient {
     service: string;
     type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
     label?: string;
+    /** Logical mailbox account (groups SMTP+IMAP of the same mailbox). */
+    account?: string;
     credentials: Record<string, string>;
   }): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.post<{ agent: string; service: string; type: string; keys: string[] }>("/vault/entries", req);
@@ -535,7 +537,7 @@ export class PolpoClient {
   patchVaultEntry(
     agent: string,
     service: string,
-    patch: { type?: string; label?: string; credentials?: Record<string, string> },
+    patch: { type?: string; label?: string; account?: string; credentials?: Record<string, string> },
   ): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
       `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,

@@ -168,8 +168,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const r = agentConfig.reasoning ?? reasoning;
       return { model: m, streamOpts: buildStreamOpts(apiKey, r, m.maxTokens) };
     },
-    buildAgentPrompt: (agentConfig: any) => {
-      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir());
+    buildAgentPrompt: async (agentConfig: any) => {
+      // Pull the agent's mailboxes from vault so the prompt enumerates
+      // them (drives the `account` selector in email_* tools). Failures
+      // here degrade gracefully: prompt is rendered without the section.
+      let mailboxes: any[] | undefined;
+      try {
+        const entries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
+        const { resolveAgentVault } = await import("../vault/index.js");
+        mailboxes = resolveAgentVault(entries).listMailboxes();
+      } catch { /* ignore — keep prompt without mailboxes section */ }
+      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes);
     },
     resolveAgentTools: async (agentConfig: any) => {
       const { createAllTools } = await import("../tools/system-tools.js");

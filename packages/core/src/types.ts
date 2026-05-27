@@ -229,6 +229,12 @@ export interface VaultEntry {
   type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
   /** Human-readable label */
   label?: string;
+  /** Logical account this entry belongs to — used to group SMTP+IMAP of
+   *  the same mailbox. When omitted, the entry stands alone and its
+   *  `account` defaults to the `service` key. Multiple entries with the
+   *  same `account` form one mailbox (e.g. smtp send + imap read).
+   *  Only meaningful for type "smtp" / "imap"; ignored for others. */
+  account?: string;
   /** Credential fields — values can be literals or ${ENV_VAR} references */
   credentials: Record<string, string>;
 }

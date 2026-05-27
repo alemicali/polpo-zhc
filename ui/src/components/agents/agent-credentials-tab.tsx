@@ -114,6 +114,9 @@ interface FormState {
   service: string;
   label: string;
   type: VaultType;
+  /** Logical mailbox account — groups SMTP+IMAP of the same mailbox.
+   *  Empty string = "no account override" (resolver falls back to `service`). */
+  account: string;
   // smtp / imap
   host: string;
   port: string;
@@ -144,6 +147,7 @@ function defaultForm(type: VaultType): FormState {
     service: "",
     label: "",
     type,
+    account: "",
     host: "",
     port: type === "smtp" ? "587" : type === "imap" ? "993" : "",
     user: "",
@@ -380,7 +384,18 @@ function VaultEntryCard({
           <TypeIcon className="h-3.5 w-3.5" />
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium">{entry.service}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium">{entry.service}</span>
+            {entry.account && (entry.type === "smtp" || entry.type === "imap") && (
+              <Badge
+                variant="outline"
+                className="text-[9px] py-0 px-1.5 h-4 border-border/50 text-muted-foreground"
+                title={`Mailbox account: ${entry.account}`}
+              >
+                @{entry.account}
+              </Badge>
+            )}
+          </div>
           {entry.label && (
             <p className="text-[11px] text-muted-foreground truncate">{entry.label}</p>
           )}
@@ -486,6 +501,17 @@ function SmtpImapForm({
 }) {
   return (
     <div className="space-y-3">
+      <Field
+        label="Mailbox account"
+        hint="Group SMTP+IMAP of the same mailbox by giving them the same account name (e.g. 'work', 'personal'). Optional — when empty the entry stands alone."
+      >
+        <Input
+          className="h-8 text-xs"
+          placeholder="work"
+          value={form.account}
+          onChange={(e) => onChange({ account: e.target.value })}
+        />
+      </Field>
       <Field label="Host" required error={errors.host}>
         <Input
           className="h-8 text-xs"
@@ -738,7 +764,7 @@ function CredentialDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   agent: string;
-  initial: { type: VaultType; service: string; label?: string } | null;
+  initial: { type: VaultType; service: string; label?: string; account?: string } | null;
   isEdit: boolean;
   onSaved: () => void;
 }) {
@@ -750,6 +776,7 @@ function CredentialDialog({
       const f = defaultForm(initial.type);
       f.service = initial.service;
       f.label = initial.label ?? "";
+      f.account = initial.account ?? "";
       return f;
     }
     return defaultForm("api_key");
@@ -759,11 +786,12 @@ function CredentialDialog({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Reset state when (re)opened
-  const resetTo = (init: { type: VaultType; service: string; label?: string } | null) => {
+  const resetTo = (init: { type: VaultType; service: string; label?: string; account?: string } | null) => {
     if (init) {
       const f = defaultForm(init.type);
       f.service = init.service;
       f.label = init.label ?? "";
+      f.account = init.account ?? "";
       setForm(f);
       setStep(2);
     } else {
@@ -807,10 +835,16 @@ function CredentialDialog({
     setSubmitError(null);
     try {
       const credentials = buildCredentials(form);
+      // Mailbox account is only meaningful for smtp/imap entries — clear
+      // for any other type so users don't accidentally tag api_keys etc.
+      const accountValue = (form.type === "smtp" || form.type === "imap")
+        ? (form.account.trim() || undefined)
+        : undefined;
       if (isEdit) {
         await client.patchVaultEntry(agent, form.service.trim(), {
           type: form.type,
           label: form.label.trim() || undefined,
+          account: accountValue,
           credentials,
         });
         toast.success(`Updated credential "${form.service.trim()}"`);
@@ -820,6 +854,7 @@ function CredentialDialog({
           service: form.service.trim(),
           type: form.type,
           label: form.label.trim() || undefined,
+          account: accountValue,
           credentials,
         });
         toast.success(`Added credential "${form.service.trim()}"`);
@@ -981,7 +1016,7 @@ export function AgentCredentialsTab() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogKey, setDialogKey] = useState(0);
-  const [editing, setEditing] = useState<{ type: VaultType; service: string; label?: string } | null>(null);
+  const [editing, setEditing] = useState<{ type: VaultType; service: string; label?: string; account?: string } | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<VaultEntryMeta | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -993,7 +1028,7 @@ export function AgentCredentialsTab() {
   };
 
   const openEdit = (entry: VaultEntryMeta) => {
-    setEditing({ type: entry.type, service: entry.service, label: entry.label });
+    setEditing({ type: entry.type, service: entry.service, label: entry.label, account: entry.account });
     setDialogKey((k) => k + 1);
     setDialogOpen(true);
   };

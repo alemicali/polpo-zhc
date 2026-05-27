@@ -30,6 +30,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
               service: z.string().min(1).describe("Service name (vault key)"),
               type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]).describe("Credential type"),
               label: z.string().optional().describe("Human-readable label"),
+              account: z.string().optional().describe("Logical mailbox account (groups SMTP+IMAP of the same mailbox). Optional — defaults to `service` for grouping purposes."),
               credentials: z.record(z.string(), z.string()).describe("Key-value credential fields"),
             }),
           },
@@ -70,6 +71,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     const entry: VaultEntry = {
       type: body.type,
       ...(body.label ? { label: body.label } : {}),
+      ...(body.account ? { account: body.account } : {}),
       credentials: body.credentials,
     };
 
@@ -109,6 +111,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
                 service: z.string(),
                 type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]),
                 label: z.string().optional(),
+                account: z.string().optional(),
                 keys: z.array(z.string()),
               })),
             }),
@@ -152,6 +155,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
             schema: z.object({
               type: z.enum(["smtp", "imap", "oauth", "api_key", "login", "custom"]).optional().describe("Update credential type"),
               label: z.string().optional().describe("Update human-readable label"),
+              account: z.string().optional().describe("Update logical mailbox account name. Pass empty string to clear."),
               credentials: z.record(z.string(), z.string()).optional().describe("Credential fields to add or update (merged with existing)"),
             }),
           },
@@ -202,6 +206,7 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     const mergedKeys = await vaultStore.patch(agent, service, {
       type: body.type,
       label: body.label,
+      account: body.account,
       credentials: body.credentials,
     });
 

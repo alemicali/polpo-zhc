@@ -248,11 +248,24 @@ export async function ensurePgSchema(db: any): Promise<void> {
     service     TEXT NOT NULL,
     type        TEXT NOT NULL,
     label       TEXT,
+    account     TEXT,
     credentials TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (agent, service)
   )`);
+
+  // Migration: add account column to existing vault tables (v0.3.x → mailbox grouping).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'vault' AND column_name = 'account'
+      ) THEN
+        ALTER TABLE vault ADD COLUMN account TEXT;
+      END IF;
+    END $$;
+  `);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS playbooks (
     name        TEXT PRIMARY KEY,
