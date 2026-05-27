@@ -1126,6 +1126,8 @@ export interface ChatMessage {
   ts: string;
   /** Tool calls executed during this assistant message (only for role=assistant) */
   toolCalls?: ToolCallEvent[];
+  /** Ordered assistant render timeline preserving text/reasoning/tool interleaving. */
+  segments?: ChatMessageSegment[];
 }
 
 // === Chat Completions types (OpenAI-compatible) ===
@@ -1213,6 +1215,11 @@ export interface ChatCompletionChunkDelta {
 // === Tool Call streaming ===
 
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
+
+export type ChatMessageSegment =
+  | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
+  | { type: "tool"; toolId: string };
 
 export interface ToolCallEvent {
   /** Tool call ID from the LLM */

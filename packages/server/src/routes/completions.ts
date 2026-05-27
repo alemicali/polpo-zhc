@@ -23,6 +23,37 @@ import { streamRegistry } from "../stream-registry.js";
 
 const MAX_TURNS = 20;
 
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
+  | { type: "tool"; toolId: string };
+
+const appendTextSegment = (segments: MessageSegment[], content: string): void => {
+  if (!content) return;
+  const last = segments[segments.length - 1];
+  if (last?.type === "text") {
+    last.content += content;
+    return;
+  }
+  segments.push({ type: "text", content });
+};
+
+const appendThinkingSegment = (segments: MessageSegment[], content: string): void => {
+  if (!content) return;
+  const last = segments[segments.length - 1];
+  if (last?.type === "thinking") {
+    last.content += content;
+    return;
+  }
+  segments.push({ type: "thinking", content });
+};
+
+const ensureToolSegment = (segments: MessageSegment[], toolId: string): void => {
+  if (!toolId) return;
+  if (segments.some((s) => s.type === "tool" && s.toolId === toolId)) return;
+  segments.push({ type: "tool", toolId });
+};
+
 /** Tools that write/modify files — emit file:changed after successful execution */
 const FILE_WRITE_TOOLS: Record<string, "created" | "modified"> = {
   write_file: "created",
@@ -80,24 +111,25 @@ function redactVaultToolCalls(toolCalls: any[]): any[] {
 }
 
 async function persistAssistantMessage(
-  sessionStore: { updateMessage: (sessionId: string, messageId: string, content: string, toolCalls?: any[]) => Promise<boolean> },
+  sessionStore: { updateMessage: (sessionId: string, messageId: string, content: string, toolCalls?: any[], segments?: MessageSegment[]) => Promise<boolean> },
   sessionId: string,
   messageId: string,
   finalText: string,
   toolCalls: any[],
+  segments: MessageSegment[],
 ): Promise<void> {
   const text = finalText.trim();
   if (text) {
-    await sessionStore.updateMessage(sessionId, messageId, text, toolCalls);
+    await sessionStore.updateMessage(sessionId, messageId, text, toolCalls, segments);
     return;
   }
 
   if (toolCalls.length > 0) {
-    await sessionStore.updateMessage(sessionId, messageId, "", toolCalls);
+    await sessionStore.updateMessage(sessionId, messageId, "", toolCalls, segments);
     return;
   }
 
-  await sessionStore.updateMessage(sessionId, messageId, "", toolCalls);
+  await sessionStore.updateMessage(sessionId, messageId, "", toolCalls, segments);
 }
 
 // ── Zod Schemas ────────────────────────────────────────────────────────
@@ -573,6 +605,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         const messages: any[] = [...piMessages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
+        const segmentsAccum: MessageSegment[] = [];
 
         try {
           for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -592,9 +625,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             for await (const event of piStream) {
               if (abortController.signal.aborted) break;
               if (event.type === "thinking_delta") {
+                appendThinkingSegment(segmentsAccum, event.delta);
                 await emit(sseChunk(completionId, {}, null, { thinking: event.delta }));
               } else if (event.type === "text_delta") {
                 turnText += event.delta;
+                appendTextSegment(segmentsAccum, event.delta);
                 await emit(sseChunk(completionId, { content: event.delta }));
               } else if (event.type === "toolcall_start") {
                 // Emit early "preparing" signal — the LLM has started generating a tool call
@@ -602,6 +637,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 const block = event.partial.content[event.contentIndex] as
                   | { type: "toolCall"; id: string; name: string } | undefined;
                 if (block?.type === "toolCall") {
+                  ensureToolSegment(segmentsAccum, block.id);
                   toolCallPartials.set(event.contentIndex, { id: block.id, name: block.name, argumentsText: "" });
                   await emit(sseChunk(completionId, {}, null, {
                     tool_call: { id: block.id, name: block.name, state: "preparing" },
@@ -613,6 +649,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                   | { type: "toolCall"; id: string; name: string } | undefined;
                 let partial = toolCallPartials.get(contentIndex);
                 if (!partial && block?.type === "toolCall") {
+                  ensureToolSegment(segmentsAccum, block.id);
                   partial = { id: block.id, name: block.name, argumentsText: "" };
                   toolCallPartials.set(contentIndex, partial);
                 }
@@ -652,6 +689,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               (cc: any): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
                 cc.type === "toolCall"
             );
+            for (const call of toolCalls) {
+              ensureToolSegment(segmentsAccum, call.id);
+            }
 
             if (toolCalls.length === 0) break;
 
@@ -665,6 +705,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             // questa branch dopo lo spostamento di render_widget al for-loop).
             const skipIds = new Set<string>();
             if (interactiveCall) {
+              ensureToolSegment(segmentsAccum, interactiveCall.id);
               // Persist the interactive tool call so it survives session reload
               toolCallsAccum.push({
                 id: interactiveCall.id,
@@ -795,6 +836,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               if (abortController.signal.aborted) break;
               // Skip calls that were already handled inline (e.g. render_widget validation failure).
               if (skipIds.has(call.id)) continue;
+              ensureToolSegment(segmentsAccum, call.id);
 
               // Notify client that a tool is being called
               await emit(sseChunk(completionId, {}, null, {
@@ -872,7 +914,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // SECURITY: Redact vault credentials before persisting to SQLite
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
-            await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls);
+            await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
           }
         }
       }) as any;
@@ -888,6 +930,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       const messages: any[] = [...piMessages];
       let finalText = "";
       const toolCallsAccum: any[] = [];
+      const segmentsAccum: MessageSegment[] = [];
 
       try {
         for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -902,6 +945,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for await (const event of piStream) {
             if (event.type === "text_delta") {
               turnText += event.delta;
+              appendTextSegment(segmentsAccum, event.delta);
+            } else if (event.type === "thinking_delta") {
+              appendThinkingSegment(segmentsAccum, event.delta);
             } else if (event.type === "error") {
               streamError = (event as any).error?.errorMessage ?? "Model returned an error";
             }
@@ -919,6 +965,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             (cc: any): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>
               cc.type === "toolCall"
           );
+          for (const call of toolCalls) {
+            ensureToolSegment(segmentsAccum, call.id);
+          }
 
           if (toolCalls.length === 0) break;
 
@@ -934,6 +983,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           if (interactiveCall?.name === "render_widget") {
             const widgetValidationError = validateRenderWidgetArgs(interactiveCall.arguments);
             if (widgetValidationError) {
+              ensureToolSegment(segmentsAccum, interactiveCall.id);
               toolCallsAccum.push({
                 id: interactiveCall.id,
                 name: interactiveCall.name,
@@ -954,6 +1004,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             }
           }
           if (interactiveCall) {
+            ensureToolSegment(segmentsAccum, interactiveCall.id);
             // Persist the interactive tool call so it survives session reload
             toolCallsAccum.push({
               id: interactiveCall.id,
@@ -1182,6 +1233,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
           for (const call of toolCalls) {
             if (skipIds.has(call.id)) continue;
+            ensureToolSegment(segmentsAccum, call.id);
             const result = await effectiveToolExecutor(call.name, call.arguments);
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);
@@ -1214,7 +1266,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         // SECURITY: Redact vault credentials before persisting to SQLite
         const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
-          await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls);
+          await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
         }
       }
     }

@@ -22,6 +22,11 @@ const getSessionMessagesRoute = createRoute({
   summary: "Get session messages",
   request: {
     params: z.object({ id: z.string() }),
+    query: z.object({
+      after: z.string().optional().openapi({
+        description: "If provided, return only messages strictly newer than this message id (incremental sync). If the id is not found, the full message list is returned. The response includes an `incremental` flag the client can use to decide whether to append or replace its local cache.",
+      }),
+    }),
   },
   responses: {
     200: {
@@ -120,7 +125,27 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
-    const messages = await sessionStore.getMessages(id);
+    const allMessages = await sessionStore.getMessages(id);
+    // Incremental sync: ?after=<msgId> returns only messages strictly newer
+    // than that id. Big win for clients with a warm cache — they only pay
+    // for the delta instead of the whole transcript (long chats persist
+    // hundreds of messages with deeply-nested toolCalls payloads).
+    //
+    // If the client-supplied id is not found we fall back to the full list
+    // and signal `incremental: false` so the client knows to REPLACE rather
+    // than APPEND. That covers two cases: (1) the client cached a locally-
+    // generated UUID that never existed on the server, (2) the server
+    // pruned/lost the message after the client cached it.
+    const afterId = c.req.valid("query").after;
+    let messages = allMessages;
+    let incremental = false;
+    if (afterId) {
+      const idx = allMessages.findIndex((m: any) => m.id === afterId);
+      if (idx >= 0) {
+        messages = allMessages.slice(idx + 1);
+        incremental = true;
+      }
+    }
     // SECURITY: Redact vault credentials from persisted tool calls before serving to client
     const safeMessages = messages.map((m: any) => {
       const toolCalls = Array.isArray(m.toolCalls) ? m.toolCalls : undefined;
@@ -143,7 +168,7 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
         }),
       };
     });
-    return c.json({ ok: true, data: { session, messages: safeMessages } }, 200);
+    return c.json({ ok: true, data: { session, messages: safeMessages, incremental } }, 200);
   });
 
   // PATCH /chat/sessions/:id — rename a session
@@ -189,6 +214,7 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
         role: "user" | "assistant";
         content: string;
         toolCalls?: unknown[];
+        segments?: unknown[];
       }>;
     }>();
 
@@ -201,8 +227,8 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
 
     for (const msg of body.messages) {
       const added = await sessionStore.addMessage(sessionId, msg.role, msg.content);
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any);
+      if ((msg.toolCalls && msg.toolCalls.length > 0) || (msg.segments && msg.segments.length > 0)) {
+        await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any, msg.segments as any);
       }
       imported++;
     }

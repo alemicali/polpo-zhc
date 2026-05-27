@@ -30,6 +30,13 @@ export function agentRoutes(getDeps: () => {
     path: "/",
     tags: ["Agents"],
     summary: "List agents",
+    request: {
+      query: z.object({
+        summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+          description: "If `true`, returns a slim projection: only the identity bits the list rows render (displayName, title, avatar, company, email) plus pre-computed `capabilities` counts. Drops `allowedTools`, `allowedPaths`, `skills`, `mcpServers`, `systemPrompt`, `reasoning`, `browserProfile`, `emailAllowedDomains`, `suggestions`, and the bulky `identity.responsibilities/bio/personality/tone/timezone`. Default `false` for backwards compat.",
+        }),
+      }),
+    },
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -41,7 +48,41 @@ export function agentRoutes(getDeps: () => {
   app.openapi(listAgentsRoute, async (c) => {
     const deps = getDeps();
     const agents = await deps.getAgents();
-    return c.json({ ok: true, data: agents.map(redactAgentConfig) });
+    const redacted = agents.map(redactAgentConfig);
+    const { summary } = c.req.valid("query");
+
+    if (summary === "true") {
+      const slim = redacted.map((a: any) => {
+        const id = a.identity && typeof a.identity === "object" ? a.identity : null;
+        const slimIdentity = id ? {
+          ...(id.displayName ? { displayName: id.displayName } : {}),
+          ...(id.title ? { title: id.title } : {}),
+          ...(id.avatar ? { avatar: id.avatar } : {}),
+          ...(id.company ? { company: id.company } : {}),
+          ...(id.email ? { email: id.email } : {}),
+        } : undefined;
+        return {
+          name: a.name,
+          role: a.role,
+          model: a.model,
+          team: a.team,
+          reportsTo: a.reportsTo,
+          volatile: a.volatile,
+          createdAt: a.createdAt,
+          ...(slimIdentity && Object.keys(slimIdentity).length > 0 ? { identity: slimIdentity } : {}),
+          capabilities: {
+            tools: Array.isArray(a.allowedTools) ? a.allowedTools.length : 0,
+            skills: Array.isArray(a.skills) ? a.skills.length : 0,
+            mcpServers: a.mcpServers && typeof a.mcpServers === "object"
+              ? Object.keys(a.mcpServers).length
+              : 0,
+          },
+        };
+      });
+      return c.json({ ok: true, data: slim });
+    }
+
+    return c.json({ ok: true, data: redacted });
   });
 
   // POST /agents — add agent
