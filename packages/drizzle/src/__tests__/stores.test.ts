@@ -109,7 +109,8 @@ function createTables(raw: InstanceType<typeof Database>) {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       ts TEXT NOT NULL,
-      tool_calls TEXT
+      tool_calls TEXT,
+      segments TEXT
     );
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,

@@ -124,8 +124,10 @@ export async function ensurePgSchema(db: any): Promise<void> {
     role       TEXT NOT NULL,
     content    TEXT NOT NULL,
     ts         TEXT NOT NULL,
-    tool_calls TEXT
+    tool_calls TEXT,
+    segments   TEXT
   )`);
+  await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS segments TEXT`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_messages_session ON messages(session_id, ts)`);
 

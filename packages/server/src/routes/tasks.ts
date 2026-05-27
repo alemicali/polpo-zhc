@@ -13,6 +13,9 @@ const listTasksRoute = createRoute({
       status: z.string().optional(),
       group: z.string().optional(),
       assignTo: z.string().optional(),
+      summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+      }),
     }),
   },
   responses: {
@@ -246,11 +249,52 @@ export function taskRoutes(getDeps: () => {
     let tasks = await deps.taskStore.getAllTasks();
 
     // Optional filters
-    const { status, group, assignTo } = c.req.valid("query");
+    const { status, group, assignTo, summary } = c.req.valid("query");
 
     if (status) tasks = tasks.filter((t: any) => t.status === status);
     if (group) tasks = tasks.filter((t: any) => t.group === group);
     if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
+
+    // Slim projection: kicks in only when the client opts in via ?summary=true.
+    // Keeps every field the list rows in web/mobile actually render (id, title,
+    // status, phase, assignTo, group, dependsOn, retries, timestamps, plus the
+    // small `result.assessment` block for the score badge). Drops the heavy
+    // tail — outcomes, stdout/stderr, expectations, metrics — that only the
+    // detail screen needs and that GET /tasks/:id already returns.
+    if (summary === "true") {
+      tasks = tasks.map((t: any) => {
+        const desc = typeof t.description === "string" ? t.description : "";
+        // result.assessment carries checks[] with full descriptions — that
+        // alone makes the field 100-200KB per task and dominates the summary
+        // payload (~8MB across 369 tasks observed in dev). The list rows
+        // only need the score, the pass/fail flag, and the checks count for
+        // the badge. The detail screen (GET /tasks/:id) returns the full
+        // assessment when the user actually wants it.
+        const assess = t.result && typeof t.result === "object" ? t.result.assessment : null;
+        const slimAssessment = assess && typeof assess === "object"
+          ? {
+              globalScore: assess.globalScore,
+              passed: assess.passed,
+              checksCount: Array.isArray(assess.checks) ? assess.checks.length : 0,
+            }
+          : null;
+        return {
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          phase: t.phase,
+          assignTo: t.assignTo,
+          group: t.group,
+          missionId: t.missionId,
+          dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+          retries: t.retries ?? 0,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          descriptionPreview: desc.length > 200 ? desc.slice(0, 200) : desc,
+          ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
+        };
+      });
+    }
 
     return c.json({ ok: true, data: tasks });
   });

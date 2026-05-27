@@ -28,6 +28,7 @@ export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";
 export { skillRoutes, type SkillRouteDeps } from "./routes/skills.js";
 export { attachmentRoutes } from "./routes/attachments.js";
+export { countsRoutes } from "./routes/counts.js";
 
 // Dependency types
 export type {

@@ -30,6 +30,7 @@ import {
   eventRoutes,
   configRoutes,
   attachmentRoutes,
+  countsRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes } from "./routes/config.js";
@@ -331,6 +332,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // from Neon stores directly.
 
   const o = orchestrator; // short alias
+
+  authed.route("/counts", countsRoutes(() => ({
+    getAllTasks: () => o.getStore().getAllTasks(),
+    getAllMissions: () => o.getAllMissions(),
+    getAgents: () => o.getAgents(),
+  })));
 
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),
