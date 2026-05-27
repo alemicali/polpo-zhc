@@ -53,6 +53,7 @@ import {
   BarChart3,
   Compass,
   Palette,
+  ListPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -101,6 +102,8 @@ import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, Miss
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
+import { Queue } from "@/components/ai-elements/queue";
+import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
@@ -3254,6 +3257,12 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
+
+  // Per-session prompt queue. Keyed by sessionId (or the new-session
+  // sentinel until the server assigns one). The Queue panel renders
+  // above the composer; the auto-send effect below dequeues the head
+  // when a stream ends.
+  const queue = useChatQueue(sessionId ?? NEW_SESSION_QUEUE_KEY);
   const copySessionId = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -3351,6 +3360,80 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }, []);
 
+  // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
+
+  // Push the textarea's current draft to the queue (used by the [Queue]
+  // composer button — like Send, but stashes instead of submitting).
+  const enqueueCurrentDraft = useCallback(() => {
+    const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+    const raw = textarea?.value ?? "";
+    const text = raw.trim();
+    if (!text) {
+      toast.info("Nothing to queue — type a prompt first.");
+      return;
+    }
+    // Resolve display mentions → wire mentions, same as a real submit, so
+    // the queued copy is what the agent will eventually receive.
+    const resolved = mentionRef.current?.resolveMessage(text) ?? text;
+    const added = queue.add(resolved);
+    if (!added) return;
+    // Clear the composer (mirrors PromptInput.form.reset post-submit).
+    setTextareaValue("");
+    chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+    textarea?.focus();
+  }, [queue, sessionId, setTextareaValue]);
+
+  // Migrate the `__new__` queue to the real sessionId once the server
+  // assigns one (first stream completes). Until then the queue lives
+  // under the sentinel; after, it lives under the real id so it survives
+  // tab switches.
+  useEffect(() => {
+    if (!sessionId) return;
+    migrateNewSessionQueue(sessionId);
+  }, [sessionId]);
+
+  // Auto-send the head of the queue when a stream finishes.
+  //
+  // Why a ref-tracked previous: `isLoading` flips during the SSE stream;
+  // we only want to react to the falling edge (true → false). Without the
+  // ref we'd dequeue on initial mount when isLoading is already false.
+  //
+  // Why the small delay: gives the server a beat to release the session
+  // (e.g. mark its turn complete) before we shove the next request in;
+  // a flush-during-cleanup race was observed in dev otherwise.
+  const prevLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    const prev = prevLoadingRef.current;
+    prevLoadingRef.current = isLoading;
+    // Falling edge only — and gate every other precondition the manual
+    // path checks (input enabled, autoSend on, queue non-empty).
+    if (!(prev === true && isLoading === false)) return;
+    if (!queue.autoSend) return;
+    if (queue.items.length === 0) return;
+    if (inputDisabled) return; // pending askUser / mission / vault / etc.
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      // Re-check guards at flush time — user may have toggled autoSend
+      // off or cleared the queue during the wait.
+      if (!queue.autoSend || queue.items.length === 0 || inputDisabled) return;
+      const next = queue.shift();
+      if (!next) return;
+      void send(next.text).catch((err) => {
+        // Re-queue at the head on failure so the user doesn't silently
+        // lose work, and surface a toast.
+        console.warn("[queue] auto-send failed:", err);
+        toast.error("Queued prompt failed to send");
+      });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isLoading, queue, inputDisabled, send]);
+
   // ── Per-session draft preservation ─────────────────────────────────
   // The composer is uncontrolled. When the user switches tabs we need to
   // (a) snapshot the current draft under the OUTGOING session id, and
@@ -3447,6 +3530,22 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       ref={inputWrapperRef}
     >
       <div className="mx-auto max-w-3xl">
+        {/* Prompt queue panel — sits between the message thread and the
+            composer. Only mounted when there's something to show, so it
+            doesn't add empty vertical noise on a fresh session. */}
+        {queue.items.length > 0 && (
+          <div className="mb-2">
+            <Queue
+              items={queue.items}
+              autoSend={queue.autoSend}
+              onUpdate={(id, text) => { queue.update(id, text); }}
+              onRemove={(id) => { queue.remove(id); }}
+              onClear={queue.clear}
+              onAutoSendChange={queue.setAutoSend}
+              onReorder={queue.reorder}
+            />
+          </div>
+        )}
         <MentionPopover
           ref={mentionRef}
           textareaRef={textareaRef}
@@ -3521,6 +3620,36 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   disabled={inputDisabled}
                   onListeningChange={setIsRecording}
                 />
+                {/* Queue button — stash current draft instead of sending.
+                    Disabled while a stream is in progress would defeat the
+                    point (the whole reason to queue is to pile up sends
+                    while busy), so we only honour `inputDisabled` (which
+                    excludes the loading flag here). */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
+                      onClick={enqueueCurrentDraft}
+                      disabled={inputDisabled}
+                      aria-label="Add to queue"
+                    >
+                      <ListPlus className="h-4 w-4" />
+                      {queue.items.length > 0 && (
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold leading-none text-primary-foreground">
+                          {queue.items.length}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    {queue.items.length === 0
+                      ? "Queue prompt for after current reply"
+                      : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
+                  </TooltipContent>
+                </Tooltip>
                 {isRecording ? (
                   <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
                     <span className="relative flex h-2 w-2">
