@@ -18,7 +18,7 @@ type Props = {
    * worktree). "same" = used by the session-tabs "+" (always the active
    * workspace's worktree). Undefined = legacy free-choice dialog. */
   forceMode?: WorktreeMode;
-  onCreate: (config: { agentKind: CodingAgentKind; cwdOverride?: string; branch?: string; label?: string }) => void;
+  onCreate: (config: { agentKind: CodingAgentKind; agentCommand?: string; cwdOverride?: string; branch?: string; label?: string; workspaceLabel?: string }) => void;
 };
 
 type WorktreeMode = "same" | "new";

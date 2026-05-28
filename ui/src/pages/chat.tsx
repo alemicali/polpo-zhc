@@ -98,7 +98,7 @@ import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-c
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, WhatsAppPreviewData, EmailPreviewData, SendPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
@@ -3263,6 +3263,11 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // above the composer; the auto-send effect below dequeues the head
   // when a stream ends.
   const queue = useChatQueue(sessionId ?? NEW_SESSION_QUEUE_KEY);
+  // Controls whether the queue manager panel is mounted when the queue
+  // is empty. When the queue HAS items the panel is always visible —
+  // when it's empty the user opens it via the ListPlus button so they
+  // can pre-stage prompts or toggle Auto-send before queueing anything.
+  const [queueOpen, setQueueOpen] = useState(false);
   const copySessionId = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -3362,14 +3367,19 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 
   // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
 
-  // Push the textarea's current draft to the queue (used by the [Queue]
-  // composer button — like Send, but stashes instead of submitting).
+  // Queue button click handler:
+  //  • If there's a non-empty draft, stash it (enqueue) and OPEN the
+  //    panel so the user immediately sees their queued item.
+  //  • If the draft is empty, TOGGLE the panel — gives the user access
+  //    to the manager (Auto-send switch, edit/delete existing items)
+  //    even on an empty queue without forcing them to type first.
   const enqueueCurrentDraft = useCallback(() => {
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     const raw = textarea?.value ?? "";
     const text = raw.trim();
     if (!text) {
-      toast.info("Nothing to queue — type a prompt first.");
+      // No draft → use the button as a toggle for the panel.
+      setQueueOpen((v) => !v);
       return;
     }
     // Resolve display mentions → wire mentions, same as a real submit, so
@@ -3380,6 +3390,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     // Clear the composer (mirrors PromptInput.form.reset post-submit).
     setTextareaValue("");
     chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+    setQueueOpen(true); // ensure manager is visible right after enqueueing
     textarea?.focus();
   }, [queue, sessionId, setTextareaValue]);
 
@@ -3530,19 +3541,21 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       ref={inputWrapperRef}
     >
       <div className="mx-auto max-w-3xl">
-        {/* Prompt queue panel — sits between the message thread and the
-            composer. Only mounted when there's something to show, so it
-            doesn't add empty vertical noise on a fresh session. */}
-        {queue.items.length > 0 && (
+        {/* Prompt queue panel — visible when there are items OR when the
+            user explicitly toggled it open via the ListPlus button (so the
+            queue manager is reachable even on an empty queue to flip the
+            Auto-send switch / pre-stage prompts). */}
+        {(queue.items.length > 0 || queueOpen) && (
           <div className="mb-2">
             <Queue
               items={queue.items}
               autoSend={queue.autoSend}
               onUpdate={(id, text) => { queue.update(id, text); }}
               onRemove={(id) => { queue.remove(id); }}
-              onClear={queue.clear}
+              onClear={() => { queue.clear(); setQueueOpen(false); }}
               onAutoSendChange={queue.setAutoSend}
               onReorder={queue.reorder}
+              onClose={() => setQueueOpen(false)}
             />
           </div>
         )}
@@ -3646,7 +3659,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs">
                     {queue.items.length === 0
-                      ? "Queue prompt for after current reply"
+                      ? (queueOpen ? "Close queue manager" : "Open queue manager (or type a prompt and click to queue)")
                       : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
                   </TooltipContent>
                 </Tooltip>

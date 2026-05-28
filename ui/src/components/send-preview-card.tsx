@@ -10,6 +10,7 @@
  * goes out to the recipient until the user clicks Send.
  */
 
+import * as React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ function joinRecipients(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value.join(", ") : value;
 }
 
-function mediaIcon(kind: string | undefined): JSX.Element {
+function mediaIcon(kind: string | undefined): React.ReactElement {
   switch (kind) {
     case "image": return <ImageIcon className="h-3.5 w-3.5" />;
     case "video": return <Video className="h-3.5 w-3.5" />;
