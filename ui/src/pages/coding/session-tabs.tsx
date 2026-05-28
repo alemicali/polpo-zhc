@@ -34,6 +34,7 @@ type Props = {
     cwdOverride?: string;
     branch?: string;
     label?: string;
+    workspaceLabel?: string;
   }) => void;
 };
 

@@ -221,8 +221,12 @@ export type MessageSegment =
   | { type: "thinking"; content: string }
   | { type: "tool"; tool: ToolCallInfo };
 
-/** A chat message enriched with optional ask_user questions, tool calls, mission preview, vault preview, and client-side actions */
-export interface ChatMessageWithQuestions extends ChatMessage {
+/** A chat message enriched with optional ask_user questions, tool calls, mission preview, vault preview, and client-side actions.
+ *  We Omit `segments` from the base `ChatMessage` because the SDK shape
+ *  uses `{ type: "tool"; toolId: string }` (a reference) while the UI
+ *  enriches it to `{ type: "tool"; tool: ToolCallInfo }` (the full
+ *  tool-call so we can render arguments/results inline without a join). */
+export interface ChatMessageWithQuestions extends Omit<ChatMessage, "segments"> {
   askUserQuestions?: AskUserQuestion[];
   missionPreview?: MissionPreviewData;
   vaultPreview?: VaultPreviewData;
@@ -626,7 +630,12 @@ export function useChat() {
       return hasText || hasToolCalls;
     })
     .map((m) => {
-      const enriched: ChatMessageWithQuestions = { ...m };
+      // Drop the server's `segments` from the spread — the SDK shape
+      // (`{ type: "tool"; toolId }`) is incompatible with our enriched
+      // shape (`{ type: "tool"; tool: ToolCallInfo }`). We re-derive
+      // segments below from `toolCalls` via `reconstructSegments`.
+      const { segments: _serverSegments, ...rest } = m;
+      const enriched: ChatMessageWithQuestions = rest;
       const serverMsg = m as ChatMessageWithQuestions;
       if (serverMsg.toolCalls && serverMsg.toolCalls.length > 0) {
         enriched.toolCalls = serverMsg.toolCalls;

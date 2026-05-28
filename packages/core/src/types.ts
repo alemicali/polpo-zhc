@@ -235,6 +235,13 @@ export interface VaultEntry {
    *  same `account` form one mailbox (e.g. smtp send + imap read).
    *  Only meaningful for type "smtp" / "imap"; ignored for others. */
   account?: string;
+  /** Other agent names allowed to READ/use this entry. The owner (agent
+   *  on the PK) always has access and is implicit (not in this list).
+   *  Empty/undefined → owner-private (default). When set, the entry
+   *  appears in `getAllForAgent(otherAgent)` results with `sharedFrom`
+   *  metadata. Conflict policy: if `otherAgent` has its own entry with
+   *  the same service key, the per-agent entry wins over the shared one. */
+  allowedAgents?: string[];
   /** Credential fields — values can be literals or ${ENV_VAR} references */
   credentials: Record<string, string>;
 }

@@ -53,7 +53,7 @@ type RightTab = "changes" | "browser" | "terminal" | "vscode";
  */
 const DEFAULT_TAB: RightTab = "changes";
 
-export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTerminalId, cwd, refreshKey }: Props) {
+export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTerminalId, cwd, refreshKey: _refreshKey }: Props) {
   // Per-terminal active right-tab. We keep a single localStorage record
   // (one key for the whole map) so we don't blow up the keyspace.
   const [tabsByTerm, setTabsByTerm] = useLocalState<Record<string, RightTab>>("polpo:coding:rightTabs", {});

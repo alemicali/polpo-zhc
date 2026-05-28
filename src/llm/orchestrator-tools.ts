@@ -661,9 +661,9 @@ const renameTeamTool: Tool = {
 
 const setVaultEntryTool: Tool = {
   name: "set_vault_entry",
-  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
+  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields). To share with other agents set `allowedAgents` to their names — the owner agent is always implicit.",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key, e.g. 'gmail', 'sendgrid', 'stripe')" }),
     type: Type.Union([
       Type.Literal("smtp"),
@@ -674,17 +674,22 @@ const setVaultEntryTool: Tool = {
       Type.Literal("custom"),
     ], { description: "Credential type" }),
     label: Type.Optional(Type.String({ description: "Human-readable label (e.g. 'Work Gmail SMTP')" })),
+    account: Type.Optional(Type.String({ description: "Mailbox account name (groups SMTP+IMAP of the same mailbox, e.g. 'work'). Only meaningful for smtp/imap." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "OTHER agent names that may use this credential. Owner is always implicit and not in this list. Omit / [] = owner-private." })),
     credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Use actual values — they will be encrypted at rest." }),
   }),
 };
 
 const updateVaultCredentialsTool: Tool = {
   name: "update_vault_credentials",
-  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field.",
+  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field. Pass `allowedAgents` to also update sharing (REPLACES the list, pass [] to revoke all shares).",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key)" }),
-    credentials: Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." }),
+    credentials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "REPLACES the sharing list. Owner always implicit. Pass [] to revoke all shares." })),
+    account: Type.Optional(Type.String({ description: "Update the mailbox account name. Pass empty string to clear." })),
+    label: Type.Optional(Type.String({ description: "Update the human-readable label." })),
   }),
 };
 
@@ -694,6 +699,17 @@ const removeVaultEntryTool: Tool = {
   parameters: Type.Object({
     agent: Type.String({ description: "Agent name" }),
     service: Type.String({ description: "Service name (vault key) to remove" }),
+  }),
+};
+
+const shareVaultEntryTool: Tool = {
+  name: "share_vault_entry",
+  description: "Convenience helper to change WHO an existing vault entry is shared with — without re-writing the credentials. Adds/removes agent names from the entry's `allowedAgents` list. Use 'add' to grant access, 'remove' to revoke, or 'replace' to fully overwrite the list. Owner is always implicit and is rejected if passed.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
+    service: Type.String({ description: "Service name (vault key)" }),
+    action: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("replace")], { description: "What to do with `withAgents`." }),
+    withAgents: Type.Array(Type.String(), { description: "Other agent names. The owner cannot share with themselves." }),
   }),
 };
 
@@ -1652,7 +1668,7 @@ export const WRITE_TOOLS = new Set([
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Vault & Identity
-  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "set_identity",
+  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "share_vault_entry", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -1689,6 +1705,26 @@ export const WRITE_TOOLS = new Set([
 export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
 export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
 export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
+
+/** Server-side tool that renames the current chat session. Available to
+ *  every agent (orchestrator + agent-direct) — the intercept in
+ *  completions.ts resolves the sessionId from the X-Session-Id header,
+ *  calls `sessionStore.renameSession`, and emits a `session_title`
+ *  SSE chunk so the sidebar refreshes in real time. The tool is sticky:
+ *  agents may call it any time but should ONLY do so on the first turn
+ *  of a new session or when the user explicitly asks for a rename.
+ *  The system prompt is augmented on first-turn to force the call. */
+export const setSessionTitleTool: Tool = {
+  name: "set_session_title",
+  description:
+    "Rename the current chat session with a short, meaningful title (≤50 characters) that summarises what the user is asking. " +
+    "MUST be called once at the very beginning of a new session — the system prompt will remind you on the first turn. " +
+    "On later turns, call it ONLY when the user explicitly asks to rename the conversation. " +
+    "Do not include emojis or quotes; use plain Title Case.",
+  parameters: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: 80, description: "New title for the session — short and descriptive (≤50 chars recommended)." }),
+  }),
+};
 
 /**
  * Side-effect tools that ship a real-world message (WhatsApp / email)
@@ -1740,8 +1776,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   updateMissionNotificationsTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
-  // Vault (4)
-  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool,
+  // Vault (5)
+  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
   // Identity (2)
   setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
@@ -1778,6 +1814,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   askUserTool, renderWidgetTool,
   // Client-side (4)
   openFileTool, navigateToTool, openTabTool, setDesignTool,
+  // Session meta (1)
+  setSessionTitleTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1819,6 +1857,7 @@ const TOOL_LABELS: Record<string, string> = {
   set_vault_entry: "Set Vault Entry",
   update_vault_credentials: "Update Vault Credentials",
   remove_vault_entry: "Remove Vault Entry",
+  share_vault_entry: "Share Vault Entry",
   set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
@@ -1866,6 +1905,7 @@ const TOOL_LABELS: Record<string, string> = {
   // Client-side
   open_tab: "Open Tab",
   set_design: "Set Design",
+  set_session_title: "Set Session Title",
   render_widget: "Render Widget",
   // Ink Hub
   ink_search: "Search Ink Hub",
@@ -2006,6 +2046,7 @@ export async function executeOrchestratorTool(
       case "set_vault_entry":           return execSetVaultEntry(polpo, args);
       case "update_vault_credentials": return execUpdateVaultCredentials(polpo, args);
       case "remove_vault_entry":       return execRemoveVaultEntry(polpo, args);
+      case "share_vault_entry":        return execShareVaultEntry(polpo, args);
       case "list_vault":               return execListVault(polpo, args);
 
       // ── Identity ──
@@ -3399,15 +3440,25 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
 
   const service = args.service as string;
+  // Filter allowedAgents: drop owner (implicit), de-dupe.
+  const rawAllowed = Array.isArray(args.allowedAgents) ? (args.allowedAgents as string[]) : undefined;
+  const allowedAgents = rawAllowed
+    ? Array.from(new Set(rawAllowed.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)))
+    : undefined;
   const entry: VaultEntry = {
     type: args.type as VaultEntry["type"],
     ...(args.label ? { label: args.label as string } : {}),
+    ...(args.account ? { account: args.account as string } : {}),
+    ...(allowedAgents && allowedAgents.length > 0 ? { allowedAgents } : {}),
     credentials: args.credentials as Record<string, string>,
   };
 
   await vaultStore.set(agentName, service, entry);
   const credKeys = Object.keys(entry.credentials).join(", ");
-  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
+  const shareMsg = entry.allowedAgents && entry.allowedAgents.length > 0
+    ? ` Shared with: ${entry.allowedAgents.join(", ")}.`
+    : "";
+  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}.${shareMsg}`;
 }
 
 async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3423,10 +3474,68 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   const existing = await vaultStore.get(agentName, service);
   if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}". Use set_vault_entry to create one.`;
 
-  const credentials = args.credentials as Record<string, string>;
-  const mergedKeys = await vaultStore.patch(agentName, service, { credentials });
-  const updatedKeys = Object.keys(credentials).join(", ");
+  const credentials = (args.credentials as Record<string, string> | undefined) ?? undefined;
+  // allowedAgents semantics: present → REPLACES. omitted → preserved.
+  const rawAllowed = args.allowedAgents;
+  let allowedAgents: string[] | undefined;
+  if (Array.isArray(rawAllowed)) {
+    allowedAgents = Array.from(new Set((rawAllowed as string[]).filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  }
+  const account = typeof args.account === "string" ? args.account : undefined;
+  const label = typeof args.label === "string" ? args.label : undefined;
+
+  const mergedKeys = await vaultStore.patch(agentName, service, {
+    ...(credentials ? { credentials } : {}),
+    ...(allowedAgents !== undefined ? { allowedAgents } : {}),
+    ...(account !== undefined ? { account } : {}),
+    ...(label !== undefined ? { label } : {}),
+  });
+  const updatedKeys = credentials ? Object.keys(credentials).join(", ") : "(metadata only)";
   return `Vault entry "${service}" updated for agent "${agentName}". Updated fields: ${updatedKeys}. All fields: ${mergedKeys.join(", ")}`;
+}
+
+async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+
+  const service = args.service as string;
+  const action = args.action as "add" | "remove" | "replace";
+  const withAgents = Array.isArray(args.withAgents) ? (args.withAgents as string[]) : [];
+
+  // Validate target agents exist (defensive — orchestrator may resolve aliases).
+  const known = new Set(agents.map(a => a.name));
+  const cleaned = Array.from(new Set(withAgents.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  const unknown = cleaned.filter(n => !known.has(n));
+  if (unknown.length > 0) {
+    return `Error: unknown agent name(s): ${unknown.join(", ")}. Use list_agents to verify.`;
+  }
+
+  const existing = await vaultStore.get(agentName, service);
+  if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}".`;
+
+  const current = new Set(existing.allowedAgents ?? []);
+  let next: string[];
+  if (action === "replace") {
+    next = cleaned;
+  } else if (action === "add") {
+    for (const n of cleaned) current.add(n);
+    next = Array.from(current);
+  } else {
+    // remove
+    for (const n of cleaned) current.delete(n);
+    next = Array.from(current);
+  }
+
+  await vaultStore.patch(agentName, service, { allowedAgents: next });
+  const summary = next.length === 0
+    ? `Vault entry "${service}" is now owner-private.`
+    : `Vault entry "${service}" is now shared with: ${next.join(", ")}.`;
+  return summary;
 }
 
 async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

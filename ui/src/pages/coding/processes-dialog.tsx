@@ -3,7 +3,6 @@ import { ChevronDown, ChevronRight, RefreshCcw, Terminal as TerminalIcon, Code2,
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/config";
-import { cn } from "@/lib/utils";
 import type { CodingTerminal, CodingWorkspace } from "./types";
 
 type ProcessNode = {
