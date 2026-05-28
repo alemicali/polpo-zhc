@@ -98,6 +98,7 @@ import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-c
 import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
@@ -3263,11 +3264,13 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // above the composer; the auto-send effect below dequeues the head
   // when a stream ends.
   const queue = useChatQueue(sessionId ?? NEW_SESSION_QUEUE_KEY);
-  // Controls whether the queue manager panel is mounted when the queue
-  // is empty. When the queue HAS items the panel is always visible —
-  // when it's empty the user opens it via the ListPlus button so they
-  // can pre-stage prompts or toggle Auto-send before queueing anything.
-  const [queueOpen, setQueueOpen] = useState(false);
+  // Single source of truth for queue panel visibility. Defaults to OPEN
+  // when the persisted queue already has items (so user sees their stash
+  // on reload), CLOSED otherwise. The user can always close via the X in
+  // the panel header — items survive the close (re-open via ListPlus).
+  const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
+  // Clear confirmation modal (avoid accidental wipes of queued prompts).
+  const [queueClearConfirm, setQueueClearConfirm] = useState(false);
   const copySessionId = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -3541,24 +3544,36 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       ref={inputWrapperRef}
     >
       <div className="mx-auto max-w-3xl">
-        {/* Prompt queue panel — visible when there are items OR when the
-            user explicitly toggled it open via the ListPlus button (so the
-            queue manager is reachable even on an empty queue to flip the
-            Auto-send switch / pre-stage prompts). */}
-        {(queue.items.length > 0 || queueOpen) && (
+        {/* Prompt queue panel — `queueOpen` is the single source of truth.
+            User opens via ListPlus button (auto-opens when enqueueing a
+            draft); closes via the X in the header. Items survive close —
+            re-open to see them again. */}
+        {queueOpen && (
           <div className="mb-2">
             <Queue
               items={queue.items}
               autoSend={queue.autoSend}
               onUpdate={(id, text) => { queue.update(id, text); }}
               onRemove={(id) => { queue.remove(id); }}
-              onClear={() => { queue.clear(); setQueueOpen(false); }}
+              onClear={() => setQueueClearConfirm(true)}
               onAutoSendChange={queue.setAutoSend}
               onReorder={queue.reorder}
               onClose={() => setQueueOpen(false)}
             />
           </div>
         )}
+        <ConfirmDialog
+          open={queueClearConfirm}
+          onOpenChange={setQueueClearConfirm}
+          title="Clear queue?"
+          description={`This will remove ${queue.items.length} queued prompt${queue.items.length === 1 ? "" : "s"} for this session. This action cannot be undone.`}
+          confirmLabel="Clear all"
+          destructive
+          onConfirm={() => {
+            queue.clear();
+            setQueueClearConfirm(false);
+          }}
+        />
         <MentionPopover
           ref={mentionRef}
           textareaRef={textareaRef}
