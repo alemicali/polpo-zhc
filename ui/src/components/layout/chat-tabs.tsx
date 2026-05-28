@@ -15,10 +15,26 @@
  *  - chat-first layout: below ChatPanelHeader in the left chat panel
  */
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Plus, X, Star, StarOff, Pencil, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatActions, useChatState } from "@/hooks/chat-context";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const STORAGE_KEY = "polpo:chat:tabs";
 const MAX_TABS = 12;
@@ -114,11 +130,14 @@ interface TabItemProps {
   title: string;
   active: boolean;
   streaming: boolean;
+  starred: boolean;
   onSelect: () => void;
   onClose: () => void;
+  onRename: () => void;
+  onToggleStar: () => void;
 }
 
-function TabItem({ id, title, active, streaming, onSelect, onClose }: TabItemProps) {
+function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onRename, onToggleStar }: TabItemProps) {
   const truncated = title.length > TITLE_MAX_LEN
     ? title.slice(0, TITLE_MAX_LEN - 1).trimEnd() + "…"
     : title;
@@ -137,63 +156,103 @@ function TabItem({ id, title, active, streaming, onSelect, onClose }: TabItemPro
   };
 
   return (
-    <div
-      role="tab"
-      aria-selected={active}
-      data-tab-id={id}
-      title={title}
-      onClick={onSelect}
-      onAuxClick={handleAuxClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      tabIndex={0}
-      className={cn(
-        "group flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors",
-        active
-          ? "border-primary bg-muted text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-      )}
-    >
-      {streaming && (
-        <span
-          aria-label="Streaming"
-          className="relative inline-flex h-2 w-2 shrink-0"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="tab"
+          aria-selected={active}
+          data-tab-id={id}
+          title={title}
+          onClick={onSelect}
+          onAuxClick={handleAuxClick}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect();
+            }
+          }}
+          tabIndex={0}
+          className={cn(
+            "group flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors",
+            active
+              ? "border-primary bg-muted text-foreground"
+              : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+          )}
         >
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-        </span>
-      )}
-      <span className="max-w-[140px] truncate leading-none">{truncated}</span>
-      <button
-        type="button"
-        aria-label="Close tab"
-        onClick={handleCloseClick}
-        className={cn(
-          "inline-flex h-4 w-4 items-center justify-center rounded-sm transition-opacity hover:bg-foreground/10",
-          active
-            ? "opacity-70 hover:opacity-100"
-            : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
-        )}
-      >
-        <X className="h-3 w-3" />
-      </button>
-    </div>
+          {streaming && (
+            <span
+              aria-label="Streaming"
+              className="relative inline-flex h-2 w-2 shrink-0"
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+            </span>
+          )}
+          {starred && (
+            <Star
+              aria-label="Starred"
+              className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+            />
+          )}
+          <span className="max-w-[140px] truncate leading-none">{truncated}</span>
+          <button
+            type="button"
+            aria-label="Close tab"
+            onClick={handleCloseClick}
+            className={cn(
+              "inline-flex h-4 w-4 items-center justify-center rounded-sm transition-opacity hover:bg-foreground/10",
+              active
+                ? "opacity-70 hover:opacity-100"
+                : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
+            )}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={onRename}>
+          <Pencil className="mr-2 h-3.5 w-3.5" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onToggleStar}>
+          {starred ? (
+            <>
+              <StarOff className="mr-2 h-3.5 w-3.5" />
+              Unstar
+            </>
+          ) : (
+            <>
+              <Star className="mr-2 h-3.5 w-3.5" />
+              Star
+            </>
+          )}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onClose}>
+          <X className="mr-2 h-3.5 w-3.5" />
+          Close tab
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
 export function ChatTabs() {
   const { sessionId, sessions, streamingSessionIds } = useChatState();
-  const { loadSession, newSession } = useChatActions();
+  const { loadSession, newSession, renameSession, setStarred } = useChatActions();
   const tabIds = useOpenTabs();
   const streamingSet = useMemo(() => new Set(streamingSessionIds), [streamingSessionIds]);
 
-  // Indexed lookup by id — sessions can be 100s
+  // Rename dialog — local state so chat-tabs is self-contained (doesn't
+  // depend on the ChatPage's RenameSessionDialog, which lives in a
+  // sibling tree on the chat page only).
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+
+  // Indexed lookup by id — sessions can be 100s. Include `starred` so the
+  // tab can render the star icon + dropdown label.
   const sessionMap = useMemo(() => {
-    const m = new Map<string, { id: string; title?: string }>();
+    const m = new Map<string, { id: string; title?: string; starred?: boolean }>();
     for (const s of sessions) m.set(s.id, s);
     return m;
   }, [sessions]);
@@ -244,6 +303,7 @@ export function ChatTabs() {
           // Orphan tabs (not yet pruned) render with placeholder; the prune
           // effect will sweep them on the next sessions update.
           const title = session?.title || "New session";
+          const starred = !!session?.starred;
           return (
             <TabItem
               key={id}
@@ -251,11 +311,14 @@ export function ChatTabs() {
               title={title}
               active={id === sessionId}
               streaming={streamingSet.has(id)}
+              starred={starred}
               onSelect={() => {
                 if (id === sessionId) return;
                 void loadSession(id);
               }}
               onClose={() => handleClose(id)}
+              onRename={() => setRenameTarget({ id, title })}
+              onToggleStar={() => { void setStarred(id, !starred); }}
             />
           );
         })}
@@ -268,6 +331,86 @@ export function ChatTabs() {
       >
         <Plus className="h-3.5 w-3.5" />
       </button>
+      <TabRenameDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={async (id, title) => { await renameSession(id, title); }}
+      />
     </div>
+  );
+}
+
+// ─── Rename dialog (self-contained — same UX as ChatPage's) ────────────
+
+function TabRenameDialog({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { id: string; title: string } | null;
+  onClose: () => void;
+  onSubmit: (id: string, title: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (target) setValue(target.title);
+  }, [target]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!target || submitting) return;
+    const next = value.trim();
+    // Empty or unchanged → just close, no network round-trip.
+    if (!next || next === target.title.trim()) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(target.id, next);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [onClose, onSubmit, submitting, target, value]);
+
+  return (
+    <Dialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!open && !submitting) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Rename session</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleSubmit();
+            } else if (e.key === "Escape" && !submitting) {
+              onClose();
+            }
+          }}
+          placeholder="Session title"
+          disabled={submitting}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSubmit()} disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
