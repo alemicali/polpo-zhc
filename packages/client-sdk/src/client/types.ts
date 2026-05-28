@@ -1051,6 +1051,30 @@ export interface TaskFilters {
   assignTo?: string;
 }
 
+/**
+ * Page of tasks returned by {@link PolpoClient.getTasksPage}.
+ * - `tasks` is `TaskSlim[]` when `slim: true` was passed, otherwise `Task[]`.
+ * - `nextCursor` is the `updated_at` of the last item — pass it back as
+ *   `cursor` to fetch the next page. `null` when there are no more pages.
+ * - `hasMore` is true when the server has at least one more row beyond
+ *   the requested limit.
+ */
+export interface TasksPageResponse<T = Task | TaskSlim> {
+  tasks: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface TasksPageRequest {
+  limit?: number;
+  cursor?: string | null;
+  q?: string;
+  status?: TaskStatus | string;
+  group?: string;
+  assignTo?: string;
+  slim?: boolean;
+}
+
 // === Execution results ===
 
 export interface ExecuteMissionResult {

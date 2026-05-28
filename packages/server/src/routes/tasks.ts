@@ -23,12 +23,24 @@ const listTasksRoute = createRoute({
       slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
         description: "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
       }),
+      // Cursor pagination. Activating `limit` or `cursor` switches the
+      // response envelope from `{ tasks: Task[] }` to
+      // `{ tasks, nextCursor, hasMore }`.
+      limit: z.string().optional().openapi({
+        description: "Page size (default 50, max 200). Presence triggers the paginated response shape `{ tasks, nextCursor, hasMore }`.",
+      }),
+      cursor: z.string().optional().openapi({
+        description: "ISO timestamp from a previous page's `nextCursor`. Returns tasks with `updated_at < cursor`. Ignored when `q` is set.",
+      }),
+      q: z.string().optional().openapi({
+        description: "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored.",
+      }),
     }),
   },
   responses: {
     200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-      description: "List of tasks",
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "List of tasks. Returns `{ tasks, nextCursor, hasMore }` when `limit`/`cursor`/`q` is set, otherwise `Task[]` for backwards compat.",
     },
     304: {
       description: "Not modified — client has the current list per ETag",
@@ -236,6 +248,39 @@ const bulkDeleteTasksRoute = createRoute({
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
+ * Slim projection used by both the legacy list path and the paginated one.
+ * Keeps the fields list rows actually render and drops the heavy tail
+ * (outcomes, stdout/stderr, expectations, metrics). The full record is
+ * still served by `GET /tasks/:id`.
+ */
+function projectSlim(t: any): any {
+  const desc = typeof t.description === "string" ? t.description : "";
+  const assess = t.result && typeof t.result === "object" ? t.result.assessment : null;
+  const slimAssessment = assess && typeof assess === "object"
+    ? {
+        globalScore: assess.globalScore,
+        passed: assess.passed,
+        checksCount: Array.isArray(assess.checks) ? assess.checks.length : 0,
+      }
+    : null;
+  return {
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    phase: t.phase,
+    assignTo: t.assignTo,
+    group: t.group,
+    missionId: t.missionId,
+    dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+    retries: t.retries ?? 0,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    descriptionPreview: desc.length > 200 ? desc.slice(0, 200) : desc,
+    ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
+  };
+}
+
+/**
  * Task CRUD + action routes.
  */
 export function taskRoutes(getDeps: () => {
@@ -256,57 +301,78 @@ export function taskRoutes(getDeps: () => {
   // GET /tasks — list all tasks, optional filters
   app.openapi(listTasksRoute, async (c) => {
     const deps = getDeps();
+    const { status, group, assignTo, summary, slim, limit, cursor, q } = c.req.valid("query");
+
+    // ── Paginated path ────────────────────────────────────────────────
+    // Triggered by *any* of `limit`, `cursor`, or `q`. Uses the SQLite
+    // FTS5 + cursor query when the store exposes `getTasksPage()`;
+    // otherwise falls back to fetch-all + in-memory filtering so the file
+    // store and tests keep working.
+    const usePagination = limit !== undefined || cursor !== undefined || q !== undefined;
+    if (usePagination) {
+      const parsedLimit = limit ? Math.max(1, Math.min(200, parseInt(limit, 10) || 50)) : 50;
+      let page: { tasks: any[]; nextCursor: string | null; hasMore: boolean };
+
+      const taskStore = deps.taskStore as { getTasksPage?: (opts: any) => Promise<any> };
+      if (typeof taskStore.getTasksPage === "function") {
+        page = await taskStore.getTasksPage({
+          limit: parsedLimit,
+          cursor: cursor ?? null,
+          q: q ?? null,
+          status: status ?? null,
+          group: group ?? null,
+          assignTo: assignTo ?? null,
+        });
+      } else {
+        // Fallback: fetch everything, filter + sort in memory.
+        let all = await deps.taskStore.getAllTasks();
+        if (status) all = all.filter((t: any) => t.status === status);
+        if (group) all = all.filter((t: any) => t.group === group);
+        if (assignTo) all = all.filter((t: any) => t.assignTo === assignTo);
+        if (q && q.trim().length > 0) {
+          const needle = q.toLowerCase();
+          all = all.filter((t: any) =>
+            (t.title ?? "").toLowerCase().includes(needle) ||
+            (t.description ?? "").toLowerCase().includes(needle)
+          );
+        }
+        // Newest-updated first; cursor filter is `updated_at < cursor`.
+        all.sort((a: any, b: any) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+        if (cursor) all = all.filter((t: any) => (t.updatedAt ?? "") < cursor);
+        const sliced = all.slice(0, parsedLimit + 1);
+        const hasMore = sliced.length > parsedLimit;
+        const tasks = hasMore ? sliced.slice(0, parsedLimit) : sliced;
+        page = {
+          tasks,
+          nextCursor: hasMore && tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : null,
+          hasMore,
+        };
+      }
+
+      // Same slim projection used in the legacy path.
+      const wantSlim = summary === "true" || slim === "true";
+      const projected = wantSlim ? page.tasks.map((t: any) => projectSlim(t)) : page.tasks;
+      return c.json({
+        ok: true,
+        data: {
+          tasks: projected,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+        },
+      });
+    }
+
+    // ── Legacy path (backward compat) ─────────────────────────────────
     let tasks = await deps.taskStore.getAllTasks();
-
-    // Optional filters
-    const { status, group, assignTo, summary, slim } = c.req.valid("query");
-
     if (status) tasks = tasks.filter((t: any) => t.status === status);
     if (group) tasks = tasks.filter((t: any) => t.group === group);
     if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
 
-    // `slim=true` is an alias for `summary=true`.
+    // `slim=true` is an alias for `summary=true`. Slim projection kicks in
+    // only when the client opts in. Keeps every field the list rows render;
+    // drops the heavy tail (outcomes, stdout/stderr, expectations, metrics).
     const wantSlim = summary === "true" || slim === "true";
-    // Slim projection: kicks in only when the client opts in via ?summary=true.
-    // Keeps every field the list rows in web/mobile actually render (id, title,
-    // status, phase, assignTo, group, dependsOn, retries, timestamps, plus the
-    // small `result.assessment` block for the score badge). Drops the heavy
-    // tail — outcomes, stdout/stderr, expectations, metrics — that only the
-    // detail screen needs and that GET /tasks/:id already returns.
-    if (wantSlim) {
-      tasks = tasks.map((t: any) => {
-        const desc = typeof t.description === "string" ? t.description : "";
-        // result.assessment carries checks[] with full descriptions — that
-        // alone makes the field 100-200KB per task and dominates the summary
-        // payload (~8MB across 369 tasks observed in dev). The list rows
-        // only need the score, the pass/fail flag, and the checks count for
-        // the badge. The detail screen (GET /tasks/:id) returns the full
-        // assessment when the user actually wants it.
-        const assess = t.result && typeof t.result === "object" ? t.result.assessment : null;
-        const slimAssessment = assess && typeof assess === "object"
-          ? {
-              globalScore: assess.globalScore,
-              passed: assess.passed,
-              checksCount: Array.isArray(assess.checks) ? assess.checks.length : 0,
-            }
-          : null;
-        return {
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          phase: t.phase,
-          assignTo: t.assignTo,
-          group: t.group,
-          missionId: t.missionId,
-          dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
-          retries: t.retries ?? 0,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-          descriptionPreview: desc.length > 200 ? desc.slice(0, 200) : desc,
-          ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
-        };
-      });
-    }
+    if (wantSlim) tasks = tasks.map((t: any) => projectSlim(t));
 
     // Conditional GET — return 304 if the client already has this exact list.
     // Fingerprint runs on the (possibly filtered & slimmed) array so different

@@ -8,6 +8,8 @@ export type { MutationState } from "./hooks/use-mutation.js";
 export { usePolpo } from "./hooks/use-polpo.js";
 export { useTasks } from "./hooks/use-tasks.js";
 export type { UseTasksReturn } from "./hooks/use-tasks.js";
+export { useTasksInfinite } from "./hooks/use-tasks-infinite.js";
+export type { UseTasksInfiniteOpts, UseTasksInfiniteReturn } from "./hooks/use-tasks-infinite.js";
 export { useTask } from "./hooks/use-task.js";
 export { useMissions } from "./hooks/use-missions.js";
 export type { UseMissionsReturn } from "./hooks/use-missions.js";
@@ -123,6 +125,8 @@ export type {
   UpdateSettingsRequest,
   AddTeamRequest,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   LogSession,
   LogEntry,
   RunActivityEntry,

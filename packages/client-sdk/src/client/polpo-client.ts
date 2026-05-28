@@ -11,6 +11,8 @@ import type {
   PolpoConfig,
   HealthResponse,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   CreateTaskRequest,
   UpdateTaskRequest,
   CreateMissionRequest,
@@ -384,6 +386,30 @@ export class PolpoClient {
 
   getTask(taskId: string): Promise<Task> {
     return this.get<Task>(`/tasks/${taskId}`);
+  }
+
+  /**
+   * Cursor-paginated task list with optional full-text search.
+   *
+   * Triggers the paginated response envelope (`{ tasks, nextCursor, hasMore }`)
+   * on the server side. Pass `cursor` from a previous page's `nextCursor`
+   * to fetch the next page. Pass `q` to switch the server into FTS5
+   * ranked-search mode (cursor is ignored in that mode).
+   *
+   * Backed by the SQLite FTS5 virtual table when the server uses SQLite
+   * (default). PostgreSQL / file-backed stores fall back to in-memory
+   * filtering — same shape, slower under load.
+   */
+  getTasksPage(opts?: TasksPageRequest): Promise<TasksPageResponse> {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts?.limit ?? 50));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    if (opts?.q) params.set("q", opts.q);
+    if (opts?.status) params.set("status", String(opts.status));
+    if (opts?.group) params.set("group", opts.group);
+    if (opts?.assignTo) params.set("assignTo", opts.assignTo);
+    if (opts?.slim) params.set("slim", "true");
+    return this.get<TasksPageResponse>(`/tasks?${params.toString()}`);
   }
 
   createTask(req: CreateTaskRequest): Promise<Task> {

@@ -85,6 +85,8 @@ export type {
   UpdateSettingsRequest,
   AddTeamRequest,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   LogSession,
   LogEntry,
   RunActivityEntry,

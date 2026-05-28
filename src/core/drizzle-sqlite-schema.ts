@@ -347,4 +347,56 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
   } catch {
     // Column already exists on databases created after this migration.
   }
+
+  // ── FTS5 full-text search on tasks ────────────────────────────────────
+  // Virtual table mirrors title + description from `tasks`. Triggers keep
+  // it in sync on INSERT / UPDATE / DELETE. Backfill is idempotent: the
+  // NOT IN subquery skips rows already indexed, so re-running on every
+  // boot is cheap (a single index scan).
+  //
+  // Wrapped in try/catch because some SQLite builds may ship without FTS5.
+  // If it fails the rest of the app keeps working — the route falls back to
+  // an in-memory LIKE filter when `tasks_fts` is missing.
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+        title, description,
+        content='tasks',
+        content_rowid='rowid'
+      );
+    `);
+    db.exec(`
+      INSERT INTO tasks_fts(rowid, title, description)
+        SELECT rowid, title, description FROM tasks
+        WHERE rowid NOT IN (SELECT rowid FROM tasks_fts);
+    `);
+    // DROP + CREATE so trigger bodies stay up to date if we ever tweak them.
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_insert;`);
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_delete;`);
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_update;`);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_insert AFTER INSERT ON tasks BEGIN
+        INSERT INTO tasks_fts(rowid, title, description)
+        VALUES (new.rowid, new.title, new.description);
+      END;
+    `);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_delete AFTER DELETE ON tasks BEGIN
+        INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+        VALUES('delete', old.rowid, old.title, old.description);
+      END;
+    `);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_update AFTER UPDATE ON tasks BEGIN
+        INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+        VALUES('delete', old.rowid, old.title, old.description);
+        INSERT INTO tasks_fts(rowid, title, description)
+        VALUES (new.rowid, new.title, new.description);
+      END;
+    `);
+  } catch (err) {
+    // FTS5 not available — search routes will fall back to in-memory LIKE.
+    // eslint-disable-next-line no-console
+    console.warn("[sqlite] FTS5 setup failed, search will use fallback:", (err as Error).message);
+  }
 }
