@@ -62,6 +62,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_group ON tasks("group")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_assign_to ON tasks(assign_to)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_mission_id ON tasks(mission_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_updated_at ON tasks(updated_at DESC)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS missions (
     id               TEXT PRIMARY KEY,
@@ -143,6 +144,9 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS segments TEXT`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_messages_session ON messages(session_id, ts)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_messages_session_id ON messages(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_sessions_updated_at ON sessions(updated_at DESC)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_sessions_agent ON sessions(agent)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS notifications (
     id               TEXT PRIMARY KEY,
@@ -180,7 +184,11 @@ export async function ensurePgSchema(db: any): Promise<void> {
   )`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_session ON log_entries(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_session_id ON log_entries(session_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_ts ON log_entries(ts)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_task_id_alt ON runs(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_approvals_status_alt ON approvals(status)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_notifications_rule_id_alt ON notifications(rule_id)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS approvals (
     id           TEXT PRIMARY KEY,
@@ -329,4 +337,44 @@ export async function ensurePgSchema(db: any): Promise<void> {
       END IF;
     END $$
   `);
+
+  // ── New tables added by the file→sqlite migration work (v0.2.14+) ────
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS coding_sessions (
+    id          TEXT PRIMARY KEY,
+    state       JSONB NOT NULL,
+    initialized BOOLEAN NOT NULL DEFAULT false,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+  )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS expo_tokens (
+    token         TEXT PRIMARY KEY,
+    platform      TEXT NOT NULL,
+    device_id     TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    disabled      BOOLEAN NOT NULL DEFAULT false
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_expo_tokens_device_id ON expo_tokens(device_id)`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint        TEXT PRIMARY KEY,
+    expiration_time BIGINT,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    user_agent      TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    last_success_at TEXT,
+    last_failure_at TEXT,
+    failure_count   INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS push_vapid (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key  TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    subject     TEXT NOT NULL
+  )`);
 }

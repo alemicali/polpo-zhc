@@ -193,6 +193,12 @@ export class Orchestrator extends TypedEmitter {
 
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
+  /** Raw Drizzle DB handle — used by file→sqlite migration after init. */
+  private drizzleDb?: any;
+  /** Sqlite-flavoured schema bundle, kept around so the migration can re-use it. */
+  private drizzleSchema?: typeof import("@polpo-ai/drizzle")["sqliteSchema"];
+  /** Effective storage backend selected at init time. */
+  private resolvedStorage: "file" | "sqlite" | "postgres" = "file";
 
   /**
    * Decorate task status changes with task:transition events.
@@ -275,7 +281,8 @@ export class Orchestrator extends TypedEmitter {
       };
     }
     if (storage === "sqlite") {
-      const { createSqliteStores } = await import("@polpo-ai/drizzle");
+      const drizzleMod = await import("@polpo-ai/drizzle");
+      const { createSqliteStores, sqliteSchema } = drizzleMod;
       const { createRequire } = await import("node:module");
       const req = createRequire(import.meta.url);
       const Database = req("better-sqlite3");
@@ -289,6 +296,9 @@ export class Orchestrator extends TypedEmitter {
       const { drizzle } = await import("drizzle-orm/better-sqlite3");
       const db = drizzle(sqlite);
       this.drizzleStores = createSqliteStores(db);
+      this.drizzleDb = db;
+      this.drizzleSchema = sqliteSchema;
+      this.resolvedStorage = "sqlite";
       return {
         task: this.drizzleStores.taskStore,
         run: this.drizzleStores.runStore,
@@ -297,10 +307,41 @@ export class Orchestrator extends TypedEmitter {
         memoryStore: this.drizzleStores.memoryStore,
       };
     }
+    this.resolvedStorage = "file";
     return {
       task: new FileTaskStore(this.polpoDir),
       run: new FileRunStore(this.polpoDir),
     };
+  }
+
+  /**
+   * Auto-migrate `.polpo/*.json` legacy files into the SQLite database the
+   * first time a project boots after switching to `storage: "sqlite"`.
+   *
+   * Safe to call on every init — the migration short-circuits when the DB
+   * already has data. Failures are logged but do not abort startup; the
+   * legacy files remain on disk so the user can roll back manually.
+   */
+  private async maybeAutoMigrateToSqlite(): Promise<void> {
+    if (this.resolvedStorage !== "sqlite") return;
+    if (!this.drizzleDb || !this.drizzleSchema) return;
+    // Only attempt the migration when legacy `tasks/` exists — a strong
+    // signal that this project pre-dates the SQLite default.
+    const tasksDir = join(this.polpoDir, "tasks");
+    if (!existsSync(tasksDir)) return;
+    try {
+      const { migrateFileToSqlite } = await import("../migrations/file-to-sqlite.js");
+      this.emit("log", { level: "info", message: "Detected legacy file store — migrating to SQLite (files preserved at .polpo/)." });
+      const result = await migrateFileToSqlite(this.polpoDir, this.drizzleDb, this.drizzleSchema, {
+        log: (msg) => this.emit("log", { level: "info", message: `[migrate] ${msg}` }),
+      });
+      if (!result.ok) {
+        this.emit("log", { level: "warn", message: `[migrate] completed with errors — see logs above. Files at .polpo/ remain intact.` });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "warn", message: `[migrate] auto-migration failed: ${msg}. Files at .polpo/ remain intact.` });
+    }
   }
 
   async init(): Promise<void> {
@@ -322,6 +363,10 @@ export class Orchestrator extends TypedEmitter {
     this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
+    // First-boot file→sqlite migration (no-op when DB already has data or no
+    // legacy files are present). Runs before downstream code reads the DB.
+    await this.maybeAutoMigrateToSqlite();
+
     // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
     if ("logStore" in stores && stores.logStore) {
       this.logStore = stores.logStore;
@@ -335,7 +380,8 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
-    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
+    this.codingSessionStore = (this.drizzleStores?.codingSessionStore as CodingSessionStore | undefined)
+      ?? new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -709,6 +755,8 @@ export class Orchestrator extends TypedEmitter {
     this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
+    await this.maybeAutoMigrateToSqlite();
+
     // Use Drizzle-provided stores when available, otherwise fall back to file-based
     if ("logStore" in stores && stores.logStore) {
       this.logStore = stores.logStore;
@@ -722,7 +770,8 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
-    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
+    this.codingSessionStore = (this.drizzleStores?.codingSessionStore as CodingSessionStore | undefined)
+      ?? new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -852,6 +901,10 @@ export class Orchestrator extends TypedEmitter {
   getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
+  /** Drizzle-backed AttachmentStore when storage is sqlite/postgres, undefined for file mode. */
+  getAttachmentStore(): import("@polpo-ai/core/attachment-store").AttachmentStore | undefined {
+    return this.drizzleStores?.attachmentStore;
+  }
 
   /**
    * Initialize the vault store.

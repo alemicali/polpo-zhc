@@ -39,6 +39,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_group ON tasks("group");
     CREATE INDEX IF NOT EXISTS idx_tasks_assign_to ON tasks(assign_to);
     CREATE INDEX IF NOT EXISTS idx_tasks_mission_id ON tasks(mission_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS missions (
       id TEXT PRIMARY KEY,
@@ -93,9 +94,13 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,
+      agent TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      starred INTEGER
     );
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent);
 
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -107,6 +112,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       segments TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
@@ -142,6 +148,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       data TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_log_entries_session ON log_entries(session_id);
+    CREATE INDEX IF NOT EXISTS idx_log_entries_session_id ON log_entries(session_id);
     CREATE INDEX IF NOT EXISTS idx_log_entries_ts ON log_entries(ts);
 
     CREATE TABLE IF NOT EXISTS approvals (
@@ -239,7 +246,82 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      message_id TEXT,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_session_id ON attachments(session_id);
+
+    CREATE TABLE IF NOT EXISTS coding_sessions (
+      id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      initialized INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS expo_tokens (
+      token TEXT PRIMARY KEY,
+      platform TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      disabled INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_expo_tokens_device_id ON expo_tokens(device_id);
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      expiration_time INTEGER,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_success_at TEXT,
+      last_failure_at TEXT,
+      failure_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS push_vapid (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      subject TEXT NOT NULL
+    );
   `);
+
+  // ── Additive index migrations (idempotent) ───────────────────────────
+  // These run after the CREATE block so they apply to pre-existing DBs that
+  // were built against older schema versions.
+  for (const stmt of [
+    `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent)`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_log_entries_session_id ON log_entries(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_notifications_rule_id ON notifications(rule_id)`,
+  ]) {
+    try { db.exec(stmt); } catch { /* index already present */ }
+  }
+
+  // Additive column migrations for pre-existing databases.
+  for (const stmt of [
+    `ALTER TABLE sessions ADD COLUMN agent TEXT`,
+    `ALTER TABLE sessions ADD COLUMN starred INTEGER`,
+  ]) {
+    try { db.exec(stmt); } catch { /* column already present */ }
+  }
 
   try {
     db.exec(`ALTER TABLE messages ADD COLUMN segments TEXT;`);

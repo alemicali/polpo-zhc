@@ -43,6 +43,12 @@ import {
 import { vaultPg, vaultSqlite } from "./schema/vault.js";
 import { playbooksPg, playbooksSqlite } from "./schema/playbooks.js";
 import { attachmentsPg, attachmentsSqlite } from "./schema/attachments.js";
+import { codingSessionsPg, codingSessionsSqlite } from "./schema/coding-sessions.js";
+import { expoTokensPg, expoTokensSqlite } from "./schema/expo-tokens.js";
+import {
+  pushSubscriptionsPg, pushSubscriptionsSqlite,
+  pushVapidPg, pushVapidSqlite,
+} from "./schema/push-subscriptions.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -62,6 +68,12 @@ import { DrizzleAgentStore } from "./stores/agent-store.js";
 import { DrizzleVaultStore } from "./stores/vault-store.js";
 import { DrizzlePlaybookStore } from "./stores/playbook-store.js";
 import { DrizzleAttachmentStore } from "./stores/attachment-store.js";
+import {
+  DrizzleCodingSessionStore,
+  type CodingSessionStoreLike,
+} from "./stores/coding-session-store.js";
+import { DrizzleExpoTokenStore } from "./stores/expo-token-store.js";
+import { DrizzlePushSubscriptionStore } from "./stores/push-subscription-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -99,6 +111,9 @@ export interface DrizzleStores {
   vaultStore: VaultStore;
   playbookStore: PlaybookStore;
   attachmentStore: AttachmentStore;
+  codingSessionStore: CodingSessionStoreLike;
+  expoTokenStore: DrizzleExpoTokenStore;
+  pushSubscriptionStore: DrizzlePushSubscriptionStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -131,6 +146,9 @@ export function createPgStores(db: any): DrizzleStores {
     vaultStore: new DrizzleVaultStore(db, vaultPg),
     playbookStore: new DrizzlePlaybookStore(db, playbooksPg, "pg"),
     attachmentStore: new DrizzleAttachmentStore(db, attachmentsPg, "pg"),
+    codingSessionStore: new DrizzleCodingSessionStore(db, codingSessionsPg, "pg"),
+    expoTokenStore: new DrizzleExpoTokenStore(db, expoTokensPg, "pg"),
+    pushSubscriptionStore: new DrizzlePushSubscriptionStore(db, pushSubscriptionsPg, pushVapidPg, "pg"),
   };
 }
 
@@ -164,6 +182,9 @@ export function createSqliteStores(db: any): DrizzleStores {
     vaultStore: new DrizzleVaultStore(db, vaultSqlite),
     playbookStore: new DrizzlePlaybookStore(db, playbooksSqlite, "sqlite"),
     attachmentStore: new DrizzleAttachmentStore(db, attachmentsSqlite, "sqlite"),
+    codingSessionStore: new DrizzleCodingSessionStore(db, codingSessionsSqlite, "sqlite"),
+    expoTokenStore: new DrizzleExpoTokenStore(db, expoTokensSqlite, "sqlite"),
+    pushSubscriptionStore: new DrizzlePushSubscriptionStore(db, pushSubscriptionsSqlite, pushVapidSqlite, "sqlite"),
   };
 }
 
@@ -191,6 +212,10 @@ export const pgSchema = {
   vault: vaultPg,
   playbooks: playbooksPg,
   attachments: attachmentsPg,
+  codingSessions: codingSessionsPg,
+  expoTokens: expoTokensPg,
+  pushSubscriptions: pushSubscriptionsPg,
+  pushVapid: pushVapidPg,
 };
 
 export const sqliteSchema = {
@@ -215,4 +240,8 @@ export const sqliteSchema = {
   vault: vaultSqlite,
   playbooks: playbooksSqlite,
   attachments: attachmentsSqlite,
+  codingSessions: codingSessionsSqlite,
+  expoTokens: expoTokensSqlite,
+  pushSubscriptions: pushSubscriptionsSqlite,
+  pushVapid: pushVapidSqlite,
 };

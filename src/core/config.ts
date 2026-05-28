@@ -174,9 +174,15 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
   if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
 
-  // Storage backend
+  // Storage backend.
+  // Default to "sqlite" so new installs get the indexed/transactional store
+  // out of the box. Legacy projects with no storage field also benefit — they
+  // auto-migrate via the file→sqlite path the first time the orchestrator
+  // boots with legacy files present. Explicit `storage: "file"` opts out.
   if (raw?.storage && ["file", "sqlite", "postgres"].includes(raw.storage)) {
     settings.storage = raw.storage;
+  } else {
+    settings.storage = "sqlite";
   }
   if (raw?.databaseUrl && typeof raw.databaseUrl === "string") {
     settings.databaseUrl = raw.databaseUrl;

@@ -545,7 +545,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({
-    attachmentStore: new FileAttachmentStore(o.getPolpoDir()),
+    // Prefer the Drizzle-backed AttachmentStore when storage is sqlite/postgres.
+    // Falls back to the file-based store so projects on `storage: "file"`
+    // keep working unchanged.
+    attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     fs: new NodeFileSystem(),
     workDir: o.getWorkDir(),
   })));
