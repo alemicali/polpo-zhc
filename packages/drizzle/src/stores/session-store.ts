@@ -21,6 +21,7 @@ export class DrizzleSessionStore implements SessionStore {
       updatedAt: row.updatedAt,
       messageCount,
       ...(row.agent ? { agent: row.agent } : {}),
+      ...(row.starred ? { starred: true } : {}),
     };
   }
 
@@ -117,6 +118,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -135,6 +137,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -153,6 +156,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -180,6 +184,16 @@ export class DrizzleSessionStore implements SessionStore {
     const now = new Date().toISOString();
     const result = await this.db.update(this.sessions)
       .set({ title, updatedAt: now })
+      .where(eq(this.sessions.id, sessionId));
+    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+  }
+
+  async setStarred(sessionId: string, starred: boolean): Promise<boolean> {
+    // CRITICAL: do NOT update updatedAt. Starring must not reshuffle the
+    // sidebar — "recent" ordering keys off updatedAt and users expect
+    // pinning a chat to leave its chronological position untouched.
+    const result = await this.db.update(this.sessions)
+      .set({ starred })
       .where(eq(this.sessions.id, sessionId));
     return (result?.rowCount ?? result?.changes ?? 0) > 0;
   }

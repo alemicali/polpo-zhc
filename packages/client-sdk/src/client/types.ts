@@ -1117,6 +1117,8 @@ export interface ChatSession {
   messageCount: number;
   /** Agent name when this session targets a specific agent (agent-direct mode). Absent for orchestrator sessions. */
   agent?: string;
+  /** True when the user starred this session — surfaced in the sidebar "Starred" section. */
+  starred?: boolean;
 }
 
 export interface ChatMessage {

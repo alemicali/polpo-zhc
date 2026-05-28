@@ -278,6 +278,8 @@ export function useChat() {
     activeSessionId: sessionId,
     setActiveSessionId: setSessionId,
     getMessages,
+    renameSession: sdkRenameSession,
+    setStarred: sdkSetStarred,
     deleteSession: sdkDeleteSession,
     refetch: refetchSessions,
   } = useSessions();
@@ -1879,6 +1881,34 @@ export function useChat() {
     void appendUserAndStream(responseText);
   }, [appendUserAndStream, pendingSetDesign, setSessionPending]);
 
+  // Rename a session — thin pass-through to the SDK hook (which already
+  // optimistic-updates the sessions list). Silent catch: a failure here is
+  // surfaced via the dialog's local error UI, no need to spam the console.
+  const renameSession = useCallback(
+    async (id: string, title: string) => {
+      try {
+        await sdkRenameSession(id, title);
+      } catch {
+        /* silent — caller handles UX */
+      }
+    },
+    [sdkRenameSession],
+  );
+
+  // Toggle the star flag on a session. Mirror of renameSession — silent
+  // catch and optimistic via the SDK hook. Starring DOES NOT bump updatedAt
+  // so the session keeps its position in "recent" order (handled server-side).
+  const setStarred = useCallback(
+    async (id: string, starred: boolean) => {
+      try {
+        await sdkSetStarred(id, starred);
+      } catch {
+        /* silent */
+      }
+    },
+    [sdkSetStarred],
+  );
+
   // Delete a session — clear messages if active
   const deleteSession = useCallback(
     async (id: string) => {
@@ -1944,6 +1974,8 @@ export function useChat() {
     loadSession,
     newSession,
     deleteSession,
+    renameSession,
+    setStarred,
     selectedAgent,
     setSelectedAgent,
   };

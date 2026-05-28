@@ -54,6 +54,10 @@ import {
   Compass,
   Palette,
   ListPlus,
+  Pencil,
+  Star,
+  StarOff,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +76,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Virtuoso, type VirtuosoHandle, type StateSnapshot } from "react-virtuoso";
 import {
   Message,
@@ -1920,7 +1938,7 @@ const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
 const SESSION_SIDEBAR_MIN_WIDTH = 320;
 const SESSION_SIDEBAR_MAX_WIDTH = 520;
 
-type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
+type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean };
 type SidebarView = "drill" | "flat";
 
 const clampSessionSidebarWidth = (value: number) => {
@@ -1936,13 +1954,24 @@ const readStoredSessionSidebarWidth = () => {
   return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
 };
 
-/** Shared session row — used by both drill-down and flat views */
+/** Shared session row — used by both drill-down and flat views.
+ *
+ *  Wraps the row in a <ContextMenu> so a right-click anywhere on the row
+ *  exposes Rename / Star|Unstar / Delete. The trailing kebab dropdown
+ *  exposes the same actions for users who don't expect right-click on the
+ *  web. Both surfaces call the same callbacks — single source of truth.
+ *
+ *  A small amber star (lucide Star, filled) appears next to the title when
+ *  `session.starred` is truthy.
+ */
 function SessionRow({
   session,
   isActive,
   isStreaming,
   onSelect,
   onDelete,
+  onRename,
+  onToggleStar,
 }: {
   session: SessionItem;
   isActive: boolean;
@@ -1950,51 +1979,136 @@ function SessionRow({
   isStreaming?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isStarred = !!session.starred;
+  const title = session.title || "Untitled";
+
+  const handleRename = () => onRename(session.id, title);
+  const handleToggleStar = () => onToggleStar(session.id, !isStarred);
+  const handleDelete = () => onDelete(session.id);
+
   return (
-    <div
-      className={cn(
-        "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
-        isActive
-          ? "bg-accent/80 text-accent-foreground"
-          : "hover:bg-accent/30 text-muted-foreground"
-      )}
-      onClick={() => onSelect(session.id)}
-    >
-      <div className="flex-1 min-w-0">
-        <p className={cn(
-          "whitespace-normal break-words text-[13px] font-medium leading-snug",
-          isActive ? "text-accent-foreground" : "text-foreground"
-        )}>
-          {session.title || "Untitled"}
-        </p>
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
-          {isStreaming ? (
-            <span className="flex items-center gap-1 font-medium text-primary/70">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-              </span>
-              Streaming...
-            </span>
-          ) : (
-            <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+            isActive
+              ? "bg-accent/80 text-accent-foreground"
+              : "hover:bg-accent/30 text-muted-foreground"
           )}
-          <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+          onClick={() => onSelect(session.id)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isStarred && (
+                <Star
+                  className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+                  aria-label="Starred"
+                />
+              )}
+              <p className={cn(
+                "whitespace-normal break-words text-[13px] font-medium leading-snug min-w-0",
+                isActive ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {title}
+              </p>
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+              {isStreaming ? (
+                <span className="flex items-center gap-1 font-medium text-primary/70">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                  </span>
+                  Streaming...
+                </span>
+              ) : (
+                <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+              )}
+              <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+            </div>
+          </div>
+          {/* Kebab dropdown — visible on hover/focus, or while open so it
+              doesn't vanish under the cursor. Mirrors the context menu. */}
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Session actions"
+                className={cn(
+                  "-mr-1 h-5 w-5 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
+                  menuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onSelect={handleRename}>
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleToggleStar}>
+                {isStarred ? (
+                  <>
+                    <StarOff className="mr-2 h-3.5 w-3.5" />
+                    Unstar
+                  </>
+                ) : (
+                  <>
+                    <Star className="mr-2 h-3.5 w-3.5" />
+                    Star
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={handleDelete}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="-mr-1 h-5 w-5 shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(session.id);
-        }}
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={handleRename}>
+          <Pencil className="mr-2 h-3.5 w-3.5" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={handleToggleStar}>
+          {isStarred ? (
+            <>
+              <StarOff className="mr-2 h-3.5 w-3.5" />
+              Unstar
+            </>
+          ) : (
+            <>
+              <Star className="mr-2 h-3.5 w-3.5" />
+              Star
+            </>
+          )}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={handleDelete}
+          className="text-destructive focus:text-destructive"
+        >
+          <Trash2 className="mr-2 h-3.5 w-3.5" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -2005,6 +2119,8 @@ function SessionSidebar({
   onSelect,
   onNew,
   onDelete,
+  onRename,
+  onToggleStar,
   onBack,
   fullWidth,
   mobileFullWidth,
@@ -2017,6 +2133,8 @@ function SessionSidebar({
   onSelect: (id: string) => void;
   onNew: (agent?: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
   /** Callback to close the sidebar (used in compact/overlay mode) */
   onBack?: () => void;
   /** When true, sidebar takes full width instead of fixed w-72 */
@@ -2266,6 +2384,8 @@ function SessionSidebar({
           isStreaming={streamingSessionIds.includes(s.id)}
           onSelect={onSelect}
           onDelete={onDelete}
+          onRename={onRename}
+          onToggleStar={onToggleStar}
         />
       ))}
     </div>
@@ -2416,6 +2536,8 @@ function SessionSidebar({
                       isStreaming={streamingSessionIds.includes(s.id)}
                       onSelect={onSelect}
                       onDelete={onDelete}
+                      onRename={onRename}
+                      onToggleStar={onToggleStar}
                     />
                   ))}
                   {(hidden > 0 || showAll) && (
@@ -2442,6 +2564,48 @@ function SessionSidebar({
   const activeGroupSessions = activeGroup
     ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
     : [];
+
+  // ── Starred sessions — surfaced above the main list in every view ──
+  // Order: most-recently-updated first (consistent with the grouped lists
+  // below). The section is conditionally rendered: zero starred → nothing.
+  // Keys are namespaced with a "starred-" prefix so React doesn't collide
+  // with the same SessionRow reappearing in its group below.
+  const starredSessions = useMemo(
+    () => sessions
+      .filter((s) => s.starred)
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [sessions],
+  );
+
+  const renderStarred = () => {
+    if (starredSessions.length === 0) return null;
+    return (
+      <div className="p-1.5 pb-2 border-b border-border/30">
+        <div className="px-3 pt-1.5 pb-1 flex items-center gap-1.5">
+          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Starred
+          </span>
+        </div>
+        <div className="space-y-0.5">
+          {starredSessions.map((s) => (
+            <SessionRow
+              key={`starred-${s.id}`}
+              session={s}
+              isActive={activeSessionId === s.id}
+              isStreaming={streamingSessionIds.includes(s.id)}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onRename={onRename}
+              onToggleStar={onToggleStar}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const sidebarStyle = fullWidth
     ? undefined
     : ({ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties);
@@ -2480,12 +2644,17 @@ function SessionSidebar({
               between both interfaces.
             </p>
           </div>
-        ) : view === "flat" ? (
-          renderFlat()
-        ) : activeGroup ? (
-          renderSessionList(activeGroupSessions)
         ) : (
-          renderGroups()
+          <>
+            {/* Starred section — sits above the normal list in every view.
+                Auto-hides when the user has zero starred sessions. */}
+            {renderStarred()}
+            {view === "flat"
+              ? renderFlat()
+              : activeGroup
+                ? renderSessionList(activeGroupSessions)
+                : renderGroups()}
+          </>
         )}
       </div>
     </div>
@@ -3397,6 +3566,21 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     textarea?.focus();
   }, [queue, sessionId, setTextareaValue]);
 
+  // Manual per-item send: pulls the prompt out of the queue and dispatches
+  // it through the same `send` path used by the composer + auto-send.
+  // Guarded by inputDisabled + isLoading so the user can't double-fire
+  // while a stream is already in flight.
+  const handleManualSend = useCallback((id: string) => {
+    if (isLoading || inputDisabled) return;
+    const item = queue.items.find((i) => i.id === id);
+    if (!item) return;
+    queue.remove(id);
+    void send(item.text).catch((err) => {
+      console.warn("[queue] manual send failed:", err);
+      toast.error("Failed to send queued prompt");
+    });
+  }, [queue, isLoading, inputDisabled, send]);
+
   // Migrate the `__new__` queue to the real sessionId once the server
   // assigns one (first stream completes). Until then the queue lives
   // under the sentinel; after, it lives under the real id so it survives
@@ -3555,6 +3739,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               autoSend={queue.autoSend}
               onUpdate={(id, text) => { queue.update(id, text); }}
               onRemove={(id) => { queue.remove(id); }}
+              onSend={handleManualSend}
+              sendDisabled={isLoading || inputDisabled}
               onClear={() => setQueueClearConfirm(true)}
               onAutoSendChange={queue.setAutoSend}
               onReorder={queue.reorder}
@@ -3642,7 +3828,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   <span className="font-mono text-sm font-semibold">/</span>
                 </button>
               </div>
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 items-center gap-1">
                 <MicButton
                   onTranscript={setTextareaValue}
                   disabled={inputDisabled}
@@ -3678,21 +3864,26 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
                   </TooltipContent>
                 </Tooltip>
-                {isRecording ? (
-                  <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                    </span>
-                    Recording
-                  </div>
-                ) : (
-                  <PromptInputSubmit
-                    status={isLoading ? "streaming" : undefined}
-                    disabled={isLoading ? false : inputDisabled}
-                    onStop={stop}
-                  />
-                )}
+                {/* ml-2 here adds breathing room ONLY between the Queue
+                    button and the Send/Stop action — Mic↔Queue stays at
+                    the tight gap-1 of the parent container. */}
+                <div className="ml-2 flex items-center">
+                  {isRecording ? (
+                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                      </span>
+                      Recording
+                    </div>
+                  ) : (
+                    <PromptInputSubmit
+                      status={isLoading ? "streaming" : undefined}
+                      disabled={isLoading ? false : inputDisabled}
+                      onStop={stop}
+                    />
+                  )}
+                </div>
               </div>
             </PromptInputFooter>
           </PromptInput>

@@ -10,6 +10,7 @@ export interface UseSessionsReturn {
   setActiveSessionId: (id: string | null) => void;
   getMessages: (sessionId: string) => Promise<ChatMessage[]>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  setStarred: (sessionId: string, starred: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   refetch: () => Promise<void>;
 }
@@ -54,6 +55,18 @@ export function useSessions(): UseSessionsReturn {
     [client],
   );
 
+  const setStarred = useCallback(
+    async (sessionId: string, starred: boolean) => {
+      await client.setSessionStarred(sessionId, starred);
+      // Optimistic local update — mirror of renameSession. Note: we deliberately
+      // do NOT touch updatedAt so the sidebar "recent" ordering stays put.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, starred } : s)),
+      );
+    },
+    [client],
+  );
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       await client.deleteSession(sessionId);
@@ -73,6 +86,7 @@ export function useSessions(): UseSessionsReturn {
     setActiveSessionId,
     getMessages,
     renameSession,
+    setStarred,
     deleteSession,
     refetch,
   };

@@ -789,6 +789,11 @@ export class PolpoClient {
     return this.patch<{ renamed: boolean }>(`/chat/sessions/${sessionId}`, { title });
   }
 
+  /** Star or unstar a session. Mirrors PATCH /chat/sessions/:id with { starred } payload. */
+  setSessionStarred(sessionId: string, starred: boolean): Promise<{ starred: boolean }> {
+    return this.patch<{ starred: boolean }>(`/chat/sessions/${sessionId}`, { starred });
+  }
+
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
     return this.del<{ deleted: boolean }>(`/chat/sessions/${sessionId}`);
   }

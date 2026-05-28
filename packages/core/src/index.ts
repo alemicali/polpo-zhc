@@ -4,6 +4,9 @@ export * from "./types.js";
 // ── Events (pure type definitions only, TypedEmitter lives in shell) ─────
 export * from "./events.js";
 
+// ── Hook event catalog (SSOT for lifecycle hook names + glossary) ────────
+export * from "./hook-events.js";
+
 // ── State Machine ────────────────────────────────────────────────────────
 export { VALID_TRANSITIONS, isValidTransition, assertValidTransition } from "./state-machine.js";
 

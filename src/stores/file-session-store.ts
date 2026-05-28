@@ -143,6 +143,7 @@ export class FileSessionStore implements SessionStore {
           updatedAt,
           messageCount,
           ...(header.agent ? { agent: header.agent } : {}),
+          ...(header.starred ? { starred: true } : {}),
         });
       } catch { /* skip corrupt file */
       }
@@ -166,6 +167,7 @@ export class FileSessionStore implements SessionStore {
         updatedAt,
         messageCount,
         ...(header.agent ? { agent: header.agent } : {}),
+        ...(header.starred ? { starred: true } : {}),
       };
     } catch { /* unreadable session file */
       return undefined;
@@ -187,6 +189,18 @@ export class FileSessionStore implements SessionStore {
   }
 
   async renameSession(sessionId: string, title: string): Promise<boolean> {
+    return this.patchHeader(sessionId, (h) => { h.title = title; });
+  }
+
+  async setStarred(sessionId: string, starred: boolean): Promise<boolean> {
+    return this.patchHeader(sessionId, (h) => {
+      if (starred) h.starred = true;
+      else delete h.starred;
+    });
+  }
+
+  /** Mutates the JSONL header in place. Returns true if applied, false on missing/corrupt file. */
+  private patchHeader(sessionId: string, mutate: (header: Record<string, unknown>) => void): boolean {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
     try {
@@ -195,7 +209,7 @@ export class FileSessionStore implements SessionStore {
       if (lines.length === 0) return false;
       const header = JSON.parse(lines[0]);
       if (!header._session) return false;
-      header.title = title;
+      mutate(header);
       lines[0] = JSON.stringify(header);
       writeFileSync(file, lines.join("\n") + "\n", "utf-8");
       return true;

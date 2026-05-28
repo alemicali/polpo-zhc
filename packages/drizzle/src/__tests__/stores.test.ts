@@ -101,7 +101,8 @@ function createTables(raw: InstanceType<typeof Database>) {
       title TEXT,
       agent TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      starred INTEGER
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,

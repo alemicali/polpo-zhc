@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Pencil, Trash2, X, ListOrdered } from "lucide-react";
+import { Pencil, Trash2, X, ListOrdered, ArrowUp, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +23,14 @@ export interface QueueProps {
   onRemove: (id: string) => void;
   onClear: () => void;
   onAutoSendChange: (value: boolean) => void;
+  /** Optional manual-send for a single queued item. When provided, each
+   *  row gets a Send (↑) button alongside Edit/Remove. The handler is
+   *  responsible for removing the item from the queue and dispatching it
+   *  to the chat — the queue component does NOT auto-remove on send. */
+  onSend?: (id: string) => void;
+  /** When true, the per-row Send button is disabled (e.g. a stream is
+   *  already in flight). Edit/Remove stay enabled. */
+  sendDisabled?: boolean;
   /** Optional close button (X) on the header to hide the queue panel. */
   onClose?: () => void;
   /** Optional reorder (drag-and-drop or programmatic). */
@@ -37,6 +45,8 @@ export function Queue({
   onRemove,
   onClear,
   onAutoSendChange,
+  onSend,
+  sendDisabled = false,
   onClose,
   onReorder,
   className,
@@ -67,6 +77,8 @@ export function Queue({
               item={item}
               onUpdate={(text) => onUpdate(item.id, text)}
               onRemove={() => onRemove(item.id)}
+              onSend={onSend ? () => onSend(item.id) : undefined}
+              sendDisabled={sendDisabled}
               onReorder={onReorder}
             />
           ))}
@@ -175,6 +187,8 @@ function QueueItemRow({
   item,
   onUpdate,
   onRemove,
+  onSend,
+  sendDisabled,
   onReorder,
 }: {
   index: number;
@@ -182,11 +196,27 @@ function QueueItemRow({
   item: QueueItem;
   onUpdate: (text: string) => void;
   onRemove: () => void;
+  onSend?: () => void;
+  sendDisabled?: boolean;
   onReorder?: (fromIdx: number, toIdx: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
+  const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Copy prompt text to clipboard. Falls back silently if clipboard API
+  // isn't available (e.g. http://, non-secure context) — the icon just
+  // doesn't flip to "copied" feedback.
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(item.text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* no clipboard — quietly noop */
+    }
+  };
 
   // Keep local draft in sync when the underlying item changes (e.g. from
   // a reorder, or a parallel update from another tab).
@@ -299,6 +329,34 @@ function QueueItemRow({
           editing ? "opacity-100" : "opacity-0 group-hover/queue-item:opacity-100 focus-within:opacity-100",
         )}
       >
+        {!editing && onSend && (
+          <button
+            type="button"
+            aria-label="Send this prompt now"
+            title={sendDisabled ? "Wait — a stream is in progress" : "Send now"}
+            onClick={onSend}
+            disabled={sendDisabled}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded transition-colors",
+              sendDisabled
+                ? "text-muted-foreground/40 cursor-not-allowed"
+                : "text-primary hover:bg-primary/15"
+            )}
+          >
+            <ArrowUp className="h-3 w-3" />
+          </button>
+        )}
+        {!editing && (
+          <button
+            type="button"
+            aria-label={copied ? "Copied" : "Copy prompt text"}
+            title={copied ? "Copied!" : "Copy"}
+            onClick={handleCopy}
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          </button>
+        )}
         {!editing && (
           <button
             type="button"

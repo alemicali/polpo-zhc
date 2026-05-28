@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
+import { CANONICAL_HOOK_EVENT_NAMES } from "@polpo-ai/core";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -779,52 +780,13 @@ function matchGlob(pattern: string, event: string): boolean {
 /**
  * Get all known event names from the PolpoEventMap.
  * Used to subscribe to concrete events matching glob patterns.
+ *
+ * The canonical list lives in `@polpo-ai/core/hook-events`
+ * (CANONICAL_HOOK_EVENT_NAMES). We just append the "log" channel,
+ * which the router also wants to dispatch on.
  */
 function getAllEventNames(): string[] {
-  return [
-    // Task lifecycle
-    "task:created", "task:transition", "task:updated", "task:removed",
-    // Agent lifecycle
-    "agent:spawned", "agent:finished", "agent:activity",
-    // Assessment
-    "assessment:started", "assessment:progress", "assessment:complete", "assessment:corrected",
-    // Orchestrator lifecycle
-    "orchestrator:started", "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown",
-    // Retry & Fix
-    "task:retry", "task:fix", "task:maxRetries",
-    // Question detection
-    "task:question", "task:answered",
-    // Deadlock resolution
-    "deadlock:detected", "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable",
-    // Resilience
-    "task:timeout", "agent:stale",
-    // Recovery
-    "task:recovered",
-    // Missions
-    "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
-    // Chat sessions
-    "session:created", "message:added",
-    // Approval gates
-    "approval:requested", "approval:resolved", "approval:timeout",
-    // Escalation
-    "escalation:triggered", "escalation:resolved", "escalation:human",
-    // SLA & Deadlines
-    "sla:warning", "sla:violated", "sla:met",
-    // Quality gates (mission-level)
-    "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
-    // Checkpoints
-    "checkpoint:reached", "checkpoint:resumed",
-    // Scheduling
-    "schedule:triggered", "schedule:created", "schedule:completed", "schedule:expired",
-    // Notifications
-    "notification:sent", "notification:failed",
-    // Task watchers
-    "watcher:created", "watcher:fired", "watcher:removed",
-    // Notification rule actions
-    "action:triggered",
-    // General
-    "log",
-  ];
+  return [...CANONICAL_HOOK_EVENT_NAMES, "log"];
 }
 
 /**

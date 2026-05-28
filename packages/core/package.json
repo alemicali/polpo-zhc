@@ -22,6 +22,10 @@
       "types": "./dist/events.d.ts",
       "import": "./dist/events.js"
     },
+    "./hook-events": {
+      "types": "./dist/hook-events.d.ts",
+      "import": "./dist/hook-events.js"
+    },
     "./state-machine": {
       "types": "./dist/state-machine.d.ts",
       "import": "./dist/state-machine.js"

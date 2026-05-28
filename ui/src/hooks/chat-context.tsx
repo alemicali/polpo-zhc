@@ -124,7 +124,7 @@ export interface ChatStateValue {
   isLoading: boolean;
   messagesLoading: boolean;
   sessionId: string | null;
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string }[];
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean }[];
   sessionsLoading: boolean;
   streamingSessionIds: string[];
   pendingQuestions: AskUserQuestion[] | null;
@@ -157,6 +157,10 @@ export interface ChatActionsValue {
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
+  /** Rename a session (PATCH title). Silent catch — dialog handles the error UX. */
+  renameSession: (id: string, title: string) => Promise<void>;
+  /** Toggle the star flag (PATCH starred). Does NOT bump updatedAt. */
+  setStarred: (id: string, starred: boolean) => Promise<void>;
   setSelectedAgent: (agent: string | null) => void;
 }
 
@@ -210,6 +214,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     loadSession: chat.loadSession,
     newSession: chat.newSession,
     deleteSession: chat.deleteSession,
+    renameSession: chat.renameSession,
+    setStarred: chat.setStarred,
     setSelectedAgent: chat.setSelectedAgent,
   }), [
     chat.send, chat.stop, chat.answerQuestions,
@@ -218,6 +224,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.consumeOpenFile, chat.consumeNavigateTo,
     chat.consumeOpenTab, chat.consumeSetDesign,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
+    chat.renameSession, chat.setStarred,
     chat.setSelectedAgent,
   ]);
 

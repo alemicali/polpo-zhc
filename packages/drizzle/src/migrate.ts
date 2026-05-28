@@ -115,8 +115,21 @@ export async function ensurePgSchema(db: any): Promise<void> {
     title      TEXT,
     agent      TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    starred    BOOLEAN
   )`);
+
+  // Migration: add starred column for sidebar "Starred" section (additive, idempotent).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'sessions' AND column_name = 'starred'
+      ) THEN
+        ALTER TABLE sessions ADD COLUMN starred BOOLEAN;
+      END IF;
+    END $$
+  `);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS messages (
     id         TEXT PRIMARY KEY,

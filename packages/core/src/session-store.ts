@@ -45,6 +45,8 @@ export interface Session {
   messageCount: number;
   /** Agent name when this session targets a specific agent (agent-direct mode). Null/undefined for orchestrator sessions. */
   agent?: string;
+  /** Whether the session is starred. When true, the UI surfaces it in a dedicated section above the normal list. */
+  starred?: boolean;
 }
 
 export interface SessionStore {
@@ -60,6 +62,8 @@ export interface SessionStore {
   getLatestSession(agent?: string | null): Promise<Session | undefined>;
   /** Rename (update the title of) an existing session. */
   renameSession(sessionId: string, title: string): Promise<boolean>;
+  /** Star or unstar a session. Does NOT bump updatedAt (preserves recent ordering). */
+  setStarred(sessionId: string, starred: boolean): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
   prune(keepSessions: number): Promise<number>;
   close(): Promise<void> | void;

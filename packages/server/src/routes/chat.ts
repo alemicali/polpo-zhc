@@ -48,17 +48,28 @@ const renameSessionRoute = createRoute({
   method: "patch",
   path: "/sessions/{id}",
   tags: ["Chat Sessions"],
-  summary: "Rename session",
+  summary: "Update session (rename and/or star)",
   request: {
     params: z.object({ id: z.string() }),
     body: {
-      content: { "application/json": { schema: z.object({ title: z.string().min(1) }) } },
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              title: z.string().min(1).optional(),
+              starred: z.boolean().optional(),
+            })
+            .refine((v) => v.title !== undefined || v.starred !== undefined, {
+              message: "Provide at least one of: title, starred",
+            }),
+        },
+      },
     },
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Session renamed",
+      description: "Session updated",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -171,19 +182,44 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     return c.json({ ok: true, data: { session, messages: safeMessages, incremental } }, 200);
   });
 
-  // PATCH /chat/sessions/:id — rename a session
+  // PATCH /chat/sessions/:id — rename and/or (un)star a session.
+  // Either field is optional but at least one must be present (enforced by zod
+  // .refine). Renaming bumps updatedAt; starring deliberately does NOT, so
+  // the sidebar's "recent" ordering survives pinning.
   app.openapi(renameSessionRoute, async (c) => {
     const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
     const { id } = c.req.valid("param");
-    const { title } = c.req.valid("json");
-    const renamed = await sessionStore.renameSession(id, title);
-    if (!renamed) {
-      return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    const body = c.req.valid("json");
+
+    const result: { renamed?: boolean; starred?: boolean } = {};
+    let touched = false;
+
+    if (body.title !== undefined) {
+      const renamed = await sessionStore.renameSession(id, body.title);
+      if (!renamed) {
+        return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+      }
+      result.renamed = true;
+      touched = true;
     }
-    return c.json({ ok: true, data: { renamed: true } }, 200);
+    if (body.starred !== undefined) {
+      const starred = await sessionStore.setStarred(id, body.starred);
+      if (!starred) {
+        return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+      }
+      result.starred = body.starred;
+      touched = true;
+    }
+
+    // Defensive: the refine above should make this unreachable, but keep a
+    // safety net so we never return a 200 for a no-op request.
+    if (!touched) {
+      return c.json({ ok: false, error: "Nothing to update", code: "VALIDATION_ERROR" }, 404);
+    }
+    return c.json({ ok: true, data: result }, 200);
   });
 
   // DELETE /chat/sessions/:id — delete a session
