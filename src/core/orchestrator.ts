@@ -923,13 +923,20 @@ export class Orchestrator extends TypedEmitter {
 
   /**
    * Initialize the vault store.
-   * When storage is "sqlite" or "postgres", uses DrizzleVaultStore (AES-256-GCM encrypted in DB).
-   * Otherwise falls back to EncryptedVaultStore (file-based, .polpo/vault.enc).
+   * ALWAYS uses EncryptedVaultStore (file-based, .polpo/vault.enc) regardless
+   * of storage mode. Rationale: vault crypto operations are sensitive — keeping
+   * the file-based store as the single source of truth avoids any risk of
+   * key-resolution drift or migration-time data loss when storage flips to
+   * SQLite. The DrizzleVaultStore implementation exists (and the `vault` table
+   * is still created in the schema) but is intentionally NOT wired here.
+   * If/when we want full DB consolidation, do it via an explicit
+   * `polpo vault migrate` command that round-trips through resolveKey()
+   * — not by silently flipping the wiring.
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
