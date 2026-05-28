@@ -52,6 +52,7 @@ import {
   MessageSquare,
   AlertCircle,
   FolderOpen,
+  Bell,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
@@ -73,9 +74,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents } from "@polpo-ai/react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@polpo-ai/react";
-import { useAsyncAction } from "@/hooks/use-polpo";
+import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
+import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task } from "@polpo-ai/react";
+import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
+import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
+import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -877,6 +880,7 @@ export function TaskDetailPage() {
           {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
           <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
           <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Activity</TabsTrigger>
+          <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
         {/* ── Assessment tab (conditional) ── */}
@@ -1943,10 +1947,49 @@ export function TaskDetailPage() {
         <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
           <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
         </TabsContent>
+
+        {/* Rules tab — applied notification rules for this task */}
+        <TabsContent value="rules" className="mt-4 flex-1 min-h-0">
+          <ScrollArea className="h-full">
+            <div className="pr-4 space-y-3 max-w-3xl">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                These are the notification rules that would fire for this task, resolved by scope.
+                Task-scoped rules replace mission and global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+              </p>
+              <TaskAppliedRules task={task} missionGroup={task.group} />
+            </div>
+          </ScrollArea>
+        </TabsContent>
       </Tabs>
 
       {/* File preview dialog */}
       <FilePreviewDialog preview={previewState} onClose={() => setPreviewState(null)} />
     </div>
+  );
+}
+
+/**
+ * Render applied notification rules for a task. Lives outside the
+ * TaskDetailPage so the resolution is colocated with the wrapper that
+ * fetches global + mission scope, keeping the main page lean.
+ */
+function TaskAppliedRules({ task, missionGroup }: { task: Task; missionGroup?: string }) {
+  const { config } = useConfig();
+  const { missions } = useMissions();
+  const globalRules = ((config?.settings?.notifications as { rules?: AnyRule[] } | undefined)?.rules) ?? [];
+  const taskScoped: ScopedRules | undefined = (task as Task & { notifications?: ScopedRules }).notifications;
+  const parentMission = missionGroup
+    ? missions.find(m => m.name === missionGroup)
+    : undefined;
+  const missionScoped: ScopedRules | undefined = parentMission
+    ? (parentMission as typeof parentMission & { notifications?: ScopedRules }).notifications
+    : undefined;
+  return (
+    <AppliedRulesPanel
+      variant="task"
+      taskScoped={taskScoped}
+      missionScoped={missionScoped}
+      globalRules={globalRules}
+    />
   );
 }

@@ -69,7 +69,7 @@ function createMockCtx(store?: MissionAwareStore): OrchestratorContext {
     runStore: new InMemoryRunStore(),
     memoryStore: { exists: async () => false, get: async () => "", save: async () => {}, append: async () => {}, update: async () => true as const },
     logStore: { startSession: async () => "s", getSessionId: async () => "s", append: async () => {}, getSessionEntries: async () => [], listSessions: async () => [], prune: async () => 0, close: () => {} },
-    sessionStore: { create: async () => "s1", addMessage: async () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: async () => false, getMessages: async () => [], getRecentMessages: async () => [], listSessions: async () => [], getSession: async () => undefined, getLatestSession: async () => undefined, renameSession: async () => false, deleteSession: async () => false, prune: async () => 0, close: () => {} },
+    sessionStore: { create: async () => "s1", addMessage: async () => ({ id: "m1", role: "user" as const, content: "", ts: "" }), updateMessage: async () => false, getMessages: async () => [], getRecentMessages: async () => [], listSessions: async () => [], getSession: async () => undefined, getLatestSession: async () => undefined, renameSession: async () => false, setStarred: async () => false, deleteSession: async () => false, prune: async () => 0, close: () => {} },
     hooks: new HookRegistry(),
     config: createMinimalConfig(),
     workDir: "/tmp/test",

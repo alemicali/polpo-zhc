@@ -92,6 +92,7 @@ function createNoopSessionStore() {
     getSession: async () => undefined,
     getLatestSession: async () => undefined,
     renameSession: async () => false,
+    setStarred: async () => false,
     deleteSession: async () => false,
     prune: async () => 0,
     close: () => {},

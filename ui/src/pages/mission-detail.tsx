@@ -64,7 +64,10 @@ import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles } from "@/lib/mission-status";
 import { JsonBlock } from "@/components/json-block";
-import { Calendar, Repeat } from "lucide-react";
+import { Calendar, Repeat, Bell } from "lucide-react";
+import { useConfig } from "@/hooks/use-polpo";
+import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
+import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 
 // ── Copyable ID ──
 
@@ -1857,6 +1860,10 @@ export function MissionDetailView({
               Runs
             </TabsTrigger>
           )}
+          <TabsTrigger value="notifications">
+            <Bell className="h-3.5 w-3.5 mr-1.5" />
+            Rules
+          </TabsTrigger>
           <TabsTrigger value="raw">Raw JSON</TabsTrigger>
           {report && (
             <TabsTrigger value="report">
@@ -1958,6 +1965,19 @@ export function MissionDetailView({
             </ScrollArea>
           </TabsContent>
         )}
+
+        {/* Notifications tab — applied rule preview */}
+        <TabsContent value="notifications" className="mt-4 flex-1 min-h-0">
+          <ScrollArea className="h-full">
+            <div className="pr-4 space-y-3 max-w-3xl">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                These are the notification rules that would fire for this mission, resolved by scope.
+                Mission-scoped rules replace global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+              </p>
+              <MissionAppliedRules mission={mission} />
+            </div>
+          </ScrollArea>
+        </TabsContent>
 
         {/* Raw JSON tab — full width code block with copy */}
         <TabsContent value="raw" className="mt-4 flex-1 min-h-0">
@@ -2097,6 +2117,24 @@ export function MissionDetailView({
         )}
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Render applied notification rules for a mission. Lives outside
+ * MissionDetailView so the view stays a pure presentation component
+ * (no data-fetching coupling for an optional tab).
+ */
+function MissionAppliedRules({ mission }: { mission: Mission }) {
+  const { config } = useConfig();
+  const globalRules = ((config?.settings?.notifications as { rules?: AnyRule[] } | undefined)?.rules) ?? [];
+  const missionScoped: ScopedRules | undefined = (mission as Mission & { notifications?: ScopedRules }).notifications;
+  return (
+    <AppliedRulesPanel
+      variant="mission"
+      missionScoped={missionScoped}
+      globalRules={globalRules}
+    />
   );
 }
 

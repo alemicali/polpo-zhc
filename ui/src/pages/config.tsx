@@ -89,6 +89,8 @@ import type { Provider as AuthProvider, OAuthProvider } from "@/components/share
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ModelPicker } from "@/components/shared/model-picker";
 import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/rule-form-dialog";
+import { summarizeRule } from "@/lib/rule-summary";
+import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
 import { useAppearance } from "@/lib/appearance";
 import { PALETTES, usePalette } from "@/lib/palette";
@@ -3155,11 +3157,64 @@ export function ConfigPage() {
                 <Plus className="h-3.5 w-3.5 mr-1" /> New rule
               </Button>
             </div>
+
+            {/* Event glossary — collapsible reference grouped by category */}
+            <details className="mb-3 rounded-md border border-border/30 bg-muted/10 group">
+              <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground select-none flex items-center gap-2">
+                <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                Event glossary
+                <span className="ml-2 text-[10px] font-normal normal-case tracking-normal text-muted-foreground/70">
+                  ({HOOK_EVENT_CATALOG.length} events, {HOOK_EVENT_GLOBS.length} glob shortcuts)
+                </span>
+              </summary>
+              <div className="px-3 pb-3 pt-1 space-y-3">
+                {(() => {
+                  const byCategory = new Map<string, typeof HOOK_EVENT_CATALOG>();
+                  for (const ev of HOOK_EVENT_CATALOG) {
+                    const list = byCategory.get(ev.category) ?? [];
+                    list.push(ev);
+                    byCategory.set(ev.category, list);
+                  }
+                  return [...byCategory.entries()].map(([cat, evs]) => (
+                    <div key={cat}>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                        {cat} ({evs.length})
+                      </p>
+                      <ul className="space-y-0.5 pl-1">
+                        {evs.map(ev => (
+                          <li key={ev.name} className="text-[10.5px] leading-snug">
+                            <code className="font-mono text-foreground">{ev.name}</code>
+                            <span className="text-muted-foreground"> — {ev.description}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ));
+                })()}
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                    Glob shortcuts ({HOOK_EVENT_GLOBS.length})
+                  </p>
+                  <ul className="space-y-0.5 pl-1">
+                    {HOOK_EVENT_GLOBS.map(g => (
+                      <li key={g.pattern} className="text-[10.5px] leading-snug">
+                        <code className="font-mono text-foreground">{g.pattern}</code>
+                        <span className="text-muted-foreground"> — {g.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </details>
+
             {rules.length > 0 ? (
               <div className="space-y-2">
                 {rules.map((rule) => (
                   <Card key={rule.id} className="bg-card/80 border-border/40 py-0 gap-0">
                     <CardContent className="pt-3 pb-3">
+                      <p className="text-[11px] leading-relaxed text-muted-foreground mb-2.5">
+                        {summarizeRule(rule)}
+                      </p>
                       <div className="flex items-center gap-2 mb-2">
                         <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-sm font-semibold">{rule.name ?? rule.id}</span>

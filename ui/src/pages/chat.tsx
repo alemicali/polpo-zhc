@@ -3963,7 +3963,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 
 export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: boolean } = {}) {
   const { sessions, sessionsLoading, sessionId, streamingSessionIds, messages, messagesLoading } = useChatState();
-  const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
+  const { loadSession, newSession, deleteSession, renameSession, setStarred, setSelectedAgent } = useChatActions();
 
   // In embedded mode, session sidebar is controlled externally
   const externalSessionsOpen = useChatFirstSessionsOpen();
@@ -3975,6 +3975,19 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
     : compact
       ? setCompactSidebarOpen
       : setChatPageSessionsOpen;
+
+  // Rename dialog state — when non-null, the dialog is open, prepopulated
+  // with `title`. Submitting calls renameSession; closing clears the target.
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const openRename = useCallback((id: string, currentTitle: string) => {
+    setRenameTarget({ id, title: currentTitle });
+  }, []);
+
+  // Toggle handler — fire-and-forget. Errors are swallowed by useChat's
+  // silent catch; the optimistic update keeps the UI snappy.
+  const handleToggleStar = useCallback((id: string, starred: boolean) => {
+    void setStarred(id, starred);
+  }, [setStarred]);
 
   // Filter out empty/orphan sessions
   const visibleSessions = sessions.filter(
@@ -4018,6 +4031,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onDelete={deleteSession}
+          onRename={openRename}
+          onToggleStar={handleToggleStar}
           onBack={() => setSidebarOpen(false)}
           fullWidth
         />
@@ -4037,6 +4052,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
                 onDelete={deleteSession}
+                onRename={openRename}
+                onToggleStar={handleToggleStar}
                 onBack={embedded || !compact ? () => setSidebarOpen(false) : undefined}
                 mobileFullWidth={!embedded && !compact}
                 mobileOnlyBack={!embedded && !compact}
@@ -4058,6 +4075,98 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
           </div>
         </>
       )}
+      {/* Rename dialog — controlled by `renameTarget`. Lives at the page
+          root (outside the sidebar) so it survives sidebar close/open
+          transitions and remains anchored to the viewport. */}
+      <RenameSessionDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={async (id, title) => {
+          await renameSession(id, title);
+        }}
+      />
     </div>
+  );
+}
+
+// ── RenameSessionDialog ──
+//
+// Controlled by a `{id, title} | null` target prop. Pre-populates the input
+// with the existing title, Enter submits, Escape (or Cancel) closes without
+// saving. We early-out when the trimmed value is empty or unchanged so the
+// user never wastes a round-trip on a no-op rename.
+function RenameSessionDialog({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { id: string; title: string } | null;
+  onClose: () => void;
+  onSubmit: (id: string, title: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset the input whenever a new target opens — so reopening on a
+  // different session doesn't leak the previous draft.
+  useEffect(() => {
+    if (target) setValue(target.title);
+  }, [target]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!target || submitting) return;
+    const next = value.trim();
+    if (!next || next === target.title.trim()) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(target.id, next);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [onClose, onSubmit, submitting, target, value]);
+
+  const open = target !== null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !submitting) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Rename session</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleSubmit();
+            } else if (e.key === "Escape") {
+              if (!submitting) onClose();
+            }
+          }}
+          placeholder="Session title"
+          disabled={submitting}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSubmit()} disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
