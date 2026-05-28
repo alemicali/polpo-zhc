@@ -365,44 +365,32 @@ async function deployRuns(client: ApiClient, polpoDir: string): Promise<number> 
 }
 
 async function deploySessions(client: ApiClient, polpoDir: string): Promise<number> {
-  const sessionsDir = path.join(polpoDir, "sessions");
-  if (!fs.existsSync(sessionsDir)) return 0;
-  const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith(".jsonl"));
+  // Read from the configured store (sqlite/postgres/file) — same pattern as
+  // deployTeams/deployAgents. With storage="sqlite" the .jsonl files on disk
+  // are stale legacy, so reading them directly would push outdated data.
+  const { createCliStores } = await import("../../stores.js");
+  const { sessionStore } = await createCliStores(polpoDir);
+  const sessions = await sessionStore.listSessions();
+  if (sessions.length === 0) return 0;
+
   let count = 0;
-
-  for (const file of files) {
-    const raw = fs.readFileSync(path.join(sessionsDir, file), "utf-8");
-    const lines = raw.split("\n").filter(l => l.trim());
-    if (lines.length === 0) continue;
-
-    // First line is session metadata
-    let title: string | undefined;
-    let agent: string | undefined;
-    const messages: Array<{ role: "user" | "assistant"; content: string; toolCalls?: unknown[] }> = [];
-
-    for (const line of lines) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj._session) {
-          title = obj.title;
-          agent = obj.agent;
-        } else if (obj.role && obj.content) {
-          messages.push({
-            role: obj.role,
-            content: obj.content,
-            ...(obj.toolCalls ? { toolCalls: obj.toolCalls } : {}),
-          });
-        }
-      } catch { /* skip malformed lines */ }
-    }
-
-    if (messages.length === 0) continue;
-
+  for (const session of sessions) {
+    const msgs = await sessionStore.getMessages(session.id);
+    if (msgs.length === 0) continue;
+    const messages = msgs.map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+    }));
     try {
-      await client.post("/v1/chat/sessions/import", { title, agent, messages });
+      await client.post("/v1/chat/sessions/import", {
+        title: session.title,
+        agent: session.agent,
+        messages,
+      });
       count++;
     } catch (err: any) {
-      console.error(`  Warning: session "${title ?? file}": ${err.message}`);
+      console.error(`  Warning: session "${session.title ?? session.id}": ${err.message}`);
     }
   }
 

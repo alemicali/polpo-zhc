@@ -79,8 +79,13 @@ export async function migrateFileToSqlite(
     migratePlaybooks,
     migrateAttachments,
     migrateCodingSessions,
-    migrateExpoTokens,
-    migratePushSubscriptions,
+    // Expo tokens + push subscriptions are intentionally NOT migrated: their
+    // runtime consumers (server routes + notification channels) always read
+    // from FilePushSubscriptionStore / FileExpoTokenStore regardless of
+    // `storage` mode (file-only by design, same rationale as vault).
+    // Copying rows into the DB would just create a stale shadow that nobody
+    // reads. The migration helpers `migrateExpoTokens` /
+    // `migratePushSubscriptions` are kept below in case the policy changes.
     migratePeers,
   ]) {
     try {

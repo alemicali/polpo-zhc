@@ -14,16 +14,19 @@ import type { TeamStore } from "../core/team-store.js";
 import type { AgentStore } from "../core/agent-store.js";
 import type { VaultStore } from "../core/vault-store.js";
 import type { PlaybookStore } from "../core/playbook-store.js";
+import type { SessionStore } from "@polpo-ai/core";
 import { loadPolpoConfig } from "../core/config.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
+import { FileSessionStore } from "../stores/file-session-store.js";
 
 export interface CliStores {
   teamStore: TeamStore;
   agentStore: AgentStore;
   vaultStore: VaultStore;
   playbookStore: PlaybookStore;
+  sessionStore: SessionStore;
 }
 
 /**
@@ -50,6 +53,7 @@ export async function createCliStores(polpoDir: string): Promise<CliStores> {
       agentStore: stores.agentStore,
       vaultStore: stores.vaultStore,
       playbookStore: stores.playbookStore,
+      sessionStore: stores.sessionStore,
     };
   }
 
@@ -73,6 +77,7 @@ export async function createCliStores(polpoDir: string): Promise<CliStores> {
       agentStore: stores.agentStore,
       vaultStore: stores.vaultStore,
       playbookStore: stores.playbookStore,
+      sessionStore: stores.sessionStore,
     };
   }
 
@@ -84,6 +89,7 @@ export async function createCliStores(polpoDir: string): Promise<CliStores> {
     agentStore: new FileAgentStore(polpoDir),
     vaultStore: new EncryptedVaultStore(polpoDir),
     playbookStore: new FilePlaybookStore(cwd, polpoDir),
+    sessionStore: new FileSessionStore(polpoDir),
   };
 }
 

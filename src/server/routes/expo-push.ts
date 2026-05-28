@@ -3,13 +3,12 @@
  * test deliveries. Each (deviceId + token) pair represents one anonymous
  * device; no auth/user binding (MVP).
  *
- * Mounted at /api/v1/expo-push/* (see src/server/app.ts).
+ * The token store is always file-based (`.polpo/expo-tokens.json`) regardless
+ * of the `storage` setting — same policy as the vault. The Drizzle equivalent
+ * in @polpo-ai/drizzle is unused at runtime. Single source of truth = the
+ * file; no migration runs for these rows.
  *
- * Endpoints:
- *   POST /register-token   — upsert a token from a device
- *   POST /unregister-token — drop a token (e.g. user disabled push)
- *   GET  /status           — count + SDK availability
- *   POST /test             — send a test push to one or all tokens
+ * Mounted at /api/v1/expo-push/* (see src/server/app.ts).
  */
 import { Hono } from "hono";
 import { FileExpoTokenStore } from "../../stores/file-expo-token-store.js";
