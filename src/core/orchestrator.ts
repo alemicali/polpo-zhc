@@ -197,7 +197,9 @@ export class Orchestrator extends TypedEmitter {
   private drizzleDb?: any;
   /** Sqlite-flavoured schema bundle, kept around so the migration can re-use it. */
   private drizzleSchema?: typeof import("@polpo-ai/drizzle")["sqliteSchema"];
-  /** Effective storage backend selected at init time. */
+  /** Effective storage backend selected at init time. Mirror of
+   *  `config.settings.storage` after parseSettings has applied defaults —
+   *  kept private because the source of truth is `config.settings.storage`. */
   private resolvedStorage: "file" | "sqlite" | "postgres" = "file";
 
   /**
@@ -363,9 +365,11 @@ export class Orchestrator extends TypedEmitter {
     this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
-    // First-boot file→sqlite migration (no-op when DB already has data or no
-    // legacy files are present). Runs before downstream code reads the DB.
-    await this.maybeAutoMigrateToSqlite();
+    // NOTE: file→sqlite migration is MANUAL only (run `polpo migrate`
+    // from the CLI). Auto-trigger at boot was removed by user request —
+    // a fresh-install SQLite DB ships empty until the user explicitly
+    // migrates, so legacy file-based projects keep using files until
+    // the user runs the migration command.
 
     // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
     if ("logStore" in stores && stores.logStore) {
@@ -404,10 +408,21 @@ export class Orchestrator extends TypedEmitter {
 
   /**
    * Populate stores from the teams array passed to initInteractive().
-   * Idempotent — skips teams/agents that already exist in the store.
+   *
+   * First-run only: if the TeamStore already has ANY row, we skip seeding
+   * entirely. This prevents the boot path from resurrecting teams/agents
+   * that the user has explicitly deleted (e.g. `default` / `dev-1`).
+   * The previous "idempotent per-name" behaviour was a footgun — once a
+   * named team had been deleted, the next boot would re-create it because
+   * `seed()` only checked existence by name.
    */
   private async populateStores(teams: Team[]): Promise<void> {
     if (!teams || teams.length === 0) return;
+
+    // If the user has touched the stores at all (even leaving one team),
+    // treat the project as initialised and DO NOT re-seed legacy defaults.
+    const existingTeams = await this.teamStore.getTeams();
+    if (existingTeams.length > 0) return;
 
     await this.teamStore.seed(teams);
 

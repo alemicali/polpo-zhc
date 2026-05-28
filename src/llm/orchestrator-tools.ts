@@ -35,8 +35,7 @@ import {
   stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
-import { FileTeamStore } from "../stores/file-team-store.js";
-import { FileAgentStore } from "../stores/file-agent-store.js";
+import { createCliStores } from "../cli/stores.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
@@ -5083,9 +5082,9 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
     packages = match;
   }
 
-  // Install packages via stores
-  const inkTeamStore = new FileTeamStore(polpoDir);
-  const inkAgentStore = new FileAgentStore(polpoDir);
+  // Install packages via stores (respect storage backend — hardcoding
+  // FileTeamStore/FileAgentStore silently bypasses sqlite/postgres).
+  const { teamStore: inkTeamStore, agentStore: inkAgentStore } = await createCliStores(polpoDir);
 
   // Ensure default team exists
   const inkTeams = await inkTeamStore.getTeams();
@@ -5229,7 +5228,7 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   const entry = getInkLockEntry(lock, source);
   if (!entry) return `Source "${source}" is not installed. Use ink_browse to see installed packages.`;
 
-  const removeAgentStore = new FileAgentStore(polpoDir);
+  const { agentStore: removeAgentStore } = await createCliStores(polpoDir);
   const removePlaybookStore = polpo.getPlaybookStore();
   const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
@@ -5262,8 +5261,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
     entries = [entry];
   }
 
-  const updTeamStore = new FileTeamStore(polpoDir);
-  const updAgentStore = new FileAgentStore(polpoDir);
+  const { teamStore: updTeamStore, agentStore: updAgentStore } = await createCliStores(polpoDir);
 
   // Ensure default team exists
   const updTeams = await updTeamStore.getTeams();

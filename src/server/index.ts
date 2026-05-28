@@ -46,21 +46,19 @@ export class PolpoServer {
     const workDir = resolve(overrideWorkDir ?? this.config.workDir);
     const polpoDir = getPolpoDir(workDir);
     const persistedConfig = loadPolpoConfig(polpoDir);
-    // Source of truth at runtime is FileTeamStore/FileAgentStore
-    // (teams.json / agents.json). If those exist, pass [] to initInteractive —
-    // otherwise populateStores would re-seed legacy entries from
-    // polpo.json.teams that the user may have intentionally removed.
-    // Seed a default team only on a true first-run with no stores.
-    const hasSeededStores = existsSync(join(polpoDir, "teams.json")) ||
-      existsSync(join(polpoDir, "agents.json"));
+    // Source of truth at runtime is the configured TeamStore/AgentStore
+    // (sqlite by default, file when storage="file", postgres when configured).
+    // We always pass the first-run defaultTeam to initInteractive — the
+    // orchestrator's populateStores() guards against re-seeding when ANY
+    // team already exists in the store, so this is safe across all
+    // backends and survives explicit user deletes.
     const defaultTeam: Team = {
       name: "default",
       agents: [{ name: "dev-1", role: "developer" }],
     };
-    const teams: Team[] = hasSeededStores ? [] : [defaultTeam];
 
     await this.orchestrator.initInteractive(
-      persistedConfig?.project ?? basename(workDir), teams);
+      persistedConfig?.project ?? basename(workDir), [defaultTeam]);
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();

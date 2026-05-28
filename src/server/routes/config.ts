@@ -6,8 +6,7 @@ import { redactPolpoConfig } from "../security.js";
 import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders } from "../../setup/index.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
-import { FileTeamStore } from "../../stores/file-team-store.js";
+import { createCliStores } from "../../cli/stores.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
 
@@ -482,9 +481,14 @@ export function publicConfigRoutes(
       const teams = config.teams;
 
       try {
+        // polpo.json carries only project/settings/providers — teams live in
+        // the configured store (sqlite by default). Strip teams before save.
         savePolpoConfig(targetPolpoDir, { ...config, teams: [] });
-        const teamStore = new FileTeamStore(targetPolpoDir);
-        const agentStore = new FileAgentStore(targetPolpoDir);
+        // Honour storage backend (sqlite / postgres / file) for the seed.
+        // Previously this hardcoded FileTeamStore/FileAgentStore, which on a
+        // sqlite project silently wrote agents.json/teams.json that nobody
+        // reads at runtime — losing the wizard's agentName/agentRole input.
+        const { teamStore, agentStore } = await createCliStores(targetPolpoDir);
         await teamStore.seed(teams);
         await agentStore.seed(teams.flatMap((team) =>
           team.agents.map((agent) => ({ ...agent, teamName: team.name })),

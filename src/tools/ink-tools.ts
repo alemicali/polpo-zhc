@@ -35,8 +35,7 @@ import {
 } from "../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
-import { FileTeamStore } from "../stores/file-team-store.js";
-import { FileAgentStore } from "../stores/file-agent-store.js";
+import { createCliStores } from "../cli/stores.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 
@@ -245,10 +244,10 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           packages = match;
         }
 
-        // Install: merge packages via stores
+        // Install: merge packages via stores (respect storage backend —
+        // FileTeamStore/FileAgentStore would silently bypass sqlite).
         const installed: string[] = [];
-        const teamStore = new FileTeamStore(polpoDir);
-        const agentStore = new FileAgentStore(polpoDir);
+        const { teamStore, agentStore } = await createCliStores(polpoDir);
         const playbookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
 
         // Ensure default team exists
@@ -422,8 +421,8 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
           return ok(`Source "${params.source}" is not installed. Use ink_browse to see installed packages.`);
         }
 
-        // Uninstall packages via stores
-        const removeAgentStore = new FileAgentStore(polpoDir);
+        // Uninstall packages via stores (respect storage backend).
+        const { agentStore: removeAgentStore } = await createCliStores(polpoDir);
         const removePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
         const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
@@ -513,9 +512,8 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
             continue;
           }
 
-          // Uninstall old packages via stores
-          const updateAgentStore = new FileAgentStore(polpoDir);
-          const updateTeamStore = new FileTeamStore(polpoDir);
+          // Uninstall old packages via stores (respect storage backend).
+          const { agentStore: updateAgentStore, teamStore: updateTeamStore } = await createCliStores(polpoDir);
           const updatePlaybookStore = new FilePlaybookStore(resolve(polpoDir, ".."), polpoDir);
           await uninstallInkPackages(entry, polpoDir, updateAgentStore, updatePlaybookStore);
 

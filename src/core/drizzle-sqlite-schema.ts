@@ -311,6 +311,13 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     `CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id)`,
     `CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)`,
     `CREATE INDEX IF NOT EXISTS idx_notifications_rule_id ON notifications(rule_id)`,
+    // Hot indices added in the post-migration audit pass.
+    `CREATE INDEX IF NOT EXISTS idx_agents_team_name ON agents(team_name)`,
+    `CREATE INDEX IF NOT EXISTS idx_processes_agent_name ON processes(agent_name)`,
+    `CREATE INDEX IF NOT EXISTS idx_processes_task_id ON processes(task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_peer_sessions_session_id ON peer_sessions(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_vault_agent ON vault(agent)`,
+    `CREATE INDEX IF NOT EXISTS idx_log_sessions_started_at ON log_sessions(started_at DESC)`,
   ]) {
     try { db.exec(stmt); } catch { /* index already present */ }
   }

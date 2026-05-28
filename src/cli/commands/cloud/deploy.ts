@@ -56,8 +56,12 @@ function listJsonFiles(dir: string): string[] {
 // ── Core deployers ──────────────────────────────────────
 
 async function deployTeams(client: ApiClient, polpoDir: string): Promise<number> {
-  const teams = loadJson(path.join(polpoDir, "teams.json"));
-  if (!teams || !Array.isArray(teams)) return 0;
+  // Read from the configured store (sqlite/postgres/file) — falls back to
+  // teams.json only when storage="file".
+  const { createCliStores } = await import("../../stores.js");
+  const { teamStore } = await createCliStores(polpoDir);
+  const teams = await teamStore.getTeams();
+  if (!teams.length) return 0;
   let count = 0;
   for (const team of teams) {
     try {
@@ -69,12 +73,13 @@ async function deployTeams(client: ApiClient, polpoDir: string): Promise<number>
 }
 
 async function deployAgents(client: ApiClient, polpoDir: string): Promise<number> {
-  const agents = loadJson(path.join(polpoDir, "agents.json"));
-  if (!agents || !Array.isArray(agents)) return 0;
+  const { createCliStores } = await import("../../stores.js");
+  const { agentStore } = await createCliStores(polpoDir);
+  const agents = await agentStore.getAgents();
+  if (!agents.length) return 0;
   let count = 0;
-  for (const entry of agents) {
-    const agent = entry.agent ?? entry;
-    const teamName = entry.teamName ?? "default";
+  for (const agent of agents) {
+    const teamName = (await agentStore.getAgentTeam(agent.name)) ?? "default";
     try {
       await client.post("/v1/agents", { ...agent, team: teamName });
       count++;
@@ -543,8 +548,15 @@ export function registerDeployCommand(program: Command): void {
       }
 
       // ── Step 3: Scan resources ────────────────────────
-      const hasTeams = fs.existsSync(path.join(polpoDir, "teams.json"));
-      const hasAgents = fs.existsSync(path.join(polpoDir, "agents.json"));
+      // Teams/agents now live in the configured store (sqlite by default),
+      // not on disk. Probe via the store factory so sqlite projects also
+      // report — and deploy — their teams/agents correctly.
+      const { createCliStores: probeCliStores } = await import("../../stores.js");
+      const probe = await probeCliStores(polpoDir).catch(() => null);
+      const teamsForProbe = probe ? await probe.teamStore.getTeams().catch(() => []) : [];
+      const agentsForProbe = probe ? await probe.agentStore.getAgents().catch(() => []) : [];
+      const hasTeams = teamsForProbe.length > 0;
+      const hasAgents = agentsForProbe.length > 0;
       const hasMemory = fs.existsSync(path.join(polpoDir, "memory.md")) ||
         fs.existsSync(path.join(polpoDir, "memory"));
       const hasMissions = fs.existsSync(path.join(polpoDir, "missions")) &&

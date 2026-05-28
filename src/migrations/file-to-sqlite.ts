@@ -565,13 +565,17 @@ async function migrateAgents(ctx: Ctx): Promise<PerStoreResult> {
   if (!Array.isArray(agents) || agents.length === 0) {
     return { store: "agents", status: "skipped-empty", fileCount: 0, dbCount: 0, durationMs: t.ms() };
   }
+  let inserted = 0;
   if (!ctx.dryRun) {
     const now = new Date().toISOString();
     for (const entry of agents) {
-      const name = entry?.name ?? entry?.config?.name;
-      const teamName = entry?.teamName ?? "default";
-      const cfg = entry?.config ?? entry;
+      // Real shape from FileAgentStore: { agent: AgentConfig, teamName: string }
+      // Fallbacks for older / hand-edited files.
+      const inner = entry?.agent ?? entry?.config ?? entry;
+      const name = inner?.name ?? entry?.name;
+      const teamName = entry?.teamName ?? entry?.team_name ?? inner?.teamName ?? "default";
       if (!name) continue;
+      const cfg = inner;
       await ctx.db.insert(ctx.schema.agents).values({
         name,
         teamName,
@@ -579,9 +583,10 @@ async function migrateAgents(ctx: Ctx): Promise<PerStoreResult> {
         createdAt: now,
         updatedAt: now,
       }).onConflictDoNothing();
+      inserted++;
     }
   }
-  return { store: "agents", status: "migrated", fileCount: agents.length, dbCount: agents.length, durationMs: t.ms() };
+  return { store: "agents", status: "migrated", fileCount: agents.length, dbCount: ctx.dryRun ? agents.length : inserted, durationMs: t.ms() };
 }
 
 // ── Playbooks ───────────────────────────────────────────────────────────

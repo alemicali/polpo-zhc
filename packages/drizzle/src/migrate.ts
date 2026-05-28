@@ -377,4 +377,12 @@ export async function ensurePgSchema(db: any): Promise<void> {
     private_key TEXT NOT NULL,
     subject     TEXT NOT NULL
   )`);
+
+  // ── Hot indices added in the post-migration audit pass ─────────────────
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_agents_team_name ON agents(team_name)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_processes_agent_name ON processes(agent_name)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_processes_task_id ON processes(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_peer_sessions_session_id ON peer_sessions(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_vault_agent ON vault(agent)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_sessions_started_at ON log_sessions(started_at DESC)`);
 }
