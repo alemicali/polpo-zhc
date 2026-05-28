@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -16,12 +17,21 @@ const listTasksRoute = createRoute({
       summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
         description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
       }),
+      // `slim` is an alias for `summary` — the web UI uses `slim=true`
+      // by convention (matches `/agents?slim=true`). Either flag triggers
+      // the same projection; kept distinct so docs can keep both names.
+      slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+      }),
     }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
       description: "List of tasks",
+    },
+    304: {
+      description: "Not modified — client has the current list per ETag",
     },
   },
 });
@@ -249,19 +259,21 @@ export function taskRoutes(getDeps: () => {
     let tasks = await deps.taskStore.getAllTasks();
 
     // Optional filters
-    const { status, group, assignTo, summary } = c.req.valid("query");
+    const { status, group, assignTo, summary, slim } = c.req.valid("query");
 
     if (status) tasks = tasks.filter((t: any) => t.status === status);
     if (group) tasks = tasks.filter((t: any) => t.group === group);
     if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
 
+    // `slim=true` is an alias for `summary=true`.
+    const wantSlim = summary === "true" || slim === "true";
     // Slim projection: kicks in only when the client opts in via ?summary=true.
     // Keeps every field the list rows in web/mobile actually render (id, title,
     // status, phase, assignTo, group, dependsOn, retries, timestamps, plus the
     // small `result.assessment` block for the score badge). Drops the heavy
     // tail — outcomes, stdout/stderr, expectations, metrics — that only the
     // detail screen needs and that GET /tasks/:id already returns.
-    if (summary === "true") {
+    if (wantSlim) {
       tasks = tasks.map((t: any) => {
         const desc = typeof t.description === "string" ? t.description : "";
         // result.assessment carries checks[] with full descriptions — that
@@ -295,6 +307,12 @@ export function taskRoutes(getDeps: () => {
         };
       });
     }
+
+    // Conditional GET — return 304 if the client already has this exact list.
+    // Fingerprint runs on the (possibly filtered & slimmed) array so different
+    // query combinations get distinct ETags.
+    const etag = buildETag(quickFingerprint(tasks));
+    if (handleConditional(c, etag)) return c.body(null, 304);
 
     return c.json({ ok: true, data: tasks });
   });

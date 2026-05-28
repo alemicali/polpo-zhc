@@ -23,6 +23,7 @@ export {
 // ── Types ─────────────────────────────────────────────────────
 export type {
   Task,
+  TaskSlim,
   TaskStatus,
   TaskResult,
   TaskExpectation,
@@ -31,6 +32,7 @@ export type {
   ExpectedOutcome,
   OutcomeType,
   Mission,
+  MissionSlim,
   MissionStatus,
   MissionReport,
   MissionDelay,

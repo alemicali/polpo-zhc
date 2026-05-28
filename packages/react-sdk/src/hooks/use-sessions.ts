@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { readCached, writeCached } from "./use-swr-cache.js";
 import type { ChatSession, ChatMessage } from "@polpo-ai/sdk";
 
 export interface UseSessionsReturn {
   sessions: ChatSession[];
+  /** True when there is no cached or fetched data yet. */
   isLoading: boolean;
+  /** True when we already have data (stale or fresh) but a background fetch is in flight. */
+  isRefreshing: boolean;
   error: Error | null;
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
@@ -23,8 +27,17 @@ export interface UseSessionsReturn {
 export function useSessions(): UseSessionsReturn {
   const { client } = usePolpoContext();
 
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Synchronous SWR seed: read stale snapshot on the very first render so
+  // the sidebar paints instantly. The background fetch below replaces it
+  // as soon as the network responds (often a 304 thanks to the ETag).
+  const initial = (() => {
+    const cached = readCached<ChatSession[]>("sessions");
+    return cached?.data ?? null;
+  })();
+
+  const [sessions, setSessions] = useState<ChatSession[]>(initial ?? []);
+  const [isLoading, setIsLoading] = useState(initial === null);
+  const [isRefreshing, setIsRefreshing] = useState(initial !== null);
   const [error, setError] = useState<Error | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
@@ -32,14 +45,24 @@ export function useSessions(): UseSessionsReturn {
     try {
       const data = await client.getSessions();
       setSessions(data.sessions);
+      // Persist for next cold load. We don't have the ETag here because
+      // PolpoClient.get() doesn't surface response headers — Fix 2's ETag
+      // still wins on the SERVER round-trip via the browser's HTTP cache.
+      writeCached("sessions", data.sessions);
     } catch (err) {
       setError(err as Error);
     }
   }, [client]);
 
   useEffect(() => {
-    setIsLoading(true);
-    refetch().finally(() => setIsLoading(false));
+    if (initial === null) setIsLoading(true);
+    setIsRefreshing(true);
+    refetch().finally(() => {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    });
+    // initial is captured at mount; refetch is stable per client.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch]);
 
   const getMessages = useCallback(
@@ -92,6 +115,7 @@ export function useSessions(): UseSessionsReturn {
   return {
     sessions,
     isLoading,
+    isRefreshing,
     error,
     activeSessionId,
     setActiveSessionId,

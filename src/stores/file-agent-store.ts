@@ -15,6 +15,11 @@ interface AgentEntry {
  */
 export class FileAgentStore implements AgentStore {
   private readonly filePath: string;
+  // In-memory cache: array snapshot of the JSON file. Hydrated lazily,
+  // refreshed atomically on every write. ~25-40 agents × multi-KB each →
+  // saves a 30-80ms read+parse on every getAgents() call (which fires
+  // from `useAgents()` on every page mount).
+  private cache: AgentEntry[] | undefined;
 
   constructor(polpoDir: string) {
     this.filePath = join(polpoDir, "agents.json");
@@ -23,18 +28,26 @@ export class FileAgentStore implements AgentStore {
   // ── helpers ──────────────────────────────────────────────────────────
 
   private readAll(): AgentEntry[] {
-    if (!existsSync(this.filePath)) return [];
-    try {
-      return JSON.parse(readFileSync(this.filePath, "utf-8")) as AgentEntry[];
-    } catch {
-      return [];
+    if (this.cache) return this.cache;
+    if (!existsSync(this.filePath)) {
+      this.cache = [];
+      return this.cache;
     }
+    try {
+      this.cache = JSON.parse(readFileSync(this.filePath, "utf-8")) as AgentEntry[];
+    } catch {
+      this.cache = [];
+    }
+    return this.cache;
   }
 
   private writeAll(entries: AgentEntry[]): void {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(this.filePath, JSON.stringify(entries, null, 2), "utf-8");
+    // Mirror the write into the cache so the next reader sees fresh data
+    // without another disk round-trip.
+    this.cache = entries;
   }
 
   // ── AgentStore implementation ────────────────────────────────────────

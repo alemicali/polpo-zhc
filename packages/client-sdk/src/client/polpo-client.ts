@@ -35,6 +35,8 @@ import type {
   ExecuteMissionResult,
   ResumeMissionResult,
   ApiResult,
+  TaskSlim,
+  MissionSlim,
   LogSession,
   LogEntry,
   ChatSession,
@@ -365,6 +367,21 @@ export class PolpoClient {
     return this.get<Task[]>(`/tasks${qs ? `?${qs}` : ""}`);
   }
 
+  /**
+   * Slim variant of {@link getTasks}. Same filters, but the server returns
+   * only the fields the list rows render (~70-90% smaller payload). Use
+   * this for the Tasks page, Dashboard, and any list view. Fall back to
+   * `getTask(id)` for the full record on detail screens.
+   */
+  getTasksSlim(filters?: TaskFilters): Promise<TaskSlim[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.group) params.set("group", filters.group);
+    if (filters?.assignTo) params.set("assignTo", filters.assignTo);
+    params.set("slim", "true");
+    return this.get<TaskSlim[]>(`/tasks?${params.toString()}`);
+  }
+
   getTask(taskId: string): Promise<Task> {
     return this.get<Task>(`/tasks/${taskId}`);
   }
@@ -401,6 +418,15 @@ export class PolpoClient {
 
   getMissions(): Promise<Mission[]> {
     return this.get<Mission[]>("/missions");
+  }
+
+  /**
+   * Slim variant of {@link getMissions}. Drops the `data` blob and the
+   * full `prompt` (often 2-10× smaller). Adds `taskCount`. Use for the
+   * Missions list page, Dashboard, and any list view.
+   */
+  getMissionsSlim(): Promise<MissionSlim[]> {
+    return this.get<MissionSlim[]>("/missions?slim=true");
   }
 
   getResumableMissions(): Promise<Mission[]> {

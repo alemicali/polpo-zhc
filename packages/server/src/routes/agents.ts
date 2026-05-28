@@ -3,6 +3,7 @@ import { join, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 
 /**
  * Agent/team management routes.
@@ -42,6 +43,9 @@ export function agentRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
         description: "List of agents",
       },
+      304: {
+        description: "Not modified — client has the current list per ETag",
+      },
     },
   });
 
@@ -79,9 +83,13 @@ export function agentRoutes(getDeps: () => {
           },
         };
       });
+      const etag = buildETag(quickFingerprint(slim));
+      if (handleConditional(c, etag)) return c.body(null, 304);
       return c.json({ ok: true, data: slim });
     }
 
+    const etag = buildETag(quickFingerprint(redacted));
+    if (handleConditional(c, etag)) return c.body(null, 304);
     return c.json({ ok: true, data: redacted });
   });
 

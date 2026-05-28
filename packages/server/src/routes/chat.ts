@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -11,6 +12,9 @@ const listSessionsRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "List of sessions",
+    },
+    304: {
+      description: "Not modified — client has the current list per ETag",
     },
   },
 });
@@ -122,6 +126,10 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
       return c.json({ ok: true, data: { sessions: [] } });
     }
     const sessions = await sessionStore.listSessions();
+    // Conditional GET — sidebar is the hottest list in the app (refreshed
+    // on every chat tab/route change). 304 short-circuit is huge here.
+    const etag = buildETag(quickFingerprint(sessions));
+    if (handleConditional(c, etag)) return c.body(null, 304);
     return c.json({ ok: true, data: { sessions } });
   });
 

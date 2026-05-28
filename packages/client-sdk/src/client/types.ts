@@ -127,6 +127,34 @@ export interface Task {
   updatedAt: string;
 }
 
+/**
+ * Slim projection returned by `GET /tasks?slim=true`. Drops the heavy
+ * tail (outcomes, stdout/stderr, expectations, metrics, maxRetries) so
+ * list rows over Tailscale stay sub-100KB even with hundreds of tasks.
+ * The full record is still served by `GET /tasks/:id`.
+ */
+export interface TaskSlim {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  phase?: TaskPhase;
+  assignTo: string;
+  group?: string;
+  missionId?: string;
+  dependsOn: string[];
+  retries: number;
+  createdAt: string;
+  updatedAt: string;
+  descriptionPreview?: string;
+  result?: {
+    assessment?: {
+      globalScore?: number;
+      passed?: boolean;
+      checksCount?: number;
+    };
+  };
+}
+
 export interface TaskResult {
   exitCode: number;
   stdout: string;
@@ -369,6 +397,26 @@ export interface Mission {
   executionCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Slim projection returned by `GET /missions?slim=true`. Drops the
+ * potentially-multi-KB `data` JSON blob and the full `prompt`; surfaces
+ * derived `taskCount` so list rows can render the badge without parsing
+ * `data` themselves. The full record is still served by `GET /missions/:id`.
+ */
+export interface MissionSlim {
+  id: string;
+  name: string;
+  status: MissionStatus;
+  schedule?: string;
+  deadline?: string;
+  endDate?: string;
+  qualityThreshold?: number;
+  createdAt: string;
+  updatedAt: string;
+  taskCount?: number;
+  promptPreview?: string;
 }
 
 // === Mission Document Types (parsed from Mission.data JSON) ===
