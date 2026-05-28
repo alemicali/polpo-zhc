@@ -282,6 +282,7 @@ export function useChat() {
     setStarred: sdkSetStarred,
     deleteSession: sdkDeleteSession,
     refetch: refetchSessions,
+    updateLocalTitle,
   } = useSessions();
 
   const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessageWithQuestions[]>>({});
@@ -812,6 +813,16 @@ export function useChat() {
             });
             updateMsg();
           }
+
+          // Session title intercept — `set_session_title` tool emits this
+          // chunk after the server already persisted the rename. Mirror
+          // it locally so sidebar + chat tabs refresh without a refetch.
+          const st = (choice as any)?.session_title as
+            | { sessionId: string; title: string }
+            | undefined;
+          if (st && typeof st.sessionId === "string" && typeof st.title === "string") {
+            updateLocalTitle(st.sessionId, st.title);
+          }
         }
       }
 
@@ -1182,6 +1193,18 @@ export function useChat() {
             stream: wr.stream ?? false,
           });
           updateMsg();
+        }
+
+        // Session title intercept — `set_session_title` tool emits this
+        // chunk after the server already persisted the rename via
+        // sessionStore.renameSession. Mirror it into local sessions[]
+        // so sidebar + chat tabs reflect the new title in real time
+        // (without waiting for a `refetchSessions` round-trip).
+        const st = (choice as any)?.session_title as
+          | { sessionId: string; title: string }
+          | undefined;
+        if (st && typeof st.sessionId === "string" && typeof st.title === "string") {
+          updateLocalTitle(st.sessionId, st.title);
         }
       }
 

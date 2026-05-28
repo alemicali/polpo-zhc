@@ -10,6 +10,11 @@ export interface UseSessionsReturn {
   setActiveSessionId: (id: string | null) => void;
   getMessages: (sessionId: string) => Promise<ChatMessage[]>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  /** Sync update of the local cached title — used when the server has
+   *  already renamed (e.g. set_session_title tool emitted a SSE chunk)
+   *  and we just need to mirror the change client-side without firing
+   *  another PATCH. No-op if the session is unknown locally. */
+  updateLocalTitle: (sessionId: string, title: string) => void;
   setStarred: (sessionId: string, starred: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   refetch: () => Promise<void>;
@@ -78,6 +83,12 @@ export function useSessions(): UseSessionsReturn {
     [client, activeSessionId],
   );
 
+  const updateLocalTitle = useCallback((sessionId: string, title: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, title } : s)),
+    );
+  }, []);
+
   return {
     sessions,
     isLoading,
@@ -86,6 +97,7 @@ export function useSessions(): UseSessionsReturn {
     setActiveSessionId,
     getMessages,
     renameSession,
+    updateLocalTitle,
     setStarred,
     deleteSession,
     refetch,
