@@ -3642,7 +3642,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   <span className="font-mono text-sm font-semibold">/</span>
                 </button>
               </div>
-              <div className="flex min-w-0 items-center gap-1">
+              <div className="flex min-w-0 items-center gap-2">
                 <MicButton
                   onTranscript={setTextareaValue}
                   disabled={inputDisabled}
