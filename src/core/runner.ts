@@ -223,11 +223,14 @@ async function main(): Promise<void> {
 
   let handle;
   try {
-    // Use Drizzle vault store when available (postgres/sqlite), fall back to file-based
-    let vaultStore: VaultStore | undefined = drizzleVaultStore;
-    if (!vaultStore) {
-      try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
-    }
+    // Vault is intentionally FILE-BASED for every storage mode — matches the
+    // orchestrator (src/core/orchestrator.ts:initVaultStore). Crypto round-trip
+    // to DB is sensitive and not wired automatically; the explicit
+    // `polpo vault migrate` command would do it on user request. The
+    // `drizzleVaultStore` returned by createStores is ignored on purpose.
+    void drizzleVaultStore;
+    let vaultStore: VaultStore | undefined;
+    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
     // WhatsApp store + send function (if configured)
     let waStore: WhatsAppStore | undefined;
