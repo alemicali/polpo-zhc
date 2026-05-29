@@ -992,12 +992,12 @@ const listOrchestratorSkillsTool: Tool = {
 
 const createOrchestratorSkillTool: Tool = {
   name: "create_orchestrator_skill",
-  description: "Create a new skill in the orchestrator's pool. Writes a SKILL.md with YAML frontmatter and markdown body.",
+  description: "Create a new skill in the orchestrator's pool. Writes a SKILL.md with YAML frontmatter and markdown body. Prefer this over hand-writing the file with `write`: it guarantees a valid YAML block list for allowed-tools.",
   parameters: Type.Object({
     name: Type.String({ description: "Skill name (directory name, e.g. 'project-planner')" }),
     description: Type.String({ description: "Short description for the skill frontmatter" }),
     content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires. MUST be a JSON array of strings (e.g. [\"read\",\"write\",\"bash\"]) — never a single comma-separated string. The tool writes it as a YAML block list automatically." })),
   }),
 };
 
@@ -1008,7 +1008,7 @@ const updateOrchestratorSkillTool: Tool = {
     name: Type.String({ description: "Skill name to update" }),
     description: Type.Optional(Type.String({ description: "New description" })),
     content: Type.Optional(Type.String({ description: "New markdown body content" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list. MUST be a JSON array of strings (e.g. [\"read\",\"write\"]) — never a single comma-separated string." })),
   }),
 };
 
@@ -1056,12 +1056,12 @@ const removeAgentSkillTool: Tool = {
 
 const createAgentSkillTool: Tool = {
   name: "create_agent_skill",
-  description: "Create a new skill in the agent skill pool (.polpo/skills/). Writes a SKILL.md with YAML frontmatter and markdown body. After creation, assign it to agents with update_agent.",
+  description: "Create a new skill in the agent skill pool (.polpo/skills/). Writes a SKILL.md with YAML frontmatter and markdown body. After creation, assign it to agents with update_agent. Prefer this over hand-writing the file with `write`: it guarantees a valid YAML block list for allowed-tools.",
   parameters: Type.Object({
     name: Type.String({ description: "Skill name (directory name, e.g. 'api-testing')" }),
     description: Type.String({ description: "Short description for the skill frontmatter" }),
     content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires. MUST be a JSON array of strings (e.g. [\"read\",\"write\",\"bash\"]) — never a single comma-separated string. The tool writes it as a YAML block list automatically." })),
   }),
 };
 
@@ -3939,6 +3939,27 @@ allowed-tools:
 - **name**: kebab-case, lowercase, descriptive (e.g. \`api-testing\`, \`react-patterns\`, \`code-review\`)
 - **description**: What the skill teaches the agent to do — be specific, not vague
 - **allowed-tools**: Optional list of tool names this skill may need. Purely informational for filtering.
+
+### CRITICAL — \`allowed-tools\` MUST be a YAML block list
+
+The single biggest source of broken skills. \`allowed-tools\` is an ARRAY, not a string.
+
+\`\`\`yaml
+# ✅ CORRECT — YAML block list, each item on its own line with "  - "
+allowed-tools:
+  - read
+  - write
+  - bash
+
+# ✅ ALSO OK — YAML flow list (inline array form)
+allowed-tools: [read, write, bash]
+
+# ❌ WRONG — comma-separated string. YAML parses this as ONE string,
+# downstream consumers call .join() on it and crash.
+allowed-tools: read, write, bash
+\`\`\`
+
+When you use the \`create_orchestrator_skill\` / \`create_agent_skill\` tools, pass \`allowedTools\` as a JSON array (e.g. \`["read","write","bash"]\`) — the tool generates the correct YAML block list automatically. NEVER hand-write SKILL.md via the \`write\` tool unless you're certain the YAML is valid; prefer the dedicated tools.
 
 ### Markdown Body (the actual skill content)
 

@@ -113,6 +113,42 @@ Content`;
     const result = parseSkillFrontmatter(content);
     expect(result!.allowedTools).toEqual(["edit"]);
   });
+
+  it("tolerates CSV string instead of YAML list (no crash)", () => {
+    // Real-world case: orchestrator hand-wrote the SKILL.md with an unquoted
+    // comma-separated string. YAML parses this as ONE string; the normalizer
+    // splits it back into an array so consumers calling .join() don't crash.
+    const content = `---
+name: test
+description: test
+allowed-tools: read, write, edit, bash
+---
+Content`;
+    const result = parseSkillFrontmatter(content);
+    expect(result!.allowedTools).toEqual(["read", "write", "edit", "bash"]);
+  });
+
+  it("supports YAML flow list (inline array)", () => {
+    const content = `---
+name: test
+description: test
+allowed-tools: [read, write]
+---
+Content`;
+    const result = parseSkillFrontmatter(content);
+    expect(result!.allowedTools).toEqual(["read", "write"]);
+  });
+
+  it("returns undefined allowedTools for empty/whitespace string", () => {
+    const content = `---
+name: test
+description: test
+allowed-tools: "   "
+---
+Content`;
+    const result = parseSkillFrontmatter(content);
+    expect(result!.allowedTools).toBeUndefined();
+  });
 });
 
 // ── discoverSkills ─────────────────────────────────────────────────────
