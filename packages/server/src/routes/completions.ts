@@ -21,7 +21,7 @@ import { nanoid } from "nanoid";
 import { agentMemoryScope } from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
 
-const MAX_TURNS = 20;
+const DEFAULT_MAX_TURNS = 200;
 
 type MessageSegment =
   | { type: "text"; content: string }
@@ -292,13 +292,33 @@ function toPiContent(content: z.infer<typeof messageSchema>["content"]): string 
   });
 }
 
+/**
+ * Marker prefix used by the UI when it acknowledges a client-side tool
+ * (open_file, navigate_to, open_tab). The client posts these as `role: "system"`
+ * because they're system-generated, not human-typed; but the LLM must see them
+ * in the conversation as a "tool result" turn — otherwise it observes its own
+ * un-resulted tool_call and re-emits the same call, looping forever.
+ *
+ * See ui/src/hooks/use-polpo.ts → consumeOpenFile/NavigateTo/OpenTab.
+ */
+const CLIENT_TOOL_ACK_PREFIX = "Client-side tool ";
+
 function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: any[]; extraSystemParts: string[] } {
   const piMessages: any[] = [];
   const extraSystemParts: string[] = [];
 
   for (const msg of messages) {
     if (msg.role === "system") {
-      extraSystemParts.push(extractText(msg.content));
+      const text = extractText(msg.content);
+      if (text.startsWith(CLIENT_TOOL_ACK_PREFIX)) {
+        // Tool-result acknowledgement from the UI — must live IN the
+        // conversation (as a user turn) so the model sees "the tool ran",
+        // not in extraSystemParts where it would only flavor the system
+        // prompt and the model would see an un-resulted tool_call.
+        piMessages.push({ role: "user", content: text, timestamp: Date.now() });
+      } else {
+        extraSystemParts.push(text);
+      }
     } else if (msg.role === "user") {
       piMessages.push({ role: "user", content: toPiContent(msg.content), timestamp: Date.now() });
     } else if (msg.role === "assistant") {
@@ -442,6 +462,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     const body = c.req.valid("json");
     const agentMode = !!body.agent;
 
+    // Per-request tool-loop cap. Defaults to DEFAULT_MAX_TURNS; agent-direct
+    // mode can override via agentConfig.maxTurns (positive integer).
+    let maxTurns = DEFAULT_MAX_TURNS;
+
     // ── Resolve effective context (orchestrator vs agent-direct) ──
     let fullSystemPrompt: string;
     let m: any;
@@ -458,6 +482,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       const agentConfig = agents.find((a: any) => a.name === body.agent);
       if (!agentConfig) {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
+      }
+
+      // Per-agent maxTurns override
+      if (typeof agentConfig.maxTurns === "number" && agentConfig.maxTurns > 0) {
+        maxTurns = Math.floor(agentConfig.maxTurns);
       }
 
       // Build system prompt via dep
@@ -631,7 +660,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         const segmentsAccum: MessageSegment[] = [];
 
         try {
-          for (let turn = 0; turn < MAX_TURNS; turn++) {
+          for (let turn = 0; turn < maxTurns; turn++) {
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
 
@@ -1017,7 +1046,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       const segmentsAccum: MessageSegment[] = [];
 
       try {
-        for (let turn = 0; turn < MAX_TURNS; turn++) {
+        for (let turn = 0; turn < maxTurns; turn++) {
           const piStream = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
             messages,
