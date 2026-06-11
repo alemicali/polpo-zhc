@@ -83,6 +83,8 @@ export function validateAgents(agents: any[]): void {
     if (agent.reportsTo === agent.name) {
       throw new Error(`Agent "${agent.name}": cannot report to itself`);
     }
+
+    validateAgentLoops(agent);
   }
 
   // Second pass: validate reportsTo references existing agents
@@ -105,6 +107,160 @@ export function validateAgents(agents: any[]): void {
       visited.add(current);
       const next = agents.find((a: any) => a.name === current);
       current = next?.reportsTo;
+    }
+  }
+}
+
+function validateAgentLoops(agent: any): void {
+  const prefix = `Agent "${agent.name}"`;
+
+  if (agent.runtime !== undefined && (typeof agent.runtime !== "string" || agent.runtime.trim() === "")) {
+    throw new Error(`${prefix}: runtime must be a non-empty string`);
+  }
+
+  if (agent.loops !== undefined) {
+    if (!agent.loops || typeof agent.loops !== "object" || Array.isArray(agent.loops)) {
+      throw new Error(`${prefix}: loops must be an object keyed by loop name`);
+    }
+
+    for (const [loopName, loop] of Object.entries(agent.loops)) {
+      if (!loopName.trim()) {
+        throw new Error(`${prefix}: loop names must be non-empty`);
+      }
+      if (!loop || typeof loop !== "object" || Array.isArray(loop)) {
+        throw new Error(`${prefix}: loop "${loopName}" must be an object`);
+      }
+      const cfg = loop as Record<string, unknown>;
+      if (cfg.name !== undefined && (typeof cfg.name !== "string" || cfg.name.trim() === "")) {
+        throw new Error(`${prefix}: loop "${loopName}" name must be a non-empty string`);
+      }
+      if (cfg.tools !== undefined) {
+        if (!Array.isArray(cfg.tools) || cfg.tools.some((tool) => typeof tool !== "string" || tool.trim() === "")) {
+          throw new Error(`${prefix}: loop "${loopName}" tools must be an array of non-empty strings`);
+        }
+      }
+      const maxTurns = cfg.maxTurns;
+      if (maxTurns !== undefined && (typeof maxTurns !== "number" || !Number.isInteger(maxTurns) || maxTurns <= 0)) {
+        throw new Error(`${prefix}: loop "${loopName}" maxTurns must be a positive integer`);
+      }
+      if (cfg.stopWhen !== undefined) {
+        validateCondition(cfg.stopWhen, `${prefix}: loop "${loopName}" stopWhen`);
+      }
+    }
+  }
+
+  if (agent.pipeline !== undefined) {
+    if (!agent.pipeline || typeof agent.pipeline !== "object" || Array.isArray(agent.pipeline)) {
+      throw new Error(`${prefix}: pipeline must be an object`);
+    }
+    const pipeline = agent.pipeline as Record<string, unknown>;
+    if (pipeline.mode !== undefined && pipeline.mode !== "sequential" && pipeline.mode !== "parallel") {
+      throw new Error(`${prefix}: pipeline.mode must be "sequential" or "parallel"`);
+    }
+    if (pipeline.context !== undefined && pipeline.context !== "shared") {
+      throw new Error(`${prefix}: pipeline.context must be "shared"`);
+    }
+    if (!Array.isArray(pipeline.steps) || pipeline.steps.length === 0) {
+      throw new Error(`${prefix}: pipeline.steps must contain at least one step`);
+    }
+
+    const loopNames = new Set<string>(agent.loops && typeof agent.loops === "object" && !Array.isArray(agent.loops)
+      ? Object.keys(agent.loops)
+      : []);
+    pipeline.steps.forEach((step, index) => validatePipelineStep(step, `${prefix}: pipeline.steps[${index}]`, loopNames));
+  }
+}
+
+function validateCondition(condition: unknown, path: string): void {
+  if (!condition || typeof condition !== "object" || Array.isArray(condition)) {
+    throw new Error(`${path} must be an object`);
+  }
+  const expression = (condition as Record<string, unknown>).expression;
+  if (typeof expression !== "string" || expression.trim() === "") {
+    throw new Error(`${path}.expression must be a non-empty string`);
+  }
+}
+
+function validateOptionalWhen(step: Record<string, unknown>, path: string): void {
+  if (step.when !== undefined && (typeof step.when !== "string" || step.when.trim() === "")) {
+    throw new Error(`${path}.when must be a non-empty string`);
+  }
+}
+
+function validatePipelineStep(step: unknown, path: string, loopNames: Set<string>): void {
+  if (!step || typeof step !== "object" || Array.isArray(step)) {
+    throw new Error(`${path} must be an object`);
+  }
+  const s = step as Record<string, unknown>;
+  const kinds = ["loop", "parallel", "switch", "human"].filter((kind) => s[kind] !== undefined);
+  if (kinds.length !== 1) {
+    throw new Error(`${path} must define exactly one of loop, parallel, switch, or human`);
+  }
+  validateOptionalWhen(s, path);
+
+  if (typeof s.loop === "string") {
+    if (s.loop.trim() === "") {
+      throw new Error(`${path}.loop must be a non-empty string`);
+    }
+    if (!loopNames.has(s.loop)) {
+      throw new Error(`${path}.loop references unknown loop "${s.loop}"`);
+    }
+    return;
+  }
+
+  if (s.parallel !== undefined) {
+    if (!Array.isArray(s.parallel) || s.parallel.length === 0) {
+      throw new Error(`${path}.parallel must contain at least one step`);
+    }
+    if (s.join !== undefined && s.join !== "all" && s.join !== "any" && (!Number.isInteger(s.join) || (s.join as number) <= 0)) {
+      throw new Error(`${path}.join must be "all", "any", or a positive integer`);
+    }
+    s.parallel.forEach((child, index) => validatePipelineStep(child, `${path}.parallel[${index}]`, loopNames));
+    return;
+  }
+
+  if (s.switch !== undefined) {
+    if (!s.switch || typeof s.switch !== "object" || Array.isArray(s.switch)) {
+      throw new Error(`${path}.switch must be an object`);
+    }
+    const sw = s.switch as Record<string, unknown>;
+    if (!Array.isArray(sw.cases) || sw.cases.length === 0) {
+      throw new Error(`${path}.switch.cases must contain at least one case`);
+    }
+    sw.cases.forEach((rawCase, index) => {
+      if (!rawCase || typeof rawCase !== "object" || Array.isArray(rawCase)) {
+        throw new Error(`${path}.switch.cases[${index}] must be an object`);
+      }
+      const switchCase = rawCase as Record<string, unknown>;
+      if (typeof switchCase.when !== "string" || switchCase.when.trim() === "") {
+        throw new Error(`${path}.switch.cases[${index}].when must be a non-empty string`);
+      }
+      if (!Array.isArray(switchCase.steps) || switchCase.steps.length === 0) {
+        throw new Error(`${path}.switch.cases[${index}].steps must contain at least one step`);
+      }
+      switchCase.steps.forEach((child, childIndex) =>
+        validatePipelineStep(child, `${path}.switch.cases[${index}].steps[${childIndex}]`, loopNames),
+      );
+    });
+    if (sw.default !== undefined) {
+      if (!sw.default || typeof sw.default !== "object" || Array.isArray(sw.default)) {
+        throw new Error(`${path}.switch.default must be an object`);
+      }
+      const defaultSteps = (sw.default as Record<string, unknown>).steps;
+      if (!Array.isArray(defaultSteps) || defaultSteps.length === 0) {
+        throw new Error(`${path}.switch.default.steps must contain at least one step`);
+      }
+      defaultSteps.forEach((child, index) => validatePipelineStep(child, `${path}.switch.default.steps[${index}]`, loopNames));
+    }
+    return;
+  }
+
+  if (typeof s.human === "string") {
+    if (s.human.trim() === "") {
+      throw new Error(`${path}.human must be a non-empty string`);
+    }
+    if (s.notify !== undefined && (!Array.isArray(s.notify) || s.notify.some((target) => typeof target !== "string" || target.trim() === ""))) {
+      throw new Error(`${path}.notify must be an array of non-empty strings`);
     }
   }
 }
