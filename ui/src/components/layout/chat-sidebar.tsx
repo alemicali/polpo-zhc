@@ -7,7 +7,14 @@
  * chat is already visible). State is shared via ChatProvider context.
  */
 
-import { lazy, Suspense } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useLocation } from "react-router-dom";
 import { useSidebarOpen } from "@/hooks/chat-context";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +29,24 @@ import {
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((m) => ({ default: m.ChatPage }))
 );
+
+const CHAT_SIDEBAR_WIDTH_KEY = "polpo-chat-sidebar-width";
+const CHAT_SIDEBAR_DEFAULT_WIDTH = 480;
+const CHAT_SIDEBAR_MIN_WIDTH = 380;
+const CHAT_SIDEBAR_MAX_WIDTH = 760;
+
+const clampSidebarWidth = (value: number) => {
+  const viewportCap = typeof window === "undefined"
+    ? CHAT_SIDEBAR_MAX_WIDTH
+    : Math.max(CHAT_SIDEBAR_MIN_WIDTH, Math.min(CHAT_SIDEBAR_MAX_WIDTH, window.innerWidth - 520));
+  return Math.min(Math.max(value, CHAT_SIDEBAR_MIN_WIDTH), viewportCap);
+};
+
+const readStoredSidebarWidth = () => {
+  if (typeof window === "undefined") return CHAT_SIDEBAR_DEFAULT_WIDTH;
+  const parsed = Number(localStorage.getItem(CHAT_SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : CHAT_SIDEBAR_DEFAULT_WIDTH;
+};
 
 /**
  * Suspense fallback — matches the ChatLoadingSkeleton layout so there's no
@@ -72,16 +97,13 @@ function SidebarSkeleton() {
       {/* Real prompt input — disabled during loading */}
       <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
         <div className="mx-auto max-w-3xl">
-          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
             <PromptInputTextarea placeholder="Message Polpo..." disabled />
             <PromptInputFooter>
               <div className="flex items-center gap-1" />
               <PromptInputSubmit disabled />
             </PromptInputFooter>
           </PromptInput>
-          <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-            @ to mention · Enter to send · Shift+Enter for new line.
-          </p>
         </div>
       </div>
     </div>
@@ -91,16 +113,57 @@ function SidebarSkeleton() {
 export function ChatSidebar() {
   const sidebarOpen = useSidebarOpen();
   const { pathname } = useLocation();
+  const [width, setWidth] = useState(readStoredSidebarWidth);
 
   // Auto-hide on /chat — the full-page chat is already visible
   const isOnChatPage = pathname === "/chat";
   const visible = sidebarOpen && !isOnChatPage;
 
+  useEffect(() => {
+    localStorage.setItem(CHAT_SIDEBAR_WIDTH_KEY, String(width));
+  }, [width]);
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setWidth(clampSidebarWidth(startWidth + startX - moveEvent.clientX));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }, [width]);
+
   if (!visible) return null;
 
   return (
-    <div className="hidden lg:flex flex-col w-[480px] shrink-0 h-full py-2 pr-2">
-      <div className="flex flex-col flex-1 min-h-0 rounded-xl border bg-card/50 overflow-hidden">
+    <div
+      className="relative hidden lg:flex flex-col shrink-0 h-full border-l border-border/50 bg-card/50"
+      style={{ width }}
+    >
+      <button
+        type="button"
+        aria-label="Resize chat sidebar"
+        onPointerDown={startResize}
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
+      >
+        <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+      </button>
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <Suspense fallback={<SidebarSkeleton />}>
           <ChatPage compact />
         </Suspense>

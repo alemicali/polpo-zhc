@@ -1,8 +1,12 @@
 import { existsSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../core/constants.js";
+import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { SyncScheduler } from "./sync-scheduler.js";
+import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
+import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
 
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
@@ -27,19 +31,33 @@ export class PolpoServer {
   private orchestrator!: Orchestrator;
   private sseBridge!: SSEBridge;
   private server: ReturnType<typeof serve> | null = null;
+  private terminalWs: TerminalWebSocketHandle | null = null;
+  private codeServerManager: CodeServerManager | null = null;
+  private codeServerWs: { close: () => void } | null = null;
+  private syncScheduler: SyncScheduler | null = null;
+  private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
+  private supervisorRun: Promise<void> | null = null;
 
   constructor(private config: ServerConfig) {}
 
   /** Initialize the orchestrator (called at start or after setup completes). */
   private async initOrchestrator(overrideWorkDir?: string): Promise<void> {
     const workDir = resolve(overrideWorkDir ?? this.config.workDir);
+    const polpoDir = getPolpoDir(workDir);
+    const persistedConfig = loadPolpoConfig(polpoDir);
     const defaultTeam: Team = {
       name: "default",
       agents: [{ name: "dev-1", role: "developer" }],
     };
+    const hasSeededStores = existsSync(join(polpoDir, "teams.json")) || existsSync(join(polpoDir, "agents.json"));
+    const teams = persistedConfig?.teams?.length
+      ? persistedConfig.teams as Team[]
+      : hasSeededStores
+        ? []
+      : [defaultTeam];
 
-    await this.orchestrator.initInteractive(basename(workDir), defaultTeam);
+    await this.orchestrator.initInteractive(persistedConfig?.project ?? basename(workDir), teams);
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -53,12 +71,35 @@ export class PolpoServer {
   async completeSetup(workDir: string): Promise<void> {
     this.orchestrator.resetWorkDir(workDir);
     await this.initOrchestrator(workDir);
+    this.ensureSupervisorRunning("setup complete");
+  }
+
+  private ensureSupervisorRunning(reason: string): void {
+    if (this.config.autoStart === false) return;
+    if (!this.orchestrator?.isInitialized) return;
+    if (this.supervisorRun) return;
+
+    this.supervisorRun = this.orchestrator.run()
+      .catch((err) => {
+        console.error(`[PolpoServer] Supervisor loop crashed (${reason}):`, err instanceof Error ? err.message : err);
+      })
+      .finally(() => {
+        this.supervisorRun = null;
+      });
   }
 
   /** Start the server: init orchestrator if config exists, bind HTTP. */
   async start(): Promise<void> {
     const workDir = resolve(this.config.workDir);
     this.orchestrator = new Orchestrator(workDir);
+    this.codeServerManager = new CodeServerManager(this.orchestrator);
+    const wakeSupervisor = () => this.ensureSupervisorRunning("task event");
+    this.orchestrator.on("task:created", wakeSupervisor);
+    this.orchestrator.on("task:updated", wakeSupervisor);
+    this.shutdownHandlers.push(() => {
+      this.orchestrator.off("task:created", wakeSupervisor);
+      this.orchestrator.off("task:updated", wakeSupervisor);
+    });
 
     const configPath = join(getPolpoDir(workDir), "polpo.json");
     const hasConfig = existsSync(configPath);
@@ -66,27 +107,47 @@ export class PolpoServer {
     if (hasConfig) {
       await this.initOrchestrator();
 
-      if (this.config.autoStart !== false) {
-        this.orchestrator.run().catch((err) => {
-          console.error(`[PolpoServer] Supervisor loop crashed:`, err instanceof Error ? err.message : err);
-        });
-      }
+      this.ensureSupervisorRunning("startup");
     } else {
       // No config yet — placeholder SSE bridge, orchestrator will be initialized after setup
       this.sseBridge = new SSEBridge(this.orchestrator);
     }
+
+    // Auto-push scheduler — reads `<polpoDir>/sync-config.json` so its
+    // state survives restarts. Activates only when the schedule's
+    // `enabled` flag is true and R2 is configured.
+    this.syncScheduler = new SyncScheduler(
+      getPolpoDir(workDir),
+      workDir,
+      () => this.syncRunning,
+    );
+    this.syncScheduler.reload();
 
     const app = createApp(this.orchestrator, this.sseBridge, {
       apiKeys: this.config.apiKeys,
       corsOrigins: this.config.corsOrigins,
       workDir,
       onInitialize: (workDir: string) => this.completeSetup(workDir),
+      wakeSupervisor: () => this.ensureSupervisorRunning("task route"),
+      codeServerManager: this.codeServerManager,
+      // Late-bound: terminalWs is created after this createApp() call, but
+      // the Processes panel only reads it at request time.
+      getTerminalHandle: () => this.terminalWs,
+      syncScheduler: this.syncScheduler,
     });
 
     this.server = serve({
       fetch: app.fetch,
       port: this.config.port,
       hostname: this.config.host,
+    });
+    this.terminalWs = attachTerminalWebSocket(this.server, this.orchestrator, {
+      apiKeys: this.config.apiKeys,
+      workDir,
+    });
+    this.codeServerWs = attachCodeServerWebSocket(this.server, this.codeServerManager, this.orchestrator, {
+      apiKeys: this.config.apiKeys,
+      workDir,
     });
 
     const base = `http://${this.config.host}:${this.config.port}`;
@@ -110,6 +171,12 @@ export class PolpoServer {
   async stop(): Promise<void> {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
+    this.terminalWs?.close();
+    this.terminalWs = null;
+    this.codeServerWs?.close();
+    this.codeServerWs = null;
+    this.syncScheduler?.stop();
+    this.codeServerManager?.close();
     if (this.orchestrator?.isInitialized) {
       await this.orchestrator.gracefulStop();
     }

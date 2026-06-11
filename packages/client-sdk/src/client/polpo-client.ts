@@ -48,6 +48,10 @@ import type {
   OpenFilePayload,
   NavigateToPayload,
   OpenTabPayload,
+  SetDesignPayload,
+  WidgetRenderPayload,
+  WhatsAppPreviewPayload,
+  EmailPreviewPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -86,6 +90,14 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
   /** Session ID assigned by the server. Available after the first `next()` call. */
   sessionId: string | null = null;
 
+  /**
+   * Turn ID assigned by the server (`x-turn-id` header). Identifies this
+   * specific in-flight completion turn so a disconnected client can come
+   * back and resume from where it left off via /chat/completions/resume/:turnId.
+   * Available after the first `next()` call.
+   */
+  turnId: string | null = null;
+
   /** If the stream ended with finish_reason "ask_user", this contains the questions. */
   askUser: AskUserPayload | null = null;
 
@@ -103,6 +115,18 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "open_tab", this contains the URL to open. */
   openTab: OpenTabPayload | null = null;
+
+  /** If the stream ended with finish_reason "set_design", this contains appearance overrides. */
+  setDesign: SetDesignPayload | null = null;
+
+  /** If the stream ended with finish_reason "widget_render", this contains the inline widget. */
+  widgetRender: WidgetRenderPayload | null = null;
+
+  /** If the stream ended with finish_reason "whatsapp_preview", this contains the proposed WhatsApp message. */
+  whatsappPreview: WhatsAppPreviewPayload | null = null;
+
+  /** If the stream ended with finish_reason "email_preview", this contains the proposed email. */
+  emailPreview: EmailPreviewPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -158,6 +182,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       headers,
       body: JSON.stringify({ ...body, stream: true }),
       signal: this.abortController.signal,
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -168,8 +193,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       );
     }
 
-    // Capture session ID from response header
+    // Capture session/turn IDs from response headers
     this.sessionId = res.headers.get("x-session-id");
+    this.turnId = res.headers.get("x-turn-id");
 
     this.reader = res.body?.getReader() ?? null;
     if (!this.reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
@@ -219,6 +245,22 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             // Capture open_tab payload from the chunk
             if (choice?.finish_reason === "open_tab" && choice.open_tab) {
               this.openTab = choice.open_tab;
+            }
+            // Capture set_design payload from the chunk
+            if (choice?.finish_reason === "set_design" && choice.set_design) {
+              this.setDesign = choice.set_design;
+            }
+            // Capture widget_render payload from the chunk
+            if (choice?.finish_reason === "widget_render" && choice.widget_render) {
+              this.widgetRender = choice.widget_render;
+            }
+            // Capture whatsapp_preview payload from the chunk
+            if (choice?.finish_reason === "whatsapp_preview" && choice.whatsapp_preview) {
+              this.whatsappPreview = choice.whatsapp_preview;
+            }
+            // Capture email_preview payload from the chunk
+            if (choice?.finish_reason === "email_preview" && choice.email_preview) {
+              this.emailPreview = choice.email_preview;
             }
             yield chunk;
           } catch {
@@ -276,6 +318,7 @@ export class PolpoClient {
       method,
       headers: { ...this.headers, "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "include",
     });
     const json = (await res.json()) as ApiResult<T>;
     if (!json.ok) {
@@ -480,6 +523,10 @@ export class PolpoClient {
     service: string;
     type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
     label?: string;
+    /** Logical mailbox account (groups SMTP+IMAP of the same mailbox). */
+    account?: string;
+    /** Other agent names allowed to use this credential (shared). */
+    allowedAgents?: string[];
     credentials: Record<string, string>;
   }): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.post<{ agent: string; service: string; type: string; keys: string[] }>("/vault/entries", req);
@@ -492,7 +539,7 @@ export class PolpoClient {
   patchVaultEntry(
     agent: string,
     service: string,
-    patch: { type?: string; label?: string; credentials?: Record<string, string> },
+    patch: { type?: string; label?: string; account?: string; allowedAgents?: string[]; credentials?: Record<string, string> },
   ): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
       `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,
@@ -607,8 +654,8 @@ export class PolpoClient {
     return this.del<PolpoConfig>(`/config/channels/${encodeURIComponent(name)}`);
   }
 
-  testChannel(name: string): Promise<{ success: boolean }> {
-    return this.post<{ success: boolean }>(`/config/channels/${encodeURIComponent(name)}/test`);
+  testChannel(name: string): Promise<{ success: boolean; error?: string }> {
+    return this.post<{ success: boolean; error?: string }>(`/config/channels/${encodeURIComponent(name)}/test`);
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {
@@ -706,6 +753,7 @@ export class PolpoClient {
       method: "POST",
       headers,
       body: JSON.stringify({ ...body, stream: false }),
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));

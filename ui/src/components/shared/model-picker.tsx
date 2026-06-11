@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, Zap, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 
 // ── Types ──
 
@@ -160,12 +161,13 @@ export function ModelPicker({
                   type="button"
                   onClick={() => setProviderFilter(prov === providerFilter ? "all" : prov)}
                   className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1",
+                    "px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1.5",
                     providerFilter === prov
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-accent",
                   )}
                 >
+                  <ProviderIcon name={prov} size={12} />
                   <span className="capitalize">{prov}</span>
                   <span className="opacity-60">({count})</span>
                   {source && (
@@ -216,6 +218,7 @@ export function ModelPicker({
                   )}
                 >
                   <div className="flex items-center gap-2 min-w-0">
+                    <ProviderIcon name={m.provider} size={16} />
                     <span className="font-medium truncate">{m.name}</span>
                     <span className="text-xs text-muted-foreground shrink-0">{m.provider}</span>
                     {m.reasoning && (

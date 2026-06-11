@@ -33,7 +33,12 @@ export function useAgents(): UseAgentsReturn {
     () => store.getServerSnapshot().agents,
   );
 
-  const [teams, setTeams] = useState<Team[]>([]);
+  const teams = useSyncExternalStore(
+    store.subscribe,
+    () => store.getSnapshot().teams,
+    () => store.getServerSnapshot().teams,
+  );
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -41,7 +46,7 @@ export function useAgents(): UseAgentsReturn {
     try {
       const [a, t] = await Promise.all([client.getAgents(), client.getTeams()]);
       store.setAgents(a);
-      setTeams(t);
+      store.setTeams(t);
     } catch (err) {
       setError(err as Error);
     }

@@ -8,7 +8,9 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { errorMiddleware } from "./middleware/error.js";
+import { instanceAuthMiddleware } from "./middleware/instance-auth.js";
 import { rateLimitMiddleware } from "./middleware/rate-limit.js";
+import { isInstanceAuthEnabled } from "./auth/instance-auth.js";
 // Shared routes from @polpo-ai/server (edge-compatible, single source of truth)
 import {
   healthRoutes,
@@ -28,6 +30,7 @@ import {
   eventRoutes,
   configRoutes,
   attachmentRoutes,
+  countsRoutes,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes } from "./routes/config.js";
@@ -35,14 +38,35 @@ import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
+import { instanceAuthRoutes } from "./routes/instance-auth.js";
 import { fileRoutes } from "./routes/files.js";
+import { gitRoutes } from "./routes/git.js";
+import { audioRoutes } from "./routes/audio.js";
+import { pushRoutes } from "./routes/push.js";
+import { expoPushRoutes } from "./routes/expo-push.js";
+import { whatsappRoutes } from "./routes/whatsapp.js";
+import { emailRoutes } from "./routes/email.js";
+import { codingRoutes } from "./routes/coding.js";
+import { syncRoutes } from "./routes/sync.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
+import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
+import type { CodeServerManager } from "./code-server.js";
+import type { SyncScheduler } from "./sync-scheduler.js";
 
 export interface AppOptions {
   apiKeys?: string[];
   corsOrigins?: string[];
   workDir?: string;
   onInitialize?: (workDir: string) => Promise<void>;
+  wakeSupervisor?: () => void;
+  codeServerManager?: CodeServerManager;
+  /** Closure rather than a direct ref because the terminal websocket is
+   * attached *after* the Hono app is constructed (it needs the bound
+   * server). The "Processes" panel uses this to enumerate live ptys. */
+  getTerminalHandle?: () => TerminalWebSocketHandle | null | undefined;
+  /** Hands the long-lived scheduler to /sync routes so flipping the
+   * enabled toggle re-arms the cron without a server restart. */
+  syncScheduler?: SyncScheduler;
 }
 
 /**
@@ -55,6 +79,8 @@ export interface AppOptions {
  */
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
+  const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
+  const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -64,7 +90,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   const corsExposeHeaders = ["x-session-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
-    app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders }));
+    app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
     // Default: restrict to localhost origins only
     app.use("*", cors({
@@ -77,6 +103,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176",
       ],
       exposeHeaders: corsExposeHeaders,
+      credentials: true,
     }));
   }
 
@@ -87,18 +114,46 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
     app.route("/api/v1/config", publicConfigRoutes(orchestrator, opts.workDir, opts.onInitialize));
+    // NB: mounted at /auth/instance to avoid path collision with the
+    // provider-auth-status routes (/api/v1/auth/status) that live behind
+    // the auth gate. Instance-auth deals with this Polpo *instance*'s
+    // session/login; provider-auth-status deals with LLM provider keys.
+    app.route("/api/v1/auth/instance", instanceAuthRoutes(activePolpoDir));
   }
 
   // Filesystem browsing — always available (used by setup wizard path picker)
+  if (opts?.workDir) {
+    const setupAwareInstanceAuth = instanceAuthMiddleware(activePolpoDir, opts.apiKeys ?? []);
+    app.use("/api/v1/filesystem", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/filesystem/*", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/providers", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+    app.use("/api/v1/providers/*", async (c, next) => {
+      if (!orchestrator.isInitialized) return next();
+      return setupAwareInstanceAuth(c, next);
+    });
+  }
+
+  // Filesystem browsing — always available during setup (used by path picker)
   app.route("/api/v1/filesystem", filesystemRoutes());
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
-    const polpoDir = getPolpoDir(opts.workDir);
-    app.route("/api/v1/providers", providerRoutes(polpoDir));
+    app.route("/api/v1/providers", providerRoutes(activePolpoDir));
   }
 
   // OpenAI-compatible chat completions
+  if (opts?.workDir) {
+    app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
+  }
   app.route("/v1/chat/completions", completionRoutes(() => ({
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
@@ -113,21 +168,129 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const r = agentConfig.reasoning ?? reasoning;
       return { model: m, streamOpts: buildStreamOpts(apiKey, r, m.maxTokens) };
     },
-    buildAgentPrompt: (agentConfig: any) => {
-      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir());
+    buildAgentPrompt: async (agentConfig: any) => {
+      // Pull the agent's mailboxes from vault so the prompt enumerates
+      // them (drives the `account` selector in email_* tools). Failures
+      // here degrade gracefully: prompt is rendered without the section.
+      let mailboxes: any[] | undefined;
+      try {
+        const entries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
+        const { resolveAgentVault } = await import("../vault/index.js");
+        mailboxes = resolveAgentVault(entries).listMailboxes();
+      } catch { /* ignore — keep prompt without mailboxes section */ }
+      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes);
     },
     resolveAgentTools: async (agentConfig: any) => {
-      const { createSystemTools } = await import("../tools/system-tools.js");
+      const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
+      const {
+        CLIENT_SIDE_CHAT_TOOLS,
+        isClientSideChatTool,
+        isSideEffectGated,
+        renderWidgetTool,
+        validateRenderWidgetArgs,
+        setSessionTitleTool,
+      } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
+      const { join } = await import("node:path");
       const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
-      const tools: any[] = createSystemTools(o.getAgentWorkDir(), agentConfig.allowedTools, undefined, undefined, vault);
+      // Mirror del path task (src/adapters/engine.ts) — se l'agent dichiara
+      // tool estesi (browser_*, email_*, image_*, video_*, audio_*, excel_*,
+      // pdf_*, docx_*, search_*, whatsapp_*, phone_*) li registriamo anche
+      // in chat completions. Senza questo l'agente in chat poteva solo
+      // read/write/bash/grep/glob/ls/http_fetch/http_download mentre nei
+      // task aveva accesso completo — incoerenza intenzionalmente rimossa.
+      // Performance: la chiamata sotto cade nel core-only path se
+      // allowedTools non contiene nessun prefisso esteso (createAllTools
+      // attiva ogni categoria solo quando richiesta).
+      const polpoDir = o.getPolpoDir();
+      const browserProfileDir = polpoDir
+        ? join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name)
+        : undefined;
+      // WhatsApp send wiring: il WhatsAppBridge live dell'orchestrator
+      // espone sendMessage / sendMediaMessage / markRead. createAllTools
+      // attiva la categoria whatsapp_* solo se store + sendMessage sono
+      // entrambi presenti; sendMedia e markRead sono opzionali ma
+      // necessari per `whatsapp_send_file` e per i read-receipt
+      // (`markRead=true` su whatsapp_read). Bind a tutti e tre se il
+      // bridge è attivo.
+      const waBridge = o.getWhatsAppBridge?.();
+      const whatsappSendMessage = waBridge
+        ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
+        : undefined;
+      const whatsappSendMedia = waBridge
+        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean }) =>
+            waBridge.sendMediaMessage(jid, opts)
+        : undefined;
+      const whatsappMarkRead = waBridge
+        ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
+            waBridge.markRead(keys)
+        : undefined;
+      const tools: any[] = await createAllTools({
+        cwd: o.getAgentWorkDir(),
+        allowedTools: agentConfig.allowedTools,
+        allowedPaths: undefined,
+        browserSession: agentConfig.name,
+        browserProfileDir,
+        vault,
+        emailAllowedDomains: agentConfig.emailAllowedDomains,
+        outputDir: undefined,
+        whatsappStore: o.getWhatsAppStore?.(),
+        whatsappSendMessage,
+        whatsappSendMedia,
+        whatsappMarkRead,
+        polpoDir,
+      });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
+      const existingToolNames = new Set(tools.map((tool: any) => tool.name));
+      for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
+        if (!existingToolNames.has(tool.name)) tools.push(tool);
+      }
+      // Session meta — every agent gets `set_session_title` so the
+      // first-turn nudge in completions.ts has somewhere to land. The
+      // executor returns a placeholder string; the actual rename is
+      // intercepted server-side in completions.ts before this executor
+      // is invoked. See: orchestrator-tools.ts:setSessionTitleTool.
+      if (!existingToolNames.has("set_session_title")) {
+        tools.push(setSessionTitleTool);
+      }
+      // Opt-in `render_widget` per agente, via allowedTools (es.
+      // `["read","write","render_widget"]` in polpo.json). NON è nei
+      // CLIENT_SIDE_CHAT_TOOLS perché è un display tool potente: lo
+      // diamo solo agli agent che lo dichiarano esplicitamente. Side-
+      // effect del chunk widget_render emesso dal route in
+      // packages/server/src/routes/completions.ts (case `name ===
+      // "render_widget"` nel for-loop tool execution) — funziona
+      // identico a orchestrator mode.
+      const allowsRenderWidget = Array.isArray(agentConfig.allowedTools)
+        && agentConfig.allowedTools.includes("render_widget");
+      if (allowsRenderWidget && !existingToolNames.has("render_widget")) {
+        tools.push(renderWidgetTool);
+      }
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+        if (name === "render_widget") {
+          // Validate args; errori sono restituiti come tool result così
+          // il modello può ritentare nello stesso turn (stesso pattern
+          // dell'orchestrator). On success il route emette poi il chunk
+          // widget_render dopo questo executor.
+          const err = validateRenderWidgetArgs(args);
+          if (err) return err;
+          return "Widget rendered to the user. Continue with prose only if necessary.";
+        }
+        if (isClientSideChatTool(name)) {
+          return `Client-side tool ${name} completed.`;
+        }
+        if (name === "set_session_title") {
+          // Normally intercepted in completions.ts before reaching this
+          // executor — this fallback only fires if the intercept missed
+          // (defensive). The rename itself is a no-op here; the model
+          // gets a placeholder result and the UI sees no chunk.
+          return `Session title acknowledged (rename will be applied by server intercept).`;
+        }
         const tool = toolMap.get(name);
         if (!tool) return `Error: Unknown tool "${name}"`;
         try {
@@ -137,7 +300,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           return `Error: ${err.message}`;
         }
       };
-      return { tools, executor };
+      // Side-effect gate: in CHAT mode (real-time conversation) we
+      // intercept whatsapp_send / whatsapp_send_file / email_send and
+      // emit a preview chunk so the user can confirm before the message
+      // actually goes out. The TASK runner is unaffected — tasks are
+      // pre-authorised by the user when they're queued. See
+      // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
+      const isInteractive = (name: string) => isClientSideChatTool(name) || isSideEffectGated(name);
+      return { tools, executor, isInteractive };
     },
     streamLLM: streamSimple as any,
     resolveOrchestratorContext: async () => {
@@ -164,8 +334,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // ── Authenticated routes (require initialized orchestrator) ───────────
 
   const authed = new OpenAPIHono();
-  if (opts?.apiKeys && opts.apiKeys.length > 0) {
+  if (!isInstanceAuthEnabled() && opts?.apiKeys && opts.apiKeys.length > 0) {
     authed.use("*", authMiddleware(opts.apiKeys));
+  }
+  if (opts?.workDir) {
+    authed.use("*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
 
   // Gate: orchestrator must be initialized for these routes
@@ -185,8 +358,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   const o = orchestrator; // short alias
 
+  authed.route("/counts", countsRoutes(() => ({
+    getAllTasks: () => o.getStore().getAllTasks(),
+    getAllMissions: () => o.getAllMissions(),
+    getAgents: () => o.getAgents(),
+  })));
+
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),
+    wakeSupervisor: opts?.wakeSupervisor,
     addTask: (opts: any) => o.addTask(opts),
     deleteTask: (id: string) => o.deleteTask(id),
     retryTask: (id: string) => o.retryTask(id),
@@ -323,11 +503,62 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (event: string, data: any) => o.emit(event as any, data),
   })));
 
+  authed.route("/audio", audioRoutes());
+
+  authed.route("/git", gitRoutes(() => ({
+    workDir: o.getWorkDir(),
+  })));
+
+  authed.route("/push", pushRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+  })));
+
+  authed.route("/expo-push", expoPushRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+  })));
+
+  authed.route("/whatsapp", whatsappRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    reloadConfig: () => o.reloadConfig(),
+    // Approval-gate /send and /send-file need the live WhatsAppBridge
+    // (resolved through the orchestrator). Login flows still work without
+    // it because they spin up their own bridge per session.
+    orchestrator: o,
+  })));
+
+  // Approval-gate REST: invoked by the chat UI after the user confirms
+  // an `email_send` preview. Re-uses the same SMTP code path as the
+  // email_send agent tool (sendEmail() in src/tools/email-tools.ts).
+  authed.route("/email", emailRoutes(() => ({ orchestrator: o })));
+
+  authed.route("/coding", codingRoutes(() => ({
+    codingSessionStore: o.getCodingSessionStore(),
+    codeServerManager: opts?.codeServerManager,
+    polpoDir: o.getPolpoDir(),
+    getTerminalHandle: opts?.getTerminalHandle,
+  })));
+
+  authed.route("/sync", syncRoutes(() => ({
+    polpoDir: o.getPolpoDir(),
+    workDir: o.getWorkDir(),
+    scheduler: opts?.syncScheduler,
+  })));
+
   authed.route("/attachments", attachmentRoutes(() => ({
     attachmentStore: new FileAttachmentStore(o.getPolpoDir()),
     fs: new NodeFileSystem(),
     workDir: o.getWorkDir(),
   })));
+
+  authed.get("/terminal/status", (c) => c.json({
+    ok: true,
+    data: {
+      enabled: isTerminalEnabled(),
+      workDir: o.getWorkDir(),
+      agentWorkDir: o.getAgentWorkDir(),
+      shell: process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash",
+    },
+  }));
 
   authed.route("/", stateRoutes(() => ({
     taskStore: o.getStore(),

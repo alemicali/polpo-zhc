@@ -198,6 +198,42 @@ export interface AgentIdentity {
   socials?: Record<string, string>;
 }
 
+export interface Condition {
+  expression: string;
+}
+
+export interface LoopOutputConfig {
+  schema?: unknown;
+}
+
+export interface LoopConfig {
+  name?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  model?: string;
+  reasoning?: ReasoningLevel | string;
+  maxTurns?: number;
+  stopWhen?: Condition;
+  output?: LoopOutputConfig;
+}
+
+export interface SwitchCase {
+  when: string;
+  steps: PipelineStep[];
+}
+
+export type PipelineStep =
+  | { loop: string; when?: string }
+  | { parallel: PipelineStep[]; join?: "all" | "any" | number; when?: string }
+  | { switch: { cases: SwitchCase[]; default?: { steps: PipelineStep[] } }; when?: string }
+  | { human: string; output?: LoopOutputConfig; notify?: string[]; when?: string };
+
+export interface Pipeline {
+  mode?: "sequential" | "parallel";
+  context?: "shared";
+  steps: PipelineStep[];
+}
+
 export interface AgentConfig {
   name: string;
   /** ISO timestamp of when this agent was created / added to the team. */
@@ -217,11 +253,19 @@ export interface AgentConfig {
   reportsTo?: string;
   systemPrompt?: string;
   skills?: string[];
+  /** Suggested starter prompts shown when opening a new chat with this agent. */
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
   /** Reasoning / deep thinking level for this agent's LLM calls. */
   reasoning?: ReasoningLevel;
+  /** Runtime profile used by deterministic loop execution. */
+  runtime?: string;
+  /** Named deterministic loops available to this agent. */
+  loops?: Record<string, LoopConfig>;
+  /** Optional deterministic pipeline that composes the agent's loops. */
+  pipeline?: Pipeline;
   volatile?: boolean;
   missionGroup?: string;
 
@@ -231,6 +275,17 @@ export interface AgentConfig {
   browserProfile?: string;
   /** Allowed recipient email domains for email_send. Overrides global setting. */
   emailAllowedDomains?: string[];
+}
+
+export type AgentSuggestion = string | AgentSuggestionConfig;
+
+export interface AgentSuggestionConfig {
+  /** Short label shown in the UI. */
+  title: string;
+  /** Optional prompt sent to the agent. Defaults to title. */
+  prompt?: string;
+  /** Optional secondary text shown below the title. */
+  description?: string;
 }
 
 export interface AgentActivity {
@@ -448,7 +503,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
 export type NotificationStatus = "sent" | "failed";
 
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
@@ -471,6 +526,11 @@ export interface NotificationChannelConfig {
   profileDir?: string;
   url?: string;
   headers?: Record<string, string>;
+  vapidPublicKey?: string;
+  vapidPrivateKey?: string;
+  vapidSubject?: string;
+  ttl?: number;
+  urgency?: "very-low" | "low" | "normal" | "high";
   host?: string;
   port?: number;
   from?: string;
@@ -916,6 +976,7 @@ export interface AddAgentRequest {
   allowedTools?: string[];
   systemPrompt?: string;
   skills?: string[];
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   /** Max concurrent tasks for this agent. */
   maxConcurrency?: number;
@@ -928,6 +989,9 @@ export interface AddAgentRequest {
   // NOTE: Vault credentials managed via encrypted store, not in API body.
   /** Org chart: who this agent reports to. */
   reportsTo?: string;
+  runtime?: string;
+  loops?: Record<string, LoopConfig>;
+  pipeline?: Pipeline;
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
   // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
@@ -940,11 +1004,15 @@ export interface UpdateAgentRequest {
   allowedPaths?: string[];
   systemPrompt?: string;
   skills?: string[];
+  suggestions?: AgentSuggestion[];
   maxTurns?: number;
   maxConcurrency?: number;
   identity?: AgentIdentity;
   reportsTo?: string;
   reasoning?: string;
+  runtime?: string;
+  loops?: Record<string, LoopConfig>;
+  pipeline?: Pipeline;
   browserProfile?: string;
   emailAllowedDomains?: string[];
   /** Move agent to a different team. */
@@ -1106,6 +1174,8 @@ export interface ChatMessage {
   ts: string;
   /** Tool calls executed during this assistant message (only for role=assistant) */
   toolCalls?: ToolCallEvent[];
+  /** Ordered assistant render timeline preserving text/reasoning/tool interleaving. */
+  segments?: ChatMessageSegment[];
 }
 
 // === Chat Completions types (OpenAI-compatible) ===
@@ -1149,7 +1219,7 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: { role: "assistant"; content: string };
-  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab";
+  finish_reason: "stop" | "length" | "ask_user" | "mission_preview" | "vault_preview" | "open_file" | "navigate_to" | "open_tab" | "set_design" | "widget_render" | "whatsapp_preview" | "email_preview";
   /** Present when finish_reason is "ask_user" — structured questions for the user. */
   ask_user?: AskUserPayload;
   /** Present when finish_reason is "mission_preview" — proposed mission for user review. */
@@ -1162,6 +1232,14 @@ export interface ChatCompletionChoice {
   navigate_to?: NavigateToPayload;
   /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
   open_tab?: OpenTabPayload;
+  /** Present when finish_reason is "set_design" — apply local appearance overrides. */
+  set_design?: SetDesignPayload;
+  /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
+  widget_render?: WidgetRenderPayload;
+  /** Present when finish_reason is "whatsapp_preview" — proposed WhatsApp message awaiting user confirmation. */
+  whatsapp_preview?: WhatsAppPreviewPayload;
+  /** Present when finish_reason is "email_preview" — proposed email awaiting user confirmation. */
+  email_preview?: EmailPreviewPayload;
 }
 
 export interface ChatCompletionResponse {
@@ -1186,11 +1264,18 @@ export interface ChatCompletionChunkDelta {
 
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
+export type ChatMessageSegment =
+  | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
+  | { type: "tool"; toolId: string };
+
 export interface ToolCallEvent {
   /** Tool call ID from the LLM */
   id: string;
   /** Tool name (e.g. "create_task", "get_status") */
   name: string;
+  /** Raw partial JSON arguments while the model is still generating the tool call. */
+  argumentsText?: string;
   /** Tool input arguments (present when state is "calling") */
   arguments?: Record<string, unknown>;
   /** Tool execution result (present when state is "completed" or "error") */
@@ -1220,6 +1305,14 @@ export interface ChatCompletionChunk {
     navigate_to?: NavigateToPayload;
     /** Present when finish_reason is "open_tab" — open a URL in a new browser tab. */
     open_tab?: OpenTabPayload;
+    /** Present when finish_reason is "set_design" — apply local appearance overrides. */
+    set_design?: SetDesignPayload;
+    /** Present when finish_reason is "widget_render" — render an inline HTML widget. */
+    widget_render?: WidgetRenderPayload;
+    /** Present when finish_reason is "whatsapp_preview" — proposed WhatsApp message. */
+    whatsapp_preview?: WhatsAppPreviewPayload;
+    /** Present when finish_reason is "email_preview" — proposed email. */
+    email_preview?: EmailPreviewPayload;
     /** Present when the server is executing a tool call. */
     tool_call?: ToolCallEvent;
     /** Present when the model is emitting thinking/reasoning tokens. */
@@ -1281,6 +1374,21 @@ export interface VaultEntryMeta {
   type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
   /** Human-readable label */
   label?: string;
+  /** Logical mailbox account this entry belongs to. Same value across the
+   *  SMTP and IMAP entries that form one mailbox. When null, falls back
+   *  to `service` for grouping purposes. */
+  account?: string;
+  /** Other agent names allowed to use this credential. Empty/undefined →
+   *  owner-private. Owner is implicit (the agent on the PK) and not listed. */
+  allowedAgents?: string[];
+  /** When the entry is inherited from another agent via `allowedAgents`,
+   *  this carries the owner's name. Populated only by listVaultEntries when
+   *  the row was shared; the UI uses it to render a read-only "shared from
+   *  X" badge. NEVER stored — computed at read-time. */
+  sharedFrom?: string;
+  /** True when the entry is inherited (sharedFrom !== undefined). The UI
+   *  uses this to gate edit/delete actions. */
+  readOnly?: boolean;
   /** Credential field names (e.g. ["host", "port", "user", "pass"]) — values are NOT exposed */
   keys: string[];
 }
@@ -1364,4 +1472,98 @@ export interface OpenTabPayload {
   url: string;
   /** Optional human-readable label */
   label?: string;
+}
+
+export interface DesignThemePayload {
+  /** Primary color as 6-digit hex. */
+  primary?: string;
+  /** Secondary/accent color as 6-digit hex. */
+  secondary?: string;
+  /** Main text color as 6-digit hex. */
+  text?: string;
+  /** Roundedness in px, 0-24. */
+  radius?: number;
+  /** Any valid CSS font-family stack. */
+  fontFamily?: string;
+}
+
+/** Payload for set_design — proposes local appearance overrides in the browser. */
+export interface SetDesignPayload extends DesignThemePayload {
+  /** Enable/disable appearance overrides. Defaults to true when an override value is present. */
+  enabled?: boolean;
+  /** Light-mode override values. */
+  light?: DesignThemePayload;
+  /** Dark-mode override values. */
+  dark?: DesignThemePayload;
+}
+
+/** Payload for widget_render — display-only inline interactive HTML widget. */
+export interface WidgetRenderPayload {
+  /** Self-contained HTML to render inside a sandboxed iframe. */
+  html: string;
+  /** Optional title shown in the card header. Ignored if `chrome` is false. */
+  title?: string | null;
+  /** Brief alt text / a11y description. */
+  description?: string | null;
+  /** Show card chrome (border + header). Default true. */
+  chrome?: boolean;
+  /** Opt-in chunk-by-chunk live preview during stream. Default false. */
+  stream?: boolean;
+}
+
+// === WhatsApp Preview (interactive approval gate before send) ===
+
+/** Payload for whatsapp_preview — proposed outbound WhatsApp message. The
+ *  user must explicitly confirm via the UI before the bridge actually
+ *  sends. Confirm path: POST /api/v1/whatsapp/send (text) or
+ *  POST /api/v1/whatsapp/send-file (media). */
+export interface WhatsAppPreviewPayload {
+  /** Discriminator: "text" → whatsapp_send, "file" → whatsapp_send_file. */
+  kind: "text" | "file";
+  /** Recipient phone, contact name, or JID — passed straight from the
+   *  tool args. The REST endpoint will resolve it to a JID using the
+   *  WhatsApp store contact map. */
+  to: string;
+  /** Text body (kind="text" only). */
+  message?: string;
+  /** Local file path (kind="file" only) — relative to the agent workdir
+   *  unless absolute, sandboxed by allowedPaths at send time. */
+  path?: string;
+  /** Optional caption for image / video / document attachments. */
+  caption?: string;
+  /** Force the WhatsApp media kind. Default "auto" (sniffed from MIME). */
+  mediaKind?: string;
+  /** Override MIME type. */
+  mimeType?: string;
+  /** Override displayed filename for documents. */
+  fileName?: string;
+  /** Send as view-once (image/video only). */
+  viewOnce?: boolean;
+}
+
+// === Email Preview (interactive approval gate before send) ===
+
+/** Payload for email_preview — proposed outbound email. The user must
+ *  explicitly confirm via the UI before SMTP fires. Confirm path:
+ *  POST /api/v1/email/send. The REST handler re-validates
+ *  emailAllowedDomains at send time. */
+export interface EmailPreviewPayload {
+  /** Recipient(s) — string or array of strings. */
+  to: string | string[];
+  /** Subject line. */
+  subject: string;
+  /** Body content (plain text or HTML). */
+  body: string;
+  /** Treat body as HTML (default: auto-detect from `<...>` markers). */
+  html?: boolean;
+  /** CC recipients. */
+  cc?: string | string[];
+  /** BCC recipients. */
+  bcc?: string | string[];
+  /** Sender override (otherwise resolved from vault / env). */
+  from?: string;
+  /** Reply-To override. */
+  reply_to?: string;
+  /** File attachments — paths sandboxed by allowedPaths at send time. */
+  attachments?: Array<{ path: string; filename?: string }>;
 }

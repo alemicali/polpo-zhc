@@ -54,4 +54,15 @@ export interface SpawnContext {
   whatsappStore?: WhatsAppStore;
   /** WhatsApp send function — for whatsapp_send agent tool. */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
+  /** WhatsApp media send function — for whatsapp_send_file agent tool. */
+  whatsappSendMedia?: (jid: string, opts: {
+    path: string;
+    caption?: string;
+    mimeType?: string;
+    fileName?: string;
+    mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+    viewOnce?: boolean;
+  }) => Promise<string | undefined>;
+  /** WhatsApp read receipt function — for whatsapp_read markRead. */
+  whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
 }

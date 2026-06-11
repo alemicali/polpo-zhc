@@ -71,8 +71,8 @@ function TeamNameEditor({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button className="flex items-center gap-1.5 group/name cursor-pointer" onClick={() => { setValue(teamName); setEditing(true); }}>
-          <span className="text-sm font-semibold">{teamName}</span>
+        <button className="group/name flex min-w-0 cursor-pointer items-center gap-1.5" onClick={() => { setValue(teamName); setEditing(true); }}>
+          <span className="truncate text-sm font-semibold">{teamName}</span>
           <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity" />
         </button>
       </TooltipTrigger>
@@ -98,22 +98,22 @@ function AgentCard({
     (agent.allowedTools?.length ?? 0) + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0);
 
   return (
-    <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="block group">
+    <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="group block max-w-full min-w-0">
       <div className={cn(
-        "rounded-lg border transition-all bg-card/80 backdrop-blur-sm hover:bg-accent/5",
+        "max-w-full overflow-hidden rounded-lg border bg-card/80 transition-all hover:bg-accent/5",
         process ? "border-primary/30 shadow-[0_0_20px_oklch(0.7_0.15_200_/_8%)]" : "border-border/40 hover:border-primary/20",
       )}>
-        <div className="flex items-center gap-3 p-4">
+        <div className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", teamColor?.bg ?? "bg-primary/10")}>
             <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="lg" iconClassName={teamColor?.text ?? "text-primary"} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="text-sm font-medium truncate group-hover:text-primary transition-colors">
                 {agent.identity?.displayName ?? agent.name}
               </span>
               {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
-                <span className="text-[10px] font-mono text-muted-foreground">@{agent.name}</span>
+                <span className="hidden truncate text-[10px] font-mono text-muted-foreground sm:inline">@{agent.name}</span>
               )}
               {!!agent.volatile && (
                 <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
@@ -121,10 +121,10 @@ function AgentCard({
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
               {agent.identity?.title && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{agent.identity.title}</span>}
               {agent.model && (
-                <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">
+                <span className="max-w-full truncate text-[10px] font-mono text-muted-foreground sm:max-w-[200px]">
                   {agent.identity?.title ? <>&middot; </> : ""}{agent.model}
                 </span>
               )}
@@ -136,7 +136,7 @@ function AgentCard({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {process && (
               <div className="flex items-center gap-1.5">
                 <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -178,7 +178,7 @@ export function ListView() {
 
   return (
     <ScrollArea className="flex-1 min-h-0 -mx-1">
-      <div className="space-y-6 px-1 pr-5 pb-2">
+      <div className="space-y-5 px-1 pb-bottom-nav pr-1 sm:space-y-6 sm:pr-5 lg:pb-2">
         {teams.map((team, teamIdx) => {
           const tc = getTeamColor(teamIdx);
           const teamAgents = team.agents.filter(a => {
@@ -191,10 +191,10 @@ export function ListView() {
           return (
             <section key={team.name} className="space-y-2">
               {/* Team section header */}
-              <div className={cn("flex items-center gap-3 rounded-lg border px-3 py-2", tc.border, tc.bg)}>
-                <div className={cn("h-2 w-2 rounded-full", tc.dot)} />
+              <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border px-3 py-2 sm:gap-x-3", tc.border, tc.bg)}>
+                <div className={cn("h-2 w-2 shrink-0 rounded-full", tc.dot)} />
                 <TeamNameEditor teamName={team.name} teamDescription={team.description} />
-                <Badge variant="secondary" className="text-[9px]">{team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}</Badge>
+                <Badge variant="secondary" className="shrink-0 text-[9px]">{team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}</Badge>
                 {team.description && <span className="text-[10px] text-muted-foreground truncate hidden md:inline">{team.description}</span>}
                 <div className="ml-auto flex items-center gap-1">
                   {teams.length > 1 && (
@@ -216,7 +216,7 @@ export function ListView() {
 
               {/* Agents in this team — rendered with hierarchy indentation */}
               {teamAgents.length > 0 ? (
-                <div className="space-y-2 pl-3 border-l-2 ml-1" style={{ borderColor: `oklch(0.7 0.12 ${[250, 280, 160, 80, 0, 200][teamIdx % 6]} / 30%)` }}>
+                <div className="ml-1 space-y-2 border-l-2 pl-2 sm:pl-3" style={{ borderColor: `oklch(0.7 0.12 ${[250, 280, 160, 80, 0, 200][teamIdx % 6]} / 30%)` }}>
                   {(() => {
                     // Build hierarchy from reportsTo
                     const nameSet = new Set(teamAgents.map(a => a.name));
@@ -234,7 +234,7 @@ export function ListView() {
                     const renderAgent = (agent: AgentConfig, depth: number): React.ReactNode[] => {
                       const children = (childrenOf.get(agent.name) ?? []).sort((a, b) => a.name.localeCompare(b.name));
                       return [
-                        <div key={agent.name} style={{ marginLeft: depth * 20 }}>
+                        <div key={agent.name} style={{ marginLeft: Math.min(depth * 12, 36) }}>
                           <AgentCard
                             agent={agent}
                             process={processes.find(p => p.agentName === agent.name)}

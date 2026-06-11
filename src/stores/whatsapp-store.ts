@@ -42,6 +42,16 @@ export interface WhatsAppMessage {
   timestamp: number;
   /** Optional media type (image, video, document, audio). */
   mediaType?: string;
+  /** Local downloaded media path, when available. */
+  mediaPath?: string;
+  /** Original media MIME type. */
+  mimeType?: string;
+  /** Original media filename, when available. */
+  fileName?: string;
+  /** Media size in bytes, when known. */
+  mediaSize?: number;
+  /** Local read receipt timestamp. */
+  readAt?: number;
 }
 
 export interface WhatsAppContact {
@@ -96,7 +106,12 @@ export class WhatsAppStore {
         text TEXT NOT NULL,
         from_me INTEGER NOT NULL DEFAULT 0,
         timestamp INTEGER NOT NULL,
-        media_type TEXT
+        media_type TEXT,
+        media_path TEXT,
+        mime_type TEXT,
+        file_name TEXT,
+        media_size INTEGER,
+        read_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_jid, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(timestamp DESC);
@@ -110,6 +125,15 @@ export class WhatsAppStore {
       CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name COLLATE NOCASE);
       CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
     `);
+    for (const sql of [
+      `ALTER TABLE messages ADD COLUMN media_path TEXT`,
+      `ALTER TABLE messages ADD COLUMN mime_type TEXT`,
+      `ALTER TABLE messages ADD COLUMN file_name TEXT`,
+      `ALTER TABLE messages ADD COLUMN media_size INTEGER`,
+      `ALTER TABLE messages ADD COLUMN read_at INTEGER`,
+    ]) {
+      try { this.db.exec(sql); } catch { /* column already exists */ }
+    }
   }
 
   // ── Messages ──
@@ -117,9 +141,38 @@ export class WhatsAppStore {
   /** Insert a message (idempotent — ignores duplicates by ID). */
   appendMessage(msg: WhatsAppMessage): void {
     this.db.prepare(`
-      INSERT OR IGNORE INTO messages (id, chat_jid, sender_jid, sender_name, text, from_me, timestamp, media_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(msg.id, msg.chatJid, msg.senderJid, msg.senderName ?? null, msg.text, msg.fromMe ? 1 : 0, msg.timestamp, msg.mediaType ?? null);
+      INSERT OR IGNORE INTO messages (
+        id, chat_jid, sender_jid, sender_name, text, from_me, timestamp,
+        media_type, media_path, mime_type, file_name, media_size, read_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        sender_name = COALESCE(excluded.sender_name, messages.sender_name),
+        text = CASE
+          WHEN messages.text LIKE '[%' AND excluded.text NOT LIKE '[%' THEN excluded.text
+          ELSE messages.text
+        END,
+        media_type = COALESCE(excluded.media_type, messages.media_type),
+        media_path = COALESCE(excluded.media_path, messages.media_path),
+        mime_type = COALESCE(excluded.mime_type, messages.mime_type),
+        file_name = COALESCE(excluded.file_name, messages.file_name),
+        media_size = COALESCE(excluded.media_size, messages.media_size),
+        read_at = COALESCE(excluded.read_at, messages.read_at)
+    `).run(
+      msg.id,
+      msg.chatJid,
+      msg.senderJid,
+      msg.senderName ?? null,
+      msg.text,
+      msg.fromMe ? 1 : 0,
+      msg.timestamp,
+      msg.mediaType ?? null,
+      msg.mediaPath ?? null,
+      msg.mimeType ?? null,
+      msg.fileName ?? null,
+      msg.mediaSize ?? null,
+      msg.readAt ?? null,
+    );
   }
 
   /** List messages in a chat, newest first. */
@@ -153,10 +206,7 @@ export class WhatsAppStore {
         COUNT(*) AS msg_count,
         (SELECT text FROM messages m2 WHERE m2.chat_jid = m.chat_jid ORDER BY m2.timestamp DESC LIMIT 1) AS last_text,
         (SELECT COUNT(*) FROM messages m3 
-         WHERE m3.chat_jid = m.chat_jid AND m3.from_me = 0 
-         AND m3.timestamp > COALESCE(
-           (SELECT MAX(m4.timestamp) FROM messages m4 WHERE m4.chat_jid = m.chat_jid AND m4.from_me = 1), 0
-         )
+         WHERE m3.chat_jid = m.chat_jid AND m3.from_me = 0 AND m3.read_at IS NULL
         ) AS unread_count
       FROM messages m
       LEFT JOIN contacts c ON c.jid = m.chat_jid
@@ -226,6 +276,16 @@ export class WhatsAppStore {
     return undefined;
   }
 
+  /** Mark specific messages locally read after sending WhatsApp read receipts. */
+  markRead(ids: string[], readAt = Math.floor(Date.now() / 1000)): number {
+    let changed = 0;
+    const stmt = this.db.prepare(`UPDATE messages SET read_at = ? WHERE id = ?`);
+    for (const id of ids) {
+      changed += stmt.run(readAt, id).changes;
+    }
+    return changed;
+  }
+
   /** Get total message count. */
   messageCount(): number {
     const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM messages`).get() as any;
@@ -253,6 +313,11 @@ function rowToMessage(r: any): WhatsAppMessage {
     fromMe: !!r.from_me,
     timestamp: r.timestamp,
     mediaType: r.media_type ?? undefined,
+    mediaPath: r.media_path ?? undefined,
+    mimeType: r.mime_type ?? undefined,
+    fileName: r.file_name ?? undefined,
+    mediaSize: r.media_size ?? undefined,
+    readAt: r.read_at ?? undefined,
   };
 }
 

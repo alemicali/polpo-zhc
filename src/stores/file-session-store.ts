@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "../core/session-store.js";
+import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "../core/session-store.js";
 
 /**
  * File-backed SessionStore.
@@ -45,12 +45,14 @@ export class FileSessionStore implements SessionStore {
     return sessionId;
   }
 
-  async addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message> {
+  async addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message> {
     const message: Message = {
       id: nanoid(10),
       role,
       content,
       ts: new Date().toISOString(),
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
+      ...(segments && segments.length > 0 ? { segments } : {}),
     };
     try {
       const line = JSON.stringify(message);
@@ -60,7 +62,7 @@ export class FileSessionStore implements SessionStore {
     return message;
   }
 
-  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean> {
+  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<boolean> {
     const file = this.sessionFile(sessionId);
     if (!existsSync(file)) return false;
     try {
@@ -74,6 +76,9 @@ export class FileSessionStore implements SessionStore {
           const patched: Record<string, unknown> = { ...obj, content };
           if (toolCalls && toolCalls.length > 0) {
             patched.toolCalls = toolCalls;
+          }
+          if (segments && segments.length > 0) {
+            patched.segments = segments;
           }
           return JSON.stringify(patched);
         }

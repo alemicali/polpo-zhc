@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   Eye,
   EyeOff,
   ExternalLink,
@@ -582,6 +583,14 @@ export function OAuthFlow({
         {/* Awaiting input — show prompt below the URL */}
         {status === "awaiting_input" && promptMsg && (
           <div className="space-y-3">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-2">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  If the browser shows an error or a blank white page, paste the full address exactly as it appears, starting with http:// or https:// through the final character.
+                </p>
+              </div>
+            </div>
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Step 2 — {promptMsg}
             </p>

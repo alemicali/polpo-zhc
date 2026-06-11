@@ -6,7 +6,10 @@ import { redactPolpoConfig } from "../security.js";
 import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders } from "../../setup/index.js";
+import { FileAgentStore } from "../../stores/file-agent-store.js";
+import { FileTeamStore } from "../../stores/file-team-store.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
+import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
 
 // ── Authed route definitions ──────────────────────────────────────────
 
@@ -67,6 +70,10 @@ const configStatusRoute = createRoute({
                 hasKey: z.boolean(),
                 source: z.enum(["env", "oauth", "none"]),
               })),
+              auth: z.object({
+                enabled: z.boolean(),
+                configured: z.boolean(),
+              }),
             }),
           }),
         },
@@ -91,6 +98,7 @@ const initializeRoute = createRoute({
             model: z.string().optional(),
             agentName: z.string().optional(),
             agentRole: z.string().optional(),
+            adminEmail: z.string().email().optional(),
             providers: z.record(z.string(), z.object({
               baseUrl: z.string().optional(),
               api: z.enum(["openai-completions", "openai-responses", "anthropic-messages"]).optional(),
@@ -116,6 +124,14 @@ const initializeRoute = createRoute({
         },
       },
       description: "Already initialized or initialization in progress",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: z.object({ ok: z.boolean(), error: z.string() }),
+        },
+      },
+      description: "Invalid setup request",
     },
     500: {
       content: {
@@ -379,10 +395,15 @@ export function configRoutes(getDeps: () => {
     }
 
     try {
+      if (typeof notificationRouter.testChannel === "function") {
+        const result = await notificationRouter.testChannel(name);
+        return c.json({ ok: true, data: result }, 200);
+      }
       const results = await notificationRouter.testChannels();
       return c.json({ ok: true, data: { success: results[name] ?? false } }, 200);
-    } catch {
-      return c.json({ ok: true, data: { success: false } }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Channel test failed";
+      return c.json({ ok: true, data: { success: false, error: msg } }, 200);
     }
   });
 
@@ -402,13 +423,15 @@ export function publicConfigRoutes(
   onInitialize?: (workDir: string) => Promise<void>,
 ): OpenAPIHono {
   const app = new OpenAPIHono();
-  const polpoDir = getPolpoDir(workDir);
 
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {
-    const hasConfig = existsSync(join(polpoDir, "polpo.json"));
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const activePolpoDir = getPolpoDir(activeWorkDir);
+    const hasConfig = existsSync(join(activePolpoDir, "polpo.json"));
     const providers = detectProviders();
     const hasProviders = providers.some((p) => p.hasKey);
+    const authConfig = loadInstanceAuth(activePolpoDir);
 
     return c.json({
       ok: true,
@@ -417,8 +440,12 @@ export function publicConfigRoutes(
         hasConfig,
         hasProviders,
         detectedProviders: providers,
-        workDir,
-        orgName: basename(workDir),
+        auth: {
+          enabled: isInstanceAuthEnabled(),
+          configured: !!authConfig?.enabled && authConfig.allowedEmails.length > 0,
+        },
+        workDir: activeWorkDir,
+        orgName: basename(activeWorkDir),
       },
     });
   });
@@ -441,6 +468,10 @@ export function publicConfigRoutes(
       const targetDir = body.workDir ? resolve(body.workDir) : workDir;
       const targetPolpoDir = getPolpoDir(targetDir);
       const org = body.orgName || basename(targetDir);
+      const adminEmail = typeof body.adminEmail === "string" ? normalizeEmail(body.adminEmail) : "";
+      if (isInstanceAuthEnabled() && !adminEmail) {
+        return c.json({ ok: false, error: "Admin email is required when instance auth is enabled." }, 400);
+      }
 
       const config = generatePolpoConfigDefault(org, {
         model: body.model || undefined,
@@ -448,9 +479,19 @@ export function publicConfigRoutes(
         agentRole: body.agentRole || undefined,
         providers: body.providers,
       });
+      const teams = config.teams;
 
       try {
-        savePolpoConfig(targetPolpoDir, config);
+        savePolpoConfig(targetPolpoDir, { ...config, teams: [] });
+        const teamStore = new FileTeamStore(targetPolpoDir);
+        const agentStore = new FileAgentStore(targetPolpoDir);
+        await teamStore.seed(teams);
+        await agentStore.seed(teams.flatMap((team) =>
+          team.agents.map((agent) => ({ ...agent, teamName: team.name })),
+        ));
+        if (isInstanceAuthEnabled() && adminEmail) {
+          createInitialInstanceAuth(targetPolpoDir, adminEmail);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         return c.json({ ok: false, error: `Failed to save config: ${msg}` }, 500);

@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { PolpoProvider } from "@polpo-ai/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Loader2 } from "lucide-react";
 import { config } from "@/lib/config";
+import { ChatProvider } from "@/hooks/chat-context";
 
 // Lazy-load all pages for code splitting
 const DashboardPage = lazy(() => import("@/pages/dashboard").then(m => ({ default: m.DashboardPage })));
@@ -26,42 +28,101 @@ const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ d
 // Schedules are now integrated into the Missions page — redirect old URL for bookmarks
 
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
+const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
+const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
 
 // Check if server is in setup mode — blocks all rendering until resolved
 function SetupModeRedirect({ children }: { children: React.ReactNode }) {
-  const navigate = useNavigate();
   const location = useLocation();
-  const [state, setState] = useState<"loading" | "setup" | "ready">("loading");
+  const [state, setState] = useState<"loading" | "ready">("loading");
+  const [message, setMessage] = useState("Connecting to Polpo...");
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
 
-  // Check setup status ONLY on initial mount — not on every pathname change.
-  // Re-checking on navigation was causing the entire tree to unmount/remount
-  // (flash of white) because setState("loading") replaced children with a spinner.
+  const loginPath = () => {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    return `/login?next=${encodeURIComponent(next === "/" ? "/chat" : next)}`;
+  };
+
+  // Keep the bootstrap gate alive until the server answers. In hosted deploys the
+  // UI container can become reachable before the server container; giving up on
+  // the first failed status call drops users into the app with a permanent
+  // "Connecting..." sidebar instead of routing them to setup/login.
   useEffect(() => {
-    if (location.pathname === "/setup") {
+    if (location.pathname === "/setup" || location.pathname === "/login") {
+      setRedirectTo(null);
       setState("ready");
       return;
     }
-    fetch(`${config.baseUrl}/api/v1/config/status`)
-      .then((r) => r.json())
-      .then((r) => {
-        if (r.ok && !r.data.initialized) {
-          navigate("/setup", { replace: true });
-        } else {
-          setState("ready");
+
+    let cancelled = false;
+    let retry: number | undefined;
+    let attempt = 0;
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${config.baseUrl}/api/v1/config/status`, { credentials: "include" });
+        const r = await res.json();
+        if (cancelled) return;
+
+        if (!r?.ok) {
+          throw new Error(r?.error || "Could not read setup status.");
         }
-      })
-      .catch(() => { setState("ready"); });
+
+        const auth = r.data?.auth;
+        if (!r.data?.initialized || (auth?.enabled && !auth.configured)) {
+          setRedirectTo("/setup");
+          setState("ready");
+          return;
+        }
+
+        if (auth?.enabled) {
+          const authStatus = await fetch(`${config.baseUrl}/api/v1/auth/instance/status`, { credentials: "include" })
+            .then((res) => res.json())
+            .catch(() => null);
+          if (cancelled) return;
+          if (authStatus?.ok && !authStatus.data.authenticated) {
+            setRedirectTo(loginPath());
+            setState("ready");
+            return;
+          }
+          if (!authStatus?.ok) {
+            setRedirectTo(loginPath());
+            setState("ready");
+            return;
+          }
+        }
+        setRedirectTo(null);
+        setState("ready");
+      } catch {
+        if (cancelled) return;
+        attempt += 1;
+        setMessage(attempt > 4 ? "Still waiting for the Polpo server..." : "Connecting to Polpo...");
+        retry = window.setTimeout(check, Math.min(500 * attempt, 2500));
+      }
+    };
+
+    check();
+
+    return () => {
+      cancelled = true;
+      if (retry) window.clearTimeout(retry);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname, location.search, location.hash]);
 
   // Block rendering only during the initial setup check
   if (state === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{message}</p>
       </div>
     );
+  }
+
+  if (redirectTo) {
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <>{children}</>;
@@ -75,16 +136,30 @@ function PageLoader() {
   );
 }
 
+function AuthenticatedApp() {
+  return (
+    <PolpoProvider
+      baseUrl={config.baseUrl}
+      apiKey={config.apiKey}
+    >
+      <ChatProvider>
+        <AppLayout />
+      </ChatProvider>
+    </PolpoProvider>
+  );
+}
+
 export function App() {
   return (
     <SetupModeRedirect>
       <Routes>
         {/* Setup wizard — full-screen, no sidebar */}
         <Route path="setup" element={<Suspense fallback={<PageLoader />}><SetupPage /></Suspense>} />
+        <Route path="login" element={<Suspense fallback={<PageLoader />}><LoginPage /></Suspense>} />
 
         {/* Main app with sidebar layout */}
-        <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route element={<AuthenticatedApp />}>
+          <Route index element={<Navigate to="/chat" replace />} />
           <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageLoader />}><TasksPage /></Suspense>} />
           <Route path="tasks/:taskId" element={<Suspense fallback={<PageLoader />}><TaskDetailPage /></Suspense>} />
@@ -105,6 +180,9 @@ export function App() {
           <Route path="schedules" element={<Navigate to="/missions" replace />} />
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
+          <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
+          <Route path="terminal" element={<></>} />
+          <Route path="coding" element={<></>} />
         </Route>
       </Routes>
     </SetupModeRedirect>

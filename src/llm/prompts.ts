@@ -5,8 +5,9 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
-import { buildModelListingForPrompt } from "./pi-client.js";
+import { buildModelListingForPrompt, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
+import { detectProviders } from "../setup/providers.js";
 
 /**
  * Describe what tools/capabilities an agent has based on its allowedTools config.
@@ -26,7 +27,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("pdf_")) caps.push("pdf_read, pdf_create, pdf_merge, pdf_info");
   if (hasPattern("docx_")) caps.push("docx_read, docx_create");
   if (hasPattern("search_")) caps.push("search_web (Exa AI web search), search_find_similar (find similar pages)");
-  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read, whatsapp_send, whatsapp_search, whatsapp_contacts");
+  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -39,6 +40,29 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   return caps.join(" | ");
 }
 
+function buildConnectedProviderGuidance(orchestratorModel: string | undefined, agents: AgentConfig[]): string {
+  const connected = detectProviders().filter((provider) => provider.hasKey);
+  const connectedNames = connected.map((provider) => `${provider.name} (${provider.source})`);
+  const agentModels = agents
+    .map((agent) => agent.model)
+    .filter((model): model is string => !!model);
+
+  return [
+    `## Connected model providers`,
+    ``,
+    connected.length > 0
+      ? `Connected providers with usable credentials: ${connectedNames.join(", ")}.`
+      : `No connected providers were detected from env keys or OAuth profiles.`,
+    orchestratorModel ? `Current orchestrator model: ${orchestratorModel}.` : `Current orchestrator model: not explicitly configured.`,
+    agentModels.length > 0 ? `Current agent models in use: ${[...new Set(agentModels)].join(", ")}.` : `No existing agent model choices yet.`,
+    ``,
+    `When creating or updating an agent, set its model only to a model whose provider is connected.`,
+    `If the user does not ask for a specific provider, prefer the current orchestrator model when its provider is connected.`,
+    `If only one provider is connected, use a model from that provider unless the user explicitly says otherwise.`,
+    `Do NOT invent or assign models from providers that are not connected, because those agents will fail at runtime.`,
+  ].join("\n");
+}
+
 /** Build the system prompt for chat mode responses */
 export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
@@ -46,6 +70,7 @@ export async function buildChatSystemPrompt(
   _workDir?: string,
 ): Promise<string> {
   const teams = await orchestrator.getTeams();
+  const agents = await orchestrator.getAgents();
   const config = orchestrator.getConfig();
   const memory = await orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
@@ -619,6 +644,7 @@ export async function buildChatSystemPrompt(
     `  - **model**: LLM to use, format "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929").`,
     `  - **systemPrompt**: Custom instructions appended to the agent's built-in prompt.`,
     `  - **skills**: Array of skill names from the installed pool (see "Available agent skills" below).`,
+    `  - **suggestions**: Starter prompts shown in the UI when opening a new chat with this agent. Use short, actionable strings or objects { title, prompt?, description? }. Add 2-4 useful suggestions when creating user-facing agents.`,
     `  - **allowedPaths**: Filesystem sandbox — directories the agent can access (relative to workDir).`,
     `  - **allowedTools**: Restrict to specific tool names (e.g. ["read", "write", "bash", "glob"]).`,
     `    Omit to grant all core tools. Use this for security — limit what an agent CAN do.`,
@@ -961,14 +987,15 @@ export async function buildChatSystemPrompt(
     ``,
     `### WhatsApp`,
     ``,
-    `**Tools**: whatsapp_send, whatsapp_read.`,
+    `**Tools**: whatsapp_send, whatsapp_send_file, whatsapp_read.`,
     `You can send and read WhatsApp messages directly — no need to delegate to an agent.`,
     `Requires a WhatsApp channel configured in polpo.json and connected via \`polpo whatsapp login\`.`,
     ``,
     `- **whatsapp_send**: Send a message to a contact. Resolve by name, phone number, or JID.`,
     `  "send a WhatsApp message to Marco" → whatsapp_send with to="Marco", text="...".`,
     `  "text 393387172954" → whatsapp_send with to="393387172954", text="...".`,
-    `- **whatsapp_read**: Read messages. Four actions:`,
+    `- **whatsapp_send_file**: Send a local image, video, audio, or document attachment from a file path.`,
+    `- **whatsapp_read**: Read messages. Four actions. Reads are hidden/local unless markRead=true is explicitly requested:`,
     `  - \`list_chats\`: List recent conversations with message counts and last message preview.`,
     `    "show WhatsApp chats" → whatsapp_read with action="list_chats".`,
     `  - \`read_chat\`: Read messages from a specific chat. Requires chatId (phone, name, or JID).`,
@@ -1005,9 +1032,12 @@ export async function buildChatSystemPrompt(
     ``,
     `### Client-side actions`,
     ``,
-    `**Tools**: navigate_to, open_file, open_tab`,
+    `**Tools**: navigate_to, open_file, open_tab, set_design`,
     `These tools execute on the USER'S device (browser), not the server. They trigger immediate`,
     `client-side actions — no confirmation card, no waiting.`,
+    `After navigate_to/open_file/open_tab completes, the UI sends you a system message saying the`,
+    `client-side tool completed. Treat that as a tool result acknowledgement, NOT as a new user`,
+    `request. Do not call the same client-side tool again for the same request; give the final answer.`,
     ``,
     `- **navigate_to**: Navigate the user's UI to any page in the dashboard. Use this when the user`,
     `  wants to go to a specific section or detail page. Available targets:`,
@@ -1048,6 +1078,79 @@ export async function buildChatSystemPrompt(
     `  - open_tab({ url: "https://github.com/org/repo/issues/42", label: "Issue #42" })`,
     `  - User says "open the docs", "open the link" → open_tab with the relevant URL`,
     ``,
+    `- **set_design**: Propose UI appearance overrides in the user's browser. Use when the user asks`,
+    `  to change app design, colors, typography, or roundness. The UI shows a preview and the user`,
+    `  confirms before applying. Arguments: enabled, light, dark. Use enabled=false to restore`,
+    `  the selected palette/default theme. When enabled=true, include BOTH light and dark objects,`,
+    `  and include every supported field in each object: primary, secondary, text, radius, fontFamily.`,
+    `  Colors must be 6-digit hex. Radius is 0-24 px.`,
+    `  Examples:`,
+    `  - set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })`,
+    `  - set_design({ enabled: false })`,
+    ``,
+    `### When to render a widget`,
+    ``,
+    `**Tool**: render_widget`,
+    `Render an interactive HTML widget inline as a card in the user's chat. The HTML runs inside a`,
+    `sandboxed iframe (sandbox="allow-scripts") so it can include <style> and <script>, but it MUST be`,
+    `self-contained: NO external <link>, <script src=...>, no http(s) <img src=...>, no nested <iframe>.`,
+    ``,
+    `**Default to markdown.** The user pays for tokens and screen space. Only reach for the widget when`,
+    `there is clear added value over a markdown table, list, code block, or paragraph.`,
+    ``,
+    `Use it when:`,
+    `- The user explicitly asks for a chart, graph, simulation, interactive demo, animated diagram,`,
+    `  what-if calculator, force-directed graph, or timeline.`,
+    `- The concept truly needs interaction or visual layout to land at a glance (e.g. "show me a`,
+    `  sine wave animated", "draw a force-directed graph of these dependencies", "give me a slider`,
+    `  that recomputes the mortgage payment").`,
+    ``,
+    `Do NOT use it when:`,
+    `- The data is tabular → use a markdown table.`,
+    `- The answer is code → use a fenced code block.`,
+    `- The answer is a static image, list, or heading → use markdown.`,
+    `- The user just wants the result → plain prose.`,
+    ``,
+    `Concrete YES examples:`,
+    `- "show me a sine wave animation" → render_widget with an SVG + requestAnimationFrame.`,
+    `- "interactive bar chart of last week's revenue" → render_widget with inline data + SVG bars.`,
+    `- "calculator: monthly payment given rate and principal" → render_widget with sliders + live total.`,
+    ``,
+    `Concrete NO examples:`,
+    `- "list all my agents" → markdown bullet list, NOT a widget.`,
+    `- "give me a SQL query for X" → fenced code block, NOT a widget.`,
+    `- "what's the status of mission Y?" → prose / markdown, NOT a widget.`,
+    ``,
+    `Style constraints:`,
+    `- Max ~8KB of HTML. Trim comments, minify CSS, simplify SVG paths.`,
+    `- NO hardcoded contrasting colors. Respect prefers-color-scheme — use CSS like`,
+    `  \`@media (prefers-color-scheme: dark) { ... }\` and inherit \`color\` / \`background\` so the widget`,
+    `  blends into both light and dark themes.`,
+    `- max-width: 100%; box-sizing: border-box on the root element.`,
+    `- NO external fonts (no @import, no <link rel="stylesheet">). Use system font stacks.`,
+    `- The iframe canvas is TRANSPARENT — your widget paints directly on it.`,
+    `- NO fetch, NO localStorage. Pure view + local interactivity only.`,
+    ``,
+    `Layout knobs:`,
+    `- \`chrome\` (default true): show card border + header. Set \`chrome: false\` for free-form/`,
+    `  shaped widgets that should sit on the bare canvas — circular clocks, custom-shaped diagrams,`,
+    `  organic blobs, animations that aren't naturally rectangular.`,
+    `- Width: ALWAYS full bubble width (no parameter).`,
+    `- Height: AUTO-SIZE via postMessage — no parameter. Design your CSS so the body's`,
+    `  natural height is what you want shown.`,
+    ``,
+    `Streaming (opt-in):`,
+    `- \`stream\` (default false): atomic render — the widget appears only once the HTML is`,
+    `  complete. This is the right choice 95% of the time.`,
+    `- \`stream: true\`: live preview throttled at ~1 fps as you write the html. Costs an iframe`,
+    `  rebuild every ~1s — only worth it for LARGE, COMPLEX widgets where watching them`,
+    `  materialise is part of the experience (long ASCII-art diagrams that build up shape,`,
+    `  animations whose first keyframes are themselves interesting). For small or instant`,
+    `  widgets leave \`stream\` off — atomic is faster, smoother, and cheaper.`,
+    ``,
+    `After render_widget fires, the turn ends — the widget is shown to the user as an interactive card.`,
+    `Continue with prose only if there's something genuinely useful to add beyond what the widget shows.`,
+    ``,
     `**Proactive navigation**: When you CREATE something new (mission, agent, task, skill, etc.),`,
     `navigate the user to it right after. This is a natural UX — you just made it, show it.`,
     `- After create_mission → navigate_to({ target: "mission", id: "<newId>" })`,
@@ -1069,6 +1172,7 @@ export async function buildChatSystemPrompt(
     `- User says "open", "show me the file", "let me see the file" → open_file`,
     `- User says "go to the file", "where is" → navigate_to with target="files"`,
     `- User says "open this link", "visit URL" → open_tab`,
+    `- User asks to change theme/design/colors/font/roundedness → set_design`,
     ``,
     `---`,
     ``,
@@ -1097,7 +1201,7 @@ export async function buildChatSystemPrompt(
     `- For PDFs: "Use pdf_read/pdf_create" (requires pdf_* in allowedTools)`,
     `- For Word docs: "Use docx_read/docx_create" (requires docx_* in allowedTools)`,
     `- For web search/research: "Use search_web to find..." (requires search_* in allowedTools + vault exa key or EXA_API_KEY env var)`,
-    `- For WhatsApp messaging: "Use whatsapp_send to send..." / "Use whatsapp_read to check messages" (requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
+    `- For WhatsApp messaging: "Use whatsapp_send to send text..." / "Use whatsapp_send_file to send attachments..." / "Use whatsapp_read to check messages" (markRead=false keeps reads hidden; requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
     `- For vault credentials: agents always have vault_get/vault_list (core tools, always available).`,
     `- For git and dependency management: use bash.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,
@@ -1134,7 +1238,7 @@ export async function buildChatSystemPrompt(
     `Top-level keys: \`project\`, \`teams\` (array), \`settings\`, \`providers\` (optional).`,
     ``,
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
-    `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
+    `systemPrompt, skills[], suggestions[] (new-chat starter prompts), allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
     `and allowedTools wildcards: "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*".`,
     `Core tools (always available, no need for allowedTools): http_fetch, http_download, vault_get, vault_list.`,
@@ -1161,6 +1265,10 @@ export async function buildChatSystemPrompt(
     `injected into the agent's system prompt at spawn time, giving the agent specialized knowledge`,
     `(e.g. "frontend-design", "pdf-extraction", "data-pipeline").`,
     `Install from GitHub: \`polpo skills add <github-url>\`. Assign: \`polpo skills assign <skill> <agent>\`.`,
+    `When a user creates an agent, proactively encourage them to assign relevant skills. Explain briefly that`,
+    `skills are reusable instruction packs that teach an agent how to do specific work, such as frontend design,`,
+    `testing, document extraction, or deployment workflows. If useful skills are installed, suggest concrete matches;`,
+    `if none are installed, mention that skills can be added later without blocking agent creation.`,
     ``,
     `**settings** — key options:`,
     `- orchestratorModel: model for your LLM calls (can be string or {primary, fallbacks[]})`,
@@ -1386,6 +1494,8 @@ export async function buildChatSystemPrompt(
       `- The user asks the agent to do something a skill covers (e.g. PDF extraction, testing workflows)`,
       `- A task fails and a skill could help the agent do better on retry`,
       `- Use skill tags and categories to match skills to agent roles or task requirements`,
+      `When an agent is newly created without skills, explain what skills are and ask whether the user wants`,
+      `to assign any relevant ones now or leave them for later.`,
       `Don't suggest skills that are already assigned. Don't force skills on every agent.`,
     );
   } else {
@@ -1395,6 +1505,8 @@ export async function buildChatSystemPrompt(
       ``,
       `No skills are currently installed. Skills can be installed with \`polpo skills add <source>\`.`,
       `Skills provide specialized knowledge to agents (e.g. frontend-design, testing, data-pipeline).`,
+      `When creating an agent, still explain that skills are optional reusable instruction packs that can`,
+      `teach the agent specific workflows and can be added later when the pool is available.`,
     );
   }
 
@@ -1404,6 +1516,8 @@ export async function buildChatSystemPrompt(
     `## Available models`,
     ``,
     buildModelListingForPrompt(),
+    ``,
+    buildConnectedProviderGuidance(resolveModelSpec(config?.settings?.orchestratorModel), agents),
   );
 
   // ── Skill creation guidance ──

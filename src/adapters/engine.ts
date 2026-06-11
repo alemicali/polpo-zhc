@@ -102,8 +102,9 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "",
       "**WhatsApp:**",
       "- `whatsapp_send` — send a WhatsApp message (WARNING: irreversible side effect)",
+      "- `whatsapp_send_file` — send image/video/audio/document attachments from a local file path",
       "- `whatsapp_list` — list recent conversations",
-      "- `whatsapp_read` — read messages in a conversation",
+      "- `whatsapp_read` — read messages in a conversation; default markRead=false is hidden/local, set markRead=true only when asked",
       "- `whatsapp_search` — search messages",
       "- `whatsapp_contacts` — list contacts",
     );
@@ -222,10 +223,25 @@ function describeToolsForAgent(agent: AgentConfig): string {
   return lines.join("\n");
 }
 
+/** Same shape as ResolvedVault.MailboxDescriptor — re-declared so the
+ *  function signature doesn't reach into a sibling module. */
+export interface MailboxPromptInfo {
+  name: string;
+  from?: string;
+  label?: string;
+  canSend: boolean;
+  canRead: boolean;
+}
+
 /**
  * Build the system prompt for the agent, including loaded skills.
+ *
+ * `mailboxes` (when provided) is rendered as an "Email Accounts" section so
+ * the agent knows which `account` names to pass to email_* tools. The
+ * caller resolves it from the agent's vault before calling this (avoids a
+ * vault dependency reaching into the prompt builder).
  */
-export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[]): string {
+export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[], mailboxes?: MailboxPromptInfo[]): string {
   // Load skills (sync, Node.js filesystem)
   const skills = polpoDir
     ? loadAgentSkills(cwd, polpoDir, agent.name, agent.skills)
@@ -241,6 +257,27 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
   // shell scripts, npm installs, or manual workarounds for capabilities it already has.
   const toolSection = describeToolsForAgent(agent);
   if (toolSection) parts.push("", toolSection);
+
+  // Email accounts — when the agent has multiple mailboxes configured the
+  // email_* tools REQUIRE an explicit `account` param. Listing them here
+  // gives the model the names + capabilities (send/read) upfront so it
+  // doesn't have to call list_email_accounts on every turn. Single-mailbox
+  // setups omit the section entirely (zero noise).
+  if (mailboxes && mailboxes.length > 0) {
+    parts.push("", "## Email Accounts");
+    if (mailboxes.length === 1) {
+      const m = mailboxes[0]!;
+      const caps = [m.canSend ? "send" : null, m.canRead ? "read" : null].filter(Boolean).join(" + ");
+      parts.push(`You have one mailbox configured: \`${m.name}\` (${caps}${m.from ? `, from: ${m.from}` : ""}). The \`account\` param on email_* tools is optional in this case.`);
+    } else {
+      parts.push("You have multiple mailboxes configured. You MUST pass `account: \"<name>\"` to every email_* tool:");
+      for (const m of mailboxes) {
+        const caps = [m.canSend ? "send" : null, m.canRead ? "read" : null].filter(Boolean).join(" + ");
+        parts.push(`- \`${m.name}\` — ${caps}${m.from ? ` (from: ${m.from})` : ""}${m.label ? ` — ${m.label}` : ""}`);
+      }
+      parts.push("Call `list_email_accounts` at runtime if you need to re-check.");
+    }
+  }
 
   // Working directory — tell the agent where it is so it uses correct relative paths
   parts.push(
@@ -407,6 +444,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = undefined;
   }
 
+  if (ctx?.polpoDir && agentConfig.allowedTools?.some(t => t.toLowerCase().startsWith("whatsapp_"))) {
+    const whatsappMediaDir = join(ctx.polpoDir, "whatsapp-media");
+    effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
+  }
+
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
   const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
@@ -425,6 +467,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
     initialState: {
+      // Mailboxes section is added later (handle.done) after vault is async-resolved.
       systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths),
       model,
       thinkingLevel,
@@ -557,11 +600,21 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           outputDir,
           whatsappStore: ctx?.whatsappStore,
           whatsappSendMessage: ctx?.whatsappSendMessage,
+          whatsappSendMedia: ctx?.whatsappSendMedia,
+          whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
         });
       }
-      agent.setTools(allTools);
+      agent.state.tools = allTools;
 
+      // Refresh system prompt with mailboxes info now that vault is resolved.
+      // The initial prompt set in `new Agent(...)` had no mailbox section
+      // because vault is async-only here; the agent hasn't yet consumed the
+      // prompt, so overwriting state.systemPrompt before .prompt() is safe.
+      const mailboxes = vault.listMailboxes();
+      if (mailboxes.length > 0) {
+        agent.state.systemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths, mailboxes);
+      }
 
       const prompt = buildPrompt(task);
       await agent.prompt(prompt);

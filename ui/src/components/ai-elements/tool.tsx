@@ -1,6 +1,6 @@
 "use client";
 
-import type { HTMLAttributes } from "react";
+import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -31,6 +31,7 @@ export type ToolState = "preparing" | "calling" | "completed" | "error" | "inter
 export interface ToolCallInfo {
   id: string;
   name: string;
+  argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
   state: ToolState;
@@ -66,6 +67,7 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   update_vault_credentials: "Updating vault credentials…",
   navigate_to: "Navigating…",
   open_tab: "Opening tab…",
+  set_design: "Updating design…",
 };
 
 /** Convert tool_name to "Tool Name" */
@@ -138,9 +140,24 @@ export function ToolInvocation({
   className,
   ...props
 }: ToolInvocationProps) {
-  const isOpen = defaultOpen ?? tool.state === "error";
+  const shouldOpenForStreamingInput = tool.state === "preparing" && !!tool.argumentsText;
+  const [open, setOpen] = useState(defaultOpen ?? (tool.state === "error" || shouldOpenForStreamingInput));
+  const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
   const { previewState, openPreview, closePreview } = useFilePreview();
+
+  useEffect(() => {
+    if (shouldOpenForStreamingInput || tool.state === "error") {
+      setOpen(true);
+    } else if (tool.state === "completed" || tool.state === "interrupted") {
+      setOpen(false);
+    }
+  }, [shouldOpenForStreamingInput, tool.state]);
+
+  useEffect(() => {
+    if (!open || !tool.argumentsText || !draftRef.current) return;
+    draftRef.current.scrollTop = draftRef.current.scrollHeight;
+  }, [open, tool.argumentsText]);
 
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't toggle the collapsible
@@ -154,10 +171,12 @@ export function ToolInvocation({
   };
 
   // Interactive / client-side tools: show a minimal inline label while
-  // preparing, then hide completely once executed (completed/error/etc.)
+  // preparing with no input yet, then hide completely once executed
+  // (completed/error/etc.). When argument deltas arrive, fall through to
+  // the regular tool card so the generated payload can be previewed.
   const interactiveLabel = INTERACTIVE_LABELS[tool.name];
   if (interactiveLabel) {
-    if (tool.state === "preparing") {
+    if (tool.state === "preparing" && !tool.argumentsText && !tool.arguments) {
       return (
         <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -165,13 +184,15 @@ export function ToolInvocation({
         </div>
       );
     }
-    // Already executed — don't render anything
-    return null;
+    if (tool.state !== "preparing") {
+      // Already executed — don't render anything
+      return null;
+    }
   }
 
   return (
     <>
-      <Collapsible defaultOpen={isOpen} {...props}>
+      <Collapsible open={open} onOpenChange={setOpen} {...props}>
         <div
           className={cn(
             "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
@@ -220,6 +241,20 @@ export function ToolInvocation({
                   <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
                     <MessageResponse>{`\`\`\`json\n${JSON.stringify(tool.arguments, null, 2)}\n\`\`\``}</MessageResponse>
                   </div>
+                </div>
+              )}
+
+              {!tool.arguments && tool.argumentsText && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    Input draft
+                  </p>
+                  <pre
+                    ref={draftRef}
+                    className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono"
+                  >
+                    {tool.argumentsText}
+                  </pre>
                 </div>
               )}
 
@@ -276,6 +311,16 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
 
   // Only non-interactive tools for the group card
   const cardTools = visibleTools.filter((t) => !(t.name in INTERACTIVE_LABELS));
+  const shouldOpenForStreamingInput = cardTools.some((t) => t.state === "preparing" && !!t.argumentsText);
+  const [open, setOpen] = useState(hasError || shouldOpenForStreamingInput);
+
+  useEffect(() => {
+    if (hasError || shouldOpenForStreamingInput) {
+      setOpen(true);
+    } else if (!isCalling) {
+      setOpen(false);
+    }
+  }, [hasError, isCalling, shouldOpenForStreamingInput]);
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -298,7 +343,7 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
 
       {/* Non-interactive tools — grouped card (skip if none left) */}
       {cardTools.length > 0 && (
-        <Collapsible defaultOpen={hasError} {...props}>
+        <Collapsible open={open} onOpenChange={setOpen} {...props}>
           <div
             className={cn(
               "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",

@@ -1,6 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig } from "../security.js";
-import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
+import {
+  UpdateSettingsSchema,
+  NotificationChannelConfigSchema,
+  UpsertNotificationRuleSchema,
+  UpsertApprovalGateSchema,
+} from "../schemas.js";
 
 // ── Route definitions ──────────────────────────────────────────────
 
@@ -144,6 +149,108 @@ const listChannelsRoute = createRoute({
   },
 });
 
+// ── Notification rule routes ──
+
+const upsertRuleRoute = createRoute({
+  method: "put",
+  path: "/rules/{id}",
+  tags: ["Config"],
+  summary: "Create or update a notification rule",
+  request: {
+    params: z.object({ id: z.string().min(1) }),
+    body: { content: { "application/json": { schema: UpsertNotificationRuleSchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Rule saved",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "No configuration loaded",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to save",
+    },
+  },
+});
+
+const deleteRuleRoute = createRoute({
+  method: "delete",
+  path: "/rules/{id}",
+  tags: ["Config"],
+  summary: "Delete a notification rule",
+  request: {
+    params: z.object({ id: z.string().min(1) }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Rule deleted",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Rule or config not found",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to save",
+    },
+  },
+});
+
+// ── Approval gate routes ──
+
+const upsertGateRoute = createRoute({
+  method: "put",
+  path: "/gates/{id}",
+  tags: ["Config"],
+  summary: "Create or update an approval gate",
+  request: {
+    params: z.object({ id: z.string().min(1) }),
+    body: { content: { "application/json": { schema: UpsertApprovalGateSchema } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Gate saved",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "No configuration loaded",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to save",
+    },
+  },
+});
+
+const deleteGateRoute = createRoute({
+  method: "delete",
+  path: "/gates/{id}",
+  tags: ["Config"],
+  summary: "Delete an approval gate",
+  request: {
+    params: z.object({ id: z.string().min(1) }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Gate deleted",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Gate or config not found",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to save",
+    },
+  },
+});
+
 // ── Route handlers ─────────────────────────────────────────────────
 
 /**
@@ -279,11 +386,111 @@ export function configRoutes(getDeps: () => {
     }
 
     try {
+      if (typeof notificationRouter.testChannel === "function") {
+        const result = await notificationRouter.testChannel(name);
+        return c.json({ ok: true, data: result }, 200);
+      }
       const results = await notificationRouter.testChannels();
       return c.json({ ok: true, data: { success: results[name] ?? false } }, 200);
-    } catch {
-      return c.json({ ok: true, data: { success: false } }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Channel test failed";
+      return c.json({ ok: true, data: { success: false, error: msg } }, 200);
     }
+  });
+
+  // ── Notification rule CRUD ──
+
+  app.openapi(upsertRuleRoute, async (c) => {
+    const deps = getDeps();
+    const { id } = c.req.valid("param");
+    const ruleBody = c.req.valid("json");
+    if (ruleBody.id !== id) {
+      return c.json({ ok: false, error: "Rule id in body must match URL param" }, 500);
+    }
+
+    const result = await mutateConfig(deps, (config) => {
+      const settings = config.settings ?? {};
+      if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
+      if (!Array.isArray(settings.notifications.rules)) settings.notifications.rules = [];
+      const rules: any[] = settings.notifications.rules;
+      const idx = rules.findIndex((r) => r?.id === id);
+      if (idx === -1) rules.push(ruleBody);
+      else rules[idx] = ruleBody;
+      config.settings = settings;
+    });
+
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
+  });
+
+  app.openapi(deleteRuleRoute, async (c) => {
+    const deps = getDeps();
+    const { id } = c.req.valid("param");
+
+    const currentConfig = deps.getConfig();
+    const rules: any[] | undefined = currentConfig?.settings?.notifications?.rules;
+    if (!rules || !rules.some((r) => r?.id === id)) {
+      return c.json({ ok: false, error: `Rule "${id}" not found` }, 404);
+    }
+
+    const result = await mutateConfig(deps, (config) => {
+      const settings = config.settings ?? {};
+      if (settings.notifications?.rules) {
+        settings.notifications.rules = settings.notifications.rules.filter(
+          (r: any) => r?.id !== id,
+        );
+      }
+      config.settings = settings;
+    });
+
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
+  });
+
+  // ── Approval gate CRUD ──
+
+  app.openapi(upsertGateRoute, async (c) => {
+    const deps = getDeps();
+    const { id } = c.req.valid("param");
+    const gateBody = c.req.valid("json");
+    if (gateBody.id !== id) {
+      return c.json({ ok: false, error: "Gate id in body must match URL param" }, 500);
+    }
+
+    const result = await mutateConfig(deps, (config) => {
+      const settings = config.settings ?? {};
+      if (!Array.isArray(settings.approvalGates)) settings.approvalGates = [];
+      const gates: any[] = settings.approvalGates;
+      const idx = gates.findIndex((g) => g?.id === id);
+      if (idx === -1) gates.push(gateBody);
+      else gates[idx] = gateBody;
+      config.settings = settings;
+    });
+
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
+  });
+
+  app.openapi(deleteGateRoute, async (c) => {
+    const deps = getDeps();
+    const { id } = c.req.valid("param");
+
+    const currentConfig = deps.getConfig();
+    const gates: any[] | undefined = currentConfig?.settings?.approvalGates;
+    if (!gates || !gates.some((g) => g?.id === id)) {
+      return c.json({ ok: false, error: `Gate "${id}" not found` }, 404);
+    }
+
+    const result = await mutateConfig(deps, (config) => {
+      const settings = config.settings ?? {};
+      if (Array.isArray(settings.approvalGates)) {
+        settings.approvalGates = settings.approvalGates.filter((g: any) => g?.id !== id);
+      }
+      config.settings = settings;
+    });
+
+    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
   });
 
   return app;

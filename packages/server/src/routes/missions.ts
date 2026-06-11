@@ -16,6 +16,13 @@ const listMissionsRoute = createRoute({
   path: "/",
   tags: ["Missions"],
   summary: "List missions",
+  request: {
+    query: z.object({
+      summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients.",
+      }),
+    }),
+  },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
@@ -388,7 +395,41 @@ export function missionRoutes(getDeps: () => {
   // GET /missions — list all missions
   app.openapi(listMissionsRoute, async (c) => {
     const deps = getDeps();
-    return c.json({ ok: true, data: await deps.getAllMissions() });
+    const all = await deps.getAllMissions();
+    const { summary } = c.req.valid("query");
+
+    // Slim projection: drops `data` (stringified JSON of all tasks — the
+    // single biggest field per mission, regularly multi-KB) and the full
+    // `prompt`. Adds derived `taskCount` so list-row UIs can render the
+    // "N tasks" badge without parsing `data` themselves.
+    if (summary === "true") {
+      const slim = all.map((m: any) => {
+        let taskCount: number | undefined;
+        if (typeof m.data === "string" && m.data.length > 0) {
+          try {
+            const parsed = JSON.parse(m.data);
+            if (Array.isArray(parsed?.tasks)) taskCount = parsed.tasks.length;
+          } catch { /* malformed — leave taskCount undefined */ }
+        }
+        const promptStr = typeof m.prompt === "string" ? m.prompt : "";
+        return {
+          id: m.id,
+          name: m.name,
+          status: m.status,
+          schedule: m.schedule,
+          deadline: m.deadline,
+          endDate: m.endDate,
+          qualityThreshold: m.qualityThreshold,
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt,
+          ...(taskCount != null ? { taskCount } : {}),
+          ...(promptStr ? { promptPreview: promptStr.length > 200 ? promptStr.slice(0, 200) : promptStr } : {}),
+        };
+      });
+      return c.json({ ok: true, data: slim });
+    }
+
+    return c.json({ ok: true, data: all });
   });
 
   // GET /missions/resumable — list resumable missions

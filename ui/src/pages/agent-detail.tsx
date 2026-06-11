@@ -89,13 +89,13 @@ function MobileIdentitySummary() {
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
           <AgentAvatar avatar={identity?.avatar} name={agent.name} size="lg" iconClassName="text-primary" />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold truncate">{identity?.displayName ?? agent.name}</h1>
             {process && <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />}
           </div>
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
-          {agent.model && <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{agent.model}</p>}
+          {agent.model && <p className="mt-0.5 truncate text-[10px] font-mono text-muted-foreground">{agent.model}</p>}
         </div>
         <Button variant="outline" size="sm" onClick={refetch} className="shrink-0 ml-auto">
           <RefreshCw className="h-3.5 w-3.5" />
@@ -113,7 +113,7 @@ function AgentDetailContent() {
   } = useAgentDetail();
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col min-h-0">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <MobileIdentitySummary />
 
       {/* Live activity */}
@@ -128,7 +128,7 @@ function AgentDetailContent() {
         </Card>
       )}
 
-      <Tabs defaultValue="overview" className="flex flex-col flex-1 min-h-0 mt-2">
+      <Tabs defaultValue="overview" className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
@@ -231,9 +231,9 @@ function AgentDetailInner() {
   if (error || !agent) return <AgentDetailError />;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-4">
       <AgentBreadcrumb />
-      <div className="flex flex-1 min-h-0 gap-6">
+      <div className="flex flex-1 min-h-0 min-w-0 gap-6">
         <AgentDetailSidebar />
         <AgentDetailContent />
       </div>

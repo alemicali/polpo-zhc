@@ -275,6 +275,13 @@ describe("POST /v1/chat/completions", () => {
       });
       expect(toolChunks.length).toBeGreaterThan(0);
 
+      // Should stream raw arguments while the tool call is still being prepared
+      const preparingArgsChunk = toolChunks.find(c => {
+        const choice = (c.choices as any[])?.[0];
+        return choice?.tool_call?.state === "preparing" && choice.tool_call.argumentsText === "{}";
+      });
+      expect(preparingArgsChunk).toBeDefined();
+
       // Should have a "completed" tool_call with result
       const completedChunk = toolChunks.find(c => {
         const choice = (c.choices as any[])?.[0];

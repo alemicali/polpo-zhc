@@ -13,7 +13,7 @@ import type { Tool } from "@mariozechner/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
-import { join, resolve, relative, isAbsolute, dirname } from "path";
+import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
@@ -38,6 +38,8 @@ import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
+import { detectProviders } from "../setup/providers.js";
+import { listModels, resolveModelSpec } from "./pi-client.js";
 
 
 
@@ -570,6 +572,11 @@ const addAgentTool: Tool = {
     model: Type.Optional(Type.String({ description: "LLM model (e.g. 'claude-sonnet-4-5-20250929', 'gpt-4o')" })),
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent. Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*']). Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
@@ -599,6 +606,11 @@ const updateAgentTool: Tool = {
     model: Type.Optional(Type.String({ description: "New LLM model" })),
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', or 'whatsapp_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
@@ -649,9 +661,9 @@ const renameTeamTool: Tool = {
 
 const setVaultEntryTool: Tool = {
   name: "set_vault_entry",
-  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
+  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields). To share with other agents set `allowedAgents` to their names — the owner agent is always implicit.",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key, e.g. 'gmail', 'sendgrid', 'stripe')" }),
     type: Type.Union([
       Type.Literal("smtp"),
@@ -662,17 +674,22 @@ const setVaultEntryTool: Tool = {
       Type.Literal("custom"),
     ], { description: "Credential type" }),
     label: Type.Optional(Type.String({ description: "Human-readable label (e.g. 'Work Gmail SMTP')" })),
+    account: Type.Optional(Type.String({ description: "Mailbox account name (groups SMTP+IMAP of the same mailbox, e.g. 'work'). Only meaningful for smtp/imap." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "OTHER agent names that may use this credential. Owner is always implicit and not in this list. Omit / [] = owner-private." })),
     credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Use actual values — they will be encrypted at rest." }),
   }),
 };
 
 const updateVaultCredentialsTool: Tool = {
   name: "update_vault_credentials",
-  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field.",
+  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field. Pass `allowedAgents` to also update sharing (REPLACES the list, pass [] to revoke all shares).",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key)" }),
-    credentials: Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." }),
+    credentials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "REPLACES the sharing list. Owner always implicit. Pass [] to revoke all shares." })),
+    account: Type.Optional(Type.String({ description: "Update the mailbox account name. Pass empty string to clear." })),
+    label: Type.Optional(Type.String({ description: "Update the human-readable label." })),
   }),
 };
 
@@ -682,6 +699,17 @@ const removeVaultEntryTool: Tool = {
   parameters: Type.Object({
     agent: Type.String({ description: "Agent name" }),
     service: Type.String({ description: "Service name (vault key) to remove" }),
+  }),
+};
+
+const shareVaultEntryTool: Tool = {
+  name: "share_vault_entry",
+  description: "Convenience helper to change WHO an existing vault entry is shared with — without re-writing the credentials. Adds/removes agent names from the entry's `allowedAgents` list. Use 'add' to grant access, 'remove' to revoke, or 'replace' to fully overwrite the list. Owner is always implicit and is rejected if passed.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
+    service: Type.String({ description: "Service name (vault key)" }),
+    action: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("replace")], { description: "What to do with `withAgents`." }),
+    withAgents: Type.Array(Type.String(), { description: "Other agent names. The owner cannot share with themselves." }),
   }),
 };
 
@@ -1253,9 +1281,29 @@ const whatsappSendTool: Tool = {
   }),
 };
 
+const whatsappSendFileTool: Tool = {
+  name: "whatsapp_send_file",
+  description: "Send a WhatsApp file/media attachment from a local file path. Supports image, video, audio, and document messages. Requires a WhatsApp channel configured and connected.",
+  parameters: Type.Object({
+    to: Type.String({ description: "Recipient: phone number, contact name, or JID" }),
+    path: Type.String({ description: "Local file path to send. Relative paths resolve from the agent workspace." }),
+    caption: Type.Optional(Type.String({ description: "Optional caption" })),
+    mediaKind: Type.Optional(Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("image"),
+      Type.Literal("video"),
+      Type.Literal("audio"),
+      Type.Literal("document"),
+    ], { description: "Force media kind (default auto)" })),
+    mimeType: Type.Optional(Type.String({ description: "Override MIME type" })),
+    fileName: Type.Optional(Type.String({ description: "Override displayed filename" })),
+    viewOnce: Type.Optional(Type.Boolean({ description: "Send supported media as view-once" })),
+  }),
+};
+
 const whatsappReadTool: Tool = {
   name: "whatsapp_read",
-  description: "Read WhatsApp messages. List recent chats, read messages from a specific chat, or search across all chats. Requires a WhatsApp channel configured.",
+  description: "Read WhatsApp messages. Defaults to hidden/local reads; set markRead=true only when the user explicitly wants WhatsApp read receipts.",
   parameters: Type.Object({
     action: Type.Union([
       Type.Literal("list_chats"),
@@ -1266,6 +1314,7 @@ const whatsappReadTool: Tool = {
     chatId: Type.Optional(Type.String({ description: "Chat phone/name/JID for read_chat (required for read_chat)" })),
     query: Type.Optional(Type.String({ description: "Search query (required for search)" })),
     limit: Type.Optional(Type.Number({ description: "Max results (default: 30)" })),
+    markRead: Type.Optional(Type.Boolean({ description: "For read_chat only: send WhatsApp read receipts for returned inbound messages (default false)" })),
   }),
 };
 
@@ -1388,7 +1437,7 @@ const phoneDisableInboundTool: Tool = {
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
-const openFileTool: Tool = {
+export const openFileTool: Tool = {
   name: "open_file",
   description: `Open a file for the user in an inline preview dialog, without navigating away.
 Use this when the user says "open the file", "show me the file", "let me see it", etc.
@@ -1400,7 +1449,7 @@ Prefer this over navigate_to with target="files" when the user wants to SEE the 
   }),
 };
 
-const navigateToTool: Tool = {
+export const navigateToTool: Tool = {
   name: "navigate_to",
   description: `Navigate the user's UI to any page in the dashboard.
 Use this when the user asks to see a specific section or detail page, e.g. "show me the dashboard",
@@ -1441,7 +1490,7 @@ Examples:
   }),
 };
 
-const openTabTool: Tool = {
+export const openTabTool: Tool = {
   name: "open_tab",
   description: `Open a URL in a new browser tab on the user's device.
 Use this when the user asks to open a link, website, documentation page, PR, issue, deploy URL, etc.
@@ -1450,6 +1499,47 @@ This is a client-side action — calls window.open() in the user's browser.`,
   parameters: Type.Object({
     url: Type.String({ description: "The full URL to open (e.g. 'https://github.com/org/repo', 'http://localhost:3000')" }),
     label: Type.Optional(Type.String({ description: "Human-readable label for the tab (e.g. 'GitHub PR #42')" })),
+  }),
+};
+
+const designThemeParameters = Type.Object({
+  primary: Type.String({ description: "Primary color as 6-digit hex, e.g. #2563eb" }),
+  secondary: Type.String({ description: "Secondary/accent color as 6-digit hex, e.g. #f1f5f9" }),
+  text: Type.String({ description: "Main text color as 6-digit hex, e.g. #0f172a" }),
+  radius: Type.Number({ description: "Roundedness in pixels, 0-24" }),
+  fontFamily: Type.String({ description: "CSS font-family stack. Supports any installed or loaded browser font." }),
+});
+
+const setDesignTool: Tool = {
+  name: "set_design",
+  description: `Propose UI appearance overrides on the user's device.
+Use this when the user asks to change the app design, colors, typography, or roundness.
+This is a client-side action: the UI shows a preview and the user must confirm before applying it.
+
+Supported properties:
+- enabled: turn appearance overrides on/off. Use true when setting any override, false to restore the selected palette.
+- light: complete light-mode override object.
+- dark: complete dark-mode override object.
+
+Each light/dark object must include every supported override field:
+- primary: main brand/action color as a 6-digit hex value, e.g. "#2563eb".
+- secondary: secondary/accent surface color as a 6-digit hex value.
+- text: main text color as a 6-digit hex value.
+- radius: roundedness in pixels, 0-24.
+- fontFamily: any valid CSS font-family stack, e.g. '"Inter", ui-sans-serif, system-ui, sans-serif'.
+
+Examples:
+- set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })
+- set_design({ enabled: false })`,
+  parameters: Type.Object({
+    enabled: Type.Optional(Type.Boolean({ description: "Enable or disable appearance overrides. Defaults to true when any override property is provided." })),
+    light: Type.Optional(designThemeParameters),
+    dark: Type.Optional(designThemeParameters),
+    primary: Type.Optional(Type.String({ description: "Legacy fallback: primary color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    secondary: Type.Optional(Type.String({ description: "Legacy fallback: secondary/accent color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    text: Type.Optional(Type.String({ description: "Legacy fallback: main text color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    radius: Type.Optional(Type.Number({ description: "Legacy fallback: roundedness in pixels, 0-24, applied to both modes when light/dark are omitted." })),
+    fontFamily: Type.Optional(Type.String({ description: "Legacy fallback: CSS font-family stack, applied to both modes when light/dark are omitted." })),
   }),
 };
 
@@ -1478,6 +1568,72 @@ After receiving answers, continue with the task using the clarified information.
     }), { minItems: 1, maxItems: 5, description: "Questions to ask the user" }),
   }),
 };
+
+export const renderWidgetTool: Tool = {
+  name: "render_widget",
+  description: `Render an interactive HTML widget inline as a card in the user's chat. Use ONLY when the visual/interactive form delivers genuinely more value than markdown.
+
+✅ USE WHEN
+• The user explicitly asks for a chart, graph, simulation, interactive demo, animated diagram, what-if calculator, force-directed graph, timeline
+• A concept truly needs interaction or visual layout to land at a glance
+
+❌ DO NOT USE WHEN markdown already covers it
+• Tabular data → use a markdown table
+• Code → use a fenced code block
+• Static image / lists / headings → markdown
+• 'Just show the result' → plain text
+
+The user pays for tokens and screen space. Default to markdown. Only reach for the widget when there's clear added value.`,
+  parameters: Type.Object({
+    html: Type.String({ description: "Self-contained HTML (with embedded <style> and <script>). Max ~8KB. NO external resources (no <link>, no <script src=...>, no http(s) images). Inherits theme via prefers-color-scheme. Will be rendered inside a sandboxed iframe (sandbox=\"allow-scripts\"). The iframe auto-sizes to your content height via postMessage — design accordingly. Always full-width of the chat bubble." }),
+    title: Type.Optional(Type.String({ description: "Short title shown in the card header. Ignored if chrome=false." })),
+    description: Type.Optional(Type.String({ description: "Brief alt text for accessibility / search" })),
+    chrome: Type.Optional(Type.Boolean({ description: "Show card chrome (border + header). Default true. Set false for free-form / shaped widgets that should sit directly on the chat canvas (e.g. a circular clock, a custom-shaped diagram)." })),
+    stream: Type.Optional(Type.Boolean({ description: "Opt-in chunk-by-chunk live preview. Default false (atomic — widget appears only when the HTML is fully composed). Set true ONLY when the HTML is large/complex enough that watching it materialise has value (e.g. ASCII-art diagrams that build up shape, animations whose first frames are themselves interesting). For small/instant widgets leave it off — the live preview costs an iframe rebuild every ~1s and is overkill." })),
+  }),
+};
+
+/** Maximum HTML payload size for render_widget (bytes). */
+export const RENDER_WIDGET_MAX_HTML_BYTES = 8192;
+
+/** Patterns that indicate disallowed external resources / nested iframes inside widget HTML. */
+const RENDER_WIDGET_FORBIDDEN_PATTERNS: RegExp[] = [
+  /<script[^>]+\bsrc\s*=/i,
+  /<link[^>]+\bhref\s*=\s*["']?https?:/i,
+  /<img[^>]+\bsrc\s*=\s*["']?https?:/i,
+  /<iframe/i,
+];
+
+/**
+ * Validate render_widget tool arguments.
+ * Returns null on success, or an error message string suitable for returning to the LLM as the tool result.
+ *
+ * The caller (the streaming/non-streaming completions loop) should:
+ * - On null: emit the widget_render interactive intercept and return a tool result of
+ *   "Widget rendered to the user. Continue with prose only if necessary."
+ * - On non-null: skip the emit and feed the returned string back to the model as the tool result.
+ */
+export function validateRenderWidgetArgs(args: Record<string, unknown>): string | null {
+  const html = typeof args.html === "string" ? args.html : "";
+  if (!html) {
+    return "Error: render_widget requires a non-empty 'html' string argument.";
+  }
+  // Use byte length (UTF-8) — generous: code points outside ASCII count more.
+  const byteLen = Buffer.byteLength(html, "utf8");
+  if (byteLen > RENDER_WIDGET_MAX_HTML_BYTES) {
+    return "Error: Widget HTML exceeds 8KB. Trim it (remove comments, minify CSS, simplify SVG paths) and retry.";
+  }
+  for (const pat of RENDER_WIDGET_FORBIDDEN_PATTERNS) {
+    if (pat.test(html)) {
+      return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
+    }
+  }
+  // height removed from tool params — il widget auto-sizes sempre via
+  // postMessage. Lasciamo passare anche se il modello dovesse ancora
+  // includerlo per qualche reason (vecchio prompt cached): viene
+  // semplicemente ignorato lato client.
+  return null;
+}
 
 // ═══════════════════════════════════════════════════════
 //  TOOL COLLECTIONS
@@ -1512,7 +1668,7 @@ export const WRITE_TOOLS = new Set([
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Vault & Identity
-  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "set_identity",
+  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "share_vault_entry", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -1542,14 +1698,63 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab"]);
+// render_widget NON è interactive: è un tool "fire-and-display" che
+// emette un chunk widget_render durante l'esecuzione, NON ferma il turn,
+// e può essere chiamato N volte nello stesso turno (multiple widgets
+// inline). Gli interactive bloccano il turn aspettando input utente.
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
+export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
+export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
+
+/** Server-side tool that renames the current chat session. Available to
+ *  every agent (orchestrator + agent-direct) — the intercept in
+ *  completions.ts resolves the sessionId from the X-Session-Id header,
+ *  calls `sessionStore.renameSession`, and emits a `session_title`
+ *  SSE chunk so the sidebar refreshes in real time. The tool is sticky:
+ *  agents may call it any time but should ONLY do so on the first turn
+ *  of a new session or when the user explicitly asks for a rename.
+ *  The system prompt is augmented on first-turn to force the call. */
+export const setSessionTitleTool: Tool = {
+  name: "set_session_title",
+  description:
+    "Rename the current chat session with a short, meaningful title (≤50 characters) that summarises what the user is asking. " +
+    "MUST be called once at the very beginning of a new session — the system prompt will remind you on the first turn. " +
+    "On later turns, call it ONLY when the user explicitly asks to rename the conversation. " +
+    "Do not include emojis or quotes; use plain Title Case.",
+  parameters: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: 80, description: "New title for the session — short and descriptive (≤50 chars recommended)." }),
+  }),
+};
+
+/**
+ * Side-effect tools that ship a real-world message (WhatsApp / email)
+ * the moment they execute. In CHAT mode we gate them behind an
+ * approval preview (Invia / Refine / Annulla) — exactly like
+ * `create_mission`. The TASK runner is unaffected: tasks are agentic and
+ * the user already authorised them upstream when the task was created.
+ *
+ * The actual gate lives in `resolveAgentTools` (src/server/app.ts) and in
+ * the orchestrator path (src/server/app.ts:resolveOrchestratorContext).
+ * The intercept emits `whatsapp_preview` / `email_preview` chunks; the
+ * UI then calls REST endpoints to perform the send after explicit user
+ * confirmation.
+ */
+export const SIDE_EFFECT_GATED_TOOLS = new Set(["whatsapp_send", "whatsapp_send_file", "email_send"]);
+
+export function isSideEffectGated(toolName: string): boolean {
+  return SIDE_EFFECT_GATED_TOOLS.has(toolName);
+}
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
 }
 
 export function isInteractive(toolName: string): boolean {
-  return INTERACTIVE_TOOLS.has(toolName);
+  return INTERACTIVE_TOOLS.has(toolName) || SIDE_EFFECT_GATED_TOOLS.has(toolName);
+}
+
+export function isClientSideChatTool(toolName: string): boolean {
+  return CLIENT_SIDE_CHAT_TOOL_NAMES.has(toolName);
 }
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
@@ -1571,8 +1776,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   updateMissionNotificationsTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
-  // Vault (4)
-  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool,
+  // Vault (5)
+  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
   // Identity (2)
   setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
@@ -1603,12 +1808,14 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Phone (7)
   phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
   phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
-  // WhatsApp (2)
-  whatsappSendTool, whatsappReadTool,
-  // Interactive (1)
-  askUserTool,
-  // Client-side (3)
-  openFileTool, navigateToTool, openTabTool,
+  // WhatsApp (3)
+  whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
+  // Interactive (2)
+  askUserTool, renderWidgetTool,
+  // Client-side (4)
+  openFileTool, navigateToTool, openTabTool, setDesignTool,
+  // Session meta (1)
+  setSessionTitleTool,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1650,6 +1857,7 @@ const TOOL_LABELS: Record<string, string> = {
   set_vault_entry: "Set Vault Entry",
   update_vault_credentials: "Update Vault Credentials",
   remove_vault_entry: "Remove Vault Entry",
+  share_vault_entry: "Share Vault Entry",
   set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
@@ -1696,6 +1904,9 @@ const TOOL_LABELS: Record<string, string> = {
   whatsapp_read: "WhatsApp Read",
   // Client-side
   open_tab: "Open Tab",
+  set_design: "Set Design",
+  set_session_title: "Set Session Title",
+  render_widget: "Render Widget",
   // Ink Hub
   ink_search: "Search Ink Hub",
   ink_browse: "Browse Installed Packages",
@@ -1835,6 +2046,7 @@ export async function executeOrchestratorTool(
       case "set_vault_entry":           return execSetVaultEntry(polpo, args);
       case "update_vault_credentials": return execUpdateVaultCredentials(polpo, args);
       case "remove_vault_entry":       return execRemoveVaultEntry(polpo, args);
+      case "share_vault_entry":        return execShareVaultEntry(polpo, args);
       case "list_vault":               return execListVault(polpo, args);
 
       // ── Identity ──
@@ -1925,11 +2137,17 @@ export async function executeOrchestratorTool(
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
-      case "whatsapp_read":    return execWhatsAppRead(polpo, args);
+      case "whatsapp_send_file": return await execWhatsAppSendFile(polpo, args);
+      case "whatsapp_read":    return await execWhatsAppRead(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
         return "Questions sent to user. Waiting for answers.";
+      case "render_widget":
+        // Validation + emit happen in the completions loop. If we ever get here it
+        // means the tool wasn't intercepted — fall back to validating args so the
+        // model gets a useful error rather than a silent no-op.
+        return validateRenderWidgetArgs(args) ?? "Widget rendered to the user. Continue with prose only if necessary.";
 
       default:
         return `Unknown tool: ${toolName}`;
@@ -2193,6 +2411,22 @@ export async function formatToolDetails(
     case "open_tab":
       main.push(["URL", trunc(args.url)]);
       if (args.label) main.push(["Label", trunc(args.label)]);
+      break;
+    case "set_design":
+      if (args.enabled !== undefined) main.push(["Override", args.enabled ? "on" : "off"]);
+      if (args.light) main.push(["Light", "custom"]);
+      if (args.dark) main.push(["Dark", "custom"]);
+      if (args.primary) main.push(["Primary", String(args.primary)]);
+      if (args.secondary) main.push(["Secondary", String(args.secondary)]);
+      if (args.text) main.push(["Text", String(args.text)]);
+      if (args.radius !== undefined) main.push(["Radius", String(args.radius)]);
+      if (args.fontFamily) extra.push(["Font", trunc(args.fontFamily)]);
+      break;
+    case "render_widget":
+      if (args.title) main.push(["Title", trunc(args.title)]);
+      if (args.height !== undefined) main.push(["Height", `${String(args.height)}px`]);
+      if (typeof args.html === "string") main.push(["HTML size", `${Buffer.byteLength(args.html, "utf8")} bytes`]);
+      if (args.description) extra.push(["Description", trunc(args.description, 200)]);
       break;
     default:
       for (const [k, v] of Object.entries(args)) {
@@ -2731,6 +2965,31 @@ async function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<
 //  TEAM IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
+function getModelProvider(spec: string | undefined): string | undefined {
+  if (!spec) return undefined;
+  if (spec.includes(":")) return spec.split(":")[0];
+  if (spec.includes("/")) return spec.split("/")[0];
+  return undefined;
+}
+
+function resolveAgentModelForConnectedProvider(polpo: Orchestrator, requested: string | undefined): string | undefined {
+  const connectedProviders = detectProviders().filter((provider) => provider.hasKey).map((provider) => provider.name);
+  if (connectedProviders.length === 0) return requested;
+
+  const requestedProvider = getModelProvider(requested);
+  if (requested && requestedProvider && connectedProviders.includes(requestedProvider)) return requested;
+
+  const orchestratorModel = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+  const orchestratorProvider = getModelProvider(orchestratorModel);
+  if (orchestratorModel && orchestratorProvider && connectedProviders.includes(orchestratorProvider)) {
+    return orchestratorModel;
+  }
+
+  const fallbackProvider = connectedProviders[0];
+  const fallbackModel = listModels(fallbackProvider)[0];
+  return fallbackModel ? `${fallbackProvider}:${fallbackModel.id}` : requested;
+}
+
 async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const existing = await polpo.getAgents();
   // For add_agent, check if agent already exists (by name or displayName)
@@ -2739,12 +2998,14 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     return `Error: Agent "${args.name}" already exists (matched "${dup.name}"). Use update_agent to modify.`;
   }
   const teamName = args.team as string | undefined;
+  const model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   const config: Record<string, unknown> = {
     name: args.name as string,
     role: args.role as string | undefined,
-    model: args.model as string | undefined,
+    model,
     systemPrompt: args.systemPrompt as string | undefined,
     skills: args.skills as string[] | undefined,
+    suggestions: args.suggestions as Array<string | { title: string; prompt?: string; description?: string }> | undefined,
     allowedPaths: args.allowedPaths as string[] | undefined,
     allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
@@ -2786,9 +3047,10 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   // Build updates from explicit args, only including fields that were provided
   const updates: Record<string, unknown> = {};
   if (args.role !== undefined) updates.role = args.role as string;
-  if (args.model !== undefined) updates.model = args.model as string;
+  if (args.model !== undefined) updates.model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   if (args.systemPrompt !== undefined) updates.systemPrompt = args.systemPrompt as string;
   if (args.skills !== undefined) updates.skills = args.skills as string[];
+  if (args.suggestions !== undefined) updates.suggestions = args.suggestions as Array<string | { title: string; prompt?: string; description?: string }>;
   if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
   if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;
@@ -3178,15 +3440,25 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
 
   const service = args.service as string;
+  // Filter allowedAgents: drop owner (implicit), de-dupe.
+  const rawAllowed = Array.isArray(args.allowedAgents) ? (args.allowedAgents as string[]) : undefined;
+  const allowedAgents = rawAllowed
+    ? Array.from(new Set(rawAllowed.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)))
+    : undefined;
   const entry: VaultEntry = {
     type: args.type as VaultEntry["type"],
     ...(args.label ? { label: args.label as string } : {}),
+    ...(args.account ? { account: args.account as string } : {}),
+    ...(allowedAgents && allowedAgents.length > 0 ? { allowedAgents } : {}),
     credentials: args.credentials as Record<string, string>,
   };
 
   await vaultStore.set(agentName, service, entry);
   const credKeys = Object.keys(entry.credentials).join(", ");
-  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
+  const shareMsg = entry.allowedAgents && entry.allowedAgents.length > 0
+    ? ` Shared with: ${entry.allowedAgents.join(", ")}.`
+    : "";
+  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}.${shareMsg}`;
 }
 
 async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3202,10 +3474,68 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   const existing = await vaultStore.get(agentName, service);
   if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}". Use set_vault_entry to create one.`;
 
-  const credentials = args.credentials as Record<string, string>;
-  const mergedKeys = await vaultStore.patch(agentName, service, { credentials });
-  const updatedKeys = Object.keys(credentials).join(", ");
+  const credentials = (args.credentials as Record<string, string> | undefined) ?? undefined;
+  // allowedAgents semantics: present → REPLACES. omitted → preserved.
+  const rawAllowed = args.allowedAgents;
+  let allowedAgents: string[] | undefined;
+  if (Array.isArray(rawAllowed)) {
+    allowedAgents = Array.from(new Set((rawAllowed as string[]).filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  }
+  const account = typeof args.account === "string" ? args.account : undefined;
+  const label = typeof args.label === "string" ? args.label : undefined;
+
+  const mergedKeys = await vaultStore.patch(agentName, service, {
+    ...(credentials ? { credentials } : {}),
+    ...(allowedAgents !== undefined ? { allowedAgents } : {}),
+    ...(account !== undefined ? { account } : {}),
+    ...(label !== undefined ? { label } : {}),
+  });
+  const updatedKeys = credentials ? Object.keys(credentials).join(", ") : "(metadata only)";
   return `Vault entry "${service}" updated for agent "${agentName}". Updated fields: ${updatedKeys}. All fields: ${mergedKeys.join(", ")}`;
+}
+
+async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+
+  const service = args.service as string;
+  const action = args.action as "add" | "remove" | "replace";
+  const withAgents = Array.isArray(args.withAgents) ? (args.withAgents as string[]) : [];
+
+  // Validate target agents exist (defensive — orchestrator may resolve aliases).
+  const known = new Set(agents.map(a => a.name));
+  const cleaned = Array.from(new Set(withAgents.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  const unknown = cleaned.filter(n => !known.has(n));
+  if (unknown.length > 0) {
+    return `Error: unknown agent name(s): ${unknown.join(", ")}. Use list_agents to verify.`;
+  }
+
+  const existing = await vaultStore.get(agentName, service);
+  if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}".`;
+
+  const current = new Set(existing.allowedAgents ?? []);
+  let next: string[];
+  if (action === "replace") {
+    next = cleaned;
+  } else if (action === "add") {
+    for (const n of cleaned) current.add(n);
+    next = Array.from(current);
+  } else {
+    // remove
+    for (const n of cleaned) current.delete(n);
+    next = Array.from(current);
+  }
+
+  await vaultStore.patch(agentName, service, { allowedAgents: next });
+  const summary = next.length === 0
+    ? `Vault entry "${service}" is now owner-private.`
+    : `Vault entry "${service}" is now shared with: ${next.join(", ")}.`;
+  return summary;
 }
 
 async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4132,24 +4462,10 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const text = args.text as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
 
-  // Resolve recipient to JID
-  let jid: string;
-  if (to.includes("@")) {
-    // Already a JID
-    jid = to;
-  } else if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) {
-    // Phone number
-    const clean = to.replace(/[+\s-]/g, "");
-    jid = `${clean}@s.whatsapp.net`;
-  } else if (store) {
-    // Try resolving by contact name
-    const contact = store.resolveContact(to);
-    if (!contact) return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
-    jid = contact.jid;
-  } else {
-    return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
-  }
+  const jid = jidOrError;
 
   try {
     const msgId = await bridge.sendMessage(jid, text);
@@ -4161,7 +4477,41 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   }
 }
 
-function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execWhatsAppSendFile(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const bridge = polpo.getWhatsAppBridge();
+  if (!bridge) return "Error: WhatsApp not configured or not connected. Configure a WhatsApp channel in polpo.json.";
+
+  const store = polpo.getWhatsAppStore();
+  const to = args.to as string;
+  const path = args.path as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
+
+  const baseDir = polpo.getAgentWorkDir();
+  const filePath = resolve(baseDir, path);
+  const rel = relative(baseDir, filePath);
+  if (rel.startsWith("..") || isAbsolute(rel)) return "Error: WhatsApp attachments must be inside the agent workspace.";
+  if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+  const stat = statSync(filePath);
+  if (!stat.isFile()) return `Error: Not a file: ${filePath}`;
+
+  try {
+    const msgId = await bridge.sendMediaMessage(jidOrError, {
+      path: filePath,
+      caption: args.caption as string | undefined,
+      mimeType: (args.mimeType as string | undefined) ?? guessWhatsAppMime(filePath),
+      fileName: (args.fileName as string | undefined) ?? basename(filePath),
+      mediaKind: (args.mediaKind as "auto" | "image" | "video" | "audio" | "document" | undefined) ?? "auto",
+      viewOnce: args.viewOnce as boolean | undefined,
+    });
+    return `WhatsApp attachment sent to ${jidOrError.replace(/@.*$/, "")}: ${basename(filePath)}${msgId ? ` (id: ${msgId})` : ""}.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error sending WhatsApp attachment: ${msg}`;
+  }
+}
+
+async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const store = polpo.getWhatsAppStore();
   if (!store) return "Error: WhatsApp store not available. Configure a WhatsApp channel in polpo.json.";
 
@@ -4201,15 +4551,26 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
       const messages = store.listMessages(jid, limit);
       if (messages.length === 0) return `No messages found for ${chatId}.`;
 
+      const markRead = args.markRead === true;
+      if (markRead) {
+        const bridge = polpo.getWhatsAppBridge();
+        if (!bridge) return "Error: Cannot mark read because WhatsApp is not connected.";
+        const keys = messages
+          .filter(m => !m.fromMe && !m.readAt)
+          .map(m => ({ remoteJid: m.chatJid, id: m.id, fromMe: false, participant: m.chatJid.endsWith("@g.us") ? m.senderJid : undefined }));
+        if (keys.length > 0) await bridge.markRead(keys);
+      }
+
       // Reverse to chronological order
       const sorted = [...messages].reverse();
       const lines = sorted.map(m => {
         const ts = new Date(m.timestamp * 1000).toLocaleString();
         const sender = m.fromMe ? "Me" : (m.senderName ?? m.senderJid.replace(/@.*$/, ""));
         const media = m.mediaType ? ` [${m.mediaType}]` : "";
-        return `  [${ts}] ${sender}: ${m.text}${media}`;
+        const file = m.mediaPath ? `\n     attachment: ${m.mediaPath}${m.mimeType ? ` (${m.mimeType})` : ""}` : "";
+        return `  [${ts}] ${sender}: ${m.text}${media}${file}`;
       });
-      return `${messages.length} message(s) from ${chatId}:\n${lines.join("\n")}`;
+      return `${messages.length} message(s) from ${chatId}${markRead ? " (marked read)" : " (hidden read)"}:\n${lines.join("\n")}`;
     }
 
     case "search": {
@@ -4241,6 +4602,31 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
     default:
       return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
+}
+
+function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): string {
+  if (to.includes("@")) return to;
+  if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) return `${to.replace(/[+\s-]/g, "")}@s.whatsapp.net`;
+  if (store) {
+    const contact = store.resolveContact(to);
+    if (contact) return contact.jid;
+    return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
+  }
+  return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
+}
+
+function guessWhatsAppMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
 }
 
 // ═══════════════════════════════════════════════════════

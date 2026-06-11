@@ -229,8 +229,87 @@ export interface VaultEntry {
   type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
   /** Human-readable label */
   label?: string;
+  /** Logical account this entry belongs to — used to group SMTP+IMAP of
+   *  the same mailbox. When omitted, the entry stands alone and its
+   *  `account` defaults to the `service` key. Multiple entries with the
+   *  same `account` form one mailbox (e.g. smtp send + imap read).
+   *  Only meaningful for type "smtp" / "imap"; ignored for others. */
+  account?: string;
+  /** Other agent names allowed to READ/use this entry. The owner (agent
+   *  on the PK) always has access and is implicit (not in this list).
+   *  Empty/undefined → owner-private (default). When set, the entry
+   *  appears in `getAllForAgent(otherAgent)` results with `sharedFrom`
+   *  metadata. Conflict policy: if `otherAgent` has its own entry with
+   *  the same service key, the per-agent entry wins over the shared one. */
+  allowedAgents?: string[];
   /** Credential fields — values can be literals or ${ENV_VAR} references */
   credentials: Record<string, string>;
+}
+
+// === Loops ===
+
+/** Deterministic condition evaluated against the loop context bag. */
+export interface Condition {
+  expression: string;
+}
+
+/** Structured output contract produced by a loop or human step. */
+export interface LoopOutputConfig {
+  schema?: unknown;
+}
+
+/** A named LLM loop with a constrained tool/model/runtime contract. */
+export interface LoopConfig {
+  /** Optional display name. The loops record key is the canonical ID. */
+  name?: string;
+  systemPrompt?: string;
+  /** Tool subset active in this loop. */
+  tools?: string[];
+  model?: string;
+  reasoning?: ReasoningLevel | string;
+  maxTurns?: number;
+  /** Deterministic stop condition over the context bag. */
+  stopWhen?: Condition;
+  output?: LoopOutputConfig;
+}
+
+export interface SwitchCase {
+  when: string;
+  steps: PipelineStep[];
+}
+
+export interface LoopStep {
+  loop: string;
+  when?: string;
+}
+
+export interface ParallelStep {
+  parallel: PipelineStep[];
+  join?: "all" | "any" | number;
+  when?: string;
+}
+
+export interface SwitchStep {
+  switch: {
+    cases: SwitchCase[];
+    default?: { steps: PipelineStep[] };
+  };
+  when?: string;
+}
+
+export interface HumanStep {
+  human: string;
+  output?: LoopOutputConfig;
+  notify?: string[];
+  when?: string;
+}
+
+export type PipelineStep = LoopStep | ParallelStep | SwitchStep | HumanStep;
+
+export interface Pipeline {
+  mode?: "sequential" | "parallel";
+  context?: "shared";
+  steps: PipelineStep[];
 }
 
 // === Agent ===
@@ -260,6 +339,8 @@ export interface AgentConfig {
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
   skills?: string[];
+  /** Suggested starter prompts shown when opening a new chat with this agent. */
+  suggestions?: AgentSuggestion[];
   /** Max conversation turns before stopping. Default 150 */
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited (undefined). */
@@ -268,6 +349,12 @@ export interface AgentConfig {
    *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
    *  Falls back to the global `settings.reasoning` when not set. */
   reasoning?: ReasoningLevel;
+  /** Runtime profile used by deterministic loop execution. */
+  runtime?: string;
+  /** Named deterministic loops available to this agent. */
+  loops?: Record<string, LoopConfig>;
+  /** Optional deterministic pipeline that composes the agent's loops. */
+  pipeline?: Pipeline;
   /** Volatile agent — created for a specific mission, auto-removed when mission completes */
   volatile?: boolean;
   /** Mission group this volatile agent belongs to */
@@ -297,6 +384,17 @@ export interface AgentConfig {
   author?: string;
   /** Searchable tags for registry discovery (e.g. ["frontend", "react", "testing"]). */
   tags?: string[];
+}
+
+export type AgentSuggestion = string | AgentSuggestionConfig;
+
+export interface AgentSuggestionConfig {
+  /** Short label shown in the UI. */
+  title: string;
+  /** Optional prompt sent to the agent. Defaults to title. */
+  prompt?: string;
+  /** Optional secondary text shown below the title. */
+  description?: string;
 }
 
 export interface AgentActivity {
@@ -910,7 +1008,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -932,6 +1030,16 @@ export interface NotificationChannelConfig {
   url?: string;
   /** Webhook: custom headers. */
   headers?: Record<string, string>;
+  /** Push: VAPID public key. Defaults to the generated project key. */
+  vapidPublicKey?: string;
+  /** Push: VAPID private key. Defaults to the generated project key. */
+  vapidPrivateKey?: string;
+  /** Push: VAPID subject ("mailto:" or "https:" contact). */
+  vapidSubject?: string;
+  /** Push: message TTL in seconds. */
+  ttl?: number;
+  /** Push: delivery urgency. */
+  urgency?: "very-low" | "low" | "normal" | "high";
   /** SMTP host. */
   host?: string;
   /** SMTP port. */

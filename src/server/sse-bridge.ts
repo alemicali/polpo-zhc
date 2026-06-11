@@ -5,6 +5,8 @@ import type { PolpoEvent } from "../core/events.js";
 const ALL_EVENTS: PolpoEvent[] = [
   "task:created", "task:transition", "task:updated", "task:removed",
   "agent:spawned", "agent:finished", "agent:activity",
+  "agent:created", "agent:updated", "agent:removed",
+  "team:created", "team:updated", "team:removed",
   "assessment:started", "assessment:progress", "assessment:check:started", "assessment:check:complete", "assessment:complete", "assessment:corrected",
   "orchestrator:started", "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown",
   "task:retry", "task:retry:blocked", "task:fix", "task:maxRetries",

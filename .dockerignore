@@ -1,5 +1,7 @@
 node_modules
+**/node_modules
 dist
+**/dist
 ui/node_modules
 ui/dist
 ui/dev-dist
@@ -7,7 +9,15 @@ packages/react-sdk/node_modules
 packages/react-sdk/dist
 .git
 .github
+.agent
+.agents
+.claude
+.playwright-mcp
+.wrangler
 .polpo
+.turbo
+.vite
+.cache
 *.db
 *.db-wal
 *.db-shm
@@ -16,7 +26,11 @@ packages/react-sdk/dist
 .env.local
 .DS_Store
 coverage
+docs-backup
 docs
+attachments
+workspace
+polpo-ai-*.tgz
 src/__tests__
 *.test.ts
 *.spec.ts

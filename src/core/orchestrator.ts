@@ -10,6 +10,8 @@ import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import type { SessionStore } from "./session-store.js";
+import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
+import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
@@ -23,6 +25,7 @@ import type {
   PolpoConfig,
   AgentConfig,
   Task,
+  TaskStatus,
   TaskResult,
   TaskExpectation,
   ExpectedOutcome,
@@ -101,11 +104,13 @@ export class Orchestrator extends TypedEmitter {
   private stopped = false;
   private assessFn: AssessFn;
   private spawner: Spawner;
+  private ownsSpawner = true;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
+  private codingSessionStore!: CodingSessionStore;
   private notificationServer?: Server;
   private hookRegistry = new HookRegistry();
   private approvalMgr?: ApprovalManager;
@@ -126,6 +131,7 @@ export class Orchestrator extends TypedEmitter {
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
   private playbookStore!: PlaybookStore;
+  private eventingTaskStores = new WeakMap<TaskStore, TaskStore>();
 
   // Managers
   private agentMgr!: AgentManager;
@@ -160,6 +166,9 @@ export class Orchestrator extends TypedEmitter {
     this.workDir = resolve(newWorkDir);
     this.polpoDir = getPolpoDir(this.workDir);
     this.cachedAgentWorkDir = null;
+    if (this.ownsSpawner) {
+      this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+    }
   }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
@@ -178,11 +187,69 @@ export class Orchestrator extends TypedEmitter {
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
       this.spawner = opts.spawner ?? new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+      this.ownsSpawner = !opts.spawner;
     }
   }
 
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
+
+  /**
+   * Decorate task status changes with task:transition events.
+   *
+   * Watchers, SSE, notification rules, and CLI status output all depend on this
+   * event. Keeping it at the store boundary prevents missed events when callers
+   * use registry.transition(...) directly.
+   */
+  private withTaskTransitionEvents(store: TaskStore): TaskStore {
+    const cached = this.eventingTaskStores.get(store);
+    if (cached) return cached;
+
+    const orchestrator = this;
+    const wrapped = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "__emitsTaskTransitionEvents") return true;
+
+        if (prop === "transition") {
+          return async (taskId: string, newStatus: TaskStatus) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.transition(taskId, newStatus);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        if (prop === "unsafeSetStatus") {
+          return async (taskId: string, newStatus: TaskStatus, reason: string) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.unsafeSetStatus(taskId, newStatus, reason);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as TaskStore;
+
+    this.eventingTaskStores.set(store, wrapped);
+    return wrapped;
+  }
 
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
@@ -252,7 +319,7 @@ export class Orchestrator extends TypedEmitter {
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(this.config.settings.storage, this.config.settings.databaseUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
     // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
@@ -268,6 +335,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -638,7 +706,7 @@ export class Orchestrator extends TypedEmitter {
     const stores = this.injectedStore
       ? { task: this.injectedStore, run: this.injectedRunStore! }
       : await this.createStores(storageBackend, dbUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
 
     // Use Drizzle-provided stores when available, otherwise fall back to file-based
@@ -654,6 +722,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -780,6 +849,7 @@ export class Orchestrator extends TypedEmitter {
   getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): VaultStore | undefined { return this.vaultStore; }
   getPlaybookStore(): PlaybookStore { return this.playbookStore; }
+  getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
 
@@ -805,15 +875,45 @@ export class Orchestrator extends TypedEmitter {
   async getTeam(name?: string): Promise<Team | undefined> { return this.engine.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
-  async addTeam(team: Team): Promise<void> { return this.engine.addTeam(team); }
-  async removeTeam(name: string): Promise<boolean> { return this.engine.removeTeam(name); }
-  async renameTeam(oldName: string, newName: string): Promise<void> { return this.engine.renameTeam(oldName, newName); }
-  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.engine.addAgent(agent, teamName); }
-  async removeAgent(name: string): Promise<boolean> { return this.engine.removeAgent(name); }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.engine.updateAgent(name, updates); }
+  async addTeam(team: Team): Promise<void> {
+    await this.engine.addTeam(team);
+    await this.emitTeamSnapshot("team:created", { teamName: team.name });
+  }
+  async removeTeam(name: string): Promise<boolean> {
+    const removed = await this.engine.removeTeam(name);
+    if (removed) await this.emitTeamSnapshot("team:removed", { teamName: name });
+    return removed;
+  }
+  async renameTeam(oldName: string, newName: string): Promise<void> {
+    await this.engine.renameTeam(oldName, newName);
+    await this.emitTeamSnapshot("team:updated", { oldName, teamName: newName });
+  }
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    await this.engine.addAgent(agent, teamName);
+    await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
+  }
+  async removeAgent(name: string): Promise<boolean> {
+    const removed = await this.engine.removeAgent(name);
+    if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    return removed;
+  }
+  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> {
+    const agent = await this.engine.updateAgent(name, updates);
+    await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
+    return agent;
+  }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
+
+  private async emitTeamSnapshot(event: string, data: Record<string, unknown>): Promise<void> {
+    this.emit(event, {
+      ...data,
+      agents: await this.getAgents(),
+      teams: await this.getTeams(),
+      timestamp: new Date().toISOString(),
+    });
+  }
 
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
@@ -1478,4 +1578,3 @@ export class Orchestrator extends TypedEmitter {
   /** Access the pure orchestration engine (for advanced use / testing). */
   getEngine(): OrchestratorEngine { return this.engine; }
 }
-
