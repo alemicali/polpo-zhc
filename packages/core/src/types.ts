@@ -246,6 +246,72 @@ export interface VaultEntry {
   credentials: Record<string, string>;
 }
 
+// === Loops ===
+
+/** Deterministic condition evaluated against the loop context bag. */
+export interface Condition {
+  expression: string;
+}
+
+/** Structured output contract produced by a loop or human step. */
+export interface LoopOutputConfig {
+  schema?: unknown;
+}
+
+/** A named LLM loop with a constrained tool/model/runtime contract. */
+export interface LoopConfig {
+  /** Optional display name. The loops record key is the canonical ID. */
+  name?: string;
+  systemPrompt?: string;
+  /** Tool subset active in this loop. */
+  tools?: string[];
+  model?: string;
+  reasoning?: ReasoningLevel | string;
+  maxTurns?: number;
+  /** Deterministic stop condition over the context bag. */
+  stopWhen?: Condition;
+  output?: LoopOutputConfig;
+}
+
+export interface SwitchCase {
+  when: string;
+  steps: PipelineStep[];
+}
+
+export interface LoopStep {
+  loop: string;
+  when?: string;
+}
+
+export interface ParallelStep {
+  parallel: PipelineStep[];
+  join?: "all" | "any" | number;
+  when?: string;
+}
+
+export interface SwitchStep {
+  switch: {
+    cases: SwitchCase[];
+    default?: { steps: PipelineStep[] };
+  };
+  when?: string;
+}
+
+export interface HumanStep {
+  human: string;
+  output?: LoopOutputConfig;
+  notify?: string[];
+  when?: string;
+}
+
+export type PipelineStep = LoopStep | ParallelStep | SwitchStep | HumanStep;
+
+export interface Pipeline {
+  mode?: "sequential" | "parallel";
+  context?: "shared";
+  steps: PipelineStep[];
+}
+
 // === Agent ===
 
 export interface AgentConfig {
@@ -283,6 +349,12 @@ export interface AgentConfig {
    *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
    *  Falls back to the global `settings.reasoning` when not set. */
   reasoning?: ReasoningLevel;
+  /** Runtime profile used by deterministic loop execution. */
+  runtime?: string;
+  /** Named deterministic loops available to this agent. */
+  loops?: Record<string, LoopConfig>;
+  /** Optional deterministic pipeline that composes the agent's loops. */
+  pipeline?: Pipeline;
   /** Volatile agent — created for a specific mission, auto-removed when mission completes */
   volatile?: boolean;
   /** Mission group this volatile agent belongs to */

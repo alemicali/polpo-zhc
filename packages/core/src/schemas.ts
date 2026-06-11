@@ -6,6 +6,78 @@
 import { z } from "zod";
 import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
 
+// ── Loop Contract Schemas ────────────────────────────────────────────
+
+export const conditionSchema = z.object({
+  expression: z.string().min(1, "condition expression must be non-empty"),
+});
+
+export const loopOutputSchema = z.object({
+  schema: z.unknown().optional(),
+});
+
+export const loopConfigSchema = z.object({
+  name: z.string().min(1).optional(),
+  systemPrompt: z.string().optional(),
+  tools: z.array(z.string().min(1)).optional(),
+  model: z.string().min(1).optional(),
+  reasoning: z.string().min(1).optional(),
+  maxTurns: z.number().int().positive().optional(),
+  stopWhen: conditionSchema.optional(),
+  output: loopOutputSchema.optional(),
+});
+
+type PipelineStepSchema = z.ZodType<{
+  loop?: string;
+  parallel?: unknown[];
+  join?: "all" | "any" | number;
+  switch?: { cases: unknown[]; default?: { steps: unknown[] } };
+  human?: string;
+  output?: { schema?: unknown };
+  notify?: string[];
+  when?: string;
+}>;
+
+export const pipelineStepSchema: PipelineStepSchema = z.lazy(() =>
+  z.union([
+    z.object({
+      loop: z.string().min(1),
+      when: z.string().min(1).optional(),
+    }),
+    z.object({
+      parallel: z.array(pipelineStepSchema).min(1, "parallel step requires at least one child step"),
+      join: z.union([z.literal("all"), z.literal("any"), z.number().int().positive()]).optional(),
+      when: z.string().min(1).optional(),
+    }),
+    z.object({
+      switch: z.object({
+        cases: z.array(z.object({
+          when: z.string().min(1),
+          steps: z.array(pipelineStepSchema).min(1),
+        })).min(1, "switch requires at least one case"),
+        default: z.object({
+          steps: z.array(pipelineStepSchema).min(1),
+        }).optional(),
+      }),
+      when: z.string().min(1).optional(),
+    }),
+    z.object({
+      human: z.string().min(1),
+      output: loopOutputSchema.optional(),
+      notify: z.array(z.string().min(1)).optional(),
+      when: z.string().min(1).optional(),
+    }),
+  ]),
+);
+
+export const pipelineSchema = z.object({
+  mode: z.enum(["sequential", "parallel"]).optional(),
+  context: z.literal("shared").optional(),
+  steps: z.array(pipelineStepSchema).min(1, "pipeline requires at least one step"),
+});
+
+export const agentLoopsSchema = z.record(z.string().min(1), loopConfigSchema);
+
 // ── Expectation Schemas (discriminated union on `type`) ──────────────
 
 const testExpectation = z.object({

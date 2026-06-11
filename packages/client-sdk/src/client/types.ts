@@ -198,6 +198,42 @@ export interface AgentIdentity {
   socials?: Record<string, string>;
 }
 
+export interface Condition {
+  expression: string;
+}
+
+export interface LoopOutputConfig {
+  schema?: unknown;
+}
+
+export interface LoopConfig {
+  name?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  model?: string;
+  reasoning?: ReasoningLevel | string;
+  maxTurns?: number;
+  stopWhen?: Condition;
+  output?: LoopOutputConfig;
+}
+
+export interface SwitchCase {
+  when: string;
+  steps: PipelineStep[];
+}
+
+export type PipelineStep =
+  | { loop: string; when?: string }
+  | { parallel: PipelineStep[]; join?: "all" | "any" | number; when?: string }
+  | { switch: { cases: SwitchCase[]; default?: { steps: PipelineStep[] } }; when?: string }
+  | { human: string; output?: LoopOutputConfig; notify?: string[]; when?: string };
+
+export interface Pipeline {
+  mode?: "sequential" | "parallel";
+  context?: "shared";
+  steps: PipelineStep[];
+}
+
 export interface AgentConfig {
   name: string;
   /** ISO timestamp of when this agent was created / added to the team. */
@@ -224,6 +260,12 @@ export interface AgentConfig {
   maxConcurrency?: number;
   /** Reasoning / deep thinking level for this agent's LLM calls. */
   reasoning?: ReasoningLevel;
+  /** Runtime profile used by deterministic loop execution. */
+  runtime?: string;
+  /** Named deterministic loops available to this agent. */
+  loops?: Record<string, LoopConfig>;
+  /** Optional deterministic pipeline that composes the agent's loops. */
+  pipeline?: Pipeline;
   volatile?: boolean;
   missionGroup?: string;
 
@@ -947,6 +989,9 @@ export interface AddAgentRequest {
   // NOTE: Vault credentials managed via encrypted store, not in API body.
   /** Org chart: who this agent reports to. */
   reportsTo?: string;
+  runtime?: string;
+  loops?: Record<string, LoopConfig>;
+  pipeline?: Pipeline;
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
   // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
@@ -965,6 +1010,9 @@ export interface UpdateAgentRequest {
   identity?: AgentIdentity;
   reportsTo?: string;
   reasoning?: string;
+  runtime?: string;
+  loops?: Record<string, LoopConfig>;
+  pipeline?: Pipeline;
   browserProfile?: string;
   emailAllowedDomains?: string[];
   /** Move agent to a different team. */
