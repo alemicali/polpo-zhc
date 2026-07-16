@@ -31,6 +31,7 @@ import {
   configRoutes,
   attachmentRoutes,
   countsRoutes,
+  streamRegistry,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { publicConfigRoutes } from "./routes/config.js";
@@ -49,6 +50,7 @@ import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
+import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
@@ -155,7 +157,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
-  app.route("/v1/chat/completions", completionRoutes(() => ({
+  const completionApp = completionRoutes(() => ({
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
@@ -330,7 +332,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         isInteractive,
       };
     },
-  }), opts?.apiKeys));
+  }), opts?.apiKeys);
+  app.route("/v1/chat/completions", completionApp);
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
 
@@ -361,6 +364,44 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // from Neon stores directly.
 
   const o = orchestrator; // short alias
+
+  o?.setBackgroundWaitContinuation(async (wait, task, signal) => {
+    if (streamRegistry.getActiveTurnForSession(wait.sessionId)) return "deferred";
+    const session = await o.getSessionStore()?.getSession(wait.sessionId);
+    if (!session) throw new Error(`Chat session "${wait.sessionId}" no longer exists`);
+
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": wait.sessionId,
+      "x-polpo-internal-continuation": "background-wait",
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      signal,
+      body: JSON.stringify({
+        stream: false,
+        messages: [
+          ...history.map((message) => ({ role: message.role, content: message.content })),
+          {
+            role: "system",
+            content: [
+              `Background wait ${wait.id} is complete.`,
+              `Task "${task.title}" (${task.id}) reached status "${task.status}".`,
+              "Resume the conversation proactively: report the result, inspect the task if useful, and continue any work that was deferred while waiting.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    }));
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as any;
+      throw new Error(payload?.error?.message ?? payload?.error ?? `Continuation failed (${response.status})`);
+    }
+    return "completed";
+  });
 
   authed.route("/counts", countsRoutes(() => ({
     getAllTasks: () => o.getStore().getAllTasks(),
@@ -492,6 +533,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getWatcherManager: () => o.getWatcherManager(),
     taskStore: o.getStore(),
   })));
+
+  authed.route("/background-waits", backgroundWaitRoutes(o));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),

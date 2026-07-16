@@ -44,6 +44,7 @@ import {
   ORCHESTRATOR_BROWSER_TOOL_NAMES,
   executeOrchestratorBrowserTool,
 } from "./orchestrator-browser-tools.js";
+import { activeTaskWaitRegistry } from "./active-task-waits.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -55,6 +56,9 @@ export interface OrchestratorToolProgress {
 export interface OrchestratorToolExecutionContext {
   signal?: AbortSignal;
   onProgress?: (progress: OrchestratorToolProgress) => void | Promise<void>;
+  turnId?: string;
+  toolCallId?: string;
+  sessionId?: string;
 }
 
 
@@ -937,10 +941,14 @@ const watchTaskTool: Tool = {
 
 const waitForTaskTool: Tool = {
   name: "wait_for_task",
-  description: "Wait inside the current turn until a task reaches a specific status, or until it finishes (done/failed) when targetStatus is omitted. The tool is event-driven with reconciliation polling, keeps the chat turn resumable, and can be cancelled with Stop.",
+  description: "Wait for a task to reach a status. Foreground blocks this turn and can be moved to background from the UI; background returns immediately and starts a new turn in this chat when the task finishes.",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to wait for" }),
     targetStatus: Type.Optional(Type.String({ description: "Specific status to wait for. Omit to wait for either done or failed." })),
+    mode: Type.Optional(Type.Union([
+      Type.Literal("foreground"),
+      Type.Literal("background"),
+    ], { description: "Default foreground. Use background to continue the current turn immediately." })),
     timeoutMs: Type.Optional(Type.Number({ minimum: 1, description: "Optional maximum wait in milliseconds. Omit to wait indefinitely." })),
     pollIntervalMs: Type.Optional(Type.Number({ minimum: 100, maximum: 30_000, description: "Reconciliation polling interval in milliseconds. Default: 2000." })),
   }),
@@ -3487,6 +3495,16 @@ async function execWaitForTask(
     return `Error: Invalid target status "${rawTarget}". Valid: ${WAITABLE_TASK_STATUSES.join(", ")}`;
   }
   const targetStatus = rawTarget as TaskStatus | undefined;
+  const mode = args.mode === "background" ? "background" : "foreground";
+  if (mode === "background") {
+    if (!context.sessionId) return "Error: Background waits require a persisted chat session.";
+    try {
+      const wait = await polpo.createBackgroundWait({ taskId, sessionId: context.sessionId, targetStatus });
+      return `Background wait started [${wait.id}] for task "${taskId}"${targetStatus ? ` until ${targetStatus}` : " until completion"}. This turn can continue; the orchestrator will be notified in the same chat.`;
+    } catch (error) {
+      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
   const pollIntervalMs = Math.min(30_000, Math.max(100,
     typeof args.pollIntervalMs === "number" ? args.pollIntervalMs : 2_000,
   ));
@@ -3496,32 +3514,66 @@ async function execWaitForTask(
   const startedAt = Date.now();
   let lastProgressAt = 0;
   let lastStatus: TaskStatus | undefined;
+  const detachController = new AbortController();
+  let detachedWaitId: string | undefined;
+  const signal = context.signal
+    ? AbortSignal.any([context.signal, detachController.signal])
+    : detachController.signal;
+  const unregister = context.toolCallId && context.sessionId
+    ? activeTaskWaitRegistry.register({
+      toolCallId: context.toolCallId,
+      turnId: context.turnId,
+      sessionId: context.sessionId,
+      taskId,
+      targetStatus,
+      detach: (backgroundWaitId) => {
+        detachedWaitId = backgroundWaitId;
+        detachController.abort();
+      },
+    })
+    : undefined;
 
-  while (true) {
-    if (context.signal?.aborted) throw abortWaitError();
-    const task = await polpo.getStore().getTask(taskId);
-    if (!task) return `Error: Task "${taskId}" not found.`;
+  try {
+    while (true) {
+      if (signal.aborted) {
+        if (detachedWaitId) {
+          return `Wait moved to background [${detachedWaitId}]. This turn can continue; the orchestrator will be notified in the same chat.`;
+        }
+        throw abortWaitError();
+      }
+      const task = await polpo.getStore().getTask(taskId);
+      if (!task) return `Error: Task "${taskId}" not found.`;
 
-    if (taskReachedWaitTarget(task, targetStatus)) {
-      return formatTaskWaitResult(task, targetStatus, startedAt);
+      if (taskReachedWaitTarget(task, targetStatus)) {
+        return formatTaskWaitResult(task, targetStatus, startedAt);
+      }
+      if (targetStatus && TERMINAL_TASK_STATUSES.has(task.status)) {
+        return `Error: Task "${task.title}" reached terminal status "${task.status}" before target status "${targetStatus}".`;
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      if (timeoutMs !== undefined && elapsedMs >= timeoutMs) {
+        return `Error: Timed out waiting for task "${task.title}" after ${timeoutMs}ms (current status: ${task.status}).`;
+      }
+
+      if (task.status !== lastStatus || Date.now() - lastProgressAt >= 15_000) {
+        await emitTaskWaitProgress(context, task, startedAt);
+        lastStatus = task.status;
+        lastProgressAt = Date.now();
+      }
+
+      const remainingMs = timeoutMs === undefined ? pollIntervalMs : timeoutMs - elapsedMs;
+      try {
+        await waitForTaskWake(polpo, taskId, Math.min(pollIntervalMs, remainingMs), signal);
+      } catch (error) {
+        if (detachedWaitId && signal.aborted) {
+          return `Wait moved to background [${detachedWaitId}]. This turn can continue; the orchestrator will be notified in the same chat.`;
+        }
+        throw error;
+      }
     }
-    if (targetStatus && TERMINAL_TASK_STATUSES.has(task.status)) {
-      return `Error: Task "${task.title}" reached terminal status "${task.status}" before target status "${targetStatus}".`;
-    }
-
-    const elapsedMs = Date.now() - startedAt;
-    if (timeoutMs !== undefined && elapsedMs >= timeoutMs) {
-      return `Error: Timed out waiting for task "${task.title}" after ${timeoutMs}ms (current status: ${task.status}).`;
-    }
-
-    if (task.status !== lastStatus || Date.now() - lastProgressAt >= 15_000) {
-      await emitTaskWaitProgress(context, task, startedAt);
-      lastStatus = task.status;
-      lastProgressAt = Date.now();
-    }
-
-    const remainingMs = timeoutMs === undefined ? pollIntervalMs : timeoutMs - elapsedMs;
-    await waitForTaskWake(polpo, taskId, Math.min(pollIntervalMs, remainingMs), context.signal);
+  } finally {
+    unregister?.();
   }
 }
 

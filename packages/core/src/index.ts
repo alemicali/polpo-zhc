@@ -116,6 +116,9 @@ export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 export type { AgentHandle, SpawnContext } from "./adapter.js";
 export type {
   AgentConversationCheckpoint,
+  BackgroundWait,
+  BackgroundWaitStore,
+  BackgroundWaitState,
   TaskControlStore,
   TaskDirection,
   TaskDirectionMode,

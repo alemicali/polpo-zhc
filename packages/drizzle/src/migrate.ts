@@ -134,6 +134,23 @@ export async function ensurePgSchema(db: any): Promise<void> {
     turn_count INTEGER NOT NULL DEFAULT 0
   )`);
 
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS background_waits (
+    id               TEXT PRIMARY KEY,
+    task_id          TEXT NOT NULL,
+    session_id       TEXT NOT NULL,
+    target_status    TEXT,
+    state            VARCHAR(32) NOT NULL DEFAULT 'waiting',
+    last_task_status TEXT,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    triggered_at     TEXT,
+    completed_at     TEXT,
+    error            TEXT
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_background_waits_session_state ON background_waits(session_id, state)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_background_waits_task_state ON background_waits(task_id, state)`);
+
   await db.execute(sql`CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     title      TEXT,

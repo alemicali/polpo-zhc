@@ -114,6 +114,23 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       turn_count INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS background_waits (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      target_status TEXT,
+      state TEXT NOT NULL DEFAULT 'waiting',
+      last_task_status TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      triggered_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_background_waits_session_state ON background_waits(session_id, state);
+    CREATE INDEX IF NOT EXISTS idx_background_waits_task_state ON background_waits(task_id, state);
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,

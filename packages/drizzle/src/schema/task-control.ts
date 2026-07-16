@@ -25,6 +25,24 @@ export const agentCheckpointsSqlite = sqliteTable("agent_checkpoints", {
   turnCount: integer("turn_count").notNull().default(0),
 });
 
+export const backgroundWaitsSqlite = sqliteTable("background_waits", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  sessionId: text("session_id").notNull(),
+  targetStatus: text("target_status"),
+  state: text("state").notNull().default("waiting"),
+  lastTaskStatus: text("last_task_status"),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  triggeredAt: text("triggered_at"),
+  completedAt: text("completed_at"),
+  error: text("error"),
+}, (table) => [
+  index("idx_background_waits_session_state").on(table.sessionId, table.state),
+  index("idx_background_waits_task_state").on(table.taskId, table.state),
+]);
+
 export const taskDirectionsPg = pgTable("task_directions", {
   id: pgText("id").primaryKey(),
   taskId: pgText("task_id").notNull(),
@@ -48,3 +66,21 @@ export const agentCheckpointsPg = pgTable("agent_checkpoints", {
   savedAt: pgText("saved_at").notNull(),
   turnCount: pgInteger("turn_count").notNull().default(0),
 });
+
+export const backgroundWaitsPg = pgTable("background_waits", {
+  id: pgText("id").primaryKey(),
+  taskId: pgText("task_id").notNull(),
+  sessionId: pgText("session_id").notNull(),
+  targetStatus: pgText("target_status"),
+  state: varchar("state", { length: 32 }).notNull().default("waiting"),
+  lastTaskStatus: pgText("last_task_status"),
+  attempts: pgInteger("attempts").notNull().default(0),
+  createdAt: pgText("created_at").notNull(),
+  updatedAt: pgText("updated_at").notNull(),
+  triggeredAt: pgText("triggered_at"),
+  completedAt: pgText("completed_at"),
+  error: pgText("error"),
+}, (table) => [
+  pgIndex("idx_pg_background_waits_session_state").on(table.sessionId, table.state),
+  pgIndex("idx_pg_background_waits_task_state").on(table.taskId, table.state),
+]);

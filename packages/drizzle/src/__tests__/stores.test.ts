@@ -115,6 +115,20 @@ function createTables(raw: InstanceType<typeof Database>) {
       saved_at TEXT NOT NULL,
       turn_count INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS background_waits (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      target_status TEXT,
+      state TEXT NOT NULL DEFAULT 'waiting',
+      last_task_status TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      triggered_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,
@@ -596,6 +610,21 @@ describe("DrizzleTaskControlStore", () => {
     await expect(stores.taskControlStore.claimDirections("task-control-requeue", "new-run")).resolves.toEqual([
       expect.objectContaining({ id: direction.id, runId: "new-run", status: "delivered" }),
     ]);
+  });
+
+  it("persists and atomically claims background waits", async () => {
+    const wait = await stores.taskControlStore.createBackgroundWait({
+      taskId: "task-background",
+      sessionId: "session-background",
+    });
+
+    await expect(stores.taskControlStore.markBackgroundWaitReady(wait.id, "done")).resolves.toBe(true);
+    await expect(stores.taskControlStore.claimBackgroundWait(wait.id)).resolves.toMatchObject({
+      state: "running",
+      attempts: 1,
+      lastTaskStatus: "done",
+    });
+    await expect(stores.taskControlStore.claimBackgroundWait(wait.id)).resolves.toBeUndefined();
   });
 });
 

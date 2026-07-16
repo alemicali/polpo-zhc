@@ -6,6 +6,7 @@ import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
 } from "../llm/orchestrator-tools.js";
+import { activeTaskWaitRegistry } from "../llm/active-task-waits.js";
 
 function makeTask(status: TaskStatus = "in_progress"): Task {
   return {
@@ -28,13 +29,23 @@ function makeOrchestrator(initialStatus: TaskStatus = "in_progress") {
   const emitter = new EventEmitter();
   let task = makeTask(initialStatus);
   const getTask = vi.fn(async (id: string) => id === task.id ? task : undefined);
+  const createBackgroundWait = vi.fn(async (input: { taskId: string; sessionId: string; targetStatus?: string }) => ({
+    id: "background-1",
+    ...input,
+    state: "waiting",
+    attempts: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }));
   const polpo = Object.assign(emitter, {
     getStore: () => ({ getTask }),
+    createBackgroundWait,
   }) as unknown as Orchestrator;
 
   return {
     polpo,
     getTask,
+    createBackgroundWait,
     transition(to: TaskStatus) {
       const from = task.status;
       task = { ...task, status: to, updatedAt: new Date().toISOString() };
@@ -95,6 +106,42 @@ describe("wait_for_task orchestrator tool", () => {
     controller.abort();
 
     await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(fixture.polpo.listenerCount("task:transition")).toBe(0);
+  });
+
+  test("registers a durable background wait and returns immediately", async () => {
+    const fixture = makeOrchestrator();
+
+    const result = await executeOrchestratorTool("wait_for_task", {
+      taskId: "task-wait-1",
+      targetStatus: "done",
+      mode: "background",
+    }, fixture.polpo, { sessionId: "session-1" });
+
+    expect(fixture.createBackgroundWait).toHaveBeenCalledWith({
+      taskId: "task-wait-1",
+      targetStatus: "done",
+      sessionId: "session-1",
+    });
+    expect(result).toContain("Background wait started [background-1]");
+  });
+
+  test("detaches only the active wait tool when moved to background", async () => {
+    const fixture = makeOrchestrator();
+    const waiting = executeOrchestratorTool("wait_for_task", {
+      taskId: "task-wait-1",
+      pollIntervalMs: 10_000,
+    }, fixture.polpo, {
+      toolCallId: "tool-wait-1",
+      turnId: "turn-1",
+      sessionId: "session-1",
+    });
+
+    await vi.waitFor(() => expect(activeTaskWaitRegistry.get("tool-wait-1")).toBeDefined());
+    activeTaskWaitRegistry.get("tool-wait-1")?.detach("background-2");
+
+    await expect(waiting).resolves.toContain("moved to background [background-2]");
+    expect(activeTaskWaitRegistry.get("tool-wait-1")).toBeUndefined();
     expect(fixture.polpo.listenerCount("task:transition")).toBe(0);
   });
 });

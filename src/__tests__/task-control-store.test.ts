@@ -110,4 +110,41 @@ describe("FileTaskControlStore", () => {
       expect.objectContaining({ id: direction.id, status: "delivered", runId: "replacement-run" }),
     ]);
   });
+
+  it("persists and atomically claims a background task wait", async () => {
+    const wait = await store.createBackgroundWait({
+      taskId: "task-1",
+      sessionId: "session-1",
+      targetStatus: "done",
+    });
+
+    expect(wait).toMatchObject({ state: "waiting", attempts: 0 });
+    await store.markBackgroundWaitReady(wait.id, "done");
+    const claimed = await store.claimBackgroundWait(wait.id);
+
+    expect(claimed).toMatchObject({ id: wait.id, state: "running", attempts: 1 });
+    await expect(store.claimBackgroundWait(wait.id)).resolves.toBeUndefined();
+    await expect(store.listBackgroundWaits("session-1")).resolves.toEqual([
+      expect.objectContaining({ id: wait.id, state: "running" }),
+    ]);
+  });
+
+  it("recovers interrupted background continuations after restart", async () => {
+    const wait = await store.createBackgroundWait({ taskId: "task-1", sessionId: "session-1" });
+    await store.markBackgroundWaitReady(wait.id, "failed");
+    await store.claimBackgroundWait(wait.id);
+
+    const recovered = await store.recoverBackgroundWaits();
+
+    expect(recovered).toBe(1);
+    await expect(store.getBackgroundWait(wait.id)).resolves.toMatchObject({ state: "ready" });
+  });
+
+  it("cancels a pending background wait without deleting its history", async () => {
+    const wait = await store.createBackgroundWait({ taskId: "task-1", sessionId: "session-1" });
+
+    await expect(store.cancelBackgroundWait(wait.id)).resolves.toBe(true);
+    await expect(store.getBackgroundWait(wait.id)).resolves.toMatchObject({ state: "cancelled" });
+    await expect(store.markBackgroundWaitReady(wait.id, "done")).resolves.toBe(false);
+  });
 });

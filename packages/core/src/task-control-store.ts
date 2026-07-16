@@ -23,7 +23,37 @@ export interface AgentConversationCheckpoint {
   turnCount: number;
 }
 
-export interface TaskControlStore {
+export type BackgroundWaitState = "waiting" | "ready" | "running" | "completed" | "failed" | "cancelled";
+
+export interface BackgroundWait {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  targetStatus?: string;
+  state: BackgroundWaitState;
+  lastTaskStatus?: string;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+  triggeredAt?: string;
+  completedAt?: string;
+  error?: string;
+}
+
+export interface BackgroundWaitStore {
+  createBackgroundWait(input: { taskId: string; sessionId: string; targetStatus?: string }): Promise<BackgroundWait>;
+  getBackgroundWait(id: string): Promise<BackgroundWait | undefined>;
+  listBackgroundWaits(sessionId?: string): Promise<BackgroundWait[]>;
+  markBackgroundWaitReady(id: string, taskStatus: string): Promise<boolean>;
+  claimBackgroundWait(id: string): Promise<BackgroundWait | undefined>;
+  completeBackgroundWait(id: string): Promise<void>;
+  failBackgroundWait(id: string, error: string): Promise<void>;
+  requeueBackgroundWait(id: string): Promise<void>;
+  cancelBackgroundWait(id: string): Promise<boolean>;
+  recoverBackgroundWaits(): Promise<number>;
+}
+
+export interface TaskControlStore extends Partial<BackgroundWaitStore> {
   enqueueDirection(input: {
     taskId: string;
     runId?: string;

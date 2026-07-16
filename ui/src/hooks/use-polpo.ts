@@ -11,7 +11,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePolpo, useSessions } from "@polpo-ai/react";
+import { useEvents, usePolpo, useSessions } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/react";
 import type { ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
@@ -280,6 +280,11 @@ interface SessionPendingState {
 
 export function useChat() {
   const { client } = usePolpo();
+  const { events: backgroundWaitEvents } = useEvents([
+    "background-wait:completed",
+    "background-wait:failed",
+    "background-wait:cancelled",
+  ], 10);
   const {
     sessions,
     isLoading: sessionsLoading,
@@ -324,6 +329,7 @@ export function useChat() {
    * deleteSession, on clear(), and on logout (full unmount).
    */
   const loadedSessionsRef = useRef<Set<string>>(new Set());
+  const lastBackgroundWaitEventRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     activeSessionKeyRef.current = activeSessionKey;
@@ -959,6 +965,19 @@ export function useChat() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [applyServerMessages, sessionId, getMessages, refetchSessions]);
+
+  useEffect(() => {
+    const latest = backgroundWaitEvents.at(-1);
+    if (!latest || latest.id === lastBackgroundWaitEventRef.current) return;
+    lastBackgroundWaitEventRef.current = latest.id;
+    void refetchSessions();
+    const waitSessionId = (latest.data as { wait?: { sessionId?: string } } | undefined)?.wait?.sessionId;
+    if (!sessionId || waitSessionId !== sessionId) return;
+    if (streamsBySessionRef.current.has(sessionId) || resumeAbortBySessionRef.current.has(sessionId)) return;
+    getMessages(sessionId)
+      .then((raw) => { applyServerMessages(sessionId, raw); })
+      .catch(() => { /* next reconnect or focus refresh will reconcile */ });
+  }, [applyServerMessages, backgroundWaitEvents, getMessages, refetchSessions, sessionId]);
 
   // Start a new empty session
   const newSession = useCallback(() => {

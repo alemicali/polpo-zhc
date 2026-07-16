@@ -453,6 +453,9 @@ export interface ToolExecutionProgress {
 export interface ToolExecutionContext {
   signal?: AbortSignal;
   onProgress?: (progress: ToolExecutionProgress) => void | Promise<void>;
+  turnId?: string;
+  toolCallId?: string;
+  sessionId?: string;
 }
 
 export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: string[]): OpenAPIHono {
@@ -605,7 +608,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         } catch { /* non-fatal */ }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
-      const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
+      const skipUserPersistence = c.req.header("x-polpo-internal-continuation") === "background-wait";
+      const lastUserMsg = skipUserPersistence
+        ? undefined
+        : [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
         await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
       }
@@ -970,6 +976,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
               const result = await effectiveToolExecutor(call.name, call.arguments, {
                 signal: abortController.signal,
+                turnId,
+                toolCallId: call.id,
+                sessionId: sessionId ?? undefined,
                 onProgress: async (progress) => {
                   if (abortController.signal.aborted) return;
                   await emit(sseChunk(completionId, {}, null, {
@@ -1375,6 +1384,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             ensureToolSegment(segmentsAccum, call.id);
             const result = await effectiveToolExecutor(call.name, call.arguments, {
               signal: c.req.raw.signal,
+              turnId: completionId,
+              toolCallId: call.id,
+              sessionId: sessionId ?? undefined,
             });
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);

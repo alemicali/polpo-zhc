@@ -588,6 +588,36 @@ describe("POST /v1/chat/completions", () => {
       expect(res2.headers.get("x-session-id")).toBe(sessionId);
     });
 
+    test("internal background continuation keeps history without duplicating the user message", async () => {
+      setStreamImpl(() => mockTextStream("Initial answer"));
+      const initial = await postCompletions({
+        messages: [{ role: "user", content: "Start an external task" }],
+        stream: false,
+      }, { "x-session-id": "new" });
+      const sessionId = initial.headers.get("x-session-id")!;
+
+      setStreamImpl(() => mockTextStream("The background task finished"));
+      const continuation = await postCompletions({
+        messages: [
+          { role: "user", content: "Start an external task" },
+          { role: "assistant", content: "Initial answer" },
+          { role: "system", content: "The background wait is complete" },
+        ],
+        stream: false,
+      }, {
+        "x-session-id": sessionId,
+        "x-polpo-internal-continuation": "background-wait",
+      });
+
+      expect(continuation.status).toBe(200);
+      const messages = await orchestrator.getSessionStore()!.getMessages(sessionId);
+      expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
+      expect(messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "The background task finished",
+      });
+    });
+
     test("creates new session when x-session-id is 'new'", async () => {
       setStreamImpl(() => mockTextStream("First."));
       const res1 = await postCompletions({

@@ -15,7 +15,10 @@ import {
   previewCategory,
 } from "@/components/shared/file-preview";
 import { cn } from "@/lib/utils";
+import { apiUrl, config } from "@/lib/config";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 import {
   Loader2,
   CheckCircle2,
@@ -23,6 +26,7 @@ import {
   ChevronRight,
   Wrench,
   FileText,
+  PictureInPicture2,
 } from "lucide-react";
 
 // ── Types ──
@@ -156,6 +160,7 @@ export function ToolInvocation({
 }: ToolInvocationProps) {
   const shouldOpenForStreamingInput = tool.state === "preparing" && !!tool.argumentsText;
   const [open, setOpen] = useState(defaultOpen ?? (tool.state === "error" || shouldOpenForStreamingInput));
+  const [movingToBackground, setMovingToBackground] = useState(false);
   const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
   const { previewState, openPreview, closePreview } = useFilePreview();
@@ -182,6 +187,29 @@ export function ToolInvocation({
       path: filePath,
       mimeType: mimeFromPath(filePath),
     });
+  };
+
+  const moveToBackground = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMovingToBackground(true);
+    try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+      const response = await fetch(apiUrl("/api/v1/background-waits/from-active"), {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: JSON.stringify({ toolCallId: tool.id }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? "Could not move wait to background");
+      window.dispatchEvent(new Event("polpo:background-waits-changed"));
+      toast.success("Wait moved to background");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not move wait to background");
+      setMovingToBackground(false);
+    }
   };
 
   // Interactive / client-side tools: show a minimal inline label while
@@ -244,6 +272,24 @@ export function ToolInvocation({
               </button>
             )}
             <span className="flex-1" />
+            {tool.name === "wait_for_task" && tool.state === "calling" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    onClick={moveToBackground}
+                    disabled={movingToBackground}
+                    aria-label="Move wait to background"
+                  >
+                    {movingToBackground
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <PictureInPicture2 className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">Move wait to background</TooltipContent>
+              </Tooltip>
+            )}
             {getStateIcon(tool.state)}
             {getStateBadge(tool.state)}
             <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />

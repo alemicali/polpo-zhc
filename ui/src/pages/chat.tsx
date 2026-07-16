@@ -59,6 +59,7 @@ import {
   Star,
   StarOff,
   MoreHorizontal,
+  ClockArrowUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -123,7 +124,9 @@ import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/sh
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { Queue } from "@/components/ai-elements/queue";
+import { BackgroundWaits } from "@/components/ai-elements/background-waits";
 import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
+import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
@@ -3443,6 +3446,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // on reload), CLOSED otherwise. The user can always close via the X in
   // the panel header — items survive the close (re-open via ListPlus).
   const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
+  const backgroundWaits = useBackgroundWaits();
+  const [backgroundWaitsOpen, setBackgroundWaitsOpen] = useState(false);
   // Clear confirmation modal (avoid accidental wipes of queued prompts).
   const [queueClearConfirm, setQueueClearConfirm] = useState(false);
   const copySessionId = useCallback(async () => {
@@ -3737,6 +3742,24 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       ref={inputWrapperRef}
     >
       <div className="mx-auto max-w-3xl">
+        {backgroundWaitsOpen && (
+          <div className="mb-2">
+            <BackgroundWaits
+              waits={backgroundWaits.waits}
+              loading={backgroundWaits.loading}
+              currentSessionId={sessionId}
+              onCancel={async (id) => {
+                try {
+                  await backgroundWaits.cancel(id);
+                  toast.success("Background wait cancelled");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not cancel wait");
+                }
+              }}
+              onClose={() => setBackgroundWaitsOpen(false)}
+            />
+          </div>
+        )}
         {/* Prompt queue panel — `queueOpen` is the single source of truth.
             User opens via ListPlus button (auto-opens when enqueueing a
             draft); closes via the X in the header. Items survive close —
@@ -3851,6 +3874,28 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   disabled={inputDisabled}
                   onListeningChange={setIsRecording}
                 />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => setBackgroundWaitsOpen((value) => !value)}
+                      aria-label="Background waits"
+                    >
+                      <ClockArrowUp className="h-4 w-4" />
+                      {backgroundWaits.activeCount > 0 && (
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white">
+                          {backgroundWaits.activeCount}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    Background waits ({backgroundWaits.activeCount} active)
+                  </TooltipContent>
+                </Tooltip>
                 {/* Queue button — stash current draft instead of sending.
                     Disabled while a stream is in progress would defeat the
                     point (the whole reason to queue is to pile up sends

@@ -22,7 +22,7 @@ import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
 import { TypedEmitter } from "./events.js";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
-import type { TaskControlStore } from "./task-control-store.js";
+import type { BackgroundWaitStore, TaskControlStore } from "./task-control-store.js";
 import type {
   PolpoConfig,
   AgentConfig,
@@ -75,6 +75,7 @@ import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
+import { BackgroundWaitManager, type BackgroundWaitContinuation } from "./background-wait-manager.js";
 import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -94,6 +95,19 @@ export interface OrchestratorOptions {
   taskControlStore?: TaskControlStore;
   assessFn?: AssessFn;
   spawner?: Spawner;
+}
+
+function supportsBackgroundWaits(store: TaskControlStore): store is TaskControlStore & BackgroundWaitStore {
+  return typeof store.createBackgroundWait === "function"
+    && typeof store.getBackgroundWait === "function"
+    && typeof store.listBackgroundWaits === "function"
+    && typeof store.markBackgroundWaitReady === "function"
+    && typeof store.claimBackgroundWait === "function"
+    && typeof store.completeBackgroundWait === "function"
+    && typeof store.failBackgroundWait === "function"
+    && typeof store.requeueBackgroundWait === "function"
+    && typeof store.cancelBackgroundWait === "function"
+    && typeof store.recoverBackgroundWaits === "function";
 }
 
 export class Orchestrator extends TypedEmitter {
@@ -126,6 +140,8 @@ export class Orchestrator extends TypedEmitter {
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
   private watcherMgr?: TaskWatcherManager;
+  private backgroundWaitMgr?: BackgroundWaitManager;
+  private backgroundWaitContinuation?: BackgroundWaitContinuation;
   private telegramPoller?: TelegramCallbackPoller;
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
@@ -164,6 +180,11 @@ export class Orchestrator extends TypedEmitter {
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
   getWatcherManager(): TaskWatcherManager | undefined { return this.watcherMgr; }
+  getBackgroundWaitManager(): BackgroundWaitManager | undefined { return this.backgroundWaitMgr; }
+  setBackgroundWaitContinuation(handler: BackgroundWaitContinuation): void {
+    this.backgroundWaitContinuation = handler;
+    this.backgroundWaitMgr?.setContinuation(handler);
+  }
   getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
@@ -686,6 +707,14 @@ export class Orchestrator extends TypedEmitter {
     this.watcherMgr.setActionExecutor(actionExecutor);
     this.watcherMgr.start();
 
+    if (supportsBackgroundWaits(this.taskControlStore)) {
+      this.backgroundWaitMgr = new BackgroundWaitManager(this, this.registry, this.taskControlStore);
+      await this.backgroundWaitMgr.start();
+      if (this.backgroundWaitContinuation) {
+        this.backgroundWaitMgr.setContinuation(this.backgroundWaitContinuation);
+      }
+    }
+
     // Build the deadlock resolver port (wraps the shell's deadlock-resolver module)
     const deadlockResolver: DeadlockResolverPort = {
       isResolving,
@@ -904,6 +933,17 @@ export class Orchestrator extends TypedEmitter {
     opts?: { mode?: "auto" | "steer" | "follow_up" | "continue"; confirmSideEffects?: boolean },
   ) { return this.engine.sendDirection(taskId, message, opts); }
   async listDirections(taskId: string) { return this.engine.listDirections(taskId); }
+  async createBackgroundWait(input: { taskId: string; sessionId: string; targetStatus?: string }) {
+    if (!this.backgroundWaitMgr) throw new Error("Background waits are not initialized");
+    return this.backgroundWaitMgr.create(input);
+  }
+  async listBackgroundWaits(sessionId?: string) {
+    if (!this.backgroundWaitMgr) return [];
+    return this.backgroundWaitMgr.list(sessionId);
+  }
+  async cancelBackgroundWait(id: string): Promise<boolean> {
+    return (await this.backgroundWaitMgr?.cancel(id)) ?? false;
+  }
   reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
@@ -936,6 +976,7 @@ export class Orchestrator extends TypedEmitter {
 
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
+  getTaskControlStore(): TaskControlStore { return this.taskControlStore; }
   getPolpoDir(): string { return this.polpoDir; }
   getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): VaultStore | undefined { return this.vaultStore; }
@@ -1169,6 +1210,7 @@ export class Orchestrator extends TypedEmitter {
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
     this.stopped = true;
+    this.backgroundWaitMgr?.dispose();
     this.engine?.stop();
   }
 
@@ -1179,6 +1221,7 @@ export class Orchestrator extends TypedEmitter {
   async gracefulStop(timeoutMs = 5000): Promise<void> {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
+    this.backgroundWaitMgr?.dispose();
     const activeRuns = await this.runStore.getActiveRuns();
 
     if (activeRuns.length > 0) {
@@ -1240,6 +1283,7 @@ export class Orchestrator extends TypedEmitter {
     this.slaMonitor?.dispose();
     this.qualityController?.dispose();
     this.scheduler?.dispose();
+    this.backgroundWaitMgr?.dispose();
     await this.registry.close?.();
     await this.runStore.close();
     this.emit("orchestrator:shutdown", {});

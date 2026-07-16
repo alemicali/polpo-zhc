@@ -7,7 +7,7 @@
  */
 
 import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
-import type { TaskDirection, TaskDirectionMode } from "./task-control-store.js";
+import type { BackgroundWait, TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
 export interface PolpoEventMap {
   // Task lifecycle
@@ -75,6 +75,14 @@ export interface PolpoEventMap {
   // Chat sessions
   "session:created": { sessionId: string; title?: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
+
+  // Durable background task waits
+  "background-wait:created": { wait: BackgroundWait };
+  "background-wait:ready": { wait: BackgroundWait };
+  "background-wait:running": { wait: BackgroundWait };
+  "background-wait:completed": { wait: BackgroundWait };
+  "background-wait:failed": { wait: BackgroundWait };
+  "background-wait:cancelled": { wait: BackgroundWait };
 
   // Approval gates
   "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; missionId?: string };
