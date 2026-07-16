@@ -42,6 +42,10 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./task-control-store": {
+      "types": "./dist/task-control-store.d.ts",
+      "import": "./dist/task-control-store.js"
+    },
     "./memory-store": {
       "types": "./dist/memory-store.d.ts",
       "import": "./dist/memory-store.js"

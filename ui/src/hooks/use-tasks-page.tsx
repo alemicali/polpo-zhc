@@ -12,6 +12,10 @@ import { useNavigate } from "react-router-dom";
 import { useTasksInfinite, usePolpo, useProcesses, useMissions, useAgents } from "@polpo-ai/react";
 import type { Task } from "@polpo-ai/react";
 import type { FilterOption } from "@/components/shared/multi-select-filter";
+import {
+  createDefaultTimeFilter,
+  type TimeFilterState,
+} from "@/lib/time-filter";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { Target, Users } from "lucide-react";
@@ -22,8 +26,6 @@ export type ViewMode = "list" | "kanban";
 export type SortKey = "updated" | "created" | "name" | "status" | "priority" | "score";
 export type GroupByKey = "none" | "status" | "mission" | "team" | "agent";
 export type ColumnByKey = "status" | "mission" | "team" | "agent";
-export type TimeField = "createdAt" | "updatedAt";
-export type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
 
 /** Toggleable fields on task cards. */
 export interface CardFieldVisibility {
@@ -60,13 +62,6 @@ function loadCardFields(): CardFieldVisibility {
     if (raw) return { ...DEFAULT_CARD_FIELDS, ...JSON.parse(raw) };
   } catch { /* ignore */ }
   return { ...DEFAULT_CARD_FIELDS };
-}
-
-export interface TimeFilterState {
-  field: TimeField;
-  range: TimeRange;
-  /** Epoch ms — resolved from preset or custom input */
-  after: number;
 }
 
 // ── Sort helpers ──
@@ -182,7 +177,7 @@ export function useTasksPageState() {
   );
   const [selectedMissions, setSelectedMissions] = useState<Set<string>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
-  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(null);
+  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(() => createDefaultTimeFilter());
 
   // ── View preferences (persisted to localStorage) ──
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {

@@ -470,7 +470,12 @@
                               "length",
                               "ask_user",
                               "mission_preview",
-                              "vault_preview"
+                              "vault_preview",
+                              "open_file",
+                              "navigate_to",
+                              "open_tab",
+                              "set_design",
+                              "widget_render"
                             ]
                           }
                         },
@@ -582,6 +587,57 @@
         }
       }
     },
+    "/api/v1/counts": {
+      "get": {
+        "tags": [
+          "Counts"
+        ],
+        "summary": "Cardinality of tasks/missions/agents",
+        "responses": {
+          "200": {
+            "description": "Counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "tasks": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "missions": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "agents": {
+                          "type": "number",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "tasks",
+                        "missions",
+                        "agents"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks": {
       "get": {
         "tags": [
@@ -612,11 +668,87 @@
             "required": false,
             "name": "assignTo",
             "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "false"
+                  ]
+                }
+              ],
+              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
+            },
+            "required": false,
+            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+            "name": "summary",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "false"
+                  ]
+                }
+              ],
+              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview)."
+            },
+            "required": false,
+            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+            "name": "slim",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Page size (default 50, max 200). Presence triggers the paginated response shape `{ tasks, nextCursor, hasMore }`."
+            },
+            "required": false,
+            "description": "Page size (default 50, max 200). Presence triggers the paginated response shape `{ tasks, nextCursor, hasMore }`.",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO timestamp from a previous page's `nextCursor`. Returns tasks with `updated_at < cursor`. Ignored when `q` is set."
+            },
+            "required": false,
+            "description": "ISO timestamp from a previous page's `nextCursor`. Returns tasks with `updated_at < cursor`. Ignored when `q` is set.",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored."
+            },
+            "required": false,
+            "description": "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored.",
+            "name": "q",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "List of tasks",
+            "description": "List of tasks. Returns `{ tasks, nextCursor, hasMore }` when `limit`/`cursor`/`q` is set, otherwise `Task[]` for backwards compat.",
             "content": {
               "application/json": {
                 "schema": {
@@ -626,19 +758,18 @@
                       "type": "boolean"
                     },
                     "data": {
-                      "type": "array",
-                      "items": {
-                        "nullable": true
-                      }
+                      "nullable": true
                     }
                   },
                   "required": [
-                    "ok",
-                    "data"
+                    "ok"
                   ]
                 }
               }
             }
+          },
+          "304": {
+            "description": "Not modified — client has the current list per ETag"
           }
         }
       },
@@ -1369,6 +1500,200 @@
         }
       }
     },
+    "/api/v1/tasks/{taskId}/directions": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Steer or continue a task",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "steer",
+                      "follow_up",
+                      "continue"
+                    ],
+                    "default": "auto"
+                  },
+                  "confirmSideEffects": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Direction queued for the active or next task runner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Task state does not permit this direction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "List task directions",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Direction history, including delivery status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/{taskId}/reassess": {
       "post": {
         "tags": [
@@ -1577,6 +1902,54 @@
           "Missions"
         ],
         "summary": "List missions",
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "false"
+                  ]
+                }
+              ],
+              "description": "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients."
+            },
+            "required": false,
+            "description": "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients.",
+            "name": "summary",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "false"
+                  ]
+                }
+              ],
+              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview)."
+            },
+            "required": false,
+            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview).",
+            "name": "slim",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "List of missions",
@@ -1602,6 +1975,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Not modified — client has the current list per ETag"
           }
         }
       },
@@ -4268,6 +4644,31 @@
           "Agents"
         ],
         "summary": "List agents",
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "false"
+                  ]
+                }
+              ],
+              "description": "If `true`, returns a slim projection: only the identity bits the list rows render (displayName, title, avatar, company, email) plus pre-computed `capabilities` counts. Drops `allowedTools`, `allowedPaths`, `skills`, `mcpServers`, `systemPrompt`, `reasoning`, `browserProfile`, `emailAllowedDomains`, `suggestions`, and the bulky `identity.responsibilities/bio/personality/tone/timezone`. Default `false` for backwards compat."
+            },
+            "required": false,
+            "description": "If `true`, returns a slim projection: only the identity bits the list rows render (displayName, title, avatar, company, email) plus pre-computed `capabilities` counts. Drops `allowedTools`, `allowedPaths`, `skills`, `mcpServers`, `systemPrompt`, `reasoning`, `browserProfile`, `emailAllowedDomains`, `suggestions`, and the bulky `identity.responsibilities/bio/personality/tone/timezone`. Default `false` for backwards compat.",
+            "name": "summary",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "List of agents",
@@ -4293,6 +4694,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Not modified — client has the current list per ETag"
           }
         }
       },
@@ -4330,6 +4734,35 @@
                     "type": "array",
                     "items": {
                       "type": "string"
+                    }
+                  },
+                  "suggestions": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prompt": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      ]
                     }
                   },
                   "maxTurns": {
@@ -4578,6 +5011,35 @@
                     "type": "array",
                     "items": {
                       "type": "string"
+                    }
+                  },
+                  "suggestions": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prompt": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      ]
                     }
                   },
                   "maxTurns": {
@@ -5161,6 +5623,9 @@
                 }
               }
             }
+          },
+          "304": {
+            "description": "Not modified — client has the current list per ETag"
           }
         }
       }
@@ -5179,6 +5644,16 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "If provided, return only messages strictly newer than this message id (incremental sync). If the id is not found, the full message list is returned. The response includes an `incremental` flag the client can use to decide whether to append or replace its local cache."
+            },
+            "required": false,
+            "description": "If provided, return only messages strictly newer than this message id (incremental sync). If the id is not found, the full message list is returned. The response includes an `incremental` flag the client can use to decide whether to append or replace its local cache.",
+            "name": "after",
+            "in": "query"
           }
         ],
         "responses": {
@@ -5263,7 +5738,7 @@
         "tags": [
           "Chat Sessions"
         ],
-        "summary": "Rename session",
+        "summary": "Update session (rename and/or star)",
         "parameters": [
           {
             "schema": {
@@ -5283,18 +5758,18 @@
                   "title": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "starred": {
+                    "type": "boolean"
                   }
-                },
-                "required": [
-                  "title"
-                ]
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Session renamed",
+            "description": "Session updated",
             "content": {
               "application/json": {
                 "schema": {
@@ -8438,7 +8913,8 @@
                       "low",
                       "medium",
                       "high",
-                      "xhigh"
+                      "xhigh",
+                      "max"
                     ]
                   }
                 }
@@ -10495,7 +10971,7 @@
                   "agent": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Agent name"
+                    "description": "Agent name (owner)"
                   },
                   "service": {
                     "type": "string",
@@ -10517,6 +10993,17 @@
                   "label": {
                     "type": "string",
                     "description": "Human-readable label"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Logical mailbox account (groups SMTP+IMAP of the same mailbox). Optional — defaults to `service` for grouping purposes."
+                  },
+                  "allowedAgents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Other agent names allowed to use this credential (shared). Owner is always implicit and never in this list. Empty/omitted = owner-private."
                   },
                   "credentials": {
                     "type": "object",
@@ -10657,6 +11144,23 @@
                           "label": {
                             "type": "string"
                           },
+                          "account": {
+                            "type": "string"
+                          },
+                          "allowedAgents": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "sharedFrom": {
+                            "type": "string",
+                            "description": "Set when this entry is inherited via shared credentials. Identifies the owner agent."
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "description": "True for inherited entries — UI should disable edit/delete."
+                          },
                           "keys": {
                             "type": "array",
                             "items": {
@@ -10751,6 +11255,17 @@
                   "label": {
                     "type": "string",
                     "description": "Update human-readable label"
+                  },
+                  "account": {
+                    "type": "string",
+                    "description": "Update logical mailbox account name. Pass empty string to clear."
+                  },
+                  "allowedAgents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Replace the list of agents allowed to use this credential. Pass [] to revoke all shares (turn back into owner-private)."
                   },
                   "credentials": {
                     "type": "object",

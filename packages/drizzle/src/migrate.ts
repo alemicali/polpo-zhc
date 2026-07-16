@@ -111,6 +111,29 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_status ON runs(status)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_task_id ON runs(task_id)`);
 
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS task_directions (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL,
+    run_id       TEXT,
+    mode         VARCHAR(32) NOT NULL,
+    message      TEXT NOT NULL,
+    status       VARCHAR(32) NOT NULL DEFAULT 'queued',
+    created_at   TEXT NOT NULL,
+    delivered_at TEXT,
+    applied_at   TEXT,
+    error        TEXT
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_task_directions_task ON task_directions(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_task_directions_run_status ON task_directions(run_id, status)`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS agent_checkpoints (
+    task_id    TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL,
+    messages   JSONB NOT NULL DEFAULT '[]',
+    saved_at   TEXT NOT NULL,
+    turn_count INTEGER NOT NULL DEFAULT 0
+  )`);
+
   await db.execute(sql`CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     title      TEXT,

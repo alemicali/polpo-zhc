@@ -9,9 +9,9 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { Tool } from "@mariozechner/pi-ai";
+import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team } from "../core/types.js";
+import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team, Task, TaskStatus } from "../core/types.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
@@ -39,6 +39,23 @@ import { createCliStores } from "../cli/stores.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
+import {
+  ALL_ORCHESTRATOR_BROWSER_TOOLS,
+  ORCHESTRATOR_BROWSER_TOOL_NAMES,
+  executeOrchestratorBrowserTool,
+} from "./orchestrator-browser-tools.js";
+
+export interface OrchestratorToolProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
+export interface OrchestratorToolExecutionContext {
+  signal?: AbortSignal;
+  onProgress?: (progress: OrchestratorToolProgress) => void | Promise<void>;
+}
 
 
 
@@ -564,7 +581,7 @@ const updateMissionNotificationsTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*']). Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -577,10 +594,10 @@ const addAgentTool: Tool = {
       description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
     })]), { description: "Starter prompts shown when opening a new chat with this agent. Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*']). Vault tools are always available. Omit for core coding tools only." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*','phone_*']). phone_* enables VAPI calls for this agent. Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
-    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
@@ -598,7 +615,7 @@ const removeAgentTool: Tool = {
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
+  description: "Update an existing agent's configuration or move it to another team. Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -611,10 +628,10 @@ const updateAgentTool: Tool = {
       description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
     })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', or 'whatsapp_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', or 'phone_*' to grant those categories. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
-    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
@@ -630,7 +647,7 @@ const listTeamsTool: Tool = {
 
 const addTeamTool: Tool = {
   name: "add_team",
-  description: "Create a new team.",
+  description: "Create a new team immediately. The team can be used by subsequent tool calls without reloading config.",
   parameters: Type.Object({
     name: Type.String({ description: "Team name (must be unique)" }),
     description: Type.Optional(Type.String({ description: "Team description" })),
@@ -915,6 +932,17 @@ const watchTaskTool: Tool = {
       channel: Type.Optional(Type.String()),
       body: Type.Optional(Type.String()),
     }, { description: "Action to execute when triggered" }),
+  }),
+};
+
+const waitForTaskTool: Tool = {
+  name: "wait_for_task",
+  description: "Wait inside the current turn until a task reaches a specific status, or until it finishes (done/failed) when targetStatus is omitted. The tool is event-driven with reconciliation polling, keeps the chat turn resumable, and can be cancelled with Stop.",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID to wait for" }),
+    targetStatus: Type.Optional(Type.String({ description: "Specific status to wait for. Omit to wait for either done or failed." })),
+    timeoutMs: Type.Optional(Type.Number({ minimum: 1, description: "Optional maximum wait in milliseconds. Omit to wait indefinitely." })),
+    pollIntervalMs: Type.Optional(Type.Number({ minimum: 100, maximum: 30_000, description: "Reconciliation polling interval in milliseconds. Default: 2000." })),
   }),
 };
 
@@ -1643,7 +1671,7 @@ export const READ_TOOLS = new Set([
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
-  "list_schedules", "list_notification_rules", "list_watchers",
+  "list_schedules", "list_notification_rules", "list_watchers", "wait_for_task",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // Playbooks (read-only)
@@ -1785,8 +1813,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   createScheduleTool, deleteScheduleTool, updateScheduleTool,
   // Notification rules (2 write + 1 read above + 1 direct send)
   addNotificationRuleTool, removeNotificationRuleTool, sendNotificationTool,
-  // Task watchers (2 write + 1 read above)
-  watchTaskTool, removeWatcherTool,
+  // Task watchers (2 write + 2 read above)
+  watchTaskTool, waitForTaskTool, removeWatcherTool,
   // Config & Self (4)
   reloadConfigTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
   // Skills (10)
@@ -1815,6 +1843,9 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   openFileTool, navigateToTool, openTabTool, setDesignTool,
   // Session meta (1)
   setSessionTitleTool,
+  // Browser (6) — wired to agent-browser CLI, session="orchestrator",
+  // viewable live in the Agent Live tab.
+  ...ALL_ORCHESTRATOR_BROWSER_TOOLS,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1871,6 +1902,7 @@ const TOOL_LABELS: Record<string, string> = {
   send_notification: "Send Notification",
   // Task watchers
   watch_task: "Watch Task",
+  wait_for_task: "Wait for Task",
   remove_watcher: "Remove Watcher",
   // Config & Self
   reload_config: "Reload Config",
@@ -1977,6 +2009,7 @@ export async function executeOrchestratorTool(
   toolName: string,
   args: Record<string, unknown>,
   polpo: Orchestrator,
+  context: OrchestratorToolExecutionContext = {},
 ): Promise<string> {
   try {
     switch (toolName) {
@@ -2071,6 +2104,7 @@ export async function executeOrchestratorTool(
 
       // ── Task Watchers ──
       case "watch_task":          return execWatchTask(polpo, args);
+      case "wait_for_task":       return execWaitForTask(polpo, args, context);
       case "list_watchers":       return execListWatchers(polpo, args);
       case "remove_watcher":      return execRemoveWatcher(polpo, args);
 
@@ -2149,9 +2183,17 @@ export async function executeOrchestratorTool(
         return validateRenderWidgetArgs(args) ?? "Widget rendered to the user. Continue with prose only if necessary.";
 
       default:
+        // ── Browser (delegated) ──
+        // Six browser_* tools share a single executor in
+        // orchestrator-browser-tools.ts. Routed here so we don't have to
+        // mirror every case branch.
+        if (ORCHESTRATOR_BROWSER_TOOL_NAMES.has(toolName)) {
+          return await executeOrchestratorBrowserTool(toolName, args, polpo);
+        }
         return `Unknown tool: ${toolName}`;
     }
   } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
     const msg = err instanceof Error ? err.message : String(err);
     return `Error: ${msg}`;
   }
@@ -3016,7 +3058,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
   };
   // Strip undefined values so addAgent only receives explicitly set fields
   const cleaned = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
-  polpo.addAgent(cleaned as any, teamName);
+  await polpo.addAgent(cleaned as any, teamName);
   return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
 }
 
@@ -3076,7 +3118,7 @@ async function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): 
   const name = args.name as string;
   const existing = await polpo.getTeam(name);
   if (existing) return `Error: Team "${name}" already exists.`;
-  polpo.addTeam({
+  await polpo.addTeam({
     name,
     description: args.description as string | undefined,
     agents: [],
@@ -3097,7 +3139,7 @@ async function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>
   const newName = args.name as string;
   const team = await polpo.getTeam(oldName);
   if (!team) return `Error: Team "${oldName}" not found.`;
-  polpo.renameTeam(oldName, newName);
+  await polpo.renameTeam(oldName, newName);
   return `Team "${oldName}" renamed to "${newName}".`;
 }
 
@@ -3344,6 +3386,143 @@ async function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>)
     action,
   });
   return `Watcher created: [${watcher.id}] watching task "${task.title}" for status "${targetStatus}" → action: ${action.type}`;
+}
+
+const WAITABLE_TASK_STATUSES: TaskStatus[] = [
+  "draft",
+  "pending",
+  "awaiting_approval",
+  "assigned",
+  "in_progress",
+  "review",
+  "done",
+  "failed",
+];
+const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(["done", "failed"]);
+
+function abortWaitError(): DOMException {
+  return new DOMException("Task wait cancelled", "AbortError");
+}
+
+function taskReachedWaitTarget(task: Task, targetStatus?: TaskStatus): boolean {
+  return targetStatus ? task.status === targetStatus : TERMINAL_TASK_STATUSES.has(task.status);
+}
+
+function formatTaskWaitResult(task: Task, targetStatus: TaskStatus | undefined, startedAt: number): string {
+  return `Task wait completed.\n${JSON.stringify({
+    taskId: task.id,
+    title: task.title,
+    status: task.status,
+    waitedFor: targetStatus ?? "terminal (done or failed)",
+    elapsedMs: Date.now() - startedAt,
+    result: task.result ?? null,
+    outcomes: task.outcomes ?? [],
+  }, null, 2)}`;
+}
+
+async function emitTaskWaitProgress(
+  context: OrchestratorToolExecutionContext,
+  task: Task,
+  startedAt: number,
+): Promise<void> {
+  if (!context.onProgress) return;
+  try {
+    await context.onProgress({
+      message: `Waiting for task "${task.title}" (${task.status})`,
+      taskId: task.id,
+      status: task.status,
+      elapsedMs: Date.now() - startedAt,
+    });
+  } catch {
+    // Progress is best-effort and must never terminate the task wait.
+  }
+}
+
+function waitForTaskWake(
+  polpo: Orchestrator,
+  taskId: string,
+  waitMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortWaitError());
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      polpo.off("task:transition", onTransition);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (error?: DOMException) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onTransition = (event: { taskId: string }) => {
+      if (event.taskId === taskId) finish();
+    };
+    const onAbort = () => finish(abortWaitError());
+    const timer = setTimeout(() => finish(), waitMs);
+
+    polpo.on("task:transition", onTransition);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    // Close the narrow race where the signal aborts between the initial
+    // check and listener registration.
+    if (signal?.aborted) onAbort();
+  });
+}
+
+async function execWaitForTask(
+  polpo: Orchestrator,
+  args: Record<string, unknown>,
+  context: OrchestratorToolExecutionContext,
+): Promise<string> {
+  const taskId = typeof args.taskId === "string" ? args.taskId.trim() : "";
+  if (!taskId) return "Error: wait_for_task requires a taskId.";
+
+  const rawTarget = typeof args.targetStatus === "string" ? args.targetStatus : undefined;
+  if (rawTarget && !WAITABLE_TASK_STATUSES.includes(rawTarget as TaskStatus)) {
+    return `Error: Invalid target status "${rawTarget}". Valid: ${WAITABLE_TASK_STATUSES.join(", ")}`;
+  }
+  const targetStatus = rawTarget as TaskStatus | undefined;
+  const pollIntervalMs = Math.min(30_000, Math.max(100,
+    typeof args.pollIntervalMs === "number" ? args.pollIntervalMs : 2_000,
+  ));
+  const timeoutMs = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs)
+    ? Math.max(1, args.timeoutMs)
+    : undefined;
+  const startedAt = Date.now();
+  let lastProgressAt = 0;
+  let lastStatus: TaskStatus | undefined;
+
+  while (true) {
+    if (context.signal?.aborted) throw abortWaitError();
+    const task = await polpo.getStore().getTask(taskId);
+    if (!task) return `Error: Task "${taskId}" not found.`;
+
+    if (taskReachedWaitTarget(task, targetStatus)) {
+      return formatTaskWaitResult(task, targetStatus, startedAt);
+    }
+    if (targetStatus && TERMINAL_TASK_STATUSES.has(task.status)) {
+      return `Error: Task "${task.title}" reached terminal status "${task.status}" before target status "${targetStatus}".`;
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (timeoutMs !== undefined && elapsedMs >= timeoutMs) {
+      return `Error: Timed out waiting for task "${task.title}" after ${timeoutMs}ms (current status: ${task.status}).`;
+    }
+
+    if (task.status !== lastStatus || Date.now() - lastProgressAt >= 15_000) {
+      await emitTaskWaitProgress(context, task, startedAt);
+      lastStatus = task.status;
+      lastProgressAt = Date.now();
+    }
+
+    const remainingMs = timeoutMs === undefined ? pollIntervalMs : timeoutMs - elapsedMs;
+    await waitForTaskWake(polpo, taskId, Math.min(pollIntervalMs, remainingMs), context.signal);
+  }
 }
 
 async function execListWatchers(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

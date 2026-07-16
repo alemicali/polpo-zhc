@@ -25,6 +25,8 @@ export { useMemory, useAgentMemory } from "./hooks/use-memory.js";
 export { useLogs } from "./hooks/use-logs.js";
 export { useSessions } from "./hooks/use-sessions.js";
 export { useTaskActivity } from "./hooks/use-task-activity.js";
+export { useTaskDirections } from "./hooks/use-task-directions.js";
+export type { UseTaskDirectionsReturn } from "./hooks/use-task-directions.js";
 export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
@@ -104,6 +106,11 @@ export type {
   ActiveDelay,
   CreateTaskRequest,
   UpdateTaskRequest,
+  TaskDirection,
+  TaskDirectionMode,
+  TaskDirectionStatus,
+  SendTaskDirectionRequest,
+  SendTaskDirectionResult,
   CreateMissionRequest,
   UpdateMissionRequest,
   AddMissionTaskRequest,

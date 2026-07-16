@@ -7,6 +7,7 @@
  */
 
 import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
+import type { TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
 export interface PolpoEventMap {
   // Task lifecycle
@@ -14,6 +15,7 @@ export interface PolpoEventMap {
   "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task };
   "task:updated": { taskId: string; task: Task };
   "task:removed": { taskId: string };
+  "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string };

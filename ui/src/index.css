@@ -322,6 +322,157 @@
 }
 .dark[data-palette="editorial"] body::before { mix-blend-mode: screen; opacity: 0.05; }
 
+/* ─── Redline Paper — strict newsprint system, signal-red marker ───── */
+:root[data-palette="redline"] {
+  color-scheme: light;
+
+  --ink: #171717;
+  --line: #d9d9d4;
+  --paper: #f5f5f1;
+  --surface: #ffffff;
+  --accent-soft: #fce9e6;
+  --code: #20211f;
+  --ink-inverse: #f7f7f2;
+  --accent-line: #f2bbb5;
+  --paper-sunken: #ecece7;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: #e93f33;
+  --primary-foreground: #ffffff;
+  --secondary: var(--accent-soft);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-sunken);
+  --muted-foreground: #676767;
+  --accent: #e93f33;
+  --accent-foreground: #ffffff;
+  --destructive: #b72720;
+  --border: var(--line);
+  --input: var(--line);
+  --ring: #e93f33;
+  --chart-1: #e93f33;
+  --chart-2: #276a8f;
+  --chart-3: #39734f;
+  --chart-4: #a76818;
+  --chart-5: #755192;
+  --sidebar: var(--paper-sunken);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: #e93f33;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--accent-soft);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: #e93f33;
+
+  --font-sans: "IBM Plex Sans", "Aptos", sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+  --app-font-family: var(--font-sans);
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-display: clamp(38px, 7vw, 72px);
+  --lh-display: 0.98;
+  --lh-snug: 1.35;
+  --lh-body: 1.55;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+  --tracking: 0;
+
+  --space-1: 4px;
+  --space-2: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 18px;
+  --space-6: 20px;
+  --space-7: 28px;
+  --space-8: 36px;
+  --space-9: 40px;
+  --space-10: 64px;
+  --space-11: 96px;
+  --content-max: 920px;
+  --gutter: 32px;
+  --label-col: 180px;
+  --grid-gap: 28px;
+  --bp-mobile: 680px;
+  --tap-min: 44px;
+  --rule-hairline: 1px;
+  --rule-marker: 4px;
+  --rule-masthead: 8px;
+  --radius: 0px;
+  --shadow-raised: 0 1px 3px rgb(0 0 0 / 8%);
+}
+
+.dark[data-palette="redline"] {
+  color-scheme: dark;
+
+  --ink: #f3f3ee;
+  --line: #3b3b36;
+  --paper: #151513;
+  --surface: #1d1d1a;
+  --accent-soft: #3a211f;
+  --code: #0d0e0c;
+  --ink-inverse: #171715;
+  --accent-line: #713a35;
+  --paper-sunken: #11110f;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: #20201d;
+  --popover-foreground: var(--ink);
+  --primary: #ff6257;
+  --primary-foreground: #171715;
+  --secondary: var(--accent-soft);
+  --secondary-foreground: #f8efed;
+  --muted: #272724;
+  --muted-foreground: #aaa9a1;
+  --accent: #ff6257;
+  --accent-foreground: #171715;
+  --destructive: #ff6257;
+  --border: var(--line);
+  --input: #484841;
+  --ring: #ff6257;
+  --chart-1: #ff6257;
+  --chart-2: #6ba7c7;
+  --chart-3: #77a986;
+  --chart-4: #d59a4d;
+  --chart-5: #ab8ac4;
+  --sidebar: var(--paper-sunken);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: #ff6257;
+  --sidebar-primary-foreground: #171715;
+  --sidebar-accent: var(--accent-soft);
+  --sidebar-accent-foreground: #f8efed;
+  --sidebar-border: #343430;
+  --sidebar-ring: #ff6257;
+  --shadow-raised: 0 1px 3px rgb(0 0 0 / 28%);
+}
+
+[data-palette="redline"] * {
+  border-radius: 0 !important;
+  letter-spacing: 0 !important;
+}
+[data-palette="redline"] body {
+  font-family: "IBM Plex Sans", "Aptos", sans-serif;
+}
+[data-palette="redline"] h1 {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: var(--w-medium);
+}
+[data-palette="redline"] .deep-sea-bg { background: none; }
+[data-palette="redline"] [class*="shadow-"] { box-shadow: none !important; }
+[data-palette="redline"] [data-slot="tabs-trigger"][data-state="active"] {
+  box-shadow: var(--shadow-raised) !important;
+}
+
 /* ─── Cyber — neon on near-black, sharp 0.25rem, primary glow ──────── */
 :root[data-palette="cyber"] {
   --radius: 0.25rem;

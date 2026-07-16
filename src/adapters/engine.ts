@@ -1,7 +1,7 @@
 /**
  * Polpo Engine — the built-in agentic runtime.
  *
- * Uses @mariozechner/pi-agent-core Agent class for the agentic loop,
+ * Uses @earendil-works/pi-agent-core Agent class for the agentic loop,
  * with pi-ai for multi-provider LLM abstraction.
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
@@ -21,8 +21,8 @@ export function createActivity(): AgentActivity {
     lastUpdate: new Date().toISOString(),
   };
 }
-import { Agent } from "@mariozechner/pi-agent-core";
-import type { AgentEvent } from "@mariozechner/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
@@ -393,7 +393,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create all tools scoped to working directory with path sandboxing
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list
-  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*")
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*")
   // polpoDir must always be provided via SpawnContext.
   // Fallback to join(cwd, ".polpo") is WRONG when settings.workDir points to a
   // subdirectory — cwd would be e.g. /project/packages/app while .polpo/ lives
@@ -473,12 +473,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       thinkingLevel,
       maxTokens: model.maxTokens,
       tools: codingTools,
-      messages: [],
+      messages: (ctx?.resumeMessages ?? []) as any[],
       isStreaming: false,
       streamMessage: null,
       pendingToolCalls: new Set(),
     } as any,
   });
+  const directionAcks = new WeakMap<object, string[]>();
 
   const handle: AgentHandle = {
     agentName: agentConfig.name,
@@ -493,6 +494,24 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       alive = false;
 
     },
+    steer: (message: string, directionId?: string) => {
+      const userMessage: AgentMessage = {
+        role: "user",
+        content: [{ type: "text", text: message }],
+        timestamp: Date.now(),
+      };
+      if (directionId) directionAcks.set(userMessage, [directionId]);
+      agent.steer(userMessage);
+    },
+    followUp: (message: string, directionId?: string) => {
+      const userMessage: AgentMessage = {
+        role: "user",
+        content: [{ type: "text", text: message }],
+        timestamp: Date.now(),
+      };
+      if (directionId) directionAcks.set(userMessage, [directionId]);
+      agent.followUp(userMessage);
+    },
   };
 
   // Track turns for maxTurns enforcement
@@ -500,10 +519,18 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const maxTurns = agentConfig.maxTurns ?? 150;
 
   // Subscribe to agent events for activity tracking + transcript
-  agent.subscribe((event: AgentEvent) => {
+  agent.subscribe(async (event: AgentEvent) => {
     activity.lastUpdate = new Date().toISOString();
 
     switch (event.type) {
+      case "message_start": {
+        const directionIds = directionAcks.get(event.message as object);
+        if (directionIds) {
+          directionAcks.delete(event.message as object);
+          await handle.onDirectionApplied?.(directionIds);
+        }
+        break;
+      }
       case "message_end": {
         const msg = event.message;
         if (msg && "content" in msg && msg.role === "assistant") {
@@ -567,6 +594,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
       case "turn_end": {
         turnCount++;
+        await handle.onCheckpoint?.(structuredClone(agent.state.messages), turnCount);
         if (turnCount >= maxTurns) {
           agent.abort();
         }
@@ -616,8 +644,20 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         agent.state.systemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths, mailboxes);
       }
 
-      const prompt = buildPrompt(task);
-      await agent.prompt(prompt);
+      if (ctx?.continuation) {
+        const continuationPrompt = ctx.resumeMessages?.length
+          ? ctx.continuation.message
+          : `${buildPrompt(task)}\n\n[Human direction]\n${ctx.continuation.message}`;
+        const continuationMessage: AgentMessage = {
+          role: "user",
+          content: [{ type: "text", text: continuationPrompt }],
+          timestamp: Date.now(),
+        };
+        directionAcks.set(continuationMessage, ctx.continuation.directionIds);
+        await agent.prompt(continuationMessage);
+      } else {
+        await agent.prompt(buildPrompt(task));
+      }
 
       // Extract final text from the last assistant message
       const messages = agent.state.messages;

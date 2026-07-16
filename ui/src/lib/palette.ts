@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
 
-export type Palette = "tide" | "brutal" | "editorial" | "cyber" | "mono";
+export type Palette = "tide" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
 
 export interface PaletteMeta {
   id: Palette;
@@ -48,6 +48,13 @@ export const PALETTES: PaletteMeta[] = [
     blurb: "Warm cream · large radius · ink red",
     swatchLight: ["oklch(0.965 0.022 75)",   "oklch(0.42 0.13 25)",  "oklch(0.66 0.12 75)"],
     swatchDark:  ["oklch(0.165 0.022 50)",   "oklch(0.7 0.13 35)",   "oklch(0.74 0.12 75)"],
+  },
+  {
+    id: "redline",
+    name: "Redline Paper",
+    blurb: "Newsprint white · signal red · zero radius",
+    swatchLight: ["#f5f5f1", "#171717", "#e93f33"],
+    swatchDark: ["#151513", "#f3f3ee", "#ff6257"],
   },
   {
     id: "cyber",

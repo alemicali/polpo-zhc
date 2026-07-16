@@ -14,7 +14,7 @@
 import { resolve, extname } from "node:path";
 import { readFileSync } from "node:fs";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { assertPathAllowed } from "./path-sandbox.js";
 
 const MAX_TEXT_OUTPUT = 50_000;

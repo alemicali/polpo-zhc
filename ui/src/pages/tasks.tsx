@@ -53,7 +53,6 @@ import {
   Layers,
   ChevronRight,
   ChevronDown,
-  Calendar,
   Settings2,
 } from "lucide-react";
 import {
@@ -75,11 +74,10 @@ import type {
   GroupByKey,
   ColumnByKey,
   SortKey,
-  TimeField,
-  TimeFilterState,
-  TimeRange,
   CardFieldVisibility,
 } from "@/hooks/use-tasks-page";
+import { TimeRangeFilter } from "@/components/shared/time-range-filter";
+import { getTimeRangeLabel } from "@/lib/time-filter";
 
 // ── Card settings context (avoids prop drilling) ──
 
@@ -388,108 +386,6 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "priority", label: "Priority" },
   { value: "score", label: "Score" },
 ];
-
-// ── Time filter ──
-
-const timeFieldOptions: { value: TimeField; label: string }[] = [
-  { value: "createdAt", label: "Created" },
-  { value: "updatedAt", label: "Updated" },
-];
-
-const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
-  { value: "1h", label: "Last hour", ms: 60 * 60 * 1000 },
-  { value: "6h", label: "Last 6 hours", ms: 6 * 60 * 60 * 1000 },
-  { value: "24h", label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
-  { value: "7d", label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: "30d", label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-];
-
-
-
-function TimeFilter({
-  value,
-  onChange,
-  onClear,
-}: {
-  value: TimeFilterState | null;
-  onChange: (v: TimeFilterState) => void;
-  onClear: () => void;
-}) {
-  const hasFilter = value !== null;
-  const [field, setField] = useState<TimeField>(value?.field ?? "updatedAt");
-
-  const applyPreset = (preset: (typeof timeRangePresets)[number]) => {
-    onChange({ field, range: preset.value, after: Date.now() - preset.ms });
-  };
-
-  const activePresetLabel = value
-    ? timeRangePresets.find(p => p.value === value.range)?.label ?? value.range
-    : null;
-  const activeFieldLabel = value
-    ? timeFieldOptions.find(f => f.value === value.field)?.label ?? value.field
-    : null;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
-          <Calendar className="h-3.5 w-3.5" />
-          {hasFilter ? `${activeFieldLabel}: ${activePresetLabel}` : "Time"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-2" align="start">
-        {/* Field selector */}
-        <div className="flex items-center gap-1 mb-2">
-          {timeFieldOptions.map((opt) => (
-            <Button
-              key={opt.value}
-              variant={field === opt.value ? "default" : "ghost"}
-              size="sm"
-              className="h-6 text-[10px] flex-1"
-              onClick={() => setField(opt.value)}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
-
-        {/* Range presets */}
-        <div className="space-y-0.5">
-          {timeRangePresets.map((preset) => (
-            <button
-              key={preset.value}
-              className={cn(
-                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-muted",
-              )}
-              onClick={() => applyPreset(preset)}
-            >
-              <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-primary border-primary"
-                  : "border-muted-foreground/30",
-              )}>
-                {value?.range === preset.value && value?.field === field && (
-                  <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                )}
-              </div>
-              <span>{preset.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {hasFilter && (
-          <Button variant="ghost" size="sm" className="w-full mt-1 text-xs" onClick={onClear}>
-            Clear
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 // ── Task card ──
 
@@ -1308,7 +1204,7 @@ export function TasksPage() {
               onClear={() => setSelectedTeams(new Set())}
               isLoading={teamsLoading}
             />
-            <TimeFilter
+            <TimeRangeFilter
               value={timeFilter}
               onChange={setTimeFilter}
               onClear={() => setTimeFilter(null)}
@@ -1347,7 +1243,7 @@ export function TasksPage() {
                     className="text-[10px] gap-0.5 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20 py-0 h-5"
                     onClick={() => setTimeFilter(null)}
                   >
-                    {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+                    {getTimeRangeLabel(timeFilter.range)}
                     <XCircle className="h-2.5 w-2.5" />
                   </Badge>
                 )}

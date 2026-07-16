@@ -17,7 +17,7 @@
 import { execSync, spawn as spawnChild } from "node:child_process";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const MAX_OUTPUT_BYTES = 50_000;
 const DEFAULT_TIMEOUT = 30_000;
@@ -69,15 +69,21 @@ function execBrowser(
   }
 }
 
-/** Execute agent-browser command async with signal support */
-function execBrowserAsync(
+/** Execute agent-browser command async with signal support.
+ *  Exported so the orchestrator-side wrappers (src/llm/orchestrator-browser-tools.ts)
+ *  can reuse the same CLI bridge as the agent-side tools — single source of truth.
+ */
+export function execBrowserAsync(
   args: string[],
-  options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
+  options: { session?: string; profileDir?: string; cdp?: number; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
 ): Promise<{ success: boolean; data?: any; error?: string; raw: string }> {
   return new Promise((resolve) => {
     const sessionArgs = options.session ? ["--session", options.session] : [];
-    const profileArgs = options.profileDir ? ["--profile", options.profileDir] : [];
-    const fullArgs = [...sessionArgs, ...profileArgs, ...args, "--json"];
+    // When attaching to an external Chrome via CDP, --profile is meaningless
+    // (that Chrome already owns its user-data-dir) so it's dropped.
+    const cdpArgs = options.cdp ? ["--cdp", String(options.cdp)] : [];
+    const profileArgs = options.cdp || !options.profileDir ? [] : ["--profile", options.profileDir];
+    const fullArgs = [...sessionArgs, ...cdpArgs, ...profileArgs, ...args, "--json"];
 
     const child = spawnChild("agent-browser", fullArgs, {
       cwd: options.cwd,

@@ -1,7 +1,7 @@
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimple } from "@mariozechner/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { buildSystemPrompt } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -48,6 +48,7 @@ import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
+import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
@@ -325,7 +326,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         model: m,
         streamOpts: buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens),
         tools: ALL_ORCHESTRATOR_TOOLS,
-        executor: (name: string, args: Record<string, unknown>) => executeOrchestratorTool(name, args, o),
+        executor: (name: string, args: Record<string, unknown>, context) => executeOrchestratorTool(name, args, o, context),
         isInteractive,
       };
     },
@@ -343,6 +344,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Gate: orchestrator must be initialized for these routes
   authed.use("*", async (c, next) => {
+    // The build-time OpenAPI generator intentionally creates the app without
+    // a runtime orchestrator. Serving the static schema must remain possible.
+    if (c.req.path.endsWith("/openapi.json")) return next();
     if (!orchestrator.isInitialized) {
       return c.json({ ok: false, error: "Polpo is not initialized. Complete setup first." }, 503);
     }
@@ -371,6 +375,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     deleteTask: (id: string) => o.deleteTask(id),
     retryTask: (id: string) => o.retryTask(id),
     killTask: (id: string) => o.killTask(id),
+    sendDirection: (id: string, message: string, directionOpts?: any) => o.sendDirection(id, message, directionOpts),
+    listDirections: (id: string) => o.listDirections(id),
     reassessTask: (id: string) => o.reassessTask(id),
     forceFailTask: (id: string) => o.forceFailTask(id),
     updateTaskDescription: (id: string, desc: string) => o.updateTaskDescription(id, desc),
@@ -504,6 +510,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/audio", audioRoutes());
+
+  authed.route("/browser-dashboard", browserDashboardRoutes());
 
   authed.route("/git", gitRoutes(() => ({
     workDir: o.getWorkDir(),

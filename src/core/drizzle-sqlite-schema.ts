@@ -91,6 +91,29 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
     CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 
+    CREATE TABLE IF NOT EXISTS task_directions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT,
+      mode TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      applied_at TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_directions_task ON task_directions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_directions_run_status ON task_directions(run_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+      task_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      messages TEXT NOT NULL DEFAULT '[]',
+      saved_at TEXT NOT NULL,
+      turn_count INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,

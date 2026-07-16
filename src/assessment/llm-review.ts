@@ -29,7 +29,8 @@ import { validateReviewPayload, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload 
 import { withRetry } from "../llm/retry.js";
 import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
-import { complete, completeSimple, type AssistantMessage, type Message, type Tool } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
+import { complete, completeSimple } from "@earendil-works/pi-ai/compat";
 
 export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 

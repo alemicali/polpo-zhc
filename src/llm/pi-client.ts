@@ -2,7 +2,7 @@
  * Polpo LLM abstraction — multi-provider model resolution, streaming, cost tracking,
  * and provider-level failover built on top of pi-ai.
  *
- * Supports all 23 pi-ai providers out-of-the-box plus custom OpenAI/Anthropic-compatible
+ * Supports all built-in pi-ai providers plus custom OpenAI/Anthropic-compatible
  * endpoints via ProviderConfig.
  */
 
@@ -10,18 +10,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getGlobalPolpoDir } from "../core/constants.js";
 import {
-  getModel,
-  getModels,
-  getProviders,
-  getEnvApiKey,
   calculateCost,
-  completeSimple,
-  streamSimple,
   type Model,
   type Api,
   type KnownProvider,
   type Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
+import {
+  getBuiltinModel as getModel,
+  getBuiltinModels as getModels,
+  getBuiltinProviders as getProviders,
+} from "@earendil-works/pi-ai/providers/all";
+import {
+  completeSimple,
+  getEnvApiKey,
+  streamSimple,
+} from "@earendil-works/pi-ai/compat";
 import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel } from "../core/types.js";
 
 // ─── Constants ──────────────────────────────────────
@@ -29,7 +33,7 @@ import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel }
 /**
  * Prefix-based inference map for bare model IDs (without provider prefix).
  * Used ONLY when the user writes "claude-opus-4-6" instead of "anthropic:claude-opus-4-6".
- * All 23 pi-ai providers are supported — this map covers the most common prefixes.
+ * All built-in pi-ai providers are supported; this map covers common unambiguous prefixes.
  */
 const PREFIX_MAP: [string, KnownProvider][] = [
   // Anthropic
@@ -53,7 +57,7 @@ const PREFIX_MAP: [string, KnownProvider][] = [
   // xAI
   ["grok-", "xai"],
   // OpenRouter
-  ["deepseek-", "openrouter"],
+  ["deepseek-", "deepseek"],
   // Cerebras
   ["gpt-oss-", "cerebras"],
   // ZAI / GLM
@@ -76,29 +80,40 @@ const PREFIX_MAP: [string, KnownProvider][] = [
 
 /** Map provider names to their standard environment variable for API keys. */
 export const PROVIDER_ENV_MAP: Record<string, string> = {
+  "ant-ling": "ANT_LING_API_KEY",
   "openai": "OPENAI_API_KEY",
   "anthropic": "ANTHROPIC_API_KEY",
   "google": "GEMINI_API_KEY",
+  "google-vertex": "GOOGLE_CLOUD_PROJECT",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  "nvidia": "NVIDIA_API_KEY",
+  "deepseek": "DEEPSEEK_API_KEY",
   "groq": "GROQ_API_KEY",
   "cerebras": "CEREBRAS_API_KEY",
   "xai": "XAI_API_KEY",
   "openrouter": "OPENROUTER_API_KEY",
   "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
   "zai": "ZAI_API_KEY",
+  "zai-coding-cn": "ZAI_CODING_CN_API_KEY",
   "mistral": "MISTRAL_API_KEY",
   "minimax": "MINIMAX_API_KEY",
   "minimax-cn": "MINIMAX_CN_API_KEY",
+  "moonshotai": "MOONSHOT_API_KEY",
+  "moonshotai-cn": "MOONSHOT_API_KEY",
   "huggingface": "HF_TOKEN",
+  "fireworks": "FIREWORKS_API_KEY",
+  "together": "TOGETHER_API_KEY",
   "opencode": "OPENCODE_API_KEY",
   "opencode-go": "OPENCODE_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
-  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+  "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+  "xiaomi": "XIAOMI_API_KEY",
+  "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
   "github-copilot": "COPILOT_GITHUB_TOKEN",
   "amazon-bedrock": "AWS_ACCESS_KEY_ID",
-  "google-vertex": "GOOGLE_CLOUD_PROJECT",
-  "openai-codex": "OPENAI_API_KEY",
-  "google-gemini-cli": "GEMINI_API_KEY",
-  "google-antigravity": "GEMINI_API_KEY",
 };
 
 // ─── Provider override management ───────────────────
@@ -759,7 +774,7 @@ async function handleBillingDisable(provider: string): Promise<void> {
  *
  * Maps our ReasoningLevel to pi-ai's ThinkingLevel:
  * - "off" or undefined → no reasoning parameter (pi-ai default)
- * - "minimal" | "low" | "medium" | "high" | "xhigh" → passed as `reasoning` to pi-ai
+ * - "minimal" | "low" | "medium" | "high" | "xhigh" | "max" -> passed as `reasoning` to pi-ai
  *
  * pi-ai handles provider-specific translation automatically:
  * - Anthropic → thinkingEnabled + thinkingBudgetTokens

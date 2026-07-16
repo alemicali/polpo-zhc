@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
@@ -81,6 +81,75 @@ describe("Health", () => {
     expect(body.data).toHaveProperty("version");
     expect(body.data).toHaveProperty("uptime");
     expect(typeof body.data.uptime).toBe("number");
+  });
+});
+
+describe("Files API recursive uploads", () => {
+  test("GET /files/search includes directories as mentionable paths", async () => {
+    await mkdir(join(tmpDir, "mention-search-dir", "nested"), { recursive: true });
+    await writeFile(join(tmpDir, "mention-search-dir", "nested", "result.txt"), "result");
+
+    const res = await app.request(api("/files/search?q=mention-search-dir&limit=20"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.files).toEqual(expect.arrayContaining([
+      { name: "mention-search-dir", path: "mention-search-dir", type: "directory" },
+      { name: "nested", path: "mention-search-dir/nested", type: "directory" },
+      { name: "result.txt", path: "mention-search-dir/nested/result.txt", type: "file" },
+    ]));
+  });
+
+  test("POST /files/upload preserves nested relative paths", async () => {
+    const destination = "recursive-upload";
+    await mkdir(join(tmpDir, destination), { recursive: true });
+    const form = new FormData();
+    form.set("path", destination);
+    form.append("file", new File(["root"], "root.txt", { type: "text/plain" }));
+    form.append("relativePath", "project/root.txt");
+    form.append("file", new File(["nested"], "child.txt", { type: "text/plain" }));
+    form.append("relativePath", "project/docs/child.txt");
+
+    const res = await app.request(api("/files/upload"), { method: "POST", body: form });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.uploaded).toEqual([
+      { name: "root.txt", path: "project/root.txt", size: 4 },
+      { name: "child.txt", path: "project/docs/child.txt", size: 6 },
+    ]);
+    expect(await readFile(join(tmpDir, destination, "project", "root.txt"), "utf8")).toBe("root");
+    expect(await readFile(join(tmpDir, destination, "project", "docs", "child.txt"), "utf8")).toBe("nested");
+  });
+
+  test("POST /files/upload rejects traversal before writing files", async () => {
+    const destination = "recursive-upload-reject";
+    await mkdir(join(tmpDir, destination), { recursive: true });
+    const form = new FormData();
+    form.set("path", destination);
+    form.append("file", new File(["safe"], "safe.txt", { type: "text/plain" }));
+    form.append("relativePath", "safe.txt");
+    form.append("file", new File(["escape"], "escape.txt", { type: "text/plain" }));
+    form.append("relativePath", "../escape.txt");
+
+    const res = await app.request(api("/files/upload"), { method: "POST", body: form });
+    expect(res.status).toBe(400);
+    await expect(readFile(join(tmpDir, destination, "safe.txt"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(tmpDir, "escape.txt"), "utf8")).rejects.toThrow();
+  });
+});
+
+describe("Provider auth status", () => {
+  test("includes subscription-only OAuth providers without an API-key mapping", async () => {
+    const res = await app.request(api("/auth/status"));
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    const codex = body.data.providers["openai-codex"];
+    expect(codex).toMatchObject({
+      hasEnvKey: false,
+      oauthAvailable: true,
+      oauthProviderName: "OpenAI Codex (ChatGPT Plus/Pro)",
+    });
+    expect(codex.envVar).toBeUndefined();
   });
 });
 
@@ -245,6 +314,49 @@ describe("Tasks API", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.data.killed).toBe(true);
+  });
+
+  test("POST /tasks/:id/directions queues a real continuation and exposes its status", async () => {
+    const createRes = await app.request(
+      api("/tasks"),
+      jsonReq("POST", {
+        title: "Continue direction test",
+        description: "Wait for a human direction",
+        assignTo: "agent-1",
+      }),
+    );
+    const created = await createRes.json();
+    const taskId = created.data.id;
+
+    const sendRes = await app.request(
+      api(`/tasks/${taskId}/directions`),
+      jsonReq("POST", { message: "Resume from the last checkpoint and finish the tests" }),
+    );
+    expect(sendRes.status).toBe(202);
+    const sent = await sendRes.json();
+    expect(sent.ok).toBe(true);
+    expect(sent.data.action).toBe("continue");
+    expect(sent.data.direction).toMatchObject({
+      taskId,
+      mode: "continue",
+      status: "queued",
+      message: "Resume from the last checkpoint and finish the tests",
+    });
+
+    const listRes = await app.request(api(`/tasks/${taskId}/directions`));
+    expect(listRes.status).toBe(200);
+    const listed = await listRes.json();
+    expect(listed.data).toEqual([
+      expect.objectContaining({ id: sent.data.direction.id, status: "queued" }),
+    ]);
+  });
+
+  test("POST /tasks/:id/directions rejects an empty direction", async () => {
+    const res = await app.request(
+      api("/tasks/nonexistent-id/directions"),
+      jsonReq("POST", { message: "   " }),
+    );
+    expect(res.status).toBe(400);
   });
 
   test("POST /tasks with missing title is rejected", async () => {
@@ -1179,6 +1291,28 @@ describe("Update Agent API", () => {
 
     // Cleanup
     await app.request(api("/agents/agent-update-test"), { method: "DELETE" });
+  });
+
+  test("PATCH /agents/:name moves an agent to a new team immediately", async () => {
+    await app.request(api("/agents/teams"), jsonReq("POST", { name: "hot-move-team" }));
+    await app.request(api("/agents"), jsonReq("POST", { name: "agent-hot-move", role: "original" }));
+
+    const res = await app.request(
+      api("/agents/agent-hot-move"),
+      jsonReq("PATCH", { team: "hot-move-team", role: "moved" }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.role).toBe("moved");
+
+    const teamsRes = await app.request(api("/agents/teams"));
+    const teamsBody = await teamsRes.json();
+    const destination = teamsBody.data.find((team: any) => team.name === "hot-move-team");
+    expect(destination.agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "agent-hot-move", role: "moved" }),
+    ]));
+
+    await app.request(api("/agents/agent-hot-move"), { method: "DELETE" });
+    await app.request(api("/agents/teams/hot-move-team"), { method: "DELETE" });
   });
 });
 

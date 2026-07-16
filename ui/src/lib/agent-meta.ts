@@ -17,6 +17,7 @@ import {
   Table2,
   FileText,
   Mail,
+  PhoneCall,
   KeyRound,
   Mic,
   Image,
@@ -60,6 +61,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("pdf_")) return { icon: FileText, color: "text-red-400", bg: "bg-red-500/10" };
   if (n.startsWith("docx_")) return { icon: FileText, color: "text-blue-400", bg: "bg-blue-500/10" };
   if (n.startsWith("email_")) return { icon: Mail, color: "text-rose-400", bg: "bg-rose-500/10" };
+  if (n.startsWith("phone_")) return { icon: PhoneCall, color: "text-lime-400", bg: "bg-lime-500/10" };
   if (n.startsWith("vault_")) return { icon: KeyRound, color: "text-amber-400", bg: "bg-amber-500/10" };
   if (n.startsWith("audio_")) return { icon: Mic, color: "text-pink-400", bg: "bg-pink-500/10" };
   if (n.startsWith("image_")) return { icon: Image, color: "text-emerald-400", bg: "bg-emerald-500/10" };
@@ -102,6 +104,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)", icon: Video, color: "text-red-400" },
   { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)", icon: Mic, color: "text-pink-400" },
   { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: "text-cyan-400" },
+  { prefix: "phone_", label: "Phone (VAPI)", tools: "phone_call, phone_get_call, phone_list_calls, phone_hangup, inbound call configuration", icon: PhoneCall, color: "text-lime-400" },
 ];
 
 // ── Task status display config ──

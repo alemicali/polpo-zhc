@@ -2,8 +2,8 @@
  * OAuth manager — login, refresh, and API key resolution for OAuth-enabled providers.
  *
  * Wraps pi-ai's OAuth login functions with Polpo's credential persistence layer.
- * Supports all 5 OAuth providers: Anthropic, OpenAI Codex, GitHub Copilot,
- * Google Gemini CLI, Google Antigravity.
+ * Supports the OAuth providers exposed by pi-ai: Anthropic, OpenAI Codex,
+ * and GitHub Copilot.
  *
  * Security:
  * - Expired tokens without refresh tokens are explicitly rejected (not silently used)
@@ -15,16 +15,12 @@ import {
   loginAnthropic,
   loginOpenAICodex,
   loginGitHubCopilot,
-  loginGeminiCli,
-  loginAntigravity,
   refreshAnthropicToken,
   refreshOpenAICodexToken,
   refreshGitHubCopilotToken,
-  refreshGoogleCloudToken,
-  refreshAntigravityToken,
   getOAuthProvider,
-} from "@mariozechner/pi-ai/oauth";
-import type { OAuthCredentials } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai/oauth";
+import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import type { OAuthProviderName, OAuthProfile } from "./types.js";
 import {
   profileId,
@@ -152,34 +148,13 @@ export async function oauthLogin(
 
     case "github-copilot":
       creds = await loginGitHubCopilot({
-        onAuth: (url, instructions) => callbacks.onAuthUrl(url as string, instructions),
+        onDeviceCode: (info) => callbacks.onAuthUrl(
+          info.verificationUri,
+          `Enter device code ${info.userCode}`,
+        ),
         onPrompt: (prompt) => callbacks.onPrompt(prompt.message, prompt.placeholder),
         onProgress: callbacks.onProgress,
       });
-      break;
-
-    case "google-gemini-cli":
-      creds = await loginGeminiCli(
-        (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        callbacks.onProgress,
-        () =>
-          callbacks.onPrompt(
-            "Paste the redirect URL or authorization code",
-            "http://localhost:8085/oauth2callback?...",
-          ),
-      );
-      break;
-
-    case "google-antigravity":
-      creds = await loginAntigravity(
-        (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        callbacks.onProgress,
-        () =>
-          callbacks.onPrompt(
-            "Paste the redirect URL or authorization code",
-            "http://localhost:51121/oauth-callback?...",
-          ),
-      );
       break;
 
     default:
@@ -250,20 +225,6 @@ export async function refreshProfile(
         creds = await refreshGitHubCopilotToken(
           profile.refresh,
           profile.extra?.enterpriseUrl as string | undefined,
-        );
-        break;
-
-      case "google-gemini-cli":
-        creds = await refreshGoogleCloudToken(
-          profile.refresh,
-          (profile.extra?.projectId as string) || "",
-        );
-        break;
-
-      case "google-antigravity":
-        creds = await refreshAntigravityToken(
-          profile.refresh,
-          (profile.extra?.projectId as string) || "",
         );
         break;
 

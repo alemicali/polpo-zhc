@@ -6,6 +6,7 @@ import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./co
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
+import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
@@ -21,9 +22,11 @@ import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
 import { TypedEmitter } from "./events.js";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
+import type { TaskControlStore } from "./task-control-store.js";
 import type {
   PolpoConfig,
   AgentConfig,
+  AgentUpdate,
   Task,
   TaskStatus,
   TaskResult,
@@ -88,6 +91,7 @@ export interface OrchestratorOptions {
   workDir?: string;
   store?: TaskStore;
   runStore?: RunStore;
+  taskControlStore?: TaskControlStore;
   assessFn?: AssessFn;
   spawner?: Spawner;
 }
@@ -95,6 +99,7 @@ export interface OrchestratorOptions {
 export class Orchestrator extends TypedEmitter {
   private registry!: TaskStore;
   private runStore!: RunStore;
+  private taskControlStore!: TaskControlStore;
   private config!: PolpoConfig;
   private polpoDir: string;
   private workDir: string;
@@ -107,6 +112,7 @@ export class Orchestrator extends TypedEmitter {
   private ownsSpawner = true;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
+  private injectedTaskControlStore?: TaskControlStore;
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
@@ -186,6 +192,7 @@ export class Orchestrator extends TypedEmitter {
       this.assessFn = opts.assessFn ?? assessTask;
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
+      this.injectedTaskControlStore = opts.taskControlStore;
       this.spawner = opts.spawner ?? new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
       this.ownsSpawner = !opts.spawner;
     }
@@ -261,7 +268,7 @@ export class Orchestrator extends TypedEmitter {
 
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
-    task: TaskStore; run: RunStore;
+    task: TaskStore; run: RunStore; taskControlStore: TaskControlStore;
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
     if (storage === "postgres") {
@@ -277,6 +284,7 @@ export class Orchestrator extends TypedEmitter {
       return {
         task: this.drizzleStores.taskStore,
         run: this.drizzleStores.runStore,
+        taskControlStore: this.drizzleStores.taskControlStore,
         logStore: this.drizzleStores.logStore,
         sessionStore: this.drizzleStores.sessionStore,
         memoryStore: this.drizzleStores.memoryStore,
@@ -304,6 +312,7 @@ export class Orchestrator extends TypedEmitter {
       return {
         task: this.drizzleStores.taskStore,
         run: this.drizzleStores.runStore,
+        taskControlStore: this.drizzleStores.taskControlStore,
         logStore: this.drizzleStores.logStore,
         sessionStore: this.drizzleStores.sessionStore,
         memoryStore: this.drizzleStores.memoryStore,
@@ -313,6 +322,7 @@ export class Orchestrator extends TypedEmitter {
     return {
       task: new FileTaskStore(this.polpoDir),
       run: new FileRunStore(this.polpoDir),
+      taskControlStore: new FileTaskControlStore(this.polpoDir),
     };
   }
 
@@ -360,10 +370,15 @@ export class Orchestrator extends TypedEmitter {
     }
 
     const stores = this.injectedStore
-      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      ? {
+          task: this.injectedStore,
+          run: this.injectedRunStore!,
+          taskControlStore: this.injectedTaskControlStore ?? new FileTaskControlStore(this.polpoDir),
+        }
       : await this.createStores(this.config.settings.storage, this.config.settings.databaseUrl);
     this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
+    this.taskControlStore = stores.taskControlStore;
 
     // NOTE: file→sqlite migration is MANUAL only (run `polpo migrate`
     // from the CLI). Auto-trigger at boot was removed by user request —
@@ -494,6 +509,7 @@ export class Orchestrator extends TypedEmitter {
       emitter: this,
       registry: this.registry,
       runStore: this.runStore,
+      taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
@@ -765,10 +781,15 @@ export class Orchestrator extends TypedEmitter {
     const storageBackend = settings.storage as "file" | "sqlite" | "postgres" | undefined;
     const dbUrl = (settings as any).databaseUrl ?? process.env.DATABASE_URL;
     const stores = this.injectedStore
-      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      ? {
+          task: this.injectedStore,
+          run: this.injectedRunStore!,
+          taskControlStore: this.injectedTaskControlStore ?? new FileTaskControlStore(this.polpoDir),
+        }
       : await this.createStores(storageBackend, dbUrl);
     this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
+    this.taskControlStore = stores.taskControlStore;
 
     await this.maybeAutoMigrateToSqlite();
 
@@ -877,6 +898,12 @@ export class Orchestrator extends TypedEmitter {
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.engine.updateTaskExpectations(taskId, expectations); }
   async retryTask(taskId: string): Promise<void> { return this.engine.retryTask(taskId); }
+  async sendDirection(
+    taskId: string,
+    message: string,
+    opts?: { mode?: "auto" | "steer" | "follow_up" | "continue"; confirmSideEffects?: boolean },
+  ) { return this.engine.sendDirection(taskId, message, opts); }
+  async listDirections(taskId: string) { return this.engine.listDirections(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
@@ -972,7 +999,7 @@ export class Orchestrator extends TypedEmitter {
     if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
     return removed;
   }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> {
+  async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
     const agent = await this.engine.updateAgent(name, updates);
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
     return agent;

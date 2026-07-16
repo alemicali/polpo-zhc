@@ -13,7 +13,7 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { execSync } from "node:child_process";
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync,

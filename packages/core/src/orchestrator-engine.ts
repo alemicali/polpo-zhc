@@ -30,6 +30,7 @@ import { agentMemoryScope } from "./memory-store.js";
 import type {
   PolpoConfig,
   AgentConfig,
+  AgentUpdate,
   Task,
   TaskResult,
   TaskExpectation,
@@ -55,7 +56,7 @@ import type {
  * Implemented by TaskRunner in the shell layer.
  */
 export interface TaskRunnerPort {
-  collectResults(onResult: (taskId: string, result: TaskResult) => void): Promise<void>;
+  collectResults(onResult: (taskId: string, result: TaskResult) => Promise<void> | void): Promise<void>;
   enforceHealthChecks(): Promise<void>;
   spawnForTask(task: Task): Promise<void>;
   syncProcessesFromRunStore(): Promise<void>;
@@ -486,6 +487,13 @@ export class OrchestratorEngine {
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.taskMgr.updateTaskAssignment(taskId, agentName); }
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.taskMgr.updateTaskExpectations(taskId, expectations); }
   async retryTask(taskId: string): Promise<void> { return this.taskMgr.retryTask(taskId); }
+
+  async sendDirection(
+    taskId: string,
+    message: string,
+    opts?: { mode?: "auto" | "steer" | "follow_up" | "continue"; confirmSideEffects?: boolean },
+  ) { return this.taskMgr.sendDirection(taskId, message, opts); }
+  async listDirections(taskId: string) { return this.taskMgr.listDirections(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.taskMgr.killTask(taskId); }
   async deleteTask(taskId: string): Promise<boolean> { return this.ctx.registry.removeTask(taskId); }
@@ -545,7 +553,7 @@ export class OrchestratorEngine {
   async renameTeam(oldName: string, newName: string): Promise<void> { return this.agentMgr.renameTeam(oldName, newName); }
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.agentMgr.addAgent(agent, teamName); }
   async removeAgent(name: string): Promise<boolean> { return this.agentMgr.removeAgent(name); }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.agentMgr.updateAgent(name, updates); }
+  async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> { return this.agentMgr.updateAgent(name, updates); }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.agentMgr.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.agentMgr.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.agentMgr.cleanupVolatileAgents(group); }

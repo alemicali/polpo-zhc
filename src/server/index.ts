@@ -7,6 +7,7 @@ import { createApp } from "./app.js";
 import { SyncScheduler } from "./sync-scheduler.js";
 import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
 import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
+import { attachBrowserDashboardWebSocket } from "./routes/browser-dashboard.js";
 
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
@@ -34,6 +35,7 @@ export class PolpoServer {
   private terminalWs: TerminalWebSocketHandle | null = null;
   private codeServerManager: CodeServerManager | null = null;
   private codeServerWs: { close: () => void } | null = null;
+  private browserDashboardWs: { close: () => void } | null = null;
   private syncScheduler: SyncScheduler | null = null;
   private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
@@ -150,6 +152,9 @@ export class PolpoServer {
       apiKeys: this.config.apiKeys,
       workDir,
     });
+    // agent-browser dashboard WebSocket proxy. Path:
+    //   /api/v1/browser-dashboard/view/... → ws://127.0.0.1:<dashboard-port>/...
+    this.browserDashboardWs = attachBrowserDashboardWebSocket(this.server);
 
     const base = `http://${this.config.host}:${this.config.port}`;
 
@@ -173,6 +178,7 @@ export class PolpoServer {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
     this.terminalWs?.close();
+    this.browserDashboardWs?.close();
     this.terminalWs = null;
     this.codeServerWs?.close();
     this.codeServerWs = null;

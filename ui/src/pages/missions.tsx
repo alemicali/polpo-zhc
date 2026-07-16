@@ -47,6 +47,14 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/mission-status";
+import {
+  TimeRangeFilter,
+} from "@/components/shared/time-range-filter";
+import {
+  createDefaultTimeFilter,
+  getTimeRangeLabel,
+  type TimeFilterState,
+} from "@/lib/time-filter";
 
 // ── Schedule type filter ──
 
@@ -445,7 +453,8 @@ export function MissionsPage() {
   const [search, setSearch] = useState("");
   const [selectedStatuses, setSelectedStatuses] = useState<Set<MissionStatus>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
-  const [scheduleType, setScheduleType] = useState<ScheduleType>("all");
+  const [scheduleType, setScheduleType] = useState<ScheduleType>("one-shot");
+  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(() => createDefaultTimeFilter());
 
   const [handleRefresh, isRefreshing] = useAsyncAction(async () => {
     await refetch();
@@ -516,6 +525,11 @@ export function MissionsPage() {
       if (scheduleType === "one-shot" && !isOneShotMission(m)) return false;
       // Status filter
       if (selectedStatuses.size > 0 && !selectedStatuses.has(m.status)) return false;
+      // Time filter
+      if (timeFilter) {
+        const timestamp = new Date(m[timeFilter.field]).getTime();
+        if (timestamp < timeFilter.after) return false;
+      }
       // Team filter
       if (selectedTeams.size > 0) {
         const missionAgents = parseMissionAgents(m.data);
@@ -529,7 +543,7 @@ export function MissionsPage() {
       }
       return true;
     });
-  }, [missions, search, selectedStatuses, selectedTeams, agentToTeam, scheduleType]);
+  }, [missions, search, selectedStatuses, selectedTeams, agentToTeam, scheduleType, timeFilter]);
 
   if (loading) {
     return (
@@ -539,7 +553,7 @@ export function MissionsPage() {
     );
   }
 
-  const hasFilters = search.length > 0 || selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all";
+  const hasFilters = search.length > 0 || selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all" || timeFilter !== null;
 
   const active = filtered.filter(p => p.status === "active" || p.status === "paused");
   const scheduledOnce = filtered.filter(p => p.status === "scheduled");
@@ -579,6 +593,13 @@ export function MissionsPage() {
         {/* Schedule type toggle */}
         <ScheduleTypeFilter value={scheduleType} onChange={setScheduleType} />
 
+        {/* Time filter */}
+        <TimeRangeFilter
+          value={timeFilter}
+          onChange={setTimeFilter}
+          onClear={() => setTimeFilter(null)}
+        />
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -599,7 +620,7 @@ export function MissionsPage() {
       </div>
 
       {/* Active filter indicators */}
-      {(selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all") && (
+      {(selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all" || timeFilter) && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <span className="text-[10px] text-muted-foreground">Filtering by:</span>
           {scheduleType !== "all" && (
@@ -613,6 +634,17 @@ export function MissionsPage() {
             >
               {scheduleType === "recurring" ? <Repeat className="h-2.5 w-2.5" /> : <Calendar className="h-2.5 w-2.5" />}
               {scheduleType === "recurring" ? "Recurring" : "One-shot"}
+              <XCircle className="h-2.5 w-2.5" />
+            </Badge>
+          )}
+          {timeFilter && (
+            <Badge
+              variant="secondary"
+              className="text-[10px] gap-1 cursor-pointer hover:bg-destructive/20 text-blue-400"
+              onClick={() => setTimeFilter(null)}
+            >
+              <Calendar className="h-2.5 w-2.5" />
+              {getTimeRangeLabel(timeFilter.range)}
               <XCircle className="h-2.5 w-2.5" />
             </Badge>
           )}
@@ -646,7 +678,7 @@ export function MissionsPage() {
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[10px] text-muted-foreground"
-            onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); setScheduleType("all"); }}
+            onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); setScheduleType("all"); setTimeFilter(null); }}
           >
             Clear all
           </Button>

@@ -7,7 +7,7 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
 import { basename, extname, resolve } from "node:path";
 import { statSync } from "node:fs";

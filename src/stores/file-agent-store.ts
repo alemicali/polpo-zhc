@@ -81,7 +81,9 @@ export class FileAgentStore implements AgentStore {
     const entries = this.readAll();
     const entry = entries.find(e => e.agent.name === name);
     if (!entry) throw new Error(`Agent "${name}" not found`);
-    Object.assign(entry.agent, updates);
+    const { team: _team, ...safeUpdates } = updates as Partial<Omit<AgentConfig, "name">> & { team?: string };
+    Object.assign(entry.agent, safeUpdates);
+    delete (entry.agent as AgentConfig & { team?: string }).team;
     this.writeAll(entries);
     return entry.agent;
   }

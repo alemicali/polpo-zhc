@@ -128,10 +128,10 @@ describe("detectProviders", () => {
     expect(names).toContain("openai");
     expect(names).toContain("openai-codex");
 
-    // All google variants should appear
+    // Google API remains available, while removed OAuth-only providers do not.
     expect(names).toContain("google");
-    expect(names).toContain("google-gemini-cli");
-    expect(names).toContain("google-antigravity");
+    expect(names).not.toContain("google-gemini-cli");
+    expect(names).not.toContain("google-antigravity");
 
     // Standard providers
     expect(names).toContain("anthropic");
@@ -228,7 +228,7 @@ describe("detectProviders with OAuth", () => {
     expect(openai!.hasKey).toBe(false);
   });
 
-  it("detects google-gemini-cli directly from OAuth profile", async () => {
+  it("ignores OAuth profiles for providers removed from the catalog", async () => {
     delete process.env.GEMINI_API_KEY;
 
     vi.spyOn(await import("../auth/store.js"), "getAllProfiles").mockReturnValue([
@@ -250,11 +250,8 @@ describe("detectProviders with OAuth", () => {
     const { detectProviders } = await import("../setup/providers.js");
     const providers = detectProviders();
 
-    // google-gemini-cli detected directly
     const geminiCli = providers.find((p) => p.name === "google-gemini-cli");
-    expect(geminiCli).toBeDefined();
-    expect(geminiCli!.hasKey).toBe(true);
-    expect(geminiCli!.source).toBe("oauth");
+    expect(geminiCli).toBeUndefined();
 
     // google (different provider) should NOT have credentials from google-gemini-cli profile
     const google = providers.find((p) => p.name === "google");
@@ -301,7 +298,7 @@ describe("auth-options", () => {
 
     // Should have OAuth options
     const oauthOptions = options.filter((o) => o.type === "oauth");
-    expect(oauthOptions.length).toBeGreaterThanOrEqual(5);
+    expect(oauthOptions).toHaveLength(3);
 
     // Should have manual API key option
     const manualOption = options.find((o) => o.type === "api_key");
@@ -323,10 +320,9 @@ describe("auth-options", () => {
     }
   });
 
-  it("google-antigravity and google-gemini-cli are free", async () => {
+  it("has no free OAuth providers after the upstream Google OAuth removal", async () => {
     const { FREE_OAUTH_PROVIDERS } = await import("../setup/auth-options.js");
-    expect(FREE_OAUTH_PROVIDERS.has("google-antigravity")).toBe(true);
-    expect(FREE_OAUTH_PROVIDERS.has("google-gemini-cli")).toBe(true);
+    expect(FREE_OAUTH_PROVIDERS.size).toBe(0);
   });
 
   it("anthropic and openai-codex are not free", async () => {
@@ -346,8 +342,8 @@ describe("oauth-flow", () => {
     expect(findOAuthProvider("anthropic")!.name).toContain("Anthropic");
 
     expect(findOAuthProvider("openai-codex")).toBeDefined();
-    expect(findOAuthProvider("google-gemini-cli")).toBeDefined();
     expect(findOAuthProvider("github-copilot")).toBeDefined();
+    expect(findOAuthProvider("google-gemini-cli")).toBeUndefined();
   });
 
   it("findOAuthProvider returns undefined for unknown IDs", async () => {
@@ -361,7 +357,7 @@ describe("oauth-flow", () => {
     const { getOAuthProviderList } = await import("../setup/oauth-flow.js");
     const list = getOAuthProviderList();
 
-    expect(list.length).toBeGreaterThanOrEqual(4);
+    expect(list).toHaveLength(3);
 
     for (const p of list) {
       expect(p).toHaveProperty("id");
@@ -371,8 +367,7 @@ describe("oauth-flow", () => {
       expect(typeof p.free).toBe("boolean");
     }
 
-    const freeOnes = list.filter((p) => p.free);
-    expect(freeOnes.length).toBeGreaterThanOrEqual(2);
+    expect(list.every((p) => !p.free)).toBe(true);
   });
 
   it("startOAuthLogin rejects unknown provider", async () => {
@@ -449,6 +444,14 @@ describe("models", () => {
         expect(models[i].cost.input).toBeGreaterThanOrEqual(models[i - 1].cost.input);
       }
     }
+  });
+
+  it("exposes the current pi-ai model catalog", async () => {
+    const { getProviderModels } = await import("../setup/models.js");
+
+    expect(getProviderModels("anthropic").map((model) => model.id)).toContain("claude-sonnet-5");
+    expect(getProviderModels("openai").map((model) => model.id)).toContain("gpt-5.6-sol");
+    expect(getProviderModels("google").map((model) => model.id)).toContain("gemini-3.5-flash");
   });
 });
 

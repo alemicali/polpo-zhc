@@ -12,7 +12,7 @@ import type { Shell } from "@polpo-ai/core/shell";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
@@ -480,7 +480,7 @@ export interface CreateAllToolsOptions {
   /** Working directory for the agent */
   cwd: string;
   /** Tool name filter — only include tools with these names.
-   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*").
+   *  Extended tools are auto-loaded when their names appear here (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*").
    *  If omitted, only core coding tools are included. */
   allowedTools?: string[];
   /** Filesystem sandbox paths */

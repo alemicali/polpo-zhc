@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { User, ListChecks, Target, FileText, BookOpen, Workflow } from "lucide-react";
+import { User, ListChecks, Target, FileText, Folder, BookOpen, Workflow } from "lucide-react";
 import {
   Popover,
   PopoverAnchor,
@@ -36,10 +36,11 @@ type MentionCategory = "agent" | "task" | "mission" | "skill" | "playbook" | "fi
 
 export type MentionTrigger = "@" | "/";
 
-/** A mentionable file entry (path relative to project root) */
+/** A mentionable filesystem entry (path relative to project root). */
 export interface MentionFile {
   name: string;
   path: string;
+  type?: "file" | "directory";
 }
 
 interface TriggerState {
@@ -188,7 +189,7 @@ const CATEGORY_LABELS: Record<MentionCategory, string> = {
   mission: "Missions",
   skill: "Skills",
   playbook: "Playbooks",
-  file: "Files",
+  file: "Files & folders",
 };
 
 const CATEGORY_ORDER: MentionCategory[] = ["agent", "task", "mission", "file", "skill", "playbook"];
@@ -196,7 +197,7 @@ const CATEGORY_ORDER: MentionCategory[] = ["agent", "task", "mission", "file", "
 const TRIGGER_COPY: Record<MentionTrigger, { title: string; subtitle: string }> = {
   "@": {
     title: "Mentions",
-    subtitle: "Agents, tasks, missions and files. Keep typing to filter.",
+    subtitle: "Agents, tasks, missions, files and folders. Keep typing to filter.",
   },
   "/": {
     title: "Skills",
@@ -361,7 +362,9 @@ export const MentionPopover = forwardRef<
           label: f.name,
           value: f.path,
           secondary: f.path !== f.name ? f.path : undefined,
-          icon: <FileText className="size-4 shrink-0 text-purple-500" />,
+          icon: f.type === "directory"
+            ? <Folder className="size-4 shrink-0 text-sky-500" />
+            : <FileText className="size-4 shrink-0 text-purple-500" />,
           category: "file",
         });
       }

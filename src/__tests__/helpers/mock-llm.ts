@@ -6,7 +6,7 @@
  * and fake streams (AssistantMessageEventStream) that the completions endpoint
  * and other LLM consumers can use without hitting a real provider.
  *
- * IMPORTANT: This module must NOT import from @mariozechner/pi-ai at the top
+ * IMPORTANT: This module must NOT import from @earendil-works/pi-ai at the top
  * level, because tests vi.mock that module. Instead we implement a lightweight
  * duck-typed EventStream that matches the real interface.
  */
@@ -322,7 +322,7 @@ export function mockTurnSequence(responses: AssistantMessage[]): () => MockEvent
 // ── Full pi-ai module mock builder ────────────────────
 
 /**
- * Build a complete mock of @mariozechner/pi-ai suitable for vi.mock().
+ * Build a complete mock of @earendil-works/pi-ai suitable for vi.mock().
  *
  * @param streamFactory - Called each time streamSimple is invoked.
  */

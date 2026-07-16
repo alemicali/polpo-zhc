@@ -25,6 +25,7 @@ import {
   FolderOpen,
   ChevronDown,
   Upload,
+  FolderUp,
   FolderPlus,
   Pencil,
   Trash2,
@@ -32,6 +33,7 @@ import {
   Play,
   Music,
   LayoutPanelLeft,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,6 +91,33 @@ interface RootDir {
   totalSize?: number;
 }
 
+interface UploadFile {
+  file: globalThis.File;
+  relativePath: string;
+}
+
+interface DroppedEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+}
+
+interface DroppedFileEntry extends DroppedEntry {
+  file: (success: (file: globalThis.File) => void, error?: (error: DOMException) => void) => void;
+}
+
+interface DroppedDirectoryReader {
+  readEntries: (success: (entries: DroppedEntry[]) => void, error?: (error: DOMException) => void) => void;
+}
+
+interface DroppedDirectoryEntry extends DroppedEntry {
+  createReader: () => DroppedDirectoryReader;
+}
+
+interface DirectoryDropItem {
+  webkitGetAsEntry?: () => DroppedEntry | null;
+}
+
 type ViewMode = "list" | "grid" | "rows";
 type SortKey = "name" | "type" | "size" | "modified";
 type SortDir = "asc" | "desc";
@@ -96,6 +125,78 @@ type SortDir = "asc" | "desc";
 // ── Helpers ──
 
 const base = config.baseUrl || "";
+const UPLOAD_BATCH_FILE_LIMIT = 100;
+const UPLOAD_BATCH_BYTE_LIMIT = 32 * 1024 * 1024;
+
+function uploadFile(file: globalThis.File, relativePath?: string): UploadFile {
+  const webkitRelativePath = (file as globalThis.File & { webkitRelativePath?: string }).webkitRelativePath;
+  return { file, relativePath: relativePath || webkitRelativePath || file.name };
+}
+
+function uploadBatches(files: UploadFile[]): UploadFile[][] {
+  const batches: UploadFile[][] = [];
+  let current: UploadFile[] = [];
+  let currentBytes = 0;
+
+  for (const entry of files) {
+    if (
+      current.length > 0 &&
+      (current.length >= UPLOAD_BATCH_FILE_LIMIT || currentBytes + entry.file.size > UPLOAD_BATCH_BYTE_LIMIT)
+    ) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(entry);
+    currentBytes += entry.file.size;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+function readDroppedFile(entry: DroppedFileEntry): Promise<globalThis.File> {
+  return new Promise((resolveFile, reject) => entry.file(resolveFile, reject));
+}
+
+function readDroppedDirectory(reader: DroppedDirectoryReader): Promise<DroppedEntry[]> {
+  return new Promise((resolveEntries, reject) => {
+    const entries: DroppedEntry[] = [];
+    const readNext = () => {
+      reader.readEntries((batch) => {
+        if (batch.length === 0) {
+          resolveEntries(entries);
+          return;
+        }
+        entries.push(...batch);
+        readNext();
+      }, reject);
+    };
+    readNext();
+  });
+}
+
+async function collectDroppedEntry(entry: DroppedEntry, parentPath = ""): Promise<UploadFile[]> {
+  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const file = await readDroppedFile(entry as DroppedFileEntry);
+    return [uploadFile(file, relativePath)];
+  }
+  if (!entry.isDirectory) return [];
+
+  const children = await readDroppedDirectory((entry as DroppedDirectoryEntry).createReader());
+  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, relativePath)));
+  return nested.flat();
+}
+
+async function collectDroppedFiles(items: DataTransferItem[], fallbackFiles: globalThis.File[]): Promise<UploadFile[]> {
+  const entries = items
+    .map((item) => (item as unknown as DirectoryDropItem).webkitGetAsEntry?.() ?? null)
+    .filter((entry): entry is DroppedEntry => entry !== null);
+  if (entries.length > 0) {
+    return (await Promise.all(entries.map((entry) => collectDroppedEntry(entry)))).flat();
+  }
+  return fallbackFiles.map((file) => uploadFile(file));
+}
 
 function formatSize(bytes?: number): string {
   if (bytes == null) return "";
@@ -190,11 +291,14 @@ function entryPath(currentPath: string, name: string): string {
 
 // ── API helpers ──
 
-async function apiUpload(destPath: string, files: globalThis.File[]): Promise<{ count: number }> {
+async function apiUpload(destPath: string, files: UploadFile[], signal?: AbortSignal): Promise<{ count: number }> {
   const form = new FormData();
   form.set("path", destPath);
-  for (const f of files) form.append("file", f);
-  const resp = await fetch(`${base}/api/v1/files/upload`, { method: "POST", body: form });
+  for (const entry of files) {
+    form.append("file", entry.file);
+    form.append("relativePath", entry.relativePath);
+  }
+  const resp = await fetch(`${base}/api/v1/files/upload`, { method: "POST", body: form, signal });
   const json = await resp.json();
   if (!json.ok) throw new Error(json.error);
   return json.data;
@@ -534,33 +638,60 @@ function RootItem({
 function Breadcrumb({
   segments,
   onNavigate,
+  fullPath,
 }: {
   segments: string[];
   onNavigate: (index: number) => void;
+  fullPath: string;
 }) {
+  const copyFullPath = async () => {
+    try {
+      await navigator.clipboard.writeText(fullPath);
+      toast.success("Full path copied");
+    } catch {
+      toast.error("Could not copy path");
+    }
+  };
+
   return (
-    <nav className="flex items-center gap-0.5 text-sm min-w-0 overflow-hidden">
-      <button
-        onClick={() => onNavigate(-1)}
-        className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
-      >
-        <Home className="h-3.5 w-3.5" />
-      </button>
-      {segments.map((seg, i) => (
-        <div key={i} className="flex items-center gap-0.5 min-w-0">
-          <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-          {i === segments.length - 1 ? (
-            <span className="font-medium text-foreground truncate">{seg}</span>
-          ) : (
-            <button
-              onClick={() => onNavigate(i)}
-              className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
-            >
-              {seg}
-            </button>
-          )}
-        </div>
-      ))}
+    <nav className="group/path flex min-w-0 items-center gap-0.5 text-sm">
+      <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+        <button
+          onClick={() => onNavigate(-1)}
+          className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+          aria-label="Workspace root"
+        >
+          <Home className="h-3.5 w-3.5" />
+        </button>
+        {segments.map((seg, i) => (
+          <div key={i} className="flex items-center gap-0.5 min-w-0">
+            <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+            {i === segments.length - 1 ? (
+              <span className="font-medium text-foreground truncate">{seg}</span>
+            ) : (
+              <button
+                onClick={() => onNavigate(i)}
+                className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+              >
+                {seg}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => void copyFullPath()}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent/40 hover:text-foreground focus-visible:opacity-100 group-hover/path:opacity-100"
+            aria-label="Copy full path"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Copy full path</TooltipContent>
+      </Tooltip>
     </nav>
   );
 }
@@ -619,11 +750,14 @@ export function FilesPage() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
   /** Currently selected (highlighted) file name — single click selects, double click opens */
   const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const dragCounter = useRef(0);
   const { previewState, openPreview, closePreview } = useFilePreview();
 
@@ -631,6 +765,15 @@ export function FilesPage() {
   const currentPath = searchParams.get("path") || ".";
   const highlightParam = searchParams.get("highlight");
   const activeRoot = roots.find(r => currentPath === r.path || (r.path !== "." && currentPath.startsWith(r.path + "/"))) || roots[0];
+  const currentAbsolutePath = useMemo(() => {
+    if (!activeRoot) return currentPath;
+    const relativePath = activeRoot.path === "."
+      ? (currentPath === "." ? "" : currentPath)
+      : (currentPath === activeRoot.path ? "" : currentPath.slice(activeRoot.path.length + 1));
+    if (!relativePath) return activeRoot.absolutePath;
+    const separator = activeRoot.absolutePath.includes("\\") ? "\\" : "/";
+    return `${activeRoot.absolutePath.replace(/[\\/]$/, "")}${separator}${relativePath.replace(/\//g, separator)}`;
+  }, [activeRoot, currentPath]);
 
   // Path segments for breadcrumb
   const pathSegments = useMemo(() => {
@@ -770,47 +913,85 @@ export function FilesPage() {
   }, [currentPath, navigateTo, openPreview, renamingEntry]);
 
   // ── Upload ──
-  const handleUploadFiles = useCallback(async (files: globalThis.File[]) => {
+  const handleUploadFiles = useCallback(async (files: UploadFile[]) => {
     if (files.length === 0) return;
+    const controller = new AbortController();
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = controller;
+    setUploading(true);
+    const toastId = toast.loading(`Uploading 0 of ${files.length} files...`);
+    let uploaded = 0;
     try {
-      const result = await apiUpload(currentPath, files);
-      toast.success(`Uploaded ${result.count} file${result.count !== 1 ? "s" : ""}`);
+      for (const batch of uploadBatches(files)) {
+        const result = await apiUpload(currentPath, batch, controller.signal);
+        uploaded += result.count;
+        toast.loading(`Uploading ${uploaded} of ${files.length} files...`, { id: toastId });
+      }
+      toast.success(`Uploaded ${uploaded} file${uploaded !== 1 ? "s" : ""}`, { id: toastId });
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Upload failed");
+      if (controller.signal.aborted) {
+        toast.info(uploaded > 0 ? `Upload stopped after ${uploaded} files` : "Upload stopped", { id: toastId });
+        refresh();
+      } else {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        toast.error(uploaded > 0 ? `${message} (${uploaded} files uploaded)` : message, { id: toastId });
+      }
+    } finally {
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+      }
     }
   }, [currentPath, refresh]);
 
+  const cancelUpload = useCallback(() => {
+    uploadAbortRef.current?.abort();
+  }, []);
+
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files && files.length > 0) handleUploadFiles(Array.from(files));
+    if (files && files.length > 0) void handleUploadFiles(Array.from(files, (file) => uploadFile(file)));
+    e.target.value = "";
+  }, [handleUploadFiles]);
+
+  const handleFolderInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) void handleUploadFiles(Array.from(files, (file) => uploadFile(file)));
     e.target.value = "";
   }, [handleUploadFiles]);
 
   // ── Drag & drop ──
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current++;
     if (e.dataTransfer.types.includes("Files")) setDragging(true);
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current--;
     if (dragCounter.current === 0) setDragging(false);
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "copy";
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current = 0;
     setDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) handleUploadFiles(files);
+    const items = Array.from(e.dataTransfer.items);
+    const fallbackFiles = Array.from(e.dataTransfer.files);
+    void collectDroppedFiles(items, fallbackFiles)
+      .then((files) => handleUploadFiles(files))
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Could not read dropped folder"));
   }, [handleUploadFiles]);
 
   // ── Create folder ──
@@ -1121,21 +1302,52 @@ export function FilesPage() {
     <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-0">
       {/* Hidden file input */}
       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFolderInputChange}
+        {...({ webkitdirectory: "" } as Record<string, string>)}
+      />
 
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-2 px-1 pb-3 lg:flex-row lg:items-center">
         <div className="min-w-0 flex-1">
-          <Breadcrumb segments={pathSegments} onNavigate={handleBreadcrumbNav} />
+          <Breadcrumb segments={pathSegments} onNavigate={handleBreadcrumbNav} fullPath={currentAbsolutePath} />
         </div>
         <div className="flex max-w-full shrink-0 items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 lg:overflow-visible lg:pb-0">
           {/* Upload */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-4 w-4" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => uploading ? cancelUpload() : fileInputRef.current?.click()}
+                aria-label={uploading ? "Cancel upload" : "Upload files"}
+              >
+                {uploading ? <X className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Upload files</TooltipContent>
+            <TooltipContent side="bottom">{uploading ? "Cancel upload" : "Upload files"}</TooltipContent>
+          </Tooltip>
+
+          {/* Upload folder */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={uploading}
+                aria-label="Upload folder"
+              >
+                <FolderUp className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Upload folder</TooltipContent>
           </Tooltip>
 
           {/* New folder */}
@@ -1295,8 +1507,8 @@ export function FilesPage() {
           {dragging && (
             <div className="absolute inset-0 z-20 bg-primary/5 border-2 border-dashed border-primary/40 rounded flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-2 text-primary">
-                <Upload className="h-8 w-8" />
-                <span className="text-sm font-medium">Drop files to upload</span>
+                <FolderUp className="h-8 w-8" />
+                <span className="text-sm font-medium">Drop files or folders to upload</span>
               </div>
             </div>
           )}
@@ -1341,7 +1553,7 @@ export function FilesPage() {
                       <div className="flex flex-col items-center justify-center py-20 gap-2 text-muted-foreground">
                         <Folder className="h-8 w-8 mb-2 opacity-30" />
                         <p className="text-sm">{search ? "No matching entries" : "Empty directory"}</p>
-                        <p className="text-xs opacity-50">Drop files here or use the upload button</p>
+                        <p className="text-xs opacity-50">Drop files or folders here, or use an upload button</p>
                       </div>
                     ) : viewMode === "list" ? (
                       <div className="divide-y divide-border/30">
@@ -1363,6 +1575,9 @@ export function FilesPage() {
             <ContextMenuContent>
               <ContextMenuItem onSelect={() => fileInputRef.current?.click()}>
                 <Upload className="h-3.5 w-3.5 mr-2" /> Upload files
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => folderInputRef.current?.click()}>
+                <FolderUp className="h-3.5 w-3.5 mr-2" /> Upload folder
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => setCreatingFolder(true)}>
                 <FolderPlus className="h-3.5 w-3.5 mr-2" /> New folder

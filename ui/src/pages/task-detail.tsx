@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -53,6 +54,8 @@ import {
   AlertCircle,
   FolderOpen,
   Bell,
+  Send,
+  History,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
@@ -68,14 +71,15 @@ import {
   previewCategory,
   type FilePreviewState,
 } from "@/components/shared/file-preview";
+import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task } from "@polpo-ai/react";
+import { useTask, useTasks, useProcesses, useTaskActivity, useTaskDirections, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
+import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
 import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
@@ -394,6 +398,8 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const hasPayload = expandContent != null && expandContent.length > 0;
 
   const getStyle = () => {
+    if (entry.event === "direction:applied") return { icon: MessageSquare, color: "text-sky-400", dot: "bg-sky-500" };
+    if (entry.event === "checkpoint") return { icon: History, color: "text-emerald-400", dot: "bg-emerald-500" };
     if (entry.event === "activity") return { icon: Activity, color: "text-blue-400", dot: "bg-blue-500" };
     if (entry.event === "spawning" || entry.event === "spawned") return { icon: Loader2, color: "text-emerald-400", dot: "bg-emerald-500" };
     if (entry.event === "done") return { icon: CheckCircle2, color: "text-zinc-400", dot: "bg-zinc-500" };
@@ -476,6 +482,9 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
             )}>
               {expandContent}
             </pre>
+            {isToolResult && !entry.isError && expandContent && (
+              <ToolResultArtifacts result={expandContent} className="mt-2" />
+            )}
           </div>
         </CollapsibleContent>
       )}
@@ -499,10 +508,11 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
     if (e.type === "assistant") acc.assistant++;
     if (e.type === "tool_use") acc.tools++;
     if (e.type === "tool_result") acc.results++;
+    if (e.event === "direction:applied") acc.directions++;
     if (e.event === "error" || e.type === "error") acc.errors++;
-    if (e.event === "spawning" || e.event === "spawned" || e.event === "done" || e.event === "sigterm") acc.lifecycle++;
+    if (e.event === "spawning" || e.event === "spawned" || e.event === "done" || e.event === "sigterm" || e.event === "checkpoint") acc.lifecycle++;
     return acc;
-  }, { snapshots: 0, assistant: 0, tools: 0, results: 0, errors: 0, lifecycle: 0 });
+  }, { snapshots: 0, assistant: 0, tools: 0, results: 0, directions: 0, errors: 0, lifecycle: 0 });
 
   // Filter entries based on the active filter
   // Activity snapshots (event: "activity") are always hidden — they're internal telemetry
@@ -513,14 +523,14 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
     if (filter === "all") return true;
     if (filter === "conversation") {
       return e.type === "assistant" || e.type === "tool_use" || e.type === "tool_result"
-        || e.type === "error" || e.type === "result" || e.event === "error";
+        || e.type === "error" || e.type === "result" || e.event === "error" || e.event === "direction:applied";
     }
     if (filter === "tools") {
       return e.type === "tool_use" || e.type === "tool_result";
     }
     if (filter === "lifecycle") {
       return e.event === "spawning" || e.event === "spawned" || e.event === "done"
-        || e.event === "sigterm" || e.event === "error";
+        || e.event === "sigterm" || e.event === "error" || e.event === "checkpoint";
     }
     return true;
   });
@@ -550,7 +560,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
           {(
             [
               { key: "all", label: "All", icon: Hash, count: entries.filter(e => !e._run && e.event !== "activity").length },
-              { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results },
+              { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results + stats.directions },
               { key: "tools", label: "Tools", icon: Wrench, count: stats.tools },
               { key: "lifecycle", label: "Lifecycle", icon: Activity, count: stats.lifecycle },
             ] as const
@@ -652,6 +662,116 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+const directionStatusStyle: Record<TaskDirection["status"], string> = {
+  queued: "bg-amber-400",
+  delivered: "bg-sky-400",
+  applied: "bg-emerald-400",
+  failed: "bg-red-400",
+};
+
+function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentProcess }) {
+  const [message, setMessage] = useState("");
+  const [confirmSideEffects, setConfirmSideEffects] = useState(false);
+  const isLive = !!process && (task.status === "assigned" || task.status === "in_progress");
+  const isStopping = !!process && (task.status === "failed" || task.status === "done");
+  const isAvailable = task.status !== "draft" && task.status !== "awaiting_approval" && task.status !== "review";
+  const { directions, isSending, sendDirection } = useTaskDirections(isAvailable ? task.id : null, {
+    pollIntervalMs: isAvailable ? 1_000 : 0,
+  });
+
+  if (!isAvailable) return null;
+
+  const needsConfirmation = !isLive && !!task.sideEffects;
+  const canSend = message.trim().length > 0
+    && !isSending
+    && !isStopping
+    && (!needsConfirmation || confirmSideEffects);
+  const actionLabel = isLive
+    ? "Send direction"
+    : task.status === "pending"
+      ? "Add direction"
+      : "Continue task";
+
+  const submit = async () => {
+    if (!canSend) return;
+    try {
+      const result = await sendDirection({
+        message: message.trim(),
+        mode: "auto",
+        confirmSideEffects: needsConfirmation ? confirmSideEffects : undefined,
+      });
+      setMessage("");
+      setConfirmSideEffects(false);
+      toast.success(result.action === "continue" ? "Continuation queued" : "Direction queued");
+    } catch (cause) {
+      toast.error((cause as Error).message);
+    }
+  };
+
+  const recentDirections = directions.slice(-3).reverse();
+
+  return (
+    <section className="shrink-0 border-y border-border/50 bg-muted/10 px-3 py-3" aria-label="Task direction">
+      <div className="flex items-start gap-3">
+        <MessageSquare className="mt-2 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <Textarea
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder={isLive ? "Steer the current run..." : "Continue with a new direction..."}
+            className="min-h-10 max-h-28 resize-y bg-background/50 text-sm"
+            maxLength={8_000}
+            disabled={isStopping}
+          />
+          <div className="mt-2 flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
+            {needsConfirmation && (
+              <label className="flex items-center gap-2 text-xs text-amber-500">
+                <input
+                  type="checkbox"
+                  checked={confirmSideEffects}
+                  onChange={(event) => setConfirmSideEffects(event.target.checked)}
+                  className="h-3.5 w-3.5 accent-amber-500"
+                />
+                External actions may repeat
+              </label>
+            )}
+            {isStopping && (
+              <span className="text-xs text-muted-foreground">Waiting for the runner to stop</span>
+            )}
+            <Button
+              size="sm"
+              className="ml-auto h-7 gap-1.5 px-2.5 text-xs"
+              disabled={!canSend}
+              onClick={() => void submit()}
+            >
+              {isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {actionLabel}
+            </Button>
+          </div>
+        </div>
+      </div>
+      {recentDirections.length > 0 && (
+        <div className="mt-2 ml-7 flex flex-col gap-1 border-t border-border/40 pt-2">
+          {recentDirections.map((direction) => (
+            <div key={direction.id} className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", directionStatusStyle[direction.status])} />
+              <span className="shrink-0 font-medium uppercase text-foreground/60">{direction.mode.replace("_", " ")}</span>
+              <span className="truncate">{direction.message}</span>
+              <span className="ml-auto shrink-0 capitalize">{direction.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -781,8 +901,8 @@ export function TaskDetailPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back + title bar */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-start justify-between gap-2 shrink-0">
+        <div className="flex min-w-0 flex-1 items-start gap-2 sm:items-center sm:gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate("/tasks")} className="shrink-0">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -790,8 +910,8 @@ export function TaskDetailPage() {
             <StatusIcon className={cn("h-4 w-4", cfg.color, task.status === "in_progress" && "animate-spin")} />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold truncate">{task.title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="w-full truncate text-base font-semibold sm:w-auto sm:text-lg">{task.title}</h1>
               <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)}>{cfg.label}</Badge>
               {phase && (
                 <Badge variant="outline" className={cn("text-xs gap-1 shrink-0", phase.color)}>
@@ -800,7 +920,7 @@ export function TaskDetailPage() {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mt-0.5">
               <CopyableId id={task.id} label="Task ID" />
               <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
@@ -812,17 +932,17 @@ export function TaskDetailPage() {
                 </span>
               </Link>
               {task.group && (
-                <Link to={`/missions`} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                <Link to={`/missions`} className="hidden items-center gap-1 hover:text-foreground transition-colors md:flex">
                   <Target className="h-3 w-3" /> {task.group}
                 </Link>
               )}
               {task.sessionId && (
-                <span className="flex items-center gap-1 font-mono text-[10px]">
+                <span className="hidden items-center gap-1 font-mono text-[10px] lg:flex">
                   session: {task.sessionId.slice(0, 8)}
                 </span>
               )}
-              <span>Created {format(new Date(task.createdAt), "MMM d, HH:mm")}</span>
-              <span>Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
+              <span className="hidden xl:inline">Created {format(new Date(task.createdAt), "MMM d, HH:mm")}</span>
+              <span className="hidden xl:inline">Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
             </div>
           </div>
         </div>
@@ -873,6 +993,8 @@ export function TaskDetailPage() {
 
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}
+
+      <TaskDirectionComposer task={task} process={process} />
 
       {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
       <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">

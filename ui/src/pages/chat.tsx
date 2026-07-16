@@ -53,6 +53,7 @@ import {
   BarChart3,
   Compass,
   Palette,
+  List,
   ListPlus,
   Pencil,
   Star,
@@ -3427,6 +3428,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
+  // Tracks whether the composer textarea currently has a non-empty draft.
+  // Drives the streaming-time CTA swap: with a draft we show the queue
+  // action (Enter enqueues); empty, we show Stop (Enter is a no-op).
+  const [hasDraft, setHasDraft] = useState(false);
 
   // Per-session prompt queue. Keyed by sessionId (or the new-session
   // sentinel until the server assigns one). The Queue panel renders
@@ -3523,6 +3528,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       // null at this point and only flips after the stream returns.
       chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
       chatInputDrafts.delete(NEW_SESSION_DRAFT_KEY);
+      setHasDraft(false);
       await send(resolvedText, images.length > 0 ? images : undefined);
     },
     [isLoading, send, sessionId]
@@ -3535,6 +3541,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     nativeSetter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    setHasDraft(text.trim().length > 0);
   }, []);
 
   // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
@@ -3562,6 +3569,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     // Clear the composer (mirrors PromptInput.form.reset post-submit).
     setTextareaValue("");
     chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+    setHasDraft(false);
     setQueueOpen(true); // ensure manager is visible right after enqueueing
     textarea?.focus();
   }, [queue, sessionId, setTextareaValue]);
@@ -3659,6 +3667,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       )?.set;
       nativeSetter?.call(textarea, incoming);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      setHasDraft(incoming.trim().length > 0);
     }
     prevDraftKeyRef.current = draftKey;
     return () => {
@@ -3795,12 +3804,20 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   !e.shiftKey &&
                   !e.nativeEvent.isComposing
                 ) {
+                  // During streaming Enter never goes to the form: with a
+                  // draft it enqueues (same as the queue CTA); empty, it's a
+                  // no-op so the user can't accidentally hit Stop with the
+                  // keyboard — Stop only fires from an explicit click.
                   e.preventDefault();
+                  if (e.currentTarget.value.trim().length > 0) {
+                    enqueueCurrentDraft();
+                  }
                 }
               }}
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
                 mentionRef.current?.handleInput();
+                setHasDraft(e.currentTarget.value.trim().length > 0);
               }}
             />
             <PromptInputFooter>
@@ -3838,7 +3855,12 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                     Disabled while a stream is in progress would defeat the
                     point (the whole reason to queue is to pile up sends
                     while busy), so we only honour `inputDisabled` (which
-                    excludes the loading flag here). */}
+                    excludes the loading flag here).
+
+                    Icon = bare `List` (manager/toggle role). The streaming
+                    CTA uses `ListPlus` (action role: add). Keeping the two
+                    icons distinct prevents confusion when both render side
+                    by side during a streamed reply with a pending draft. */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -3850,7 +3872,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       disabled={inputDisabled}
                       aria-label="Add to queue"
                     >
-                      <ListPlus className="h-4 w-4" />
+                      <List className="h-4 w-4" />
                       {queue.items.length > 0 && (
                         <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold leading-none text-primary-foreground">
                           {queue.items.length}
@@ -3876,6 +3898,28 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       </span>
                       Recording
                     </div>
+                  ) : isLoading && hasDraft ? (
+                    // Streaming + draft non vuoto: il CTA principale diventa
+                    // "enqueue" (stesso effetto del bottone Queue + Enter).
+                    // Stop resta accessibile svuotando il textarea — lo
+                    // switch avviene automaticamente.
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="icon"
+                          className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
+                          onClick={enqueueCurrentDraft}
+                          aria-label="Add to queue"
+                        >
+                          <ListPlus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        Add to queue (Enter)
+                      </TooltipContent>
+                    </Tooltip>
                   ) : (
                     <PromptInputSubmit
                       status={isLoading ? "streaming" : undefined}

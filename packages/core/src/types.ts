@@ -1,7 +1,7 @@
 // === Reasoning / Thinking ===
 
 /** Reasoning level for LLM calls (maps to pi-ai ThinkingLevel). */
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 // === Task ===
 
@@ -255,7 +255,7 @@ export interface AgentConfig {
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"]).
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "whatsapp_*", "phone_*"]).
    *  Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list. */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
@@ -292,7 +292,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*.
   // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
@@ -313,6 +313,15 @@ export interface AgentConfig {
   /** Searchable tags for registry discovery (e.g. ["frontend", "react", "testing"]). */
   tags?: string[];
 }
+
+/**
+ * Mutable agent fields accepted by the orchestration layer.
+ * `team` is a relationship managed by AgentStore.moveAgent(), not part of
+ * the persisted AgentConfig payload.
+ */
+export type AgentUpdate = Partial<Omit<AgentConfig, "name">> & {
+  team?: string;
+};
 
 export type AgentSuggestion = string | AgentSuggestionConfig;
 

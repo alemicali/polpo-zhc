@@ -427,7 +427,7 @@ export interface CompletionRouteDeps {
   /** Create tools + executor for the agent. Return empty arrays for chat-only. */
   resolveAgentTools: (agentConfig: any) => Promise<{
     tools: any[];
-    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive?: (name: string) => boolean;
   }>;
   /** LLM streaming function (streamSimple from pi-ai). */
@@ -438,9 +438,21 @@ export interface CompletionRouteDeps {
     model: any;
     streamOpts: any;
     tools: any[];
-    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive: (name: string) => boolean;
   }>;
+}
+
+export interface ToolExecutionProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
+export interface ToolExecutionContext {
+  signal?: AbortSignal;
+  onProgress?: (progress: ToolExecutionProgress) => void | Promise<void>;
 }
 
 export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: string[]): OpenAPIHono {
@@ -471,7 +483,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     let m: any;
     let streamOpts: any;
     let effectiveTools: any[];
-    let effectiveToolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    let effectiveToolExecutor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     let isInteractiveFn: ((name: string) => boolean) | undefined;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
@@ -956,7 +968,21 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 continue;
               }
 
-              const result = await effectiveToolExecutor(call.name, call.arguments);
+              const result = await effectiveToolExecutor(call.name, call.arguments, {
+                signal: abortController.signal,
+                onProgress: async (progress) => {
+                  if (abortController.signal.aborted) return;
+                  await emit(sseChunk(completionId, {}, null, {
+                    tool_call: {
+                      id: call.id,
+                      name: call.name,
+                      arguments: call.arguments,
+                      progress,
+                      state: "calling",
+                    },
+                  }));
+                },
+              });
               const isError = result.startsWith("Error:");
               emitFileChanged(call.name, call.arguments, result, deps.emit);
 
@@ -1347,7 +1373,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for (const call of toolCalls) {
             if (skipIds.has(call.id)) continue;
             ensureToolSegment(segmentsAccum, call.id);
-            const result = await effectiveToolExecutor(call.name, call.arguments);
+            const result = await effectiveToolExecutor(call.name, call.arguments, {
+              signal: c.req.raw.signal,
+            });
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);
 

@@ -62,7 +62,7 @@ pnpm test
 ## Key Technical Details
 
 - **ESM only** — All imports use `.js` extensions (`import { foo } from "./bar.js"`)
-- **Node >= 18** required
+- **Node >= 22.19** required (required by the current pi-ai runtime)
 - **Config file**: `.polpo/polpo.json` — structure: `{ project, team: { name, agents: [] }, settings: {}, providers: {} }`
 - **Task fields**: Use `assignTo` (NOT `agent`), `dependsOn` (NOT `dependencies`)
 - **State machine**: `pending → assigned → in_progress → review → done/failed`

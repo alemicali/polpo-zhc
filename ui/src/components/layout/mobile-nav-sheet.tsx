@@ -16,6 +16,8 @@ import {
   Terminal,
   Settings2,
   Workflow,
+  MousePointerClick,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -44,6 +46,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
+      { to: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
     ],
   },
@@ -52,6 +55,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
+      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },
     ],

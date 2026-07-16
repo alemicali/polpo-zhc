@@ -73,6 +73,9 @@ import type {
   PlaybookInfo,
   PlaybookDefinition,
   PlaybookRunResult,
+  TaskDirection,
+  SendTaskDirectionRequest,
+  SendTaskDirectionResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -430,6 +433,14 @@ export class PolpoClient {
 
   killTask(taskId: string): Promise<{ killed: boolean }> {
     return this.post<{ killed: boolean }>(`/tasks/${taskId}/kill`);
+  }
+
+  sendTaskDirection(taskId: string, req: SendTaskDirectionRequest): Promise<SendTaskDirectionResult> {
+    return this.post<SendTaskDirectionResult>(`/tasks/${taskId}/directions`, req);
+  }
+
+  getTaskDirections(taskId: string): Promise<TaskDirection[]> {
+    return this.get<TaskDirection[]>(`/tasks/${taskId}/directions`);
   }
 
   reassessTask(taskId: string): Promise<{ reassessed: boolean }> {

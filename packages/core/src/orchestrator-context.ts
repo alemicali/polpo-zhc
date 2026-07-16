@@ -21,6 +21,7 @@ import type { AgentStore } from "./agent-store.js";
 import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContext, ReasoningLevel, ModelConfig } from "./types.js";
 import type { HookRegistry } from "./hooks.js";
 import type { Spawner } from "./spawner.js";
+import type { TaskControlStore } from "./task-control-store.js";
 
 /** Progress event for individual assessment checks. */
 export interface CheckProgressEvent {
@@ -52,6 +53,7 @@ export interface OrchestratorContext {
   readonly emitter: EventBus;
   readonly registry: TaskStore;
   readonly runStore: RunStore;
+  readonly taskControlStore?: TaskControlStore;
   readonly memoryStore: MemoryStore;
   readonly logStore: LogStore;
   readonly sessionStore: SessionStore;

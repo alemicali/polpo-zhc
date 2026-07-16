@@ -59,7 +59,9 @@ export class DrizzleAgentStore implements AgentStore {
     const existing = await this.getAgent(name);
     if (!existing) throw new Error(`Agent "${name}" not found`);
 
-    const merged = { ...existing, ...updates, name };
+    const { team: _existingTeam, ...safeExisting } = existing as AgentConfig & { team?: string };
+    const { team: _updatedTeam, ...safeUpdates } = updates as Partial<Omit<AgentConfig, "name">> & { team?: string };
+    const merged = { ...safeExisting, ...safeUpdates, name };
     const { name: _n, ...rest } = merged;
     const now = new Date().toISOString();
 

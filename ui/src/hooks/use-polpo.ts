@@ -206,12 +206,20 @@ export interface SetDesignData extends DesignThemeData {
 // Local mirror of SDK tool call types
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
+export interface ToolCallProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
 export interface ToolCallInfo {
   id: string;
   name: string;
   argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
+  progress?: ToolCallProgress;
   state: ToolCallState;
 }
 
@@ -785,6 +793,7 @@ export function useChat() {
               if (tc.argumentsText !== undefined) existing.argumentsText = tc.argumentsText;
               if (tc.arguments !== undefined) existing.arguments = tc.arguments;
               if (tc.result !== undefined) existing.result = tc.result;
+              if (tc.progress !== undefined) existing.progress = tc.progress;
               const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
               if (segIdx >= 0) {
                 (segments[segIdx] as { type: "tool"; tool: ToolCallInfo }).tool = { ...existing };
@@ -1139,6 +1148,7 @@ export function useChat() {
               if (tc.argumentsText !== undefined) existing.argumentsText = tc.argumentsText;
               if (tc.arguments !== undefined) existing.arguments = tc.arguments;
               if (tc.result !== undefined) existing.result = tc.result;
+              if (tc.progress !== undefined) existing.progress = tc.progress;
               // Also update the segment in-place
               const segIdx = segments.findIndex((s) => s.type === "tool" && s.tool.id === tc.id);
               if (segIdx >= 0) {

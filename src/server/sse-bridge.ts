@@ -3,7 +3,7 @@ import type { PolpoEvent } from "../core/events.js";
 
 /** All Polpo events to subscribe to. */
 const ALL_EVENTS: PolpoEvent[] = [
-  "task:created", "task:transition", "task:updated", "task:removed",
+  "task:created", "task:transition", "task:updated", "task:removed", "task:direction",
   "agent:spawned", "agent:finished", "agent:activity",
   "agent:created", "agent:updated", "agent:removed",
   "team:created", "team:updated", "team:removed",

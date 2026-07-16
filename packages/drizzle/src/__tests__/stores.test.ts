@@ -96,6 +96,25 @@ function createTables(raw: InstanceType<typeof Database>) {
       config TEXT,
       config_path TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS task_directions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT,
+      mode TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      applied_at TEXT,
+      error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+      task_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      messages TEXT NOT NULL,
+      saved_at TEXT NOT NULL,
+      turn_count INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,
@@ -526,6 +545,57 @@ describe("DrizzleRunStore", () => {
     await stores.runStore.upsertRun(makeRun("r1", "t1") as any);
     await stores.runStore.deleteRun("r1");
     expect(await stores.runStore.getRun("r1")).toBeUndefined();
+  });
+});
+
+describe("DrizzleTaskControlStore", () => {
+  it("claims queued directions once and binds continuations to the new run", async () => {
+    const direction = await stores.taskControlStore.enqueueDirection({
+      taskId: "task-control-1",
+      mode: "continue",
+      message: "Continue with the human correction",
+    });
+
+    const claimed = await stores.taskControlStore.claimDirections("task-control-1", "run-control-1");
+
+    expect(claimed).toEqual([
+      expect.objectContaining({
+        id: direction.id,
+        runId: "run-control-1",
+        status: "delivered",
+      }),
+    ]);
+    await expect(stores.taskControlStore.claimDirections("task-control-1", "run-control-1")).resolves.toEqual([]);
+  });
+
+  it("persists the latest consistent checkpoint", async () => {
+    await stores.taskControlStore.saveCheckpoint({
+      taskId: "task-control-2",
+      runId: "run-control-2",
+      messages: [{ role: "assistant", content: [{ type: "text", text: "checkpoint" }] }],
+      savedAt: "2026-07-15T10:00:00.000Z",
+      turnCount: 3,
+    });
+
+    await expect(stores.taskControlStore.getCheckpoint("task-control-2")).resolves.toMatchObject({
+      runId: "run-control-2",
+      turnCount: 3,
+    });
+  });
+
+  it("requeues interrupted continuations for a replacement run", async () => {
+    const direction = await stores.taskControlStore.enqueueDirection({
+      taskId: "task-control-requeue",
+      mode: "continue",
+      message: "Preserve me",
+    });
+    await stores.taskControlStore.claimDirections("task-control-requeue", "dead-run");
+
+    await stores.taskControlStore.requeueDirection(direction.id);
+
+    await expect(stores.taskControlStore.claimDirections("task-control-requeue", "new-run")).resolves.toEqual([
+      expect.objectContaining({ id: direction.id, runId: "new-run", status: "delivered" }),
+    ]);
   });
 });
 
@@ -1446,7 +1516,7 @@ describe("DrizzlePlaybookStore", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("createSqliteStores", () => {
-  it("returns all 15 stores", () => {
+  it("returns all 16 stores", () => {
     expect(stores.taskStore).toBeDefined();
     expect(stores.runStore).toBeDefined();
     expect(stores.sessionStore).toBeDefined();
@@ -1462,5 +1532,6 @@ describe("createSqliteStores", () => {
     expect(stores.agentStore).toBeDefined();
     expect(stores.vaultStore).toBeDefined();
     expect(stores.playbookStore).toBeDefined();
+    expect(stores.taskControlStore).toBeDefined();
   });
 });

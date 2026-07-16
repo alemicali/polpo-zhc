@@ -165,6 +165,55 @@ const killTaskRoute = createRoute({
   },
 });
 
+const TaskDirectionBodySchema = z.object({
+  message: z.string().trim().min(1).max(8_000),
+  mode: z.enum(["auto", "steer", "follow_up", "continue"]).default("auto"),
+  confirmSideEffects: z.boolean().optional(),
+});
+
+const sendTaskDirectionRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/directions",
+  tags: ["Tasks"],
+  summary: "Steer or continue a task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+    body: { content: { "application/json": { schema: TaskDirectionBodySchema } } },
+  },
+  responses: {
+    202: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Direction queued for the active or next task runner",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task state does not permit this direction",
+    },
+  },
+});
+
+const listTaskDirectionsRoute = createRoute({
+  method: "get",
+  path: "/{taskId}/directions",
+  tags: ["Tasks"],
+  summary: "List task directions",
+  request: { params: z.object({ taskId: z.string() }) },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+      description: "Direction history, including delivery status",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
 const reassessTaskRoute = createRoute({
   method: "post",
   path: "/{taskId}/reassess",
@@ -290,6 +339,8 @@ export function taskRoutes(getDeps: () => {
   deleteTask: (taskId: string) => Promise<any>;
   retryTask: (taskId: string) => Promise<any>;
   killTask: (taskId: string) => Promise<any>;
+  sendDirection: (taskId: string, message: string, opts?: any) => Promise<any>;
+  listDirections: (taskId: string) => Promise<any[]>;
   reassessTask: (taskId: string) => Promise<any>;
   forceFailTask: (taskId: string) => Promise<any>;
   updateTaskDescription: (taskId: string, desc: string) => Promise<any>;
@@ -485,6 +536,37 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { killed: true } }, 200);
+  });
+
+  app.openapi(sendTaskDirectionRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const result = await deps.sendDirection(taskId, body.message, {
+        mode: body.mode,
+        confirmSideEffects: body.confirmSideEffects,
+      });
+      if (result.action === "continue") deps.wakeSupervisor?.();
+      return c.json({ ok: true, data: result }, 202);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "Task not found") {
+        return c.json({ ok: false, error: message, code: "NOT_FOUND" }, 404);
+      }
+      return c.json({ ok: false, error: message, code: "INVALID_STATE" }, 409);
+    }
+  });
+
+  app.openapi(listTaskDirectionsRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    try {
+      return c.json({ ok: true, data: await deps.listDirections(taskId) }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ ok: false, error: message, code: "NOT_FOUND" }, 404);
+    }
   });
 
   // POST /tasks/:taskId/reassess — re-run assessment

@@ -18,15 +18,24 @@ import type { Orchestrator } from "../core/orchestrator.js";
 // We dynamically set what streamSimple returns per test via `streamSimpleImpl`.
 let streamSimpleImpl: (...args: unknown[]) => unknown;
 
-vi.mock("@mariozechner/pi-ai", async () => {
+async function buildMockPiModule() {
   const { buildPiAiMock, mockTextStream } = await import("./helpers/mock-llm.js");
-  // Default: return a simple text response. Tests override via setStreamImpl().
-  streamSimpleImpl = () => mockTextStream("Default mock response.");
+  streamSimpleImpl ??= () => mockTextStream("Default mock response.");
   const base = buildPiAiMock((...args: unknown[]) => streamSimpleImpl(...args) as any);
   return {
     ...base,
-    // Override streamSimple to delegate to our mutable impl
     streamSimple: (...args: unknown[]) => streamSimpleImpl(...args),
+  };
+}
+
+vi.mock("@earendil-works/pi-ai", buildMockPiModule);
+vi.mock("@earendil-works/pi-ai/compat", buildMockPiModule);
+vi.mock("@earendil-works/pi-ai/providers/all", async () => {
+  const { mockModel } = await import("./helpers/mock-llm.js");
+  return {
+    getBuiltinModel: () => mockModel(),
+    getBuiltinModels: () => [mockModel()],
+    getBuiltinProviders: () => ["anthropic"],
   };
 });
 
@@ -312,6 +321,99 @@ describe("POST /v1/chat/completions", () => {
       expect(res.status).toBe(200);
       const body = await parseJson(res);
       expect((body.choices as any[])[0].message.content).toBe("There are no tasks yet.");
+    });
+
+    test("wait_for_task keeps the stream alive and continues the LLM turn after completion", async () => {
+      const task = await orchestrator.addTask({
+        title: "Wait integration task",
+        description: "Completed externally while the chat turn waits",
+        assignTo: "agent-1",
+        draft: true,
+      });
+      const turnSequence = mockTurnSequence([
+        mockToolCallResponse("wait_for_task", { taskId: task.id, pollIntervalMs: 10_000 }),
+        mockTextResponse("The task finished and I continued the same turn."),
+      ]);
+      setStreamImpl(turnSequence);
+
+      const transition = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          orchestrator.getStore().unsafeSetStatus(task.id, "done", "wait_for_task integration test")
+            .then(() => resolve(), reject);
+        }, 40);
+      });
+
+      try {
+        const res = await postCompletions({
+          messages: [{ role: "user", content: "Wait for that task and report back" }],
+          stream: true,
+        });
+        const chunks = await parseSSE(res);
+        await transition;
+
+        const toolEvents = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.tool_call)
+          .filter(Boolean);
+        expect(toolEvents).toContainEqual(expect.objectContaining({
+          name: "wait_for_task",
+          state: "calling",
+          progress: expect.objectContaining({ status: "draft", taskId: task.id }),
+        }));
+        expect(toolEvents).toContainEqual(expect.objectContaining({
+          name: "wait_for_task",
+          state: "completed",
+        }));
+
+        const text = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.delta?.content)
+          .filter(Boolean)
+          .join("");
+        expect(text).toBe("The task finished and I continued the same turn.");
+      } finally {
+        await orchestrator.deleteTask(task.id);
+      }
+    });
+
+    test("aborting the streaming turn cancels wait_for_task and cleans up its listener", async () => {
+      const task = await orchestrator.addTask({
+        title: "Cancelled wait task",
+        description: "The chat wait is cancelled before this task finishes",
+        assignTo: "agent-1",
+        draft: true,
+      });
+      setStreamImpl(mockTurnSequence([
+        mockToolCallResponse("wait_for_task", { taskId: task.id, pollIntervalMs: 10_000 }),
+        mockTextResponse("This response must not be reached."),
+      ]));
+      const listenersBefore = orchestrator.listenerCount("task:transition");
+
+      try {
+        const res = await postCompletions({
+          messages: [{ role: "user", content: "Wait, then stop" }],
+          stream: true,
+        });
+        const turnId = res.headers.get("x-turn-id");
+        expect(turnId).toBeTruthy();
+        const chunksPromise = parseSSE(res);
+
+        await vi.waitFor(() => {
+          expect(orchestrator.listenerCount("task:transition")).toBeGreaterThan(listenersBefore);
+        });
+        const abortRes = await app.request(`/v1/chat/completions/abort/${turnId}`, { method: "POST" });
+        expect(abortRes.status).toBe(200);
+
+        const chunks = await chunksPromise;
+        await vi.waitFor(() => {
+          expect(orchestrator.listenerCount("task:transition")).toBe(listenersBefore);
+        });
+        const toolEvents = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.tool_call)
+          .filter(Boolean);
+        expect(toolEvents.some((event) => event.name === "wait_for_task" && event.state === "completed")).toBe(false);
+        expect(chunks.some((chunk) => (chunk.choices as any[])?.[0]?.delta?.content === "This response must not be reached.")).toBe(false);
+      } finally {
+        await orchestrator.deleteTask(task.id);
+      }
     });
 
     test("handles multi-tool turn (2 tool calls in sequence)", async () => {

@@ -15,6 +15,7 @@
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
+import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
@@ -24,8 +25,10 @@ import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
+const CONTROL_POLL_MS = 350;
 
 function readConfigFromFile(): RunnerConfig {
   const idx = process.argv.indexOf("--config");
@@ -158,6 +161,7 @@ class RunActivityLog {
 
 interface RunnerStores {
   runStore: RunStore;
+  taskControlStore: TaskControlStore;
   logStore?: LogStore;
   vaultStore?: VaultStore;
 }
@@ -170,7 +174,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const sql = postgres(config.databaseUrl);
     const db = drizzle(sql);
     const stores = createPgStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
   if (config.storage === "sqlite") {
     const { createSqliteStores } = await import("@polpo-ai/drizzle");
@@ -187,15 +191,18 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const db = drizzle(sqlite);
     const stores = createSqliteStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
-  return { runStore: new FileRunStore(config.polpoDir) };
+  return {
+    runStore: new FileRunStore(config.polpoDir),
+    taskControlStore: new FileTaskControlStore(config.polpoDir),
+  };
 }
 
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const { runStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
+  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   // When LogStore is available (postgres/sqlite), persist transcript to DB.
@@ -222,6 +229,8 @@ async function main(): Promise<void> {
   actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
+  let initialDirections: TaskDirection[] = [];
+  let checkpointWrites: Promise<void> = Promise.resolve();
   try {
     // Vault is intentionally FILE-BASED for every storage mode — matches the
     // orchestrator (src/core/orchestrator.ts:initVaultStore). Crypto round-trip
@@ -300,6 +309,18 @@ async function main(): Promise<void> {
       } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
     }
 
+    initialDirections = await taskControlStore.claimDirections(config.taskId, config.runId);
+    const continuationDirections = initialDirections.filter((item) => item.mode === "continue");
+    const checkpoint = continuationDirections.length > 0
+      ? await taskControlStore.getCheckpoint(config.taskId)
+      : undefined;
+    const continuation = continuationDirections.length > 0
+      ? {
+          directionIds: continuationDirections.map((item) => item.id),
+          message: continuationDirections.map((item) => item.message).join("\n\n"),
+        }
+      : undefined;
+
     const spawnCtx = {
       polpoDir: config.polpoDir,
       outputDir: config.outputDir,
@@ -310,6 +331,8 @@ async function main(): Promise<void> {
       whatsappSendMessage: waSendMessage,
       whatsappSendMedia: waSendMedia,
       whatsappMarkRead: waMarkRead,
+      resumeMessages: checkpoint?.messages,
+      continuation,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
@@ -324,6 +347,27 @@ async function main(): Promise<void> {
         logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
           .catch(() => {}); // best-effort, don't block engine
       }
+    };
+    handle.onCheckpoint = async (messages, turnCount) => {
+      checkpointWrites = checkpointWrites.then(async () => {
+        await taskControlStore.saveCheckpoint({
+          taskId: config.taskId,
+          runId: config.runId,
+          messages,
+          savedAt: new Date().toISOString(),
+          turnCount,
+        });
+        actLog.logEvent("checkpoint", { turnCount, messageCount: messages.length });
+      });
+      await checkpointWrites;
+    };
+    handle.onDirectionApplied = async (directionIds) => {
+      const knownDirections = await taskControlStore.listDirections(config.taskId);
+      for (const id of directionIds) await taskControlStore.markDirectionApplied(id);
+      const modes = knownDirections
+        .filter((direction) => directionIds.includes(direction.id))
+        .map((direction) => direction.mode);
+      actLog.logEvent("direction:applied", { directionIds, modes });
     };
     actLog.logEvent("spawned");
   } catch (err) {
@@ -346,6 +390,34 @@ async function main(): Promise<void> {
     }
   }, ACTIVITY_POLL_MS);
 
+  let controlPolling = false;
+  const deliverDirection = async (direction: TaskDirection) => {
+    try {
+      if (direction.mode === "follow_up") {
+        if (!handle.followUp) throw new Error("Agent adapter does not support follow-up messages");
+        handle.followUp(direction.message, direction.id);
+      } else {
+        if (!handle.steer) throw new Error("Agent adapter does not support steering");
+        handle.steer(direction.message, direction.id);
+      }
+    } catch (error) {
+      await taskControlStore.failDirection(direction.id, error instanceof Error ? error.message : String(error));
+    }
+  };
+  const controlPoll = setInterval(async () => {
+    if (controlPolling || !handle.isAlive()) return;
+    controlPolling = true;
+    try {
+      const directions = await taskControlStore.claimDirections(config.taskId, config.runId);
+      for (const direction of directions) await deliverDirection(direction);
+    } finally {
+      controlPolling = false;
+    }
+  }, CONTROL_POLL_MS);
+  for (const direction of initialDirections) {
+    if (direction.mode !== "continue") await deliverDirection(direction);
+  }
+
   // SIGTERM handler: graceful kill
   let sigterm = false;
   process.on("SIGTERM", () => {
@@ -357,6 +429,8 @@ async function main(): Promise<void> {
   try {
     const result = await handle.done;
     clearInterval(poll);
+    clearInterval(controlPoll);
+    await checkpointWrites;
     // Final activity + sessionId flush before marking terminal
     try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logActivity({ ...handle.activity });
@@ -381,6 +455,8 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     clearInterval(poll);
+    clearInterval(controlPoll);
+    await checkpointWrites.catch(() => {});
     try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
     await runStore.completeRun(config.runId, "failed", errorResult(err));

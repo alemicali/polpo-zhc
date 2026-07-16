@@ -25,10 +25,11 @@ const PlaybookDetailPage = lazy(() => import("@/pages/playbook-detail").then(m =
 const ConfigPage = lazy(() => import("@/pages/config").then(m => ({ default: m.ConfigPage })));
 const SkillsPage = lazy(() => import("@/pages/skills").then(m => ({ default: m.SkillsPage })));
 const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ default: m.SkillDetailPage })));
-// Schedules are now integrated into the Missions page — redirect old URL for bookmarks
+const SchedulesPage = lazy(() => import("@/pages/schedules").then(m => ({ default: m.SchedulesPage })));
 
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
 const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
+const AgentBrowserLivePage = lazy(() => import("@/pages/agent-browser-live").then(m => ({ default: m.AgentBrowserLivePage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
 const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
 
@@ -177,10 +178,11 @@ export function App() {
           <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
           <Route path="playbooks" element={<Suspense fallback={<PageLoader />}><PlaybooksPage /></Suspense>} />
           <Route path="playbooks/:name" element={<Suspense fallback={<PageLoader />}><PlaybookDetailPage /></Suspense>} />
-          <Route path="schedules" element={<Navigate to="/missions" replace />} />
+          <Route path="schedules" element={<Suspense fallback={<PageLoader />}><SchedulesPage /></Suspense>} />
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
           <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
+          <Route path="agent-live" element={<Suspense fallback={<PageLoader />}><AgentBrowserLivePage /></Suspense>} />
           <Route path="terminal" element={<></>} />
           <Route path="coding" element={<></>} />
         </Route>

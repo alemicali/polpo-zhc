@@ -11,7 +11,8 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import { completeSimple, type Tool, type Message } from "@mariozechner/pi-ai";
+import type { Tool, Message } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "./pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
 import { withRetry } from "./retry.js";

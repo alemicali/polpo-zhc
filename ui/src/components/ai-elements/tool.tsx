@@ -15,6 +15,7 @@ import {
   previewCategory,
 } from "@/components/shared/file-preview";
 import { cn } from "@/lib/utils";
+import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
   Loader2,
   CheckCircle2,
@@ -34,6 +35,12 @@ export interface ToolCallInfo {
   argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
+  progress?: {
+    message: string;
+    taskId?: string;
+    status?: string;
+    elapsedMs?: number;
+  };
   state: ToolState;
 }
 
@@ -75,6 +82,13 @@ function formatToolName(name: string): string {
   return name
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatProgress(progress: NonNullable<ToolCallInfo["progress"]>): string {
+  const elapsed = typeof progress.elapsedMs === "number"
+    ? ` · ${Math.max(0, Math.floor(progress.elapsedMs / 1000))}s`
+    : "";
+  return `${progress.status ?? progress.message}${elapsed}`;
 }
 
 function getStateIcon(state: ToolState) {
@@ -207,6 +221,11 @@ export function ToolInvocation({
             <span className="text-xs font-medium truncate">
               {formatToolName(tool.name)}
             </span>
+            {tool.state === "calling" && tool.progress && (
+              <span className="text-[11px] text-muted-foreground truncate" title={tool.progress.message}>
+                {formatProgress(tool.progress)}
+              </span>
+            )}
             {/* File path for write/edit/read tools — shown in all states */}
             {filePath && (
               <button
@@ -274,6 +293,7 @@ export function ToolInvocation({
                   >
                     <MessageResponse>{tool.result}</MessageResponse>
                   </div>
+                  {tool.state !== "error" && <ToolResultArtifacts result={tool.result} className="mt-2" />}
                 </div>
               )}
             </div>

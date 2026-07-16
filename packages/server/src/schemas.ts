@@ -216,7 +216,7 @@ const ModelConfigSchema = z.object({
 export const UpdateSettingsSchema = z.object({
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
-  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────

@@ -3,6 +3,7 @@ export {
   tasksSqlite, missionsSqlite, metadataSqlite, processesSqlite,
 } from "./tasks.js";
 export { runsSqlite } from "./runs.js";
+export { taskDirectionsSqlite, agentCheckpointsSqlite } from "./task-control.js";
 export { sessionsSqlite, messagesSqlite } from "./sessions.js";
 export { notificationsSqlite } from "./notifications.js";
 export { logSessionsSqlite, logEntriesSqlite } from "./logs.js";
@@ -24,6 +25,7 @@ export {
   tasksPg, missionsPg, metadataPg, processesPg,
 } from "./tasks.js";
 export { runsPg } from "./runs.js";
+export { taskDirectionsPg, agentCheckpointsPg } from "./task-control.js";
 export { sessionsPg, messagesPg } from "./sessions.js";
 export { notificationsPg } from "./notifications.js";
 export { logSessionsPg, logEntriesPg } from "./logs.js";

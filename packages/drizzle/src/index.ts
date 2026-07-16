@@ -27,6 +27,10 @@ import {
   tasksSqlite, missionsSqlite, metadataSqlite, processesSqlite,
 } from "./schema/tasks.js";
 import { runsPg, runsSqlite } from "./schema/runs.js";
+import {
+  taskDirectionsPg, agentCheckpointsPg,
+  taskDirectionsSqlite, agentCheckpointsSqlite,
+} from "./schema/task-control.js";
 import { sessionsPg, messagesPg, sessionsSqlite, messagesSqlite } from "./schema/sessions.js";
 import { notificationsPg, notificationsSqlite } from "./schema/notifications.js";
 import { logSessionsPg, logEntriesPg, logSessionsSqlite, logEntriesSqlite } from "./schema/logs.js";
@@ -54,6 +58,7 @@ import {
 
 import { DrizzleTaskStore } from "./stores/task-store.js";
 import { DrizzleRunStore } from "./stores/run-store.js";
+import { DrizzleTaskControlStore } from "./stores/task-control-store.js";
 import { DrizzleSessionStore } from "./stores/session-store.js";
 import { DrizzleNotificationStore } from "./stores/notification-store.js";
 import { DrizzleLogStore } from "./stores/log-store.js";
@@ -79,6 +84,7 @@ import { DrizzlePushSubscriptionStore } from "./stores/push-subscription-store.j
 
 import type { TaskStore } from "@polpo-ai/core/task-store";
 import type { RunStore } from "@polpo-ai/core/run-store";
+import type { TaskControlStore } from "@polpo-ai/core";
 import type { SessionStore } from "@polpo-ai/core/session-store";
 import type { NotificationStore } from "@polpo-ai/core/notification-store";
 import type { LogStore } from "@polpo-ai/core/log-store";
@@ -97,6 +103,7 @@ import type { AttachmentStore } from "@polpo-ai/core/attachment-store";
 export interface DrizzleStores {
   taskStore: TaskStore;
   runStore: RunStore;
+  taskControlStore: TaskControlStore;
   sessionStore: SessionStore;
   notificationStore: NotificationStore;
   logStore: LogStore;
@@ -129,6 +136,7 @@ export function createPgStores(db: any): DrizzleStores {
       tasks: tasksPg, missions: missionsPg, metadata: metadataPg, processes: processesPg,
     }, "pg"),
     runStore: new DrizzleRunStore(db, runsPg, "pg"),
+    taskControlStore: new DrizzleTaskControlStore(db, taskDirectionsPg, agentCheckpointsPg, "pg"),
     sessionStore: new DrizzleSessionStore(db, sessionsPg, messagesPg, "pg"),
     notificationStore: new DrizzleNotificationStore(db, notificationsPg, "pg"),
     logStore: new DrizzleLogStore(db, logSessionsPg, logEntriesPg, "pg"),
@@ -165,6 +173,7 @@ export function createSqliteStores(db: any): DrizzleStores {
       tasks: tasksSqlite, missions: missionsSqlite, metadata: metadataSqlite, processes: processesSqlite,
     }, "sqlite"),
     runStore: new DrizzleRunStore(db, runsSqlite, "sqlite"),
+    taskControlStore: new DrizzleTaskControlStore(db, taskDirectionsSqlite, agentCheckpointsSqlite, "sqlite"),
     sessionStore: new DrizzleSessionStore(db, sessionsSqlite, messagesSqlite, "sqlite"),
     notificationStore: new DrizzleNotificationStore(db, notificationsSqlite, "sqlite"),
     logStore: new DrizzleLogStore(db, logSessionsSqlite, logEntriesSqlite, "sqlite"),

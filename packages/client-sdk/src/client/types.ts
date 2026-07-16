@@ -255,7 +255,7 @@ export interface AgentConfig {
   volatile?: boolean;
   missionGroup?: string;
 
-  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
+  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*"])
   // Note: HTTP tools (http_fetch, http_download) and vault tools (vault_get, vault_list) are always available as core tools.
   /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
@@ -707,7 +707,7 @@ export type TemplateRunResult = PlaybookRunResult;
 // === Config ===
 
 /** Reasoning level for LLM calls. */
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Primary model with ordered fallbacks. */
 export interface ModelConfig {
@@ -855,6 +855,33 @@ export interface UpdateTaskRequest {
   assignTo?: string;
   status?: TaskStatus;
   expectations?: TaskExpectation[];
+}
+
+export type TaskDirectionMode = "steer" | "follow_up" | "continue";
+export type TaskDirectionStatus = "queued" | "delivered" | "applied" | "failed";
+
+export interface TaskDirection {
+  id: string;
+  taskId: string;
+  runId?: string;
+  mode: TaskDirectionMode;
+  message: string;
+  status: TaskDirectionStatus;
+  createdAt: string;
+  deliveredAt?: string;
+  appliedAt?: string;
+  error?: string;
+}
+
+export interface SendTaskDirectionRequest {
+  message: string;
+  mode?: "auto" | TaskDirectionMode;
+  confirmSideEffects?: boolean;
+}
+
+export interface SendTaskDirectionResult {
+  action: TaskDirectionMode;
+  direction: TaskDirection;
 }
 
 export interface CreateMissionRequest {
@@ -1290,6 +1317,13 @@ export interface ChatCompletionChunkDelta {
 
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
+export interface ToolCallProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
 export type ChatMessageSegment =
   | { type: "text"; content: string }
   | { type: "thinking"; content: string }
@@ -1306,6 +1340,8 @@ export interface ToolCallEvent {
   arguments?: Record<string, unknown>;
   /** Tool execution result (present when state is "completed" or "error") */
   result?: string;
+  /** Best-effort progress while a long-running tool remains in "calling" state. */
+  progress?: ToolCallProgress;
   /** Current state of the tool call */
   state: ToolCallState;
 }

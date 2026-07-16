@@ -18,7 +18,7 @@ export function findOAuthProvider(providerId: string) {
 export function getOAuthProviderList() {
   return OAUTH_PROVIDERS.map((p) => ({
     ...p,
-    free: p.id === "google-antigravity" || p.id === "google-gemini-cli",
+    free: false,
   }));
 }
 

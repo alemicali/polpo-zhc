@@ -4,7 +4,7 @@ import { TaskManager } from "../core/task-manager.js";
 import { MissionExecutor } from "../core/mission-executor.js";
 import { AgentManager } from "../core/agent-manager.js";
 import { TypedEmitter } from "../core/events.js";
-import { InMemoryTaskStore, InMemoryRunStore, createTestAgent, createMockStores } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, InMemoryTaskControlStore, createTestAgent, createMockStores } from "./fixtures.js";
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import { HookRegistry } from "../core/hooks.js";
 import type { PolpoConfig, Mission } from "../core/types.js";
@@ -129,6 +129,7 @@ function createContext(overrides?: {
     emitter: new TypedEmitter(),
     registry: overrides?.registry ?? new InMemoryTaskStoreWithMissions(),
     runStore: new InMemoryRunStore(),
+    taskControlStore: new InMemoryTaskControlStore(),
     memoryStore: createNoopMemoryStore(),
     logStore: createNoopLogStore(),
     sessionStore: createNoopSessionStore(),
@@ -771,6 +772,120 @@ describe("TaskManager", () => {
       expect(result).toBe(true);
       expect((await ctx.registry.getTask(task.id))!.status).toBe("done");
     });
+  });
+
+  describe("sendDirection", () => {
+    it("binds live steering to the active run", async () => {
+      const task = await mgr.addTask({ title: "Live", description: "Work", assignTo: "dev" });
+      await ctx.registry.transition(task.id, "assigned");
+      await ctx.registry.transition(task.id, "in_progress");
+      await ctx.runStore.upsertRun({
+        id: "run-live",
+        taskId: task.id,
+        pid: 123,
+        agentName: "dev",
+        status: "running",
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: new Date().toISOString() },
+        configPath: "/tmp/run.json",
+      });
+
+      const result = await mgr.sendDirection(task.id, "Use the existing API instead", { mode: "auto" });
+
+      expect(result.action).toBe("steer");
+      expect(result.direction).toMatchObject({ runId: "run-live", mode: "steer", status: "queued" });
+      expect((await ctx.registry.getTask(task.id))!.status).toBe("in_progress");
+    });
+
+    it("continues a failed task without consuming an automatic retry", async () => {
+      const task = await mgr.addTask({ title: "Stopped", description: "Work", assignTo: "dev" });
+      await ctx.registry.transition(task.id, "assigned");
+      await ctx.registry.transition(task.id, "in_progress");
+      await ctx.registry.transition(task.id, "failed");
+
+      const result = await mgr.sendDirection(task.id, "Resume from the checkpoint", { mode: "auto" });
+      const updated = await ctx.registry.getTask(task.id);
+
+      expect(result.action).toBe("continue");
+      expect(result.direction).toMatchObject({ mode: "continue", status: "queued" });
+      expect(result.direction.runId).toBeUndefined();
+      expect(updated!.status).toBe("pending");
+      expect(updated!.retries).toBe(0);
+    });
+
+    it("does not continue while a killed runner is still stopping", async () => {
+      const task = await mgr.addTask({ title: "Stopping", description: "Work", assignTo: "dev" });
+      await ctx.registry.transition(task.id, "assigned");
+      await ctx.registry.transition(task.id, "in_progress");
+      await ctx.registry.transition(task.id, "failed");
+      await ctx.runStore.upsertRun({
+        id: "run-stopping",
+        taskId: task.id,
+        pid: 123,
+        agentName: "dev",
+        status: "running",
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: new Date().toISOString() },
+        configPath: "/tmp/run.json",
+      });
+
+      await expect(mgr.sendDirection(task.id, "Continue", { mode: "continue" }))
+        .rejects.toThrow("still stopping");
+    });
+
+    it("requires confirmation before continuing a side-effecting task", async () => {
+      const task = await mgr.addTask({ title: "Email", description: "Send it", assignTo: "dev", sideEffects: true });
+      await ctx.registry.transition(task.id, "assigned");
+      await ctx.registry.transition(task.id, "in_progress");
+      await ctx.registry.transition(task.id, "failed");
+
+      await expect(mgr.sendDirection(task.id, "Try again", { mode: "continue" }))
+        .rejects.toThrow("side effects");
+      await expect(mgr.sendDirection(task.id, "Try again", { mode: "continue", confirmSideEffects: true }))
+        .resolves.toMatchObject({ action: "continue" });
+    });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// AgentManager Tests
+// ════════════════════════════════════════════════════════════════════════
+
+describe("AgentManager", () => {
+  let ctx: OrchestratorContext;
+  let mgr: AgentManager;
+
+  beforeEach(() => {
+    ctx = createContext();
+    mgr = new AgentManager(ctx);
+  });
+
+  it("moves an agent to another team and refreshes the config cache", async () => {
+    await mgr.addTeam({ name: "backend", agents: [] });
+
+    const updated = await mgr.updateAgent("dev", {
+      role: "Backend developer",
+      team: "backend",
+    });
+
+    expect(updated.role).toBe("Backend developer");
+    expect(updated).not.toHaveProperty("team");
+    expect((await mgr.findAgentTeam("dev"))?.name).toBe("backend");
+    expect((await mgr.getTeam("test-team"))?.agents).toHaveLength(0);
+    expect((await mgr.getTeam("backend"))?.agents.map(agent => agent.name)).toEqual(["dev"]);
+    expect(ctx.config.teams.find(team => team.name === "backend")?.agents.map(agent => agent.name)).toEqual(["dev"]);
+  });
+
+  it("rejects a move to a missing team without changing the agent", async () => {
+    await expect(mgr.updateAgent("dev", {
+      role: "Backend developer",
+      team: "missing",
+    })).rejects.toThrow('Team "missing" not found');
+
+    expect((await mgr.findAgent("dev"))?.role).not.toBe("Backend developer");
+    expect((await mgr.findAgentTeam("dev"))?.name).toBe("test-team");
   });
 });
 

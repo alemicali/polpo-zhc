@@ -1621,7 +1621,8 @@ const REASONING_LEVELS: { value: ReasoningLevel; label: string; description: str
   { value: "low", label: "Low", description: "Basic extended thinking" },
   { value: "medium", label: "Medium", description: "Balanced reasoning depth" },
   { value: "high", label: "High", description: "Deep analysis — slower, better results" },
-  { value: "xhigh", label: "Extra High", description: "Maximum reasoning — slowest, highest quality" },
+  { value: "xhigh", label: "Extra High", description: "Very deep reasoning for supported models" },
+  { value: "max", label: "Maximum", description: "Highest native reasoning level for supported models" },
 ];
 
 // ── Agent Tab ──

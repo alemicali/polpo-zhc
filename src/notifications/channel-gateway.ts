@@ -35,7 +35,8 @@ import type {
 } from "../core/types.js";
 import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
-import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,

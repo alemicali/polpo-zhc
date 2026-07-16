@@ -74,6 +74,20 @@ async function resolveSandboxed(requestPath: string, allowedRoots: string[], fs:
   return null;
 }
 
+function normalizeUploadPath(requestPath: string | undefined, fallbackName: string): string | null {
+  const normalized = (requestPath || fallbackName).replace(/\\/g, "/");
+  if (
+    normalized.length === 0 ||
+    normalized.includes("\0") ||
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:($|\/)/.test(normalized)
+  ) return null;
+
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return null;
+  return segments.join("/");
+}
+
 // ── Route definitions ────────────────────────────────────────────────────────
 
 const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
@@ -390,22 +404,43 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
 
     if (files.length === 0) return c.json({ ok: false, error: "No files provided" }, 400);
 
-    const uploaded: { name: string; size: number }[] = [];
-    for (const file of files) {
-      const filePath = resolve(resolvedDir, file.name);
+    const rawRelativePaths = body.relativePath;
+    const relativePaths = (Array.isArray(rawRelativePaths) ? rawRelativePaths : [rawRelativePaths])
+      .filter((value): value is string => typeof value === "string");
+    const seenPaths = new Set<string>();
+    const candidates: { file: globalThis.File; filePath: string; relativePath: string }[] = [];
+
+    for (const [index, file] of files.entries()) {
+      const fallbackName = basename(file.name.replace(/\\/g, "/"));
+      const relativePath = normalizeUploadPath(relativePaths[index], fallbackName);
+      if (!relativePath || seenPaths.has(relativePath)) {
+        return c.json({ ok: false, error: "Invalid or duplicate relative upload path" }, 400);
+      }
+
+      const filePath = resolve(resolvedDir, relativePath);
       const rel = relative(resolvedDir, filePath);
-      if (rel.startsWith("..") || rel.includes("/")) continue;
+      if (rel.startsWith("..") || rel.startsWith("/") || rel === "") {
+        return c.json({ ok: false, error: "Invalid relative upload path" }, 400);
+      }
+      seenPaths.add(relativePath);
+      candidates.push({ file, filePath, relativePath });
+    }
+
+    const uploaded: { name: string; path: string; size: number }[] = [];
+    for (const { file, filePath, relativePath } of candidates) {
+      await fs.mkdir(dirname(filePath));
       const data = new Uint8Array(await file.arrayBuffer());
       if (fs.writeFileBuffer) {
         await fs.writeFileBuffer(filePath, data);
       } else {
         await fs.writeFile(filePath, new TextDecoder().decode(data));
       }
-      uploaded.push({ name: file.name, size: data.byteLength });
+      uploaded.push({ name: file.name, path: relativePath, size: data.byteLength });
     }
 
     for (const u of uploaded) {
-      deps.emit("file:changed", { path: resolve(resolvedDir, u.name), dir: resolvedDir, action: "created", source: "server" });
+      const uploadedPath = resolve(resolvedDir, u.path);
+      deps.emit("file:changed", { path: uploadedPath, dir: dirname(uploadedPath), action: "created", source: "server" });
     }
 
     return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
@@ -481,7 +516,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     return c.json({ ok: true, data: { path: body.path } }, 200);
   });
 
-  // ── GET /search — recursive flat file listing ──
+  // ── GET /search — recursive flat filesystem listing ──
   app.get("/search", async (c) => {
     const deps = getDeps();
     const { fs } = deps;
@@ -497,7 +532,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
 
     const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", POLPO_DIR_NAME]);
-    const results: { name: string; path: string }[] = [];
+    const results: { name: string; path: string; type: "file" | "directory" }[] = [];
 
     async function walk(dir: string, depth: number) {
       if (depth > 10 || results.length >= limit) return;
@@ -511,9 +546,13 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
           const relPath = relative(resolved!, resolve(dir, e.name));
           if (e.isFile) {
             if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
-              results.push({ name: e.name, path: relPath });
+              results.push({ name: e.name, path: relPath, type: "file" });
             }
           } else if (e.isDirectory) {
+            if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
+              results.push({ name: e.name, path: relPath, type: "directory" });
+            }
+            if (results.length >= limit) return;
             await walk(resolve(dir, e.name), depth + 1);
           }
         }
