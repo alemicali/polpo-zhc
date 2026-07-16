@@ -3422,7 +3422,7 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
+  const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
@@ -3435,6 +3435,16 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // Drives the streaming-time CTA swap: with a draft we show the queue
   // action (Enter enqueues); empty, we show Stop (Enter is a no-op).
   const [hasDraft, setHasDraft] = useState(false);
+  const historyIndexRef = useRef<number | null>(null);
+  const historyDraftRef = useRef("");
+  const applyingHistoryRef = useRef(false);
+
+  const promptHistory = useMemo(
+    () => messages
+      .filter((message) => message.role === "user" && message.content.trim().length > 0)
+      .map((message) => message.content),
+    [messages],
+  );
 
   // Per-session prompt queue. Keyed by sessionId (or the new-session
   // sentinel until the server assigns one). The Queue panel renders
@@ -3533,6 +3543,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       // null at this point and only flips after the stream returns.
       chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
       chatInputDrafts.delete(NEW_SESSION_DRAFT_KEY);
+      historyIndexRef.current = null;
+      historyDraftRef.current = "";
       setHasDraft(false);
       await send(resolvedText, images.length > 0 ? images : undefined);
     },
@@ -3548,6 +3560,52 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     setHasDraft(text.trim().length > 0);
   }, []);
+
+  const applyHistoryValue = useCallback((textarea: HTMLTextAreaElement, text: string) => {
+    applyingHistoryRef.current = true;
+    setTextareaValue(text);
+    applyingHistoryRef.current = false;
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    });
+  }, [setTextareaValue]);
+
+  const handlePromptHistoryKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.defaultPrevented || e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+    const textarea = e.currentTarget;
+    if (e.key === "ArrowUp") {
+      if (promptHistory.length === 0) return;
+      const selectionStart = textarea.selectionStart ?? 0;
+      const selectionEnd = textarea.selectionEnd ?? selectionStart;
+      const cursorIsOnFirstLine = !textarea.value.slice(0, selectionStart).includes("\n");
+      if (selectionStart !== selectionEnd || !cursorIsOnFirstLine) return;
+
+      e.preventDefault();
+      if (historyIndexRef.current === null) {
+        historyDraftRef.current = textarea.value;
+        historyIndexRef.current = promptHistory.length - 1;
+      } else {
+        historyIndexRef.current = Math.max(0, historyIndexRef.current - 1);
+      }
+      applyHistoryValue(textarea, promptHistory[historyIndexRef.current]);
+      return;
+    }
+
+    if (historyIndexRef.current === null) return;
+    e.preventDefault();
+    const nextIndex = historyIndexRef.current + 1;
+    if (nextIndex >= promptHistory.length) {
+      historyIndexRef.current = null;
+      applyHistoryValue(textarea, historyDraftRef.current);
+      historyDraftRef.current = "";
+      return;
+    }
+    historyIndexRef.current = nextIndex;
+    applyHistoryValue(textarea, promptHistory[nextIndex]);
+  }, [applyHistoryValue, promptHistory]);
 
   // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
 
@@ -3657,6 +3715,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const prevDraftKeyRef = useRef<string>(draftKey);
   useEffect(() => {
     const prevKey = prevDraftKeyRef.current;
+    historyIndexRef.current = null;
+    historyDraftRef.current = "";
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     if (textarea && prevKey !== draftKey) {
       // Save outgoing draft (only if non-empty — keeps the map small)
@@ -3820,6 +3880,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               disabled={inputDisabled}
               onKeyDown={(e) => {
                 mentionRef.current?.handleTextareaKeyDown(e);
+                handlePromptHistoryKeyDown(e);
                 if (
                   !e.defaultPrevented &&
                   isLoading &&
@@ -3840,6 +3901,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
                 mentionRef.current?.handleInput();
+                if (!applyingHistoryRef.current) {
+                  historyIndexRef.current = null;
+                  historyDraftRef.current = "";
+                }
                 setHasDraft(e.currentTarget.value.trim().length > 0);
               }}
             />
