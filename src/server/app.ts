@@ -51,7 +51,9 @@ import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
+import { tokenUsageRoutes } from "./routes/token-usage.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
+import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
@@ -164,6 +166,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getSessionStore: () => o.getSessionStore(),
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
+    recordTokenUsage: (usage) => new FileTokenUsageStore(activePolpoDir()).record(usage),
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
       const { resolveModel, resolveApiKeyAsync, buildStreamOpts } = await import("../llm/pi-client.js");
       const m = resolveModel(agentConfig.model);
@@ -408,6 +411,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getAllMissions: () => o.getAllMissions(),
     getAgents: () => o.getAgents(),
   })));
+
+  authed.route("/token-usage", tokenUsageRoutes(activePolpoDir, () => o.getRunStore()));
 
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Card,
@@ -36,10 +36,77 @@ import {
   Hammer,
   HelpCircle,
   FileEdit,
+  Binary,
 } from "lucide-react";
 import { useTasks, useMissions, useProcesses, useAgents, useStats } from "@polpo-ai/react";
 import type { Task, AgentProcess, PolpoStats } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
+import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
+
+const TOKEN_RANGES: { value: TokenUsageRange; label: string }[] = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+  { value: "all", label: "All" },
+];
+
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat("en", {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function TokenUsageStrip() {
+  const [range, setRange] = useState<TokenUsageRange>("7d");
+  const { usage, loading } = useTokenUsage(range);
+  const metrics = [
+    ["Total", usage?.totalTokens ?? 0],
+    ["Input", usage?.inputTokens ?? 0],
+    ["Output", usage?.outputTokens ?? 0],
+    ["Cache", (usage?.cacheReadTokens ?? 0) + (usage?.cacheWriteTokens ?? 0)],
+    ["Task agents", usage?.taskTokens ?? 0],
+  ] as const;
+
+  return (
+    <section className="border-y border-border/70 bg-card/35 px-4 py-3" aria-label="Token usage">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-2 lg:w-36 lg:shrink-0">
+          <Binary className="h-4 w-4 text-primary" />
+          <span className="text-xs font-semibold">Token usage</span>
+          {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-5">
+          {metrics.map(([label, value]) => (
+            <div key={label} className="min-w-0 border-l border-border/60 pl-3">
+              <div className="text-[10px] text-muted-foreground">{label}</div>
+              <div className="mt-1 truncate font-mono text-lg font-semibold tabular-nums" title={value.toLocaleString()}>
+                {formatTokens(value)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex h-8 items-center border border-border/70 bg-background/40 p-0.5" role="group" aria-label="Token usage period">
+          {TOKEN_RANGES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setRange(option.value)}
+              className={cn(
+                "h-7 min-w-10 px-2 text-[11px] font-medium transition-colors",
+                range === option.value
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 // ── Phase icon helper ──
 
@@ -792,6 +859,8 @@ export function DashboardPage() {
           })()}
         />
       </div>
+
+      <TokenUsageStrip />
 
       {/* Main content — TaskProgress + Recent Activity in the top row,
           Active Agents below at full width so a busy team doesn't get

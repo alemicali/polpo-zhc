@@ -18,7 +18,14 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
-import { agentMemoryScope } from "@polpo-ai/core";
+import {
+  agentMemoryScope,
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
 
 const DEFAULT_MAX_TURNS = 200;
@@ -432,6 +439,8 @@ export interface CompletionRouteDeps {
   }>;
   /** LLM streaming function (streamSimple from pi-ai). */
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
+  /** Persist provider-reported token usage for dashboard aggregation. */
+  recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
   /** Orchestrator mode support (optional — returns 501 if not provided). */
   resolveOrchestratorContext?: () => Promise<{
     systemPrompt: string;
@@ -441,6 +450,20 @@ export interface CompletionRouteDeps {
     executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive: (name: string) => boolean;
   }>;
+}
+
+export interface TokenUsageRecord {
+  timestamp: string;
+  source: "orchestrator_chat" | "agent_chat" | "background_wait";
+  provider?: string;
+  model?: string;
+  sessionId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
 }
 
 export interface ToolExecutionProgress {
@@ -631,6 +654,92 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       c.header("x-session-id", sessionId);
     }
 
+    const contextBudget = contextBudgetForModel(m ?? {});
+    const usageSource: TokenUsageRecord["source"] = c.req.header("x-polpo-internal-continuation") === "background-wait"
+      ? "background_wait"
+      : agentMode ? "agent_chat" : "orchestrator_chat";
+
+    const prepareContext = (current: any[], force = false) => {
+      const beforeTokens = estimateContextTokens({
+        systemPrompt: fullSystemPrompt,
+        messages: current,
+        tools: effectiveTools,
+      });
+      if (!force && beforeTokens <= contextBudget.softLimit) {
+        return { messages: current, info: null };
+      }
+
+      const cut = selectCompactionCut(
+        current,
+        force ? Math.floor(contextBudget.keepRecentTokens / 2) : contextBudget.keepRecentTokens,
+      );
+      const prefix = cut > 0 ? current.slice(0, cut) : current;
+      const summary = summarizeContextMessages(prefix);
+      let compacted = cut > 0
+        ? compactContextMessages(current, cut, summary)
+        : [{
+            role: "user",
+            content: `[Context checkpoint: earlier conversation compacted]\n\n${summary}\n\n[End context checkpoint]`,
+            timestamp: Date.now(),
+          }];
+      let afterTokens = estimateContextTokens({
+        systemPrompt: fullSystemPrompt,
+        messages: compacted,
+        tools: effectiveTools,
+      });
+
+      // A single oversized recent tool result can still exceed the budget.
+      // Collapse the projection further while leaving the persisted transcript untouched.
+      if (afterTokens > contextBudget.softLimit) {
+        compacted = [{
+          role: "user",
+          content: `[Context checkpoint: earlier conversation compacted]\n\n${summarizeContextMessages(current)}\n\n[End context checkpoint]`,
+          timestamp: Date.now(),
+        }];
+        afterTokens = estimateContextTokens({
+          systemPrompt: fullSystemPrompt,
+          messages: compacted,
+          tools: effectiveTools,
+        });
+      }
+
+      return {
+        messages: compacted,
+        info: {
+          beforeTokens,
+          afterTokens,
+          hardLimit: contextBudget.hardLimit,
+          removedMessages: Math.max(0, current.length - compacted.length),
+          reason: force ? "overflow_recovery" : "budget",
+        },
+      };
+    };
+
+    const recordResponseUsage = async (response: any): Promise<void> => {
+      const usage = response?.usage;
+      if (!usage || !deps.recordTokenUsage) return;
+      try {
+        await deps.recordTokenUsage({
+          timestamp: new Date().toISOString(),
+          source: usageSource,
+          provider: typeof m?.provider === "string" ? m.provider : undefined,
+          model: typeof m?.id === "string" ? m.id : typeof m?.name === "string" ? m.name : undefined,
+          sessionId: sessionId ?? undefined,
+          inputTokens: Number(usage.input) || 0,
+          outputTokens: Number(usage.output) || 0,
+          cacheReadTokens: Number(usage.cacheRead) || 0,
+          cacheWriteTokens: Number(usage.cacheWrite) || 0,
+          totalTokens: Number(usage.totalTokens) || 0,
+          cost: Number(usage.cost?.total) || 0,
+        });
+      } catch {
+        // Metrics persistence must never fail the user-facing completion.
+      }
+    };
+
+    const isContextOverflowError = (message: string): boolean =>
+      /context.{0,20}(overflow|length|window)|prompt is too long|too many tokens|maximum context/i.test(message);
+
     if (body.stream) {
       // ── Streaming mode ──
       // Resumable: each turn gets a registry entry. Buffered deltas survive
@@ -672,15 +781,22 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           assistantMsgId = placeholder.id;
         }
 
-        const messages: any[] = [...piMessages];
+        let messages: any[] = [...piMessages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
         const segmentsAccum: MessageSegment[] = [];
+        let overflowRetries = 0;
 
         try {
           for (let turn = 0; turn < maxTurns; turn++) {
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
+
+            const prepared = prepareContext(messages);
+            messages = prepared.messages;
+            if (prepared.info) {
+              await emit(sseChunk(completionId, {}, null, { context_compaction: prepared.info }));
+            }
 
             const piStream = deps.streamLLM(m, {
               systemPrompt: fullSystemPrompt,
@@ -746,12 +862,22 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             }
 
             if (streamError) {
+              if (overflowRetries === 0 && isContextOverflowError(streamError)) {
+                overflowRetries += 1;
+                const recovered = prepareContext(messages, true);
+                messages = recovered.messages;
+                if (recovered.info) {
+                  await emit(sseChunk(completionId, {}, null, { context_compaction: recovered.info }));
+                }
+                continue;
+              }
               finalText += `\n\nError: ${streamError}`;
               await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }));
               break;
             }
 
             const response = await piStream.result();
+            await recordResponseUsage(response);
             messages.push(response);
             finalText += turnText;
 
@@ -1075,13 +1201,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         assistantMsgId = placeholder.id;
       }
 
-      const messages: any[] = [...piMessages];
+      let messages: any[] = [...piMessages];
       let finalText = "";
       const toolCallsAccum: any[] = [];
       const segmentsAccum: MessageSegment[] = [];
+      let overflowRetries = 0;
 
       try {
         for (let turn = 0; turn < maxTurns; turn++) {
+          const prepared = prepareContext(messages);
+          messages = prepared.messages;
           const piStream = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
             messages,
@@ -1102,10 +1231,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           }
 
           if (streamError) {
+            if (overflowRetries === 0 && isContextOverflowError(streamError)) {
+              overflowRetries += 1;
+              messages = prepareContext(messages, true).messages;
+              continue;
+            }
             return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
           }
 
           const response = await piStream.result();
+          await recordResponseUsage(response);
           messages.push(response);
           finalText += turnText;
 

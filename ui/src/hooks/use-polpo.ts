@@ -16,6 +16,23 @@ import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/
 import type { ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
+import { toast } from "sonner";
+
+type ContextCompactionNotice = {
+  beforeTokens: number;
+  afterTokens: number;
+  reason: "budget" | "overflow_recovery";
+};
+
+function showContextCompaction(notice: ContextCompactionNotice): void {
+  const format = (value: number) => new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+  toast.info(notice.reason === "overflow_recovery" ? "Context recovered" : "Conversation context compacted", {
+    description: `${format(notice.beforeTokens)} → ${format(notice.afterTokens)} tokens`,
+  });
+}
 
 // Local mirror of SDK ask_user types (avoids build-order issues)
 export interface AskUserOption {
@@ -768,6 +785,8 @@ export function useChat() {
           try { chunk = JSON.parse(data); } catch { continue; }
           const choice = chunk.choices?.[0];
           const delta = choice?.delta;
+          const contextCompaction = choice?.context_compaction as ContextCompactionNotice | undefined;
+          if (contextCompaction) showContextCompaction(contextCompaction);
           const thinking = choice?.thinking as string | undefined;
           if (thinking) {
             thinkingText += thinking;
@@ -1129,6 +1148,8 @@ export function useChat() {
         syncServerIds();
         const choice = chunk.choices[0];
         const delta = choice?.delta;
+        const contextCompaction = (choice as any)?.context_compaction as ContextCompactionNotice | undefined;
+        if (contextCompaction) showContextCompaction(contextCompaction);
         const thinking = choice?.thinking as string | undefined;
 
         if (thinking) {

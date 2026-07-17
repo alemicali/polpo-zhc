@@ -65,6 +65,22 @@ export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillInde
 export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";
 export type { ParsedModelSpec } from "./model-spec.js";
 
+// ── Context Budgeting ──────────────────────────────────────────────────
+export {
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  estimateMessageTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "./context-compaction.js";
+export type {
+  ContextBudget,
+  ContextEstimateInput,
+  ContextMessageLike,
+  ContextModelLimits,
+} from "./context-compaction.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 

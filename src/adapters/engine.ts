@@ -9,7 +9,14 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault } from "../vault/index.js";
-import { buildAgentSystemPrompt } from "@polpo-ai/core";
+import {
+  buildAgentSystemPrompt,
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "@polpo-ai/core";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -464,11 +471,44 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
+  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
+  const contextBudget = contextBudgetForModel(model);
   const agent = new Agent({
     getApiKey: (provider: string) => resolveApiKeyAsync(provider),
+    transformContext: async (messages) => {
+      const estimate = estimateContextTokens({
+        systemPrompt: initialSystemPrompt,
+        messages: messages as any[],
+        tools: codingTools,
+      });
+      if (estimate <= contextBudget.softLimit) return messages;
+      if (messages.length < 2) {
+        return [{
+          role: "user",
+          content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
+          timestamp: Date.now(),
+        }];
+      }
+      const cut = selectCompactionCut(messages as any[], contextBudget.keepRecentTokens);
+      const summary = summarizeContextMessages((messages as any[]).slice(0, cut));
+      const compacted = compactContextMessages(messages as any[], cut, summary);
+      const compactedEstimate = estimateContextTokens({
+        systemPrompt: initialSystemPrompt,
+        messages: compacted,
+        tools: codingTools,
+      });
+      if (compactedEstimate <= contextBudget.softLimit) {
+        return compacted as unknown as AgentMessage[];
+      }
+      return [{
+        role: "user",
+        content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
+        timestamp: Date.now(),
+      }];
+    },
     initialState: {
       // Mailboxes section is added later (handle.done) after vault is async-resolved.
-      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths),
+      systemPrompt: initialSystemPrompt,
       model,
       thinkingLevel,
       maxTokens: model.maxTokens,

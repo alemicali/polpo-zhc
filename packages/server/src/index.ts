@@ -21,7 +21,7 @@ export { scheduleRoutes } from "./routes/schedules.js";
 export { watcherRoutes } from "./routes/watchers.js";
 export { stateRoutes } from "./routes/state.js";
 export { healthRoutes } from "./routes/health.js";
-export { completionRoutes, type CompletionRouteDeps } from "./routes/completions.js";
+export { completionRoutes, type CompletionRouteDeps, type TokenUsageRecord } from "./routes/completions.js";
 export { agentRoutes } from "./routes/agents.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";

@@ -237,6 +237,86 @@ describe("POST /v1/chat/completions", () => {
       const lastChunk = chunks[chunks.length - 1];
       expect((lastChunk.choices as any[])[0].finish_reason).toBe("stop");
     });
+
+    test("compacts oversized context before calling the provider", async () => {
+      let providerContext: any;
+      setStreamImpl((_model, context) => {
+        providerContext = context;
+        return mockTextStream("Compacted safely.");
+      });
+
+      const large = "context-data ".repeat(18_000);
+      const res = await postCompletions({
+        messages: [
+          { role: "user", content: large },
+          { role: "assistant", content: large },
+          { role: "user", content: large },
+        ],
+        stream: true,
+      }, { "x-session-id": "new" });
+      const chunks = await parseSSE(res);
+
+      const notice = chunks.find((chunk) => (chunk.choices as any[])?.[0]?.context_compaction);
+      const info = (notice?.choices as any[])?.[0]?.context_compaction;
+      expect(info).toBeDefined();
+      expect(info.afterTokens).toBeLessThan(info.beforeTokens);
+      expect(info.afterTokens).toBeLessThanOrEqual(160_000);
+      expect(providerContext.messages[0].content).toContain("Context checkpoint");
+    });
+
+    test("retries once with forced compaction after a provider overflow", async () => {
+      let calls = 0;
+      setStreamImpl(() => {
+        calls += 1;
+        if (calls === 1) {
+          const failed = mockTextResponse("");
+          return mockStream([{
+            type: "error",
+            reason: "error",
+            error: { errorMessage: "prompt is too long: 1107869 tokens > 1000000 maximum" },
+          }] as any, failed);
+        }
+        return mockTextStream("Recovered response.");
+      });
+
+      const res = await postCompletions({
+        messages: [
+          { role: "user", content: "Earlier request" },
+          { role: "assistant", content: "Earlier response" },
+          { role: "user", content: "Continue" },
+        ],
+        stream: true,
+      }, { "x-session-id": "new" });
+      const chunks = await parseSSE(res);
+      const text = chunks.map((chunk) => (chunk.choices as any[])?.[0]?.delta?.content).filter(Boolean).join("");
+      const recovery = chunks.find((chunk) =>
+        (chunk.choices as any[])?.[0]?.context_compaction?.reason === "overflow_recovery"
+      );
+
+      expect(calls).toBe(2);
+      expect(recovery).toBeDefined();
+      expect(text).toBe("Recovered response.");
+    });
+  });
+
+  describe("token usage", () => {
+    test("records provider usage for dashboard aggregation", async () => {
+      const beforeRes = await app.request("/api/v1/token-usage?range=24h");
+      const before = (await beforeRes.json()).data.totalTokens as number;
+      setStreamImpl(() => mockTextStream("Measured response."));
+
+      const completion = await postCompletions({
+        messages: [{ role: "user", content: "Measure this" }],
+        stream: false,
+      }, { "x-session-id": "new" });
+      expect(completion.status).toBe(200);
+
+      const afterRes = await app.request("/api/v1/token-usage?range=24h");
+      const after = (await afterRes.json()).data;
+      expect(after.totalTokens).toBe(before + 150);
+      expect(after.inputTokens).toBeGreaterThanOrEqual(100);
+      expect(after.outputTokens).toBeGreaterThanOrEqual(50);
+    });
   });
 
   // ── Tool execution ──────────────────────────────────
