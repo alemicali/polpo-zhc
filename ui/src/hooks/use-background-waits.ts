@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl, config } from "@/lib/config";
 
 export type BackgroundWaitState = "waiting" | "ready" | "running" | "completed" | "failed" | "cancelled";
@@ -20,24 +20,38 @@ function headers(): HeadersInit {
   return config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {};
 }
 
-export function useBackgroundWaits() {
+export function useBackgroundWaits(sessionId?: string | null) {
   const [waits, setWaits] = useState<BackgroundWait[]>([]);
   const [loading, setLoading] = useState(true);
+  const normalizedSessionId = sessionId?.trim() || null;
+  const currentSessionIdRef = useRef(normalizedSessionId);
+  currentSessionIdRef.current = normalizedSessionId;
 
   const refresh = useCallback(async () => {
+    if (!normalizedSessionId) {
+      setWaits([]);
+      setLoading(false);
+      return;
+    }
+
+    const requestedSessionId = normalizedSessionId;
     try {
-      const response = await fetch(apiUrl("/api/v1/background-waits"), {
+      const response = await fetch(apiUrl(`/api/v1/background-waits?sessionId=${encodeURIComponent(requestedSessionId)}`), {
         headers: headers(),
         credentials: "include",
       });
       const payload = await response.json();
-      if (response.ok && payload.ok) setWaits(payload.data);
+      if (currentSessionIdRef.current === requestedSessionId && response.ok && payload.ok) {
+        setWaits(payload.data);
+      }
     } finally {
-      setLoading(false);
+      if (currentSessionIdRef.current === requestedSessionId) setLoading(false);
     }
-  }, []);
+  }, [normalizedSessionId]);
 
   useEffect(() => {
+    setWaits([]);
+    setLoading(Boolean(normalizedSessionId));
     void refresh();
     const timer = window.setInterval(() => void refresh(), 2_000);
     const onChanged = () => void refresh();
@@ -46,7 +60,7 @@ export function useBackgroundWaits() {
       window.clearInterval(timer);
       window.removeEventListener("polpo:background-waits-changed", onChanged);
     };
-  }, [refresh]);
+  }, [normalizedSessionId, refresh]);
 
   const cancel = useCallback(async (id: string) => {
     const response = await fetch(apiUrl(`/api/v1/background-waits/${encodeURIComponent(id)}`), {

@@ -3456,7 +3456,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // on reload), CLOSED otherwise. The user can always close via the X in
   // the panel header — items survive the close (re-open via ListPlus).
   const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
-  const backgroundWaits = useBackgroundWaits();
+  const backgroundWaits = useBackgroundWaits(sessionId);
   const [backgroundWaitsOpen, setBackgroundWaitsOpen] = useState(false);
   // Clear confirmation modal (avoid accidental wipes of queued prompts).
   const [queueClearConfirm, setQueueClearConfirm] = useState(false);

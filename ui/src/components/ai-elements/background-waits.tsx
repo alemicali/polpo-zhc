@@ -61,8 +61,17 @@ export function BackgroundWaits({
                 </div>
                 <Badge variant="outline" className="h-5 text-[9px] font-normal">{wait.state}</Badge>
                 {active && (
-                  <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={() => void onCancel(wait.id)} aria-label="Cancel background wait" title="Cancel background wait">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => void onCancel(wait.id)}
+                    aria-label="Stop background wait"
+                    title="Stop background wait"
+                  >
                     <Square className="h-3 w-3 fill-current" />
+                    Stop
                   </Button>
                 )}
               </div>
