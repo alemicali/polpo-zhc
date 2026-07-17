@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
 
 type Theme = "light" | "dark" | "system";
+const THEME_CHANGE_EVENT = "polpo:theme-change";
 
 function getSystemTheme(): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -28,6 +29,7 @@ export function useTheme() {
     setThemeState(t);
     localStorage.setItem(scopedStorageKey("polpo-theme"), t);
     applyTheme(t);
+    window.dispatchEvent(new CustomEvent<Theme>(THEME_CHANGE_EVENT, { detail: t }));
   }, []);
 
   // Apply on mount + listen for system changes
@@ -41,6 +43,17 @@ export function useTheme() {
       return () => mq.removeEventListener("change", handler);
     }
   }, [theme]);
+
+  useEffect(() => {
+    const syncTheme = (event: Event) => {
+      const next = (event as CustomEvent<Theme>).detail;
+      if (next !== "light" && next !== "dark" && next !== "system") return;
+      setThemeState(next);
+      applyTheme(next);
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, syncTheme);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, syncTheme);
+  }, []);
 
   useEffect(() => {
     const syncScopedTheme = () => {

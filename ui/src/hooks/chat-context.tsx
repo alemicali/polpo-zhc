@@ -142,7 +142,7 @@ export interface ChatStateValue {
 
 /** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
 export interface ChatActionsValue {
-  send: (message: string, images?: { url: string; mimeType: string }[]) => Promise<void>;
+  send: (message: string, images?: { url: string; mimeType: string }[], context?: string) => Promise<void>;
   stop: () => void;
   answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
   respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;

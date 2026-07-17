@@ -494,6 +494,85 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
 
 type ActivityFilter = "all" | "conversation" | "tools" | "lifecycle";
 
+interface ActivityRunGroup {
+  header?: RunActivityEntry;
+  entries: RunActivityEntry[];
+  attempt: number;
+}
+
+function groupActivityRuns(entries: RunActivityEntry[]): ActivityRunGroup[] {
+  const groups: Array<Omit<ActivityRunGroup, "attempt">> = [];
+  let current: Omit<ActivityRunGroup, "attempt"> | undefined;
+
+  for (const entry of entries) {
+    if (entry._run) {
+      if (current && (current.header || current.entries.length > 0)) groups.push(current);
+      current = { header: entry, entries: [] };
+      continue;
+    }
+    if (!current) current = { entries: [] };
+    current.entries.push(entry);
+  }
+  if (current && (current.header || current.entries.length > 0)) groups.push(current);
+
+  return groups.map((group, index) => ({ ...group, attempt: index + 1 }));
+}
+
+function activityMatchesFilter(entry: RunActivityEntry, filter: ActivityFilter): boolean {
+  if (entry.event === "activity") return false;
+  if (filter === "all") return true;
+  if (filter === "conversation") {
+    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result"
+      || entry.type === "error" || entry.type === "result" || entry.event === "error" || entry.event === "direction:applied";
+  }
+  if (filter === "tools") return entry.type === "tool_use" || entry.type === "tool_result";
+  return entry.event === "spawning" || entry.event === "spawned" || entry.event === "done"
+    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint";
+}
+
+function ActivityRunHeader({
+  run,
+  totalRuns,
+  isActive,
+}: {
+  run: ActivityRunGroup;
+  totalRuns: number;
+  isActive?: boolean;
+}) {
+  const isLatest = run.attempt === totalRuns;
+  const done = [...run.entries].reverse().find((entry) => entry.event === "done");
+  const doneData = done?.data && typeof done.data === "object"
+    ? done.data as { status?: string }
+    : undefined;
+  const status = isLatest && isActive ? "running" : doneData?.status;
+  const startedAt = run.header?.startedAt;
+
+  return (
+    <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-y border-border bg-background/95 px-3 py-2 backdrop-blur-sm">
+      <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="text-xs font-semibold text-foreground">Run {run.attempt}</span>
+      {isLatest && totalRuns > 1 && (
+        <span className="text-[10px] font-medium uppercase text-primary">Latest</span>
+      )}
+      {status && (
+        <span className="flex items-center gap-1 text-[10px] capitalize text-muted-foreground">
+          <span className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            status === "running" ? "bg-emerald-500 animate-pulse"
+              : status === "completed" ? "bg-emerald-500"
+                : status === "failed" || status === "killed" ? "bg-red-500" : "bg-muted-foreground",
+          )} />
+          {status}
+        </span>
+      )}
+      <span className="ml-auto truncate text-[10px] text-muted-foreground">
+        {run.header?.agentName && <span className="mr-2">{run.header.agentName}</span>}
+        {startedAt ? format(new Date(startedAt), "MMM d, yyyy HH:mm:ss") : run.header?.runId?.slice(0, 8)}
+      </span>
+    </div>
+  );
+}
+
 function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
@@ -514,26 +593,10 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
     return acc;
   }, { snapshots: 0, assistant: 0, tools: 0, results: 0, directions: 0, errors: 0, lifecycle: 0 });
 
-  // Filter entries based on the active filter
-  // Activity snapshots (event: "activity") are always hidden — they're internal telemetry
-  // already visible in the Overview tab (filesCreated, toolCalls, totalTokens, etc.)
-  const filteredEntries = entries.filter((e) => {
-    if (e._run) return false; // always hide header
-    if (e.event === "activity") return false; // always hide activity snapshots
-    if (filter === "all") return true;
-    if (filter === "conversation") {
-      return e.type === "assistant" || e.type === "tool_use" || e.type === "tool_result"
-        || e.type === "error" || e.type === "result" || e.event === "error" || e.event === "direction:applied";
-    }
-    if (filter === "tools") {
-      return e.type === "tool_use" || e.type === "tool_result";
-    }
-    if (filter === "lifecycle") {
-      return e.event === "spawning" || e.event === "spawned" || e.event === "done"
-        || e.event === "sigterm" || e.event === "error" || e.event === "checkpoint";
-    }
-    return true;
-  });
+  const activityRuns = groupActivityRuns(entries);
+  const filteredRuns = activityRuns
+    .map((run) => ({ ...run, entries: run.entries.filter((entry) => activityMatchesFilter(entry, filter)) }))
+    .filter((run) => run.entries.length > 0);
 
   if (isLoading) {
     return (
@@ -588,9 +651,19 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
         </Button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-        <div className="space-y-0.5">
-          {[...filteredEntries].reverse().map((entry, i) => (
-            <ActivityEntry key={`${entry.ts}-${entry.type ?? entry.event}-${i}`} entry={entry} />
+        <div className="space-y-3">
+          {[...filteredRuns].reverse().map((run) => (
+            <section key={run.header?.runId ?? `legacy-${run.attempt}`} aria-label={`Run ${run.attempt}`}>
+              <ActivityRunHeader run={run} totalRuns={activityRuns.length} isActive={isActive} />
+              <div className="space-y-0.5 py-1">
+                {[...run.entries].reverse().map((entry, index) => (
+                  <ActivityEntry
+                    key={`${run.header?.runId ?? run.attempt}-${entry.ts}-${entry.type ?? entry.event}-${index}`}
+                    entry={entry}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>

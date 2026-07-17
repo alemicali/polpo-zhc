@@ -156,6 +156,42 @@ describe("Provider auth status", () => {
 // ── Tasks API ────────────────────────────────────────────────────────
 
 describe("Tasks API", () => {
+  test("GET task activity preserves every run in chronological order", async () => {
+    const taskId = "multi-run-activity-task";
+    const logsDir = join(tmpDir, ".polpo", "logs");
+    await mkdir(logsDir, { recursive: true });
+
+    const newerRun = [
+      { _run: true, runId: "run-newer", taskId, agentName: "agent-1", startedAt: "2026-07-17T10:05:00.000Z" },
+      { ts: "2026-07-17T10:05:01.000Z", type: "assistant", text: "continued output" },
+    ];
+    const olderRun = [
+      { _run: true, runId: "run-older", taskId, agentName: "agent-1", startedAt: "2026-07-17T10:00:00.000Z" },
+      { ts: "2026-07-17T10:00:01.000Z", type: "assistant", text: "original output" },
+    ];
+
+    // Write in reverse chronological filename order to ensure the endpoint
+    // uses run metadata rather than filesystem enumeration order.
+    await writeFile(
+      join(logsDir, "run-run-newer.jsonl"),
+      newerRun.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    );
+    await writeFile(
+      join(logsDir, "run-run-older.jsonl"),
+      olderRun.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+    );
+
+    const res = await app.request(api(`/agents/processes/${taskId}/activity`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toEqual([
+      expect.objectContaining({ _run: true, runId: "run-older", taskId }),
+      expect.objectContaining({ type: "assistant", text: "original output" }),
+      expect.objectContaining({ _run: true, runId: "run-newer", taskId }),
+      expect.objectContaining({ type: "assistant", text: "continued output" }),
+    ]);
+  });
+
   test("GET /tasks returns 200 with task array", async () => {
     const res = await app.request(api("/tasks"));
     expect(res.status).toBe(200);

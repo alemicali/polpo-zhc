@@ -1,8 +1,11 @@
-import { ClockArrowUp, ExternalLink, Loader2, Square, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ClockArrowUp, History, Loader2, Square, X } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { BackgroundWait } from "@/hooks/use-background-waits";
+import { sidebarActions } from "@/hooks/chat-context";
 
 const ACTIVE_STATES = new Set(["waiting", "ready", "running"]);
 
@@ -19,10 +22,16 @@ export function BackgroundWaits({
   onCancel: (id: string) => void | Promise<void>;
   onClose: () => void;
 }) {
-  const ordered = [...waits].sort((a, b) => {
-    const activeDiff = Number(ACTIVE_STATES.has(b.state)) - Number(ACTIVE_STATES.has(a.state));
-    return activeDiff || b.updatedAt.localeCompare(a.updatedAt);
-  });
+  const navigate = useNavigate();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const activeWaits = waits
+    .filter((wait) => ACTIVE_STATES.has(wait.state))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const finishedWaits = waits
+    .filter((wait) => !ACTIVE_STATES.has(wait.state))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 10);
+  const visibleWaits = historyOpen ? [...activeWaits, ...finishedWaits] : activeWaits;
 
   return (
     <div className="border border-border/60 bg-card/80 shadow-sm">
@@ -34,11 +43,11 @@ export function BackgroundWaits({
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
-      {ordered.length === 0 ? (
-        <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No background waits.</div>
+      {visibleWaits.length === 0 ? (
+        <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No active background waits.</div>
       ) : (
         <div className="max-h-56 divide-y divide-border/40 overflow-y-auto">
-          {ordered.map((wait) => {
+          {visibleWaits.map((wait) => {
             const active = ACTIVE_STATES.has(wait.state);
             return (
               <div key={wait.id} className={cn("flex items-center gap-2 px-3 py-2", wait.sessionId === currentSessionId && "bg-accent/20")}>
@@ -49,10 +58,17 @@ export function BackgroundWaits({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <a href={`/tasks/${encodeURIComponent(wait.taskId)}`} className="truncate text-xs font-medium hover:underline">
+                    <button
+                      type="button"
+                      className="truncate text-left text-xs font-medium hover:underline"
+                      onClick={() => {
+                        navigate(`/tasks/${encodeURIComponent(wait.taskId)}`);
+                        sidebarActions.setSidebarOpen(true);
+                      }}
+                    >
                       {wait.taskId}
-                    </a>
-                    <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
+                    <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                   </div>
                   <p className="truncate text-[10px] text-muted-foreground" title={wait.error}>
                     {wait.targetStatus ? `until ${wait.targetStatus}` : "until done or failed"}
@@ -78,6 +94,18 @@ export function BackgroundWaits({
             );
           })}
         </div>
+      )}
+      {finishedWaits.length > 0 && (
+        <button
+          type="button"
+          className="flex h-8 w-full items-center gap-2 border-t border-border/50 px-3 text-[10px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          onClick={() => setHistoryOpen((value) => !value)}
+          aria-expanded={historyOpen}
+        >
+          <History className="h-3 w-3" />
+          <span className="flex-1 text-left">{historyOpen ? "Hide recent history" : `Recent finished (${finishedWaits.length})`}</span>
+          <ChevronDown className={cn("h-3 w-3 transition-transform", historyOpen && "rotate-180")} />
+        </button>
       )}
     </div>
   );

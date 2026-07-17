@@ -50,6 +50,7 @@ import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
+import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
@@ -195,6 +196,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         isClientSideChatTool,
         isSideEffectGated,
         renderWidgetTool,
+        askUserTool,
         validateRenderWidgetArgs,
         setSessionTitleTool,
       } = await import("../llm/orchestrator-tools.js");
@@ -263,6 +265,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (!existingToolNames.has("set_session_title")) {
         tools.push(setSessionTitleTool);
       }
+      // Structured clarification is a chat capability, not an
+      // orchestrator-only capability. It is intentionally registered here
+      // (agent-direct chat) and not in createAllTools, so autonomous task
+      // runners remain non-interactive.
+      if (!existingToolNames.has("ask_user")) {
+        tools.push(askUserTool);
+      }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
       // CLIENT_SIDE_CHAT_TOOLS perché è un display tool potente: lo
@@ -312,7 +321,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // actually goes out. The TASK runner is unaffected — tasks are
       // pre-authorised by the user when they're queued. See
       // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
-      const isInteractive = (name: string) => isClientSideChatTool(name) || isSideEffectGated(name);
+      const isInteractive = (name: string) => name === "ask_user" || isClientSideChatTool(name) || isSideEffectGated(name);
       return { tools, executor, isInteractive };
     },
     streamLLM: streamSimple as any,
@@ -560,6 +569,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/audio", audioRoutes());
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
+  authed.route("/app-preview", appPreviewRoutes(() => ({
+    codingSessionStore: o.getCodingSessionStore(),
+    codeServerManager: opts?.codeServerManager,
+    agentWorkDir: o.getAgentWorkDir(),
+  })));
 
   authed.route("/git", gitRoutes(() => ({
     workDir: o.getWorkDir(),

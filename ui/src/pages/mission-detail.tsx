@@ -13,6 +13,7 @@ import {
   Play,
   RotateCcw,
   XCircle,
+  X,
   Loader2,
   AlertTriangle,
   CheckCircle2,
@@ -45,6 +46,7 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  Panel,
   Handle,
   Position,
   MarkerType,
@@ -68,6 +70,7 @@ import { Calendar, Repeat, Bell } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
+import { useLocalState } from "./coding/use-local-state";
 
 // ── Copyable ID ──
 
@@ -327,6 +330,17 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
               {score.toFixed(1)}/5
             </Badge>
           )}
+          {expanded && liveTask && (
+            <button
+              type="button"
+              className="ml-auto inline-flex h-6 items-center gap-0.5 px-1.5 text-[9px] font-medium text-primary hover:bg-primary/10"
+              onClick={(event) => { event.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
+              title="View task detail"
+            >
+              Open
+              <ChevronRight className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
         {/* Title */}
@@ -485,20 +499,6 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
               </div>
             )}
 
-            {/* View task detail — only when selected and a live task exists */}
-            {selected && liveTask && (
-              <div className="pt-2 border-t border-border/30">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-full text-[11px] font-medium gap-1 text-primary"
-                  onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
-                >
-                  View task detail
-                  <ChevronRight className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1087,20 +1087,16 @@ export function MissionGraphInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useLocalState<"floating" | "inline">("polpo:missionGraphPreviewMode", "floating");
 
   // Sync when live task status changes
   useEffect(() => {
     const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays);
-    // Preserve expanded state across syncs
-    setNodes((prev: Node[]) =>
-      n.map((node: Node) => {
-        const existing = prev.find((p: Node) => p.id === node.id);
-        if (existing?.data.expanded) {
-          return { ...node, data: { ...node.data, expanded: true } };
-        }
-        return node;
-      }),
-    );
+    setNodes((previous: Node[]) => n.map((node: Node) => {
+      const existing = previous.find((candidate) => candidate.id === node.id);
+      return existing?.data.expanded ? { ...node, data: { ...node.data, expanded: true } } : node;
+    }));
     setEdges(e);
   }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, setNodes, setEdges]);
 
@@ -1109,21 +1105,29 @@ export function MissionGraphInner({
     return () => clearTimeout(t);
   }, [fitView, nodes.length]);
 
-  // Toggle expanded on node click (only for task nodes)
+  const previewNode = previewMode === "floating" && previewNodeId
+    ? nodes.find((node) => node.id === previewNodeId && node.type === "taskNode") as Node<TaskNodeData> | undefined
+    : undefined;
+
+  // Keep the graph geometry stable and show task details in a fixed panel.
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.type !== "taskNode") return;
-      setNodes((prev: Node[]) =>
-        prev.map((n: Node) =>
-          n.id === node.id
-            ? { ...n, data: { ...n.data, expanded: !n.data.expanded } }
-            : n.data.expanded
-              ? { ...n, data: { ...n.data, expanded: false } }
-              : n,
-        ),
-      );
+      if (previewMode === "floating") {
+        setPreviewNodeId((current) => current === node.id ? null : node.id);
+        setNodes((current: Node[]) => current.map((candidate) => candidate.data.expanded
+          ? { ...candidate, data: { ...candidate.data, expanded: false } }
+          : candidate));
+        return;
+      }
+      setPreviewNodeId(null);
+      setNodes((current: Node[]) => current.map((candidate) => candidate.id === node.id
+        ? { ...candidate, data: { ...candidate.data, expanded: !candidate.data.expanded } }
+        : candidate.data.expanded
+          ? { ...candidate, data: { ...candidate.data, expanded: false } }
+          : candidate));
     },
-    [setNodes],
+    [previewMode, setNodes],
   );
 
   return (
@@ -1133,6 +1137,14 @@ export function MissionGraphInner({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={handleNodeClick}
+      onPaneClick={() => {
+        setPreviewNodeId(null);
+        if (previewMode === "inline") {
+          setNodes((current: Node[]) => current.map((node) => node.data.expanded
+            ? { ...node, data: { ...node.data, expanded: false } }
+            : node));
+        }
+      }}
       nodeTypes={nodeTypes}
       fitView
       fitViewOptions={{ padding: 0.2 }}
@@ -1145,7 +1157,95 @@ export function MissionGraphInner({
     >
       <Background gap={20} size={1} className="!bg-background" />
       <Controls showInteractive={false} className="!bg-card !border-border !shadow-md [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
+      <Panel position="top-left" className="m-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 bg-background px-2 text-[10px] shadow-sm"
+          onClick={() => {
+            setPreviewNodeId(null);
+            setNodes((current: Node[]) => current.map((node) => node.data.expanded
+              ? { ...node, data: { ...node.data, expanded: false } }
+              : node));
+            setPreviewMode((current) => current === "floating" ? "inline" : "floating");
+          }}
+          title="Switch task detail presentation"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          {previewMode === "floating" ? "Floating details" : "Inline details"}
+        </Button>
+      </Panel>
+      {previewNode && (
+        <Panel position="top-right" className="!bottom-3 !right-3 !top-3 !m-0">
+          <GraphTaskPreview node={previewNode} onClose={() => setPreviewNodeId(null)} />
+        </Panel>
+      )}
     </ReactFlow>
+  );
+}
+
+function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { taskDef, liveTask, index } = node.data;
+  const status = liveTask ? taskStatusConfig[liveTask.status] : undefined;
+  const StatusIcon = status?.icon ?? Clock;
+
+  return (
+    <aside className="nodrag nopan nowheel flex h-full w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden border border-border bg-background shadow-xl">
+      <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span className="font-mono">#{index + 1}</span>
+            <StatusIcon className={cn("h-3 w-3", status?.color, liveTask?.status === "in_progress" && "animate-spin")} />
+            <span>{status?.label ?? "Task definition"}</span>
+          </div>
+          <h3 className="mt-1 text-sm font-semibold leading-snug">{taskDef.title}</h3>
+        </div>
+        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose} aria-label="Close task preview">
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 p-3">
+          {taskDef.description && (
+            <div className="prose prose-sm max-w-none break-words text-xs leading-relaxed text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap">
+              <Markdown>{taskDef.description}</Markdown>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-[9px]"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
+            {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
+            {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
+          </div>
+          {(taskDef.expectations?.length ?? 0) > 0 && (
+            <div className="space-y-1.5 border-t border-border pt-3">
+              <p className="text-[9px] font-semibold uppercase text-muted-foreground">Expectations</p>
+              {taskDef.expectations!.map((expectation, expectationIndex) => {
+                const check = liveTask?.result?.assessment?.checks?.[expectationIndex];
+                return (
+                  <div key={expectationIndex} className="flex items-start gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                    {check?.passed === true
+                      ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                      : check?.passed === false
+                        ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                        : <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full border border-border" />}
+                    <span>{expectation.criteria ?? expectation.command ?? expectation.paths?.join(", ") ?? expectation.type}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+      {liveTask && (
+        <div className="relative z-10 shrink-0 border-t border-border bg-background p-2">
+          <Button type="button" variant="outline" size="sm" className="h-8 w-full text-xs" onClick={() => navigate(`/tasks/${liveTask.id}`)}>
+            View task detail
+          </Button>
+        </div>
+      )}
+    </aside>
   );
 }
 

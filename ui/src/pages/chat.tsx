@@ -60,6 +60,7 @@ import {
   StarOff,
   MoreHorizontal,
   ClockArrowUp,
+  AppWindow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -136,6 +137,12 @@ import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
+import {
+  clearAppPreviewContext,
+  formatAppPreviewContext,
+  setAppPreviewContext,
+  useAppPreviewContext,
+} from "@/hooks/use-app-preview-context";
 
 /** Like formatDistanceToNow but returns "just now" for < 30 s */
 function chatTimeAgo(date: Date): string {
@@ -3426,6 +3433,28 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
+  const previewContext = useAppPreviewContext();
+  const activePreviewContext = previewContext?.sessionId === sessionId ? previewContext : null;
+  const [expandedPreviewImage, setExpandedPreviewImage] = useState<{ url: string; label: string } | null>(null);
+
+  const removePreviewSelection = useCallback((index: number) => {
+    if (!activePreviewContext) return;
+    const selections = (activePreviewContext.selections ?? []).filter((_, selectionIndex) => selectionIndex !== index);
+    if (selections.length === 0 && !activePreviewContext.screenshotDataUrl) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, selections: selections.length > 0 ? selections : undefined });
+  }, [activePreviewContext]);
+
+  const removePreviewScreenshot = useCallback(() => {
+    if (!activePreviewContext) return;
+    if (!activePreviewContext.selections?.length) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, screenshotDataUrl: undefined });
+  }, [activePreviewContext]);
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3536,6 +3565,13 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       const images = message.files
         .filter((f) => f.url && f.mediaType?.startsWith("image/"))
         .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
+      const previewImages = [
+        activePreviewContext?.screenshotDataUrl,
+        ...(activePreviewContext?.selections?.map((selection) => selection.screenshotDataUrl) ?? []),
+      ].filter((url): url is string => Boolean(url));
+      for (const url of previewImages) {
+        if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png" });
+      }
       // PromptInput resets the form on successful submit — drop any cached
       // draft for this session so a later tab-switch does not rehydrate it.
       // We clear both the current id key and the new-session sentinel to
@@ -3546,9 +3582,14 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       historyIndexRef.current = null;
       historyDraftRef.current = "";
       setHasDraft(false);
-      await send(resolvedText, images.length > 0 ? images : undefined);
+      await send(
+        resolvedText,
+        images.length > 0 ? images : undefined,
+        activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
+      );
+      if (activePreviewContext) clearAppPreviewContext();
     },
-    [isLoading, send, sessionId]
+    [activePreviewContext, isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -3852,6 +3893,90 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             setQueueClearConfirm(false);
           }}
         />
+        {activePreviewContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <AppWindow className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">App Preview</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{activePreviewContext.url}</span>
+              <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+                {activePreviewContext.viewport.width} × {activePreviewContext.viewport.height}
+              </span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearAppPreviewContext} aria-label="Remove all App Preview context" title="Remove all">
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activePreviewContext.selections?.map((selection, index) => (
+                <div key={`${selection.node.selector}-${index}`} className="flex h-9 min-w-0 max-w-[260px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  {selection.screenshotDataUrl ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                          onClick={() => setExpandedPreviewImage({ url: selection.screenshotDataUrl!, label: selection.node.selector })}
+                          aria-label={`Enlarge ${selection.node.selector} screenshot`}
+                        >
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element" className="h-full w-full object-cover" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" sideOffset={8} className="w-[420px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                        <div className="flex min-h-24 items-center overflow-auto border border-border/50 bg-muted/40 p-2">
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element preview" className="mx-auto max-h-72 max-w-none object-contain" />
+                        </div>
+                        <p className="mt-1.5 truncate px-1 font-mono text-[10px] text-muted-foreground">{selection.node.selector}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <div className="h-7 w-9 shrink-0 animate-pulse bg-muted" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={selection.node.selector}>{selection.node.selector}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePreviewSelection(index)} aria-label={`Remove ${selection.node.selector}`}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              {activePreviewContext.screenshotDataUrl && (
+                <div className="flex h-9 min-w-0 max-w-[220px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                        onClick={() => setExpandedPreviewImage({ url: activePreviewContext.screenshotDataUrl!, label: "App Preview screenshot" })}
+                        aria-label="Enlarge App Preview screenshot"
+                      >
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot" className="h-full w-full object-cover" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" sideOffset={8} className="w-[520px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                      <div className="flex min-h-32 items-center justify-center border border-border/50 bg-muted/40 p-2">
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot preview" className="max-h-80 max-w-full object-contain" />
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                  <span className="min-w-0 flex-1 truncate text-[10px]">Screenshot</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={removePreviewScreenshot} aria-label="Remove App Preview screenshot">
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        <Dialog open={Boolean(expandedPreviewImage)} onOpenChange={(open) => { if (!open) setExpandedPreviewImage(null); }}>
+          <DialogContent className="flex h-[86vh] w-[92vw] max-w-[1280px] flex-col gap-0 overflow-hidden p-0">
+            <div className="flex h-11 shrink-0 items-center border-b border-border px-3 pr-12">
+              <DialogTitle className="truncate text-sm">{expandedPreviewImage?.label ?? "App Preview screenshot"}</DialogTitle>
+            </div>
+            <div className="min-h-0 flex-1 bg-muted/40 p-4">
+              {expandedPreviewImage && (
+                <img src={expandedPreviewImage.url} alt="Enlarged App Preview context" className="h-full w-full bg-background object-contain shadow-lg" />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
         <MentionPopover
           ref={mentionRef}
           textareaRef={textareaRef}

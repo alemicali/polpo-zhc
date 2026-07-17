@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEvents } from "@polpo-ai/react";
 import { apiUrl, config } from "@/lib/config";
 
 export type BackgroundWaitState = "waiting" | "ready" | "running" | "completed" | "failed" | "cancelled";
@@ -21,10 +22,19 @@ function headers(): HeadersInit {
 }
 
 export function useBackgroundWaits(sessionId?: string | null) {
+  const { events } = useEvents([
+    "background-wait:created",
+    "background-wait:ready",
+    "background-wait:running",
+    "background-wait:completed",
+    "background-wait:failed",
+    "background-wait:cancelled",
+  ], 1);
   const [waits, setWaits] = useState<BackgroundWait[]>([]);
   const [loading, setLoading] = useState(true);
   const normalizedSessionId = sessionId?.trim() || null;
   const currentSessionIdRef = useRef(normalizedSessionId);
+  const requestIdRef = useRef(0);
   currentSessionIdRef.current = normalizedSessionId;
 
   const refresh = useCallback(async () => {
@@ -35,17 +45,21 @@ export function useBackgroundWaits(sessionId?: string | null) {
     }
 
     const requestedSessionId = normalizedSessionId;
+    const requestId = ++requestIdRef.current;
     try {
       const response = await fetch(apiUrl(`/api/v1/background-waits?sessionId=${encodeURIComponent(requestedSessionId)}`), {
         headers: headers(),
         credentials: "include",
+        cache: "no-store",
       });
       const payload = await response.json();
-      if (currentSessionIdRef.current === requestedSessionId && response.ok && payload.ok) {
+      if (requestId === requestIdRef.current && currentSessionIdRef.current === requestedSessionId && response.ok && payload.ok) {
         setWaits(payload.data);
       }
+    } catch {
+      // SSE or the next recovery poll will retry without disturbing current data.
     } finally {
-      if (currentSessionIdRef.current === requestedSessionId) setLoading(false);
+      if (requestId === requestIdRef.current && currentSessionIdRef.current === requestedSessionId) setLoading(false);
     }
   }, [normalizedSessionId]);
 
@@ -61,6 +75,13 @@ export function useBackgroundWaits(sessionId?: string | null) {
       window.removeEventListener("polpo:background-waits-changed", onChanged);
     };
   }, [normalizedSessionId, refresh]);
+
+  const latestEvent = events.at(-1);
+  useEffect(() => {
+    if (!latestEvent) return;
+    const eventSessionId = (latestEvent.data as { wait?: { sessionId?: string } } | undefined)?.wait?.sessionId;
+    if (eventSessionId === normalizedSessionId) void refresh();
+  }, [latestEvent, normalizedSessionId, refresh]);
 
   const cancel = useCallback(async (id: string) => {
     const response = await fetch(apiUrl(`/api/v1/background-waits/${encodeURIComponent(id)}`), {

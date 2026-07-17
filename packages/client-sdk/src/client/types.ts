@@ -1516,7 +1516,7 @@ export interface OpenFilePayload {
 }
 
 export interface NavigateToPayload {
-  /** Target page: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, settings */
+  /** Target page: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, app_preview, activity, chat, memory, settings */
   target: string;
   /** Entity ID for detail pages (task, mission) */
   id?: string;
@@ -1526,6 +1526,8 @@ export interface NavigateToPayload {
   path?: string;
   /** File to highlight/select for files target */
   highlight?: string;
+  /** Public preview URL for the app_preview target */
+  url?: string;
 }
 
 /** Payload for open_tab — opens a URL in a new browser tab. */

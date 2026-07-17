@@ -563,6 +563,62 @@ describe("POST /v1/chat/completions", () => {
       });
       expect(askChunk).toBeDefined();
     });
+
+    test("ask_user is available in direct agent chats", async () => {
+      setStreamImpl((...args: unknown[]) => {
+        const options = args[1] as { systemPrompt: string; tools: Array<{ name: string }> };
+        expect(options.tools.some((tool) => tool.name === "ask_user")).toBe(true);
+        expect(options.systemPrompt).toContain("structured ask_user tool");
+        expect(options.systemPrompt.lastIndexOf("structured ask_user tool"))
+          .toBeGreaterThan(options.systemPrompt.lastIndexOf("proceed without asking questions"));
+        const msg = mockToolCallResponse("ask_user", {
+          questions: [{
+            id: "framework",
+            question: "Which framework should I use?",
+            options: [
+              { label: "React", description: "Use React" },
+              { label: "Vue", description: "Use Vue" },
+            ],
+          }],
+        });
+        return mockStream(mockToolCallStreamEvents(msg), msg);
+      });
+
+      const res = await postCompletions({
+        agent: "agent-1",
+        messages: [{ role: "user", content: "Build the interface" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await parseJson(res);
+      const choice = (body.choices as any[])[0];
+      expect(choice.finish_reason).toBe("ask_user");
+      expect(choice.ask_user.questions[0].id).toBe("framework");
+    });
+
+    test("navigate_to preserves an App Preview URL", async () => {
+      setStreamImpl(() => {
+        const msg = mockToolCallResponse("navigate_to", {
+          target: "app_preview",
+          url: "https://machine.example.ts.net:3020/",
+        });
+        return mockStream(mockToolCallStreamEvents(msg), msg);
+      });
+
+      const res = await postCompletions({
+        messages: [{ role: "user", content: "Open the active app preview" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const choice = ((await parseJson(res)).choices as any[])[0];
+      expect(choice.finish_reason).toBe("navigate_to");
+      expect(choice.navigate_to).toMatchObject({
+        target: "app_preview",
+        url: "https://machine.example.ts.net:3020/",
+      });
+    });
   });
 
   // ── Auth ────────────────────────────────────────────

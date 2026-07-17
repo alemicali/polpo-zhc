@@ -199,6 +199,7 @@ export interface NavigateToData {
   name?: string;
   path?: string;
   highlight?: string;
+  url?: string;
 }
 
 export interface OpenTabData {
@@ -609,6 +610,7 @@ export function useChat() {
           name: args.name as string | undefined,
           path: args.path as string | undefined,
           highlight: args.highlight as string | undefined,
+          url: args.url as string | undefined,
         };
       } else if (tc.name === "open_tab" && tc.arguments) {
         // Display-only — do NOT set pending state (one-shot action)
@@ -1356,6 +1358,7 @@ export function useChat() {
           name: nav.name,
           path: nav.path,
           highlight: nav.highlight,
+          url: nav.url,
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
@@ -1573,21 +1576,24 @@ export function useChat() {
 
   // Send a message (streaming). Optionally attach images (data URLs).
   const send = useCallback(
-    async (message: string, images?: { url: string; mimeType: string }[]) => {
+    async (message: string, images?: { url: string; mimeType: string }[], context?: string) => {
       const sessionKey = activeSessionKeyRef.current;
       clearSessionPending(sessionKey);
+      const modelMessage = context
+        ? `${message}\n\n<app_preview_context>\n${context}\n</app_preview_context>`
+        : message;
 
       // Build content: plain string or multimodal content parts
       const content: ChatCompletionMessage["content"] =
         images && images.length > 0
           ? [
-              { type: "text" as const, text: message },
+              { type: "text" as const, text: modelMessage },
               ...images.map((img) => ({
                 type: "image_url" as const,
                 image_url: { url: img.url },
               })),
             ]
-          : message;
+          : modelMessage;
 
       const forceNew = wantsNewSessionRef.current;
       wantsNewSessionRef.current = false;
@@ -1926,6 +1932,7 @@ export function useChat() {
     if (data.id) label += ` "${data.id}"`;
     if (data.name) label += ` "${data.name}"`;
     if (data.path) label += ` (${data.path})`;
+    if (data.url) label += ` (${data.url})`;
     void appendSystemAndStream(
       `Client-side tool navigate_to completed successfully. Destination: ${label}. Do not call navigate_to again for this same request. Continue with the final answer.`,
     );

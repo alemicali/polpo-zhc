@@ -79,7 +79,7 @@ export class CodeServerManager {
     const theme = options.theme ?? "dark";
     const existing = this.sessions.get(id);
     if (existing && existing.process.exitCode == null) {
-      if (options.force) {
+      if (options.force || existing.theme !== theme) {
         await this.stopSession(id);
       } else {
         const baseDir = join(this.orchestrator.getPolpoDir(), "code-server", id);

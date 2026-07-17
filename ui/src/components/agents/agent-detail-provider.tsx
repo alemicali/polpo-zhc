@@ -26,6 +26,7 @@ import type {
 } from "@polpo-ai/react";
 import { taskStatusOrder } from "@/lib/agent-meta";
 import { toolCategories } from "@/lib/agent-meta";
+import { useAsyncAction } from "@/hooks/use-polpo";
 
 // ── Context interface ──
 
@@ -42,6 +43,7 @@ export interface TaskStats {
 export interface AgentDetailState {
   agent: AgentConfig;
   isLoading: boolean;
+  isRefreshing: boolean;
   error: Error | null;
   /** Active process for this agent (if any) */
   process: AgentProcess | undefined;
@@ -70,7 +72,7 @@ export interface AgentDetailState {
 }
 
 export interface AgentDetailActions {
-  refetch: () => void;
+  refetch: () => Promise<void>;
   refetchVault: () => Promise<void>;
 }
 
@@ -104,12 +106,23 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
   const { name } = useParams<{ name: string }>();
   const agentName = name ?? "";
 
-  const { agent, isLoading, error, refetch } = useAgent(agentName);
-  const { agents, teams } = useAgents();
-  const { processes } = useProcesses();
-  const { skills: allSkills } = useSkills();
+  const { agent, isLoading, error, refetch: refetchAgent } = useAgent(agentName);
+  const { agents, teams, refetch: refetchAgents } = useAgents();
+  const { processes, refetch: refetchProcesses } = useProcesses();
+  const { skills: allSkills, refetch: refetchSkills } = useSkills();
   const { entries: vaultEntries, refetch: refetchVault } = useVaultEntries(agentName);
-  const { tasks: agentTasks } = useTasks({ assignTo: agentName });
+  const { tasks: agentTasks, refetch: refetchTasks } = useTasks({ assignTo: agentName });
+
+  const [refetch, isRefreshing] = useAsyncAction(async () => {
+    await Promise.all([
+      refetchAgent(),
+      refetchAgents(),
+      refetchProcesses(),
+      refetchSkills(),
+      refetchVault(),
+      refetchTasks(),
+    ]);
+  });
 
   // Skill pool map
   const skillPool = useMemo(() => {
@@ -190,6 +203,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     state: {
       agent: agent!,
       isLoading,
+      isRefreshing,
       error: error ?? null,
       process,
       subordinates,
@@ -207,7 +221,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     actions: { refetch, refetchVault },
     meta: { agentName },
   }), [
-    agent, isLoading, error, process, subordinates, manager,
+    agent, isLoading, isRefreshing, error, process, subordinates, manager,
     taskStats, sortedTasks, skillPool, vaultEntries, mcpEntries,
     agentAllowedTools, enabledCategories, teamInfo, refetch, refetchVault, agentName,
   ]);

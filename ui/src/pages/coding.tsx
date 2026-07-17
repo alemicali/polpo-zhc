@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import {
   Cloud,
   GitBranch,
   GitMerge,
   GitPullRequest as GitPullRequestIcon,
-  Home as HomeIcon,
   Laptop,
   Loader2,
   PanelLeft,
@@ -36,6 +34,7 @@ type TerminalStatus = {
 };
 
 export function CodingPage() {
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TerminalStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useLocalState<boolean>("polpo:coding:sidebarOpen", true);
@@ -63,6 +62,7 @@ export function CodingPage() {
 
   const [codingSettings] = useCodingSettings();
   const [busy, setBusy] = useState(false);
+  const [surfaceWidth, setSurfaceWidth] = useState(() => window.innerWidth);
 
   /** Empty worktrees that exist on disk but haven't spawned a session yet.
    * Survives reloads via localStorage; removed when the first session lands.
@@ -213,6 +213,15 @@ export function CodingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!status?.enabled || !surfaceRef.current) return;
+    const update = () => setSurfaceWidth(surfaceRef.current?.getBoundingClientRect().width ?? window.innerWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(surfaceRef.current);
+    return () => observer.disconnect();
+  }, [status?.enabled]);
+
   if (statusError) {
     return (
       <CodingNotice
@@ -236,25 +245,19 @@ export function CodingPage() {
     );
   }
 
+  const showCodingSidebar = sidebarOpen && surfaceWidth >= 480;
+  const showCodingRightPanel = rightOpen && (surfaceWidth >= 860 || !showCodingSidebar);
+
   return (
-    <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0d0d0d] text-white/85">
-      {/* Top bar — minimal: home · sidebar toggle · restart active */}
-      <header className="flex h-10 shrink-0 items-center gap-1 border-b border-white/[0.06] pl-3 pr-2">
-        <Link
-          to="/dashboard"
-          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-white/55 hover:bg-white/[0.05] hover:text-white"
-          title="Back to dashboard"
-        >
-          <HomeIcon className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Home</span>
-        </Link>
-        <div className="h-4 w-px bg-white/[0.08] mx-0.5" />
+    <div ref={surfaceRef} className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#0d0d0d] text-white/85">
+      {/* Coding-local controls only; platform navigation stays outside. */}
+      <header className="flex h-10 shrink-0 items-center gap-1 border-b border-white/[0.08] px-2">
         <Button
           variant="ghost"
           size="icon"
           className={cn(
             "h-7 w-7 rounded-md transition-colors",
-            sidebarOpen ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
+            showCodingSidebar ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
           )}
           onClick={() => setSidebarOpen((v) => !v)}
           title="Toggle sidebar"
@@ -266,7 +269,7 @@ export function CodingPage() {
           size="icon"
           className={cn(
             "h-7 w-7 rounded-md transition-colors",
-            rightOpen ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
+            showCodingRightPanel ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
           )}
           onClick={() => setRightOpen((v) => !v)}
           title="Toggle right panel"
@@ -310,7 +313,7 @@ export function CodingPage() {
           onLayoutChanged={(layout) => setPanelLayout(layout)}
           className="flex-1"
         >
-          {sidebarOpen && (
+          {showCodingSidebar && (
             <>
               <ResizablePanel
                 id="sidebar"
@@ -402,7 +405,7 @@ export function CodingPage() {
             </main>
           </ResizablePanel>
 
-          {rightOpen && (
+          {showCodingRightPanel && (
             <>
               <ResizableHandle />
               <ResizablePanel

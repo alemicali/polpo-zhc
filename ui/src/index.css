@@ -900,3 +900,13 @@
 .bio-pulse {
   animation: bioluminescent-pulse 2s ease-in-out infinite;
 }
+@keyframes app-preview-scan {
+  0% { top: 0; opacity: 0; }
+  8% { opacity: 1; }
+  92% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.app-preview-scan-line {
+  animation: app-preview-scan 1.2s linear infinite;
+}

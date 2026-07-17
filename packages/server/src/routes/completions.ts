@@ -534,13 +534,18 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
         "explain your reasoning, and wait for user input when needed.",
         "You still have access to all your coding tools to help the user.",
+        "When you genuinely need a clarification or preference, use the structured ask_user tool",
+        "so the user can answer through the chat controls. Do not use it for questions you can resolve yourself.",
         "You may also use the client-side UI tools open_file, navigate_to, and open_tab when",
         "the user asks to view a file, move to a Polpo page, or open an external URL.",
         "After one of those client-side tools completes, the UI sends a system acknowledgement;",
         "treat it as the tool result and do not repeat the same UI action for the same request.",
       ].join("\n");
 
-      const basePrompt = `${conversationalPreamble}\n\n${agentSystemPrompt}`;
+      // Keep the chat-mode rules last: buildAgentPrompt is shared with
+      // autonomous task execution and intentionally tells runners not to ask
+      // questions. In a direct chat, this later block overrides that rule.
+      const basePrompt = `${agentSystemPrompt}\n\n${conversationalPreamble}`;
       fullSystemPrompt = extraSystemParts.length > 0
         ? `${basePrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
         : basePrompt;
@@ -951,6 +956,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     name: args.name as string | undefined,
                     path: args.path as string | undefined,
                     highlight: args.highlight as string | undefined,
+                    url: args.url as string | undefined,
                   },
                 }));
               } else if (interactiveCall.name === "open_tab") {
@@ -1388,6 +1394,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     name: args.name as string | undefined,
                     path: args.path as string | undefined,
                     highlight: args.highlight as string | undefined,
+                    url: args.url as string | undefined,
                   },
                 }],
               });

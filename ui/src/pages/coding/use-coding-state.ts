@@ -3,19 +3,25 @@ import { apiUrl } from "@/lib/config";
 import type { CodingCodeServerSession, CodingTerminal, CodingWorkspace, ConnectionState } from "./types";
 
 const STORAGE_KEY = "polpo-coding-layout";
+const SYNC_EVENT = "polpo:coding-state-sync";
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-type Persisted = {
+export type PersistedCodingState = {
   workspaces: CodingWorkspace[];
   terminals: CodingTerminal[];
   codeServers: CodingCodeServerSession[];
   activeId: string;
 };
 
-function defaultState(): Persisted {
+export function syncCodingState(state: PersistedCodingState): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  window.dispatchEvent(new CustomEvent<PersistedCodingState>(SYNC_EVENT, { detail: state }));
+}
+
+function defaultState(): PersistedCodingState {
   const workspaceId = makeId("workspace");
   const terminalId = makeId("terminal");
   return {
@@ -26,7 +32,7 @@ function defaultState(): Persisted {
   };
 }
 
-function readStored(): Persisted {
+function readStored(): PersistedCodingState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
@@ -50,16 +56,16 @@ function readStored(): Persisted {
   }
 }
 
-async function fetchServerState(): Promise<{ state: Persisted; initialized: boolean }> {
+async function fetchServerState(): Promise<{ state: PersistedCodingState; initialized: boolean }> {
   const res = await fetch(apiUrl("/api/v1/coding/sessions"), { credentials: "include" });
   const body = await res.json().catch(() => null);
   if (!res.ok || !body?.ok) {
     throw new Error(body?.error || `Coding sessions request failed (${res.status})`);
   }
-  return body.data as { state: Persisted; initialized: boolean };
+  return body.data as { state: PersistedCodingState; initialized: boolean };
 }
 
-async function saveServerState(state: Persisted): Promise<void> {
+async function saveServerState(state: PersistedCodingState): Promise<void> {
   const res = await fetch(apiUrl("/api/v1/coding/sessions"), {
     method: "PATCH",
     credentials: "include",
@@ -100,6 +106,20 @@ export function useCodingState() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const sync = (event: Event) => {
+      const state = (event as CustomEvent<PersistedCodingState>).detail;
+      if (!state) return;
+      setWorkspaces(state.workspaces);
+      setTerminals(state.terminals);
+      setCodeServers(state.codeServers ?? []);
+      setActiveId(state.activeId);
+      hydratedRef.current = true;
+    };
+    window.addEventListener(SYNC_EVENT, sync);
+    return () => window.removeEventListener(SYNC_EVENT, sync);
   }, []);
 
   useEffect(() => {

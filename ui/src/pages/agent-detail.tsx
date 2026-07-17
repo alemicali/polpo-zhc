@@ -29,6 +29,7 @@ import {
   AgentDetailProvider,
   useAgentDetail,
 } from "@/components/agents/agent-detail-provider";
+import { cn } from "@/lib/utils";
 
 // Sidebar cards
 import { AgentHeroCard } from "@/components/agents/agent-hero-card";
@@ -80,7 +81,7 @@ function AgentDetailSidebar() {
 // ── Mobile identity summary (visible only on small screens) ──
 
 function MobileIdentitySummary() {
-  const { state: { agent, process }, actions: { refetch } } = useAgentDetail();
+  const { state: { agent, process, isRefreshing }, actions: { refetch } } = useAgentDetail();
   const identity = agent.identity;
 
   return (
@@ -97,8 +98,15 @@ function MobileIdentitySummary() {
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
           {agent.model && <p className="mt-0.5 truncate text-[10px] font-mono text-muted-foreground">{agent.model}</p>}
         </div>
-        <Button variant="outline" size="sm" onClick={refetch} className="shrink-0 ml-auto">
-          <RefreshCw className="h-3.5 w-3.5" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={refetch}
+          disabled={isRefreshing}
+          className="shrink-0 ml-auto"
+          aria-label={isRefreshing ? "Refreshing agent" : "Refresh agent"}
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>
       </div>
     </div>
@@ -202,7 +210,7 @@ function AgentDetailLoading() {
 // ── Error state ──
 
 function AgentDetailError() {
-  const { state: { error }, actions: { refetch } } = useAgentDetail();
+  const { state: { error, isRefreshing }, actions: { refetch } } = useAgentDetail();
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 bg-card/60 rounded-lg p-8">
@@ -214,8 +222,9 @@ function AgentDetailError() {
         <Button variant="outline" size="sm" asChild>
           <Link to="/agents"><ArrowLeft className="h-3.5 w-3.5 mr-1" /> Back to Agents</Link>
         </Button>
-        <Button variant="outline" size="sm" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Retry
+        <Button variant="outline" size="sm" onClick={refetch} disabled={isRefreshing}>
+          <RefreshCw className={cn("h-3.5 w-3.5 mr-1", isRefreshing && "animate-spin")} />
+          {isRefreshing ? "Retrying" : "Retry"}
         </Button>
       </div>
     </div>

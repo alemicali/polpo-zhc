@@ -45,6 +45,7 @@ import {
   executeOrchestratorBrowserTool,
 } from "./orchestrator-browser-tools.js";
 import { activeTaskWaitRegistry } from "./active-task-waits.js";
+import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -70,6 +71,12 @@ export interface OrchestratorToolExecutionContext {
 const getStatusTool: Tool = {
   name: "get_status",
   description: "Get a full overview: task counts, active processes, team info, missions, memory status, pending approvals, active checkpoints.",
+  parameters: Type.Object({}),
+};
+
+const listAppPreviewsTool: Tool = {
+  name: "list_app_previews",
+  description: "List local web services that are currently running and exposed through this machine's Tailscale Serve configuration. Returns public HTTPS URLs and identifies the recommended App Preview target.",
   parameters: Type.Object({}),
 };
 
@@ -227,9 +234,35 @@ const deleteTasksTool: Tool = {
 
 const retryTaskTool: Tool = {
   name: "retry_task",
-  description: "Retry a failed task — resets it to pending status.",
+  description: "Restart a failed task from scratch by resetting it to pending. Do not use this to preserve and resume the previous agent context; use send_task_direction with continue or auto instead.",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to retry" }),
+  }),
+};
+
+const sendTaskDirectionTool: Tool = {
+  name: "send_task_direction",
+  description:
+    "Send new instructions to a task while preserving its work context. In auto mode, an active task is steered and a stopped or terminal task is continued from its checkpoint. Use retry_task only for a full restart.",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID receiving the instruction" }),
+    message: Type.String({
+      minLength: 1,
+      maxLength: 8_000,
+      description: "Concrete instruction describing what the agent should change, do next, or resume",
+    }),
+    mode: Type.Optional(Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("steer"),
+      Type.Literal("follow_up"),
+      Type.Literal("continue"),
+    ], {
+      description: "auto (default) selects steer for an active run and continue otherwise; steer redirects the current turn; follow_up queues a message after the current turn; continue resumes a stopped or terminal task from its checkpoint",
+      default: "auto",
+    })),
+    confirmSideEffects: Type.Optional(Type.Boolean({
+      description: "Set true only after the user explicitly confirms that continuing may repeat this task's external side effects",
+    })),
   }),
 };
 
@@ -1509,19 +1542,22 @@ Available targets:
 - "approvals" — Approvals page
 - "playbooks" — Playbooks page
 - "config" — Configuration / settings page
+- "app_preview" — App Preview page (optional url selects a running app/service)
 
 Examples:
 - navigate_to({ target: "dashboard" })
 - navigate_to({ target: "mission", id: "abc123" })
 - navigate_to({ target: "agent", name: "coder" })
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
+- navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, app_preview, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
     highlight: Type.Optional(Type.String({ description: "File to highlight/select for files target" })),
+    url: Type.Optional(Type.String({ description: "Public preview URL when target is app_preview. Obtain it from list_app_previews instead of guessing ports." })),
   }),
 };
 
@@ -1582,7 +1618,7 @@ Examples:
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
-const askUserTool: Tool = {
+export const askUserTool: Tool = {
   name: "ask_user",
   description: `Ask the user clarifying questions when something is ambiguous or you need preferences.
 Each question has pre-populated options the user can pick from, plus a free-text custom input.
@@ -1675,7 +1711,7 @@ export function validateRenderWidgetArgs(args: Record<string, unknown>): string 
 // ═══════════════════════════════════════════════════════
 
 export const READ_TOOLS = new Set([
-  "get_status", "list_tasks", "get_task", "list_missions", "get_mission",
+  "get_status", "list_app_previews", "list_tasks", "get_task", "list_missions", "get_mission",
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
@@ -1697,7 +1733,7 @@ export const READ_TOOLS = new Set([
 export const WRITE_TOOLS = new Set([
   // Task
   "create_task", "update_task", "delete_task", "delete_tasks",
-  "retry_task", "kill_task", "reassess_task", "force_fail_task",
+  "retry_task", "send_task_direction", "kill_task", "reassess_task", "force_fail_task",
   // Mission
   "create_mission", "update_mission", "execute_mission", "resume_mission", "abort_mission", "delete_mission",
   // Team
@@ -1793,14 +1829,14 @@ export function isClientSideChatTool(toolName: string): boolean {
 }
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
-  // Read (15)
-  getStatusTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
+  // Read
+  getStatusTool, listAppPreviewsTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
   listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
   listApprovalsTool, listCheckpointsTool, listDelaysTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
-  // Task (8)
+  // Task (9)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
-  retryTaskTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
+  retryTaskTool, sendTaskDirectionTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
   // Mission (6 + 14 atomic)
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   addMissionTaskTool, updateMissionTaskTool, removeMissionTaskTool, reorderMissionTasksTool,
@@ -1863,6 +1899,7 @@ const TOOL_LABELS: Record<string, string> = {
   delete_task: "Delete Task",
   delete_tasks: "Delete Tasks",
   retry_task: "Retry Task",
+  send_task_direction: "Direct Task",
   kill_task: "Kill Task",
   reassess_task: "Reassess Task",
   force_fail_task: "Force Fail Task",
@@ -2023,6 +2060,7 @@ export async function executeOrchestratorTool(
     switch (toolName) {
       // ── Read ──
       case "get_status":       return execGetStatus(polpo);
+      case "list_app_previews": return execListAppPreviews();
       case "list_tasks":       return execListTasks(polpo, args);
       case "get_task":         return execGetTask(polpo, args);
       case "list_missions":    return execListMissions(polpo, args);
@@ -2042,6 +2080,7 @@ export async function executeOrchestratorTool(
       case "delete_task":      return execDeleteTask(polpo, args);
       case "delete_tasks":     return execDeleteTasks(polpo, args);
       case "retry_task":       return execRetryTask(polpo, args);
+      case "send_task_direction": return execSendTaskDirection(polpo, args);
       case "kill_task":        return execKillTask(polpo, args);
       case "reassess_task":    return execReassessTask(polpo, args);
       case "force_fail_task":  return execForceFailTask(polpo, args);
@@ -2312,6 +2351,12 @@ export async function formatToolDetails(
       if (args.assignTo) main.push(["New agent", String(args.assignTo)]);
       if (args.description) extra.push(["New description", trunc(args.description, 200)]);
       break;
+    case "send_task_direction":
+      main.push(["Task", await resolveTask(args.taskId)]);
+      main.push(["Mode", String(args.mode ?? "auto")]);
+      if (args.confirmSideEffects) main.push(["Repeat side effects", "confirmed"]);
+      extra.push(["Direction", trunc(args.message, 200)]);
+      break;
     case "create_mission":
       main.push(["Name", trunc(args.name)]);
       if (args.data) extra.push(["Content", trunc(args.data, 300)]);
@@ -2539,6 +2584,24 @@ async function execGetStatus(polpo: Orchestrator): Promise<string> {
   return lines.join("\n");
 }
 
+async function execListAppPreviews(): Promise<string> {
+  const discovery = await discoverAppPreviewTargets();
+  if (discovery.targets.length === 0) {
+    return "No active local services are currently exposed through Tailscale Serve.";
+  }
+  const lines = [
+    `Tailscale machine: ${discovery.hostname ?? "unknown"}`,
+    "Active App Preview targets:",
+  ];
+  for (const target of discovery.targets) {
+    const recommended = discovery.suggested?.url === target.url ? " [recommended]" : "";
+    const platform = target.infrastructure ? " [Polpo infrastructure]" : "";
+    lines.push(`- ${target.label} — port ${target.port} — ${target.url}${recommended}${platform}`);
+  }
+  lines.push('Use navigate_to with target="app_preview" and one of these exact URLs to show it in the user interface.');
+  return lines.join("\n");
+}
+
 async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const state = await polpo.getStore().getState();
   let tasks = state.tasks;
@@ -2762,6 +2825,18 @@ async function execDeleteTasks(polpo: Orchestrator, args: Record<string, unknown
 async function execRetryTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   await polpo.retryTask(args.taskId as string);
   return `Task ${args.taskId} retried — reset to pending.`;
+}
+
+async function execSendTaskDirection(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const result = await polpo.sendDirection(
+    args.taskId as string,
+    args.message as string,
+    {
+      mode: (args.mode as "auto" | "steer" | "follow_up" | "continue" | undefined) ?? "auto",
+      confirmSideEffects: args.confirmSideEffects as boolean | undefined,
+    },
+  );
+  return `Direction sent to task ${args.taskId} using ${result.action} mode.`;
 }
 
 async function execKillTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

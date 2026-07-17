@@ -27,7 +27,7 @@ import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
 
 export function AgentHeroCard() {
-  const { state: { agent, process, teamColorIndex }, actions: { refetch } } = useAgentDetail();
+  const { state: { agent, process, teamColorIndex, isRefreshing }, actions: { refetch } } = useAgentDetail();
   const identity = agent.identity;
   const tc = getTeamColor(teamColorIndex);
 
@@ -130,8 +130,9 @@ export function AgentHeroCard() {
 
         {/* Refresh */}
         <div className="pt-1">
-          <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch}>
-            <RefreshCw className="h-3 w-3 mr-1.5" /> Refresh
+          <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch} disabled={isRefreshing}>
+            <RefreshCw className={cn("h-3 w-3 mr-1.5", isRefreshing && "animate-spin")} />
+            {isRefreshing ? "Refreshing" : "Refresh"}
           </Button>
         </div>
       </CardContent>

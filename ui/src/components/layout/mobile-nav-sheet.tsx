@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   Code2,
+  AppWindow,
   LayoutDashboard,
   ListChecks,
   MessageCircle,
@@ -46,6 +47,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
+      { to: "/browser", icon: AppWindow, label: "App Preview" },
       { to: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
     ],

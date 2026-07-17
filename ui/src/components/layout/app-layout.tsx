@@ -8,15 +8,15 @@ import { ChatFirstLayout } from "./chat-first-layout";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
 
-/** Routes that own their own chrome and don't want the page Header / padding. */
-function isFullBleedPath(pathname: string): boolean {
-  return pathname === "/coding" || pathname.startsWith("/coding/");
+/** Tool surfaces that should meet the surrounding pane edges. */
+function hasNoPagePadding(pathname: string): boolean {
+  return pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser";
 }
 
 export function AppLayout() {
   const layoutMode = useLayoutMode();
   const { pathname } = useLocation();
-  const fullBleed = isFullBleedPath(pathname);
+  const noPagePadding = hasNoPagePadding(pathname);
 
   // Both branches return a root <div> so React reconciles without remounting.
   // The key ensures each layout mode has a stable identity.
@@ -37,16 +37,16 @@ export function AppLayout() {
         <Sidebar />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        {!fullBleed && <Header />}
+        <Header />
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <main
-            className={fullBleed
+            className={noPagePadding
               ? "flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden"
               : "flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden p-4 lg:p-6 pb-2 lg:pb-3"}
           >
             <PersistentPageOutlet />
           </main>
-          {!fullBleed && <ChatSidebar />}
+          <ChatSidebar />
         </div>
       </div>
       <BottomNav />

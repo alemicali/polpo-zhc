@@ -45,7 +45,7 @@ export function ChatNavigationEffects() {
   // Auto-navigate to any page when navigate_to fires
   useEffect(() => {
     if (!pendingNavigateTo) return;
-    const { target, id, name, path, highlight } = pendingNavigateTo;
+    const { target, id, name, path, highlight, url } = pendingNavigateTo;
 
     let route: string;
     switch (target) {
@@ -71,6 +71,12 @@ export function ChatNavigationEffects() {
         const params = new URLSearchParams({ path: dir });
         if (highlight) params.set("highlight", highlight);
         route = `/files?${params.toString()}`;
+        break;
+      }
+      case "app_preview": {
+        const params = new URLSearchParams();
+        if (url) params.set("url", url);
+        route = params.size > 0 ? `/browser?${params.toString()}` : "/browser";
         break;
       }
       default:           route = `/${target}`; break;

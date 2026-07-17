@@ -9,7 +9,7 @@
  * work seamlessly. Tab icons call navigate() for top-level sections.
  */
 
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -25,6 +25,7 @@ import {
   FolderOpen,
   Terminal,
   Code2,
+  AppWindow,
   MousePointerClick,
   Sun,
   Moon,
@@ -101,6 +102,8 @@ const pinnedTabs: TabDef[] = [
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
   { path: "/files", icon: FolderOpen, label: "Files" },
+  { path: "/coding", icon: Code2, label: "Coding" },
+  { path: "/browser", icon: AppWindow, label: "App Preview" },
   { path: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
 ];
 
@@ -127,7 +130,6 @@ const secondaryGroups: TabGroup[] = [
     label: "Tools",
     icon: Code2,
     tabs: [
-      { path: "/coding", icon: Code2, label: "Coding" },
       { path: "/terminal", icon: Terminal, label: "Terminal" },
     ],
   },
@@ -154,6 +156,7 @@ const tabs: TabDef[] = [
   { path: "/files", icon: FolderOpen, label: "Files" },
   { path: "/coding", icon: Code2, label: "Coding" },
   { path: "/terminal", icon: Terminal, label: "Terminal" },
+  { path: "/browser", icon: AppWindow, label: "App Preview" },
   { path: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
   { path: "/notifications", icon: Bell, label: "Notifications" },
   { path: "/schedules", icon: CalendarClock, label: "Schedules" },
@@ -572,23 +575,20 @@ function RightPanelContent() {
 
   // Resolve a page title from current path
   const title = resolvePageTitle(pathname);
-  // /coding owns its full pane — no tab strip, no title, no padding
-  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/");
+  // Tool surfaces keep the platform tab strip but meet its edges so their
+  // dense, resizable work areas get every available pixel.
+  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser";
   const showMoreNavigation = navMode === "more" && isSecondaryPath(pathname);
-
-  if (fullBleed && !showMoreNavigation) {
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <PersistentPageOutlet />
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PagesPanelHeader />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {showMoreNavigation && <MoreNavigation pathname={pathname} />}
+        {showMoreNavigation && (
+          <div className="max-lg:hidden">
+            <MoreNavigation pathname={pathname} />
+          </div>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {!fullBleed && title && (
             <div className="flex shrink-0 items-center px-5 pb-1 pt-3">
@@ -610,6 +610,31 @@ function RightPanelContent() {
 // ── Main layout ──
 
 export function ChatFirstLayout() {
+  const { pathname } = useLocation();
+  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setMobile(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  if (mobile) {
+    if (pathname === "/chat") {
+      return (
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+          <ChatPanelHeader />
+          <ChatTabs />
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <ChatPage embedded />
+          </div>
+        </div>
+      );
+    }
+    return <RightPanelContent />;
+  }
+
   return (
     <ResizablePanelGroup orientation="horizontal" id="chat-first-group">
       {/* Left: Chat */}
@@ -648,6 +673,7 @@ function resolvePageTitle(pathname: string): string {
     "/files": "Files",
     "/coding": "Coding",
     "/terminal": "Terminal",
+    "/browser": "App Preview",
     "/agent-live": "Browser Automation",
     "/config": "Configuration",
   };
