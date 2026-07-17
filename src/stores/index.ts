@@ -14,4 +14,4 @@ export { FileTeamStore } from "./file-team-store.js";
 export { FileAgentStore } from "./file-agent-store.js";
 export { WhatsAppStore } from "./whatsapp-store.js";
 export { FileAttachmentStore } from "./file-attachment-store.js";
-export { FileTokenUsageStore } from "./file-token-usage-store.js";
+export { FileTokenUsageStore, readTaskTokenEvents } from "./file-token-usage-store.js";

@@ -80,7 +80,7 @@ function TokenUsageStrip() {
           <Binary className="h-4 w-4 text-primary" />
           <div className="min-w-0">
             <div className="text-xs font-semibold">Token usage</div>
-            <div className="text-[10px] text-muted-foreground">{usage?.calls ?? 0} model calls</div>
+            <div className="text-[10px] text-muted-foreground">{usage?.calls ?? 0} chat calls</div>
           </div>
           {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </div>

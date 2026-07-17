@@ -1,8 +1,20 @@
-import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { TokenUsageRecord } from "@polpo-ai/server";
 
 export type TokenUsageRange = "24h" | "7d" | "30d" | "all";
+
+export interface TaskTokenEvent {
+  timestamp: string;
+  totalTokens: number;
+}
+
+interface CachedTaskLog {
+  fingerprint: string;
+  events: TaskTokenEvent[];
+}
+
+const taskLogCache = new Map<string, Map<string, CachedTaskLog>>();
 
 const RANGE_MS: Record<Exclude<TokenUsageRange, "all">, number> = {
   "24h": 24 * 60 * 60 * 1_000,
@@ -47,4 +59,54 @@ export class FileTokenUsageStore {
     }
     return records;
   }
+}
+
+function parseTaskTokenEvents(content: string): TaskTokenEvent[] {
+  const events: TaskTokenEvent[] = [];
+  let previousTotal = 0;
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const record = JSON.parse(line) as { ts?: string; event?: string; data?: { totalTokens?: number } };
+      if (record.event !== "activity" || !record.ts) continue;
+      const currentTotal = Number(record.data?.totalTokens) || 0;
+      if (currentTotal <= 0 || currentTotal === previousTotal) continue;
+      const delta = currentTotal > previousTotal ? currentTotal - previousTotal : currentTotal;
+      previousTotal = currentTotal;
+      if (delta > 0) events.push({ timestamp: record.ts, totalTokens: delta });
+    } catch {
+      // Ignore partial or unrelated log records.
+    }
+  }
+  return events;
+}
+
+/** Read cumulative task activity logs as timestamped token deltas. */
+export async function readTaskTokenEvents(polpoDir: string): Promise<TaskTokenEvent[]> {
+  const logsDir = join(polpoDir, "logs");
+  let files: string[];
+  try {
+    files = (await readdir(logsDir)).filter((file) => file.startsWith("run-") && file.endsWith(".jsonl"));
+  } catch {
+    return [];
+  }
+
+  const cache = taskLogCache.get(logsDir) ?? new Map<string, CachedTaskLog>();
+  taskLogCache.set(logsDir, cache);
+  const present = new Set(files);
+  for (const cachedFile of cache.keys()) {
+    if (!present.has(cachedFile)) cache.delete(cachedFile);
+  }
+
+  await Promise.all(files.map(async (file) => {
+    const path = join(logsDir, file);
+    const metadata = await stat(path).catch(() => null);
+    if (!metadata) return;
+    const fingerprint = `${metadata.size}:${metadata.mtimeMs}`;
+    if (cache.get(file)?.fingerprint === fingerprint) return;
+    const content = await readFile(path, "utf8").catch(() => "");
+    cache.set(file, { fingerprint, events: parseTaskTokenEvents(content) });
+  }));
+
+  return [...cache.values()].flatMap((entry) => entry.events);
 }
