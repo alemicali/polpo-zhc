@@ -60,12 +60,17 @@ function formatTokens(value: number): string {
 function TokenUsageStrip() {
   const [range, setRange] = useState<TokenUsageRange>("7d");
   const { usage, loading } = useTokenUsage(range);
-  const metrics = [
-    ["Total", usage?.totalTokens ?? 0],
-    ["Input", usage?.inputTokens ?? 0],
-    ["Output", usage?.outputTokens ?? 0],
-    ["Cache", (usage?.cacheReadTokens ?? 0) + (usage?.cacheWriteTokens ?? 0)],
-    ["Task agents", usage?.taskTokens ?? 0],
+  const metrics: Array<{ label: string; display: string; raw: string | number; detail?: string }> = [
+    { label: "Processed", display: formatTokens(usage?.totalTokens ?? 0), raw: usage?.totalTokens ?? 0 },
+    { label: "Uncached input", display: formatTokens(usage?.inputTokens ?? 0), raw: usage?.inputTokens ?? 0 },
+    { label: "Generated", display: formatTokens(usage?.outputTokens ?? 0), raw: usage?.outputTokens ?? 0 },
+    {
+      label: "Cache read",
+      display: formatTokens(usage?.cacheReadTokens ?? 0),
+      raw: `${(usage?.cacheReadTokens ?? 0).toLocaleString()} read / ${(usage?.cacheWriteTokens ?? 0).toLocaleString()} write`,
+      detail: `${formatTokens(usage?.cacheWriteTokens ?? 0)} write`,
+    },
+    { label: "Task processed", display: formatTokens(usage?.taskTokens ?? 0), raw: usage?.taskTokens ?? 0 },
   ] as const;
 
   return (
@@ -73,16 +78,20 @@ function TokenUsageStrip() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <div className="flex items-center gap-2 lg:w-36 lg:shrink-0">
           <Binary className="h-4 w-4 text-primary" />
-          <span className="text-xs font-semibold">Token usage</span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold">Token usage</div>
+            <div className="text-[10px] text-muted-foreground">{usage?.calls ?? 0} model calls</div>
+          </div>
           {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </div>
         <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-5">
-          {metrics.map(([label, value]) => (
-            <div key={label} className="min-w-0 border-l border-border/60 pl-3">
-              <div className="text-[10px] text-muted-foreground">{label}</div>
-              <div className="mt-1 truncate font-mono text-lg font-semibold tabular-nums" title={value.toLocaleString()}>
-                {formatTokens(value)}
+          {metrics.map((metric) => (
+            <div key={metric.label} className="min-w-0 border-l border-border/60 pl-3">
+              <div className="truncate text-[10px] text-muted-foreground" title={metric.label}>{metric.label}</div>
+              <div className="mt-1 truncate font-mono text-lg font-semibold tabular-nums" title={String(metric.raw)}>
+                {metric.display}
               </div>
+              {metric.detail && <div className="text-[10px] text-muted-foreground">{metric.detail}</div>}
             </div>
           ))}
         </div>
