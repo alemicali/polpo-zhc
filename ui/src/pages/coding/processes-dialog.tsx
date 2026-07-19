@@ -97,14 +97,14 @@ export function ProcessesDialog({ open, onOpenChange, terminals, workspaces }: P
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-[min(96vw,1100px)] w-[min(96vw,1100px)] border-white/[0.08] bg-[#141414] text-white/85">
+      <DialogContent className="!max-w-[min(96vw,1100px)] w-[min(96vw,1100px)] border-border bg-popover text-foreground">
         <DialogHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <DialogTitle className="text-white/90">Server processes</DialogTitle>
-              <DialogDescription className="text-white/45">
+              <DialogTitle className="text-foreground">Server processes</DialogTitle>
+              <DialogDescription className="text-muted-foreground">
                 {stats.terminals} terminal · {stats.codeServers} code-server · {stats.totalDescendants} descendants
-                {capturedAt && <span className="ml-2 text-white/30">· refreshed {timeAgo(capturedAt)}</span>}
+                {capturedAt && <span className="ml-2 text-muted-foreground/70">· refreshed {timeAgo(capturedAt)}</span>}
               </DialogDescription>
             </div>
             <Button
@@ -122,7 +122,7 @@ export function ProcessesDialog({ open, onOpenChange, terminals, workspaces }: P
 
         <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
           {items.length === 0 && (
-            <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-3 py-6 text-center text-[12px] text-white/40">
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-6 text-center text-[12px] text-muted-foreground">
               {loading ? "Loading…" : "No managed processes."}
             </div>
           )}
@@ -171,56 +171,56 @@ function ProcessRow({
   const hasTree = !!item.tree && item.tree.children.length > 0;
 
   return (
-    <div className="rounded-md border border-white/[0.06] bg-white/[0.02]">
+    <div className="rounded-md border border-border/70 bg-muted/20">
       <div className="flex items-center gap-2 px-2 py-1.5">
         <button
           type="button"
           disabled={!hasTree}
           onClick={() => setExpanded((v) => !v)}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/45 hover:bg-white/[0.06] hover:text-white disabled:opacity-30"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
         >
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </button>
         {item.kind === "terminal" ? (
-          <TerminalIcon className="h-3.5 w-3.5 shrink-0 text-white/55" />
+          <TerminalIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         ) : (
           <Code2 className="h-3.5 w-3.5 shrink-0 text-emerald-300/80" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
-            <span className="font-medium text-white/90">
+            <span className="font-medium text-foreground">
               {sessionLabel || (item.kind === "terminal" ? agentLabel(item.agentKind) : `code-server :${item.port}`)}
             </span>
             {sessionLabel && item.kind === "terminal" && (
-              <span className="text-[11px] text-white/45">{agentLabel(item.agentKind)}</span>
+              <span className="text-[11px] text-muted-foreground">{agentLabel(item.agentKind)}</span>
             )}
             {workspaceName && (
-              <span className="rounded bg-white/[0.04] px-1.5 py-px text-[10px] text-white/55" title={workspaceCwd}>
+              <span className="rounded bg-muted/40 px-1.5 py-px text-[10px] text-muted-foreground" title={workspaceCwd}>
                 {workspaceName}
               </span>
             )}
-            <span className="font-mono text-[10.5px] tabular-nums text-white/35">pid {item.pid ?? "—"}</span>
+            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/80">pid {item.pid ?? "—"}</span>
             {item.kind === "terminal" && item.clients > 0 && (
               <span className="rounded bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-300">
                 {item.clients} client{item.clients === 1 ? "" : "s"}
               </span>
             )}
             {descendants > 0 && (
-              <span className="rounded bg-white/[0.05] px-1.5 py-px text-[10px] text-white/55">
+              <span className="rounded bg-muted/50 px-1.5 py-px text-[10px] text-muted-foreground">
                 +{descendants} child{descendants === 1 ? "" : "ren"}
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-white/45" title={item.cwd}>
+          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={item.cwd}>
             {item.cwd}
           </div>
           {item.kind === "terminal" && item.agentCommand && (
-            <div className="mt-0.5 truncate font-mono text-[10.5px] text-white/35" title={item.agentCommand}>
+            <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground/80" title={item.agentCommand}>
               ⮕ {item.agentCommand}
             </div>
           )}
         </div>
-        <div className="flex shrink-0 flex-col items-end text-right text-[10px] text-white/35">
+        <div className="flex shrink-0 flex-col items-end text-right text-[10px] text-muted-foreground/80">
           <span className="tabular-nums">{timeAgo(item.startedAt)}</span>
           <Button
             size="sm"
@@ -235,7 +235,7 @@ function ProcessRow({
         </div>
       </div>
       {expanded && item.tree && (
-        <div className="border-t border-white/[0.04] px-2 py-1.5">
+        <div className="border-t border-border/50 px-2 py-1.5">
           <ProcessTree node={item.tree} depth={0} />
         </div>
       )}
@@ -248,8 +248,8 @@ function ProcessTree({ node, depth }: { node: ProcessNode; depth: number }) {
     <div>
       {node.children.map((child) => (
         <div key={child.pid} className="leading-tight" style={{ paddingLeft: depth * 12 }}>
-          <div className="flex items-baseline gap-2 truncate font-mono text-[11px] text-white/65">
-            <span className="tabular-nums text-white/35">{child.pid}</span>
+          <div className="flex items-baseline gap-2 truncate font-mono text-[11px] text-foreground/65">
+            <span className="tabular-nums text-muted-foreground/80">{child.pid}</span>
             <span className="truncate" title={child.cmdline || child.command}>
               {child.cmdline || child.command || "?"}
             </span>

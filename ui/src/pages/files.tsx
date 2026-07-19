@@ -65,8 +65,16 @@ import {
   mimeFromPath,
   previewCategory,
 } from "@/components/shared/file-preview";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
+import {
+  describeUploadExclusions,
+  emptyUploadExclusions,
+  mergeUploadExclusions,
+  uploadPathExclusion,
+  type UploadExclusions,
+} from "@/lib/upload-exclusions";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 
@@ -94,6 +102,30 @@ interface RootDir {
 interface UploadFile {
   file: globalThis.File;
   relativePath: string;
+}
+
+interface UploadSelection {
+  files: UploadFile[];
+  exclusions: UploadExclusions;
+}
+
+interface DeleteInfo {
+  path: string;
+  type: "file" | "directory";
+  empty?: boolean;
+  entryCount?: number;
+}
+
+class FileApiError extends Error {
+  readonly status: number;
+  readonly jsonResponse: boolean;
+
+  constructor(message: string, status: number, jsonResponse: boolean) {
+    super(message);
+    this.name = "FileApiError";
+    this.status = status;
+    this.jsonResponse = jsonResponse;
+  }
 }
 
 interface DroppedEntry {
@@ -154,48 +186,139 @@ function uploadBatches(files: UploadFile[]): UploadFile[][] {
   return batches;
 }
 
-function readDroppedFile(entry: DroppedFileEntry): Promise<globalThis.File> {
-  return new Promise((resolveFile, reject) => entry.file(resolveFile, reject));
+function uploadAbortError(): DOMException {
+  return new DOMException("Upload stopped", "AbortError");
 }
 
-function readDroppedDirectory(reader: DroppedDirectoryReader): Promise<DroppedEntry[]> {
+function throwIfUploadAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw uploadAbortError();
+}
+
+function readDroppedFile(entry: DroppedFileEntry, signal?: AbortSignal): Promise<globalThis.File> {
+  return new Promise((resolveFile, reject) => {
+    const abort = () => reject(uploadAbortError());
+    signal?.addEventListener("abort", abort, { once: true });
+    entry.file(
+      (file) => {
+        signal?.removeEventListener("abort", abort);
+        if (signal?.aborted) reject(uploadAbortError());
+        else resolveFile(file);
+      },
+      (error) => {
+        signal?.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function readDroppedDirectory(reader: DroppedDirectoryReader, signal?: AbortSignal): Promise<DroppedEntry[]> {
   return new Promise((resolveEntries, reject) => {
     const entries: DroppedEntry[] = [];
+    const abort = () => reject(uploadAbortError());
+    signal?.addEventListener("abort", abort, { once: true });
     const readNext = () => {
+      if (signal?.aborted) {
+        signal.removeEventListener("abort", abort);
+        reject(uploadAbortError());
+        return;
+      }
       reader.readEntries((batch) => {
         if (batch.length === 0) {
+          signal?.removeEventListener("abort", abort);
           resolveEntries(entries);
           return;
         }
         entries.push(...batch);
         readNext();
-      }, reject);
+      }, (error) => {
+        signal?.removeEventListener("abort", abort);
+        reject(error);
+      });
     };
     readNext();
   });
 }
 
-async function collectDroppedEntry(entry: DroppedEntry, parentPath = ""): Promise<UploadFile[]> {
-  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
-  if (entry.isFile) {
-    const file = await readDroppedFile(entry as DroppedFileEntry);
-    return [uploadFile(file, relativePath)];
-  }
-  if (!entry.isDirectory) return [];
+function filterUploadFiles(files: UploadFile[]): UploadSelection {
+  const included: UploadFile[] = [];
+  const directories = new Set<string>();
+  const reasons = new Set<string>();
+  let excludedFiles = 0;
 
-  const children = await readDroppedDirectory((entry as DroppedDirectoryEntry).createReader());
-  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, relativePath)));
-  return nested.flat();
+  for (const entry of files) {
+    const exclusion = uploadPathExclusion(entry.relativePath, "file");
+    if (!exclusion) {
+      included.push(entry);
+      continue;
+    }
+    excludedFiles++;
+    reasons.add(exclusion.reason);
+    if (exclusion.kind === "directory") directories.add(exclusion.path);
+  }
+  return {
+    files: included,
+    exclusions: { files: excludedFiles, directories: [...directories], reasons: [...reasons] },
+  };
 }
 
-async function collectDroppedFiles(items: DataTransferItem[], fallbackFiles: globalThis.File[]): Promise<UploadFile[]> {
+async function collectDroppedEntry(
+  entry: DroppedEntry,
+  parentPath = "",
+  signal?: AbortSignal,
+): Promise<UploadSelection> {
+  throwIfUploadAborted(signal);
+  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const exclusion = uploadPathExclusion(relativePath, "file");
+    if (exclusion) {
+      return {
+        files: [],
+        exclusions: {
+          files: 1,
+          directories: exclusion.kind === "directory" ? [exclusion.path] : [],
+          reasons: [exclusion.reason],
+        },
+      };
+    }
+    const file = await readDroppedFile(entry as DroppedFileEntry, signal);
+    return { files: [uploadFile(file, relativePath)], exclusions: emptyUploadExclusions() };
+  }
+  if (!entry.isDirectory) return { files: [], exclusions: emptyUploadExclusions() };
+
+  const exclusion = uploadPathExclusion(relativePath, "directory");
+  if (exclusion) {
+    return {
+      files: [],
+      exclusions: { files: 0, directories: [exclusion.path], reasons: [exclusion.reason] },
+    };
+  }
+
+  const children = await readDroppedDirectory((entry as DroppedDirectoryEntry).createReader(), signal);
+  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, relativePath, signal)));
+  return {
+    files: nested.flatMap((selection) => selection.files),
+    exclusions: mergeUploadExclusions(...nested.map((selection) => selection.exclusions)),
+  };
+}
+
+async function collectDroppedFiles(
+  items: DataTransferItem[],
+  fallbackFiles: globalThis.File[],
+  signal?: AbortSignal,
+): Promise<UploadSelection> {
+  throwIfUploadAborted(signal);
   const entries = items
     .map((item) => (item as unknown as DirectoryDropItem).webkitGetAsEntry?.() ?? null)
     .filter((entry): entry is DroppedEntry => entry !== null);
   if (entries.length > 0) {
-    return (await Promise.all(entries.map((entry) => collectDroppedEntry(entry)))).flat();
+    const selections = await Promise.all(entries.map((entry) => collectDroppedEntry(entry, "", signal)));
+    return {
+      files: selections.flatMap((selection) => selection.files),
+      exclusions: mergeUploadExclusions(...selections.map((selection) => selection.exclusions)),
+    };
   }
-  return fallbackFiles.map((file) => uploadFile(file));
+  return filterUploadFiles(fallbackFiles.map((file) => uploadFile(file)));
 }
 
 function formatSize(bytes?: number): string {
@@ -291,7 +414,26 @@ function entryPath(currentPath: string, name: string): string {
 
 // ── API helpers ──
 
-async function apiUpload(destPath: string, files: UploadFile[], signal?: AbortSignal): Promise<{ count: number }> {
+async function readFileApiResponse<T>(resp: Response): Promise<T> {
+  const text = await resp.text();
+  let json: { ok?: boolean; data?: T; error?: string } | null = null;
+  try {
+    json = text ? JSON.parse(text) as { ok?: boolean; data?: T; error?: string } : null;
+  } catch {
+    const message = text.trim() || `File request failed (${resp.status})`;
+    throw new FileApiError(message, resp.status, false);
+  }
+  if (!resp.ok || !json?.ok) {
+    throw new FileApiError(json?.error || `File request failed (${resp.status})`, resp.status, true);
+  }
+  return json.data as T;
+}
+
+async function apiUpload(
+  destPath: string,
+  files: UploadFile[],
+  signal?: AbortSignal,
+): Promise<{ count: number; excluded?: { count: number; reasons: string[] } }> {
   const form = new FormData();
   form.set("path", destPath);
   for (const entry of files) {
@@ -299,9 +441,7 @@ async function apiUpload(destPath: string, files: UploadFile[], signal?: AbortSi
     form.append("relativePath", entry.relativePath);
   }
   const resp = await fetch(`${base}/api/v1/files/upload`, { method: "POST", body: form, signal });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
-  return json.data;
+  return readFileApiResponse(resp);
 }
 
 async function apiMkdir(path: string): Promise<void> {
@@ -310,8 +450,7 @@ async function apiMkdir(path: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
 async function apiRename(path: string, newName: string): Promise<void> {
@@ -320,18 +459,28 @@ async function apiRename(path: string, newName: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, newName }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
-async function apiDelete(path: string): Promise<void> {
+async function apiDeleteInfo(path: string): Promise<DeleteInfo> {
+  const resp = await fetch(`${base}/api/v1/files/delete-info?path=${encodeURIComponent(path)}`);
+  return readFileApiResponse(resp);
+}
+
+async function apiLegacyDeleteInfo(path: string, type: FileEntry["type"]): Promise<DeleteInfo> {
+  if (type === "file") return { path, type: "file" };
+  const resp = await fetch(`${base}/api/v1/files/list?path=${encodeURIComponent(path)}`);
+  const data = await readFileApiResponse<{ entries: FileEntry[] }>(resp);
+  return { path, type: "directory", empty: data.entries.length === 0, entryCount: data.entries.length };
+}
+
+async function apiDelete(path: string, recursive = false): Promise<void> {
   const resp = await fetch(`${base}/api/v1/files/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, recursive }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
 // ── Root selector component ──
@@ -753,6 +902,8 @@ export function FilesPage() {
   const [uploading, setUploading] = useState(false);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ entry: FileEntry; path: string; info?: DeleteInfo; inspecting: boolean } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   /** Currently selected (highlighted) file name — single click selects, double click opens */
   const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -913,21 +1064,47 @@ export function FilesPage() {
   }, [currentPath, navigateTo, openPreview, renamingEntry]);
 
   // ── Upload ──
-  const handleUploadFiles = useCallback(async (files: UploadFile[]) => {
-    if (files.length === 0) return;
-    const controller = new AbortController();
-    uploadAbortRef.current?.abort();
-    uploadAbortRef.current = controller;
-    setUploading(true);
-    const toastId = toast.loading(`Uploading 0 of ${files.length} files...`);
+  const handleUploadFiles = useCallback(async (
+    selection: UploadSelection,
+    activeUpload?: { controller: AbortController; toastId: string | number },
+  ) => {
+    const controller = activeUpload?.controller ?? new AbortController();
+    if (!activeUpload) {
+      uploadAbortRef.current?.abort();
+      uploadAbortRef.current = controller;
+      setUploading(true);
+    }
+
+    const excludedDescription = describeUploadExclusions(selection.exclusions);
+    if (excludedDescription) toast.info(excludedDescription);
+
+    const toastId = activeUpload?.toastId ?? toast.loading(`Uploading 0 of ${selection.files.length} files...`);
+    if (selection.files.length === 0) {
+      toast.info(excludedDescription ? "Nothing to upload after exclusions" : "No files to upload", { id: toastId });
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+      }
+      return;
+    }
+
     let uploaded = 0;
+    let serverExcluded = 0;
+    const serverExclusionReasons = new Set<string>();
     try {
-      for (const batch of uploadBatches(files)) {
+      toast.loading(`Uploading 0 of ${selection.files.length} files...`, { id: toastId });
+      for (const batch of uploadBatches(selection.files)) {
+        throwIfUploadAborted(controller.signal);
         const result = await apiUpload(currentPath, batch, controller.signal);
         uploaded += result.count;
-        toast.loading(`Uploading ${uploaded} of ${files.length} files...`, { id: toastId });
+        serverExcluded += result.excluded?.count ?? 0;
+        for (const reason of result.excluded?.reasons ?? []) serverExclusionReasons.add(reason);
+        toast.loading(`Uploading ${uploaded} of ${selection.files.length} files...`, { id: toastId });
       }
       toast.success(`Uploaded ${uploaded} file${uploaded !== 1 ? "s" : ""}`, { id: toastId });
+      if (serverExcluded > 0) {
+        toast.info(`Server excluded ${serverExcluded} file${serverExcluded === 1 ? "" : "s"} (${[...serverExclusionReasons].join(", ")})`);
+      }
       refresh();
     } catch (err) {
       if (controller.signal.aborted) {
@@ -951,13 +1128,17 @@ export function FilesPage() {
 
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files && files.length > 0) void handleUploadFiles(Array.from(files, (file) => uploadFile(file)));
+    if (files && files.length > 0) {
+      void handleUploadFiles(filterUploadFiles(Array.from(files, (file) => uploadFile(file))));
+    }
     e.target.value = "";
   }, [handleUploadFiles]);
 
   const handleFolderInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files && files.length > 0) void handleUploadFiles(Array.from(files, (file) => uploadFile(file)));
+    if (files && files.length > 0) {
+      void handleUploadFiles(filterUploadFiles(Array.from(files, (file) => uploadFile(file))));
+    }
     e.target.value = "";
   }, [handleUploadFiles]);
 
@@ -989,10 +1170,24 @@ export function FilesPage() {
     setDragging(false);
     const items = Array.from(e.dataTransfer.items);
     const fallbackFiles = Array.from(e.dataTransfer.files);
-    void collectDroppedFiles(items, fallbackFiles)
-      .then((files) => handleUploadFiles(files))
-      .catch((error) => toast.error(error instanceof Error ? error.message : "Could not read dropped folder"));
+    uploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    setUploading(true);
+    const toastId = toast.loading("Scanning dropped folders...");
+    void collectDroppedFiles(items, fallbackFiles, controller.signal)
+      .then((selection) => handleUploadFiles(selection, { controller, toastId }))
+      .catch((error) => {
+        if (controller.signal.aborted) toast.info("Upload stopped", { id: toastId });
+        else toast.error(error instanceof Error ? error.message : "Could not read dropped folder", { id: toastId });
+        if (uploadAbortRef.current === controller) {
+          uploadAbortRef.current = null;
+          setUploading(false);
+        }
+      });
   }, [handleUploadFiles]);
+
+  useEffect(() => () => uploadAbortRef.current?.abort(), []);
 
   // ── Create folder ──
   const handleCreateFolder = useCallback(async (name: string) => {
@@ -1020,14 +1215,47 @@ export function FilesPage() {
 
   // ── Delete ──
   const handleDelete = useCallback(async (entry: FileEntry) => {
+    const path = entryPath(currentPath, entry.name);
+    setDeleteTarget({ entry, path, inspecting: true });
     try {
-      await apiDelete(entryPath(currentPath, entry.name));
-      toast.success(`Deleted "${entry.name}"`);
+      const info = await apiDeleteInfo(path);
+      setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
+    } catch (err) {
+      if (err instanceof FileApiError && err.status === 404 && !err.jsonResponse) {
+        try {
+          const info = await apiLegacyDeleteInfo(path, entry.type);
+          if (info.type === "directory" && info.empty === false) {
+            setDeleteTarget(null);
+            toast.error("Recursive deletion will be available after the pending server update is restarted.");
+            return;
+          }
+          setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
+          return;
+        } catch (fallbackError) {
+          err = fallbackError;
+        }
+      }
+      setDeleteTarget(null);
+      toast.error(err instanceof Error ? err.message : "Could not inspect this path");
+    }
+  }, [currentPath]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget?.info || deleting) return;
+    setDeleting(true);
+    try {
+      const recursive = deleteTarget.info.type === "directory" && deleteTarget.info.empty === false;
+      await apiDelete(deleteTarget.path, recursive);
+      toast.success(`Deleted "${deleteTarget.entry.name}"`);
+      setDeleteTarget(null);
+      setSelectedEntry(null);
       refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
     }
-  }, [currentPath, refresh]);
+  }, [deleteTarget, deleting, refresh]);
 
   // Filter and sort
   const filtered = useMemo(() => {
@@ -1321,16 +1549,21 @@ export function FilesPage() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
+                variant={uploading ? "destructive" : "ghost"}
+                size={uploading ? "sm" : "icon"}
+                className={cn("h-8", uploading ? "gap-1.5 px-2.5" : "w-8")}
                 onClick={() => uploading ? cancelUpload() : fileInputRef.current?.click()}
-                aria-label={uploading ? "Cancel upload" : "Upload files"}
+                aria-label={uploading ? "Stop upload" : "Upload files"}
               >
-                {uploading ? <X className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                {uploading ? (
+                  <>
+                    <X className="h-4 w-4" />
+                    <span>Stop upload</span>
+                  </>
+                ) : <Upload className="h-4 w-4" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{uploading ? "Cancel upload" : "Upload files"}</TooltipContent>
+            <TooltipContent side="bottom">{uploading ? "Stop the current upload" : "Upload files"}</TooltipContent>
           </Tooltip>
 
           {/* Upload folder */}
@@ -1590,6 +1823,29 @@ export function FilesPage() {
           </ContextMenu>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+        title={deleteTarget?.inspecting
+          ? `Checking "${deleteTarget.entry.name}"...`
+          : deleteTarget?.info?.type === "directory"
+            ? deleteTarget.info.empty ? "Delete empty directory?" : "Delete directory and all contents?"
+            : "Delete file?"}
+        description={deleteTarget?.inspecting
+          ? "Polpo is checking the directory contents before allowing deletion."
+          : deleteTarget?.info?.type === "directory"
+            ? deleteTarget.info.empty
+              ? <span>The directory <span className="font-mono text-foreground">{deleteTarget.entry.name}</span> is empty and will be permanently deleted.</span>
+              : <span><span className="block font-medium text-destructive">This directory is not empty.</span><span className="mt-1 block">It contains {deleteTarget.info.entryCount} top-level item{deleteTarget.info.entryCount === 1 ? "" : "s"}. The directory and everything nested inside it will be permanently deleted.</span></span>
+            : <span>The file <span className="font-mono text-foreground">{deleteTarget?.entry.name}</span> will be permanently deleted.</span>}
+        confirmLabel={deleteTarget?.info?.type === "directory"
+          ? deleteTarget.info.empty ? "Delete directory" : "Delete recursively"
+          : "Delete file"}
+        destructive
+        loading={Boolean(deleteTarget?.inspecting || deleting)}
+        onConfirm={() => void confirmDelete()}
+      />
 
       {/* File preview dialog */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />

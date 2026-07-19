@@ -3728,8 +3728,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       // Re-check guards at flush time — user may have toggled autoSend
       // off or cleared the queue during the wait.
       if (!queue.autoSend || queue.items.length === 0 || inputDisabled) return;
+      const isLastQueuedItem = queue.items.length === 1;
       const next = queue.shift();
       if (!next) return;
+      if (isLastQueuedItem) setQueueOpen(false);
       void send(next.text).catch((err) => {
         // Re-queue at the head on failure so the user doesn't silently
         // lose work, and surface a toast.

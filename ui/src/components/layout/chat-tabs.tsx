@@ -173,10 +173,10 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
           }}
           tabIndex={0}
           className={cn(
-            "group flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors",
+            "group flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors",
             active
-              ? "border-primary bg-muted text-foreground"
-              : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
           )}
         >
           {streaming && (
@@ -295,7 +295,7 @@ export function ChatTabs() {
     <div
       role="tablist"
       aria-label="Open conversations"
-      className="flex shrink-0 items-center gap-1 border-b border-border/50 bg-background/60 px-2 py-1 backdrop-blur-sm"
+      className="flex shrink-0 items-center gap-1 border-b border-border/50 bg-background px-2 py-1"
     >
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {tabIds.map((id) => {
@@ -327,7 +327,7 @@ export function ChatTabs() {
         type="button"
         aria-label="New conversation"
         onClick={() => newSession()}
-        className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <Plus className="h-3.5 w-3.5" />
       </button>

@@ -53,8 +53,10 @@ import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
+import { appsRoutes } from "./routes/apps.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
+import { getAppRegistryRuntime } from "./app-runtime-manager.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
@@ -87,6 +89,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
   const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
+  const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir());
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -549,6 +552,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/background-waits", backgroundWaitRoutes(o));
+  authed.route("/apps", appsRoutes(() => ({ ...activeAppRegistry(), polpoDir: activePolpoDir() })));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),

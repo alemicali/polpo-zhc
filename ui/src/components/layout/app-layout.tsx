@@ -10,7 +10,7 @@ import { useLayoutMode } from "@/hooks/use-layout-mode";
 
 /** Tool surfaces that should meet the surrounding pane edges. */
 function hasNoPagePadding(pathname: string): boolean {
-  return pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser";
+  return pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser" || pathname === "/apps" || pathname.startsWith("/apps/");
 }
 
 export function AppLayout() {

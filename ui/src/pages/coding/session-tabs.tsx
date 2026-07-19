@@ -60,9 +60,9 @@ export function SessionTabs({
 
   if (!workspace) return null;
   return (
-    <div className="flex h-9 shrink-0 items-stretch overflow-hidden border-b border-white/[0.08] bg-[#0d0d0d]">
+    <div className="flex h-12 shrink-0 items-center gap-1 overflow-hidden border-b border-border/70 bg-background px-2 py-1.5">
       {/* Tabs (left) */}
-      <div className="flex min-w-0 flex-1 items-stretch overflow-hidden">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden rounded-lg bg-muted p-1">
         {visible.map((terminal) => (
           <SessionTab
             key={terminal.id}
@@ -110,7 +110,7 @@ export function SessionTabs({
               type="button"
               aria-label="New session"
               title="New session in this workspace"
-              className="inline-flex h-6 w-6 items-center justify-center rounded text-white/45 hover:bg-white/[0.06] hover:text-white"
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -191,15 +191,11 @@ function SessionTab({
           onPointerEnter={onPointerEnter}
           onClick={onSelect}
           className={cn(
-            "group/tab relative flex h-9 min-w-0 shrink-0 select-none items-center gap-1.5 px-3 text-[12px] cursor-pointer transition-colors",
-            "border-r border-white/[0.04]",
-            active ? "text-white" : "text-white/55 hover:text-white/85 hover:bg-white/[0.02]",
+            "group/tab relative flex h-7 min-w-0 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors",
+            active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
             dragging && "opacity-40",
           )}
         >
-          {active && (
-            <span aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-white/85" />
-          )}
           <AgentDot kind={terminal.agentKind} />
           {editing ? (
             <Input
@@ -212,7 +208,7 @@ function SessionTab({
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
               }}
-              className="h-5 w-32 rounded-none border-0 bg-transparent px-0.5 text-[12px] font-medium text-white/90 placeholder:text-white/40 shadow-none focus-visible:ring-0"
+              className="h-5 w-32 border-0 bg-transparent px-0.5 text-xs font-medium text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0"
             />
           ) : (
             <span
@@ -231,7 +227,7 @@ function SessionTab({
             title="Close tab (session keeps running — find it in History)"
             className={cn(
               "ml-1 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity",
-              active ? "opacity-60 hover:opacity-100 hover:bg-white/[0.10]" : "opacity-0 group-hover/tab:opacity-60 hover:!opacity-100 hover:bg-white/[0.10]",
+              active ? "opacity-60 hover:bg-muted hover:opacity-100" : "opacity-0 group-hover/tab:opacity-60 hover:!bg-muted hover:!opacity-100",
             )}
           >
             <X className="h-3 w-3" />
@@ -267,10 +263,10 @@ function OverflowSelector({
           type="button"
           title={`${tabs.length} more session${tabs.length === 1 ? "" : "s"}`}
           className={cn(
-            "inline-flex h-9 shrink-0 items-center gap-1 border-r border-white/[0.04] px-2.5 text-[11px] font-medium transition-colors",
+            "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium transition-colors",
             activeFlash
-              ? "text-emerald-300/85 hover:bg-emerald-400/[0.06]"
-              : "text-white/55 hover:bg-white/[0.04] hover:text-white/85",
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
           )}
         >
           <span className="tabular-nums">+{tabs.length}</span>
@@ -280,24 +276,24 @@ function OverflowSelector({
       <PopoverContent
         side="bottom"
         align="start"
-        className="w-72 p-0 border-white/[0.08] bg-[#141414] text-white/85"
+        className="w-72 p-0"
       >
-        <div className="border-b border-white/[0.06] px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-white/40">
+        <div className="border-b border-border/70 px-3 py-2 text-[10px] uppercase text-muted-foreground">
           More sessions
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
           {tabs.map((t) => (
-            <div key={t.id} className="group/row flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04]">
+            <div key={t.id} className="group/row flex items-center gap-2 px-3 py-1.5 hover:bg-muted">
               <AgentDot kind={t.agentKind} />
               <button
                 type="button"
                 onClick={() => onSelect(t.id)}
-                className="flex-1 truncate text-left text-[12px] text-white/85"
+                className="flex-1 truncate text-left text-xs text-foreground"
               >
                 {t.label.trim() || t.branch || "session"}
               </button>
               {t.branch && (
-                <span className="shrink-0 truncate font-mono text-[10px] text-white/35">
+                <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
                   {t.branch}
                 </span>
               )}
@@ -306,7 +302,7 @@ function OverflowSelector({
                 onClick={(e) => { e.stopPropagation(); onCloseTab(t.id); }}
                 aria-label="Close tab"
                 title="Close tab"
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-white/30 opacity-0 hover:bg-white/[0.10] hover:text-white group-hover/row:opacity-60"
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-60"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -326,7 +322,7 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
           type="button"
           aria-label="Reopen hidden tabs"
           title={`History (${hidden.length} hidden)`}
-          className="relative inline-flex h-6 w-6 items-center justify-center rounded text-white/45 hover:bg-white/[0.06] hover:text-white"
+          className="relative inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <History className="h-3.5 w-3.5" />
           {hidden.length > 0 && (
@@ -339,9 +335,9 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
       <PopoverContent
         side="bottom"
         align="end"
-        className="w-72 p-0 border-white/[0.08] bg-[#141414] text-white/85"
+        className="w-72 p-0"
       >
-        <div className="border-b border-white/[0.06] px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-white/40">
+        <div className="border-b border-border/70 px-3 py-2 text-[10px] uppercase text-muted-foreground">
           History · click to reopen
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
@@ -350,15 +346,15 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
               key={t.id}
               type="button"
               onClick={() => onUnhide(t.id)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/[0.04]"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
             >
-              <Clock className="h-3 w-3 shrink-0 text-white/35" />
+              <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />
               <AgentDot kind={t.agentKind} />
-              <span className="flex-1 truncate text-[12px] text-white/85">
+              <span className="flex-1 truncate text-xs text-foreground">
                 {t.label.trim() || t.branch || "session"}
               </span>
               {t.branch && (
-                <span className="shrink-0 truncate font-mono text-[10px] text-white/35">
+                <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
                   {t.branch}
                 </span>
               )}
@@ -372,8 +368,8 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
 
 function AgentDot({ kind }: { kind: CodingAgentKind | undefined }) {
   if (kind === "claude") return <img src="/claude-favicon.svg" alt="Claude" className="h-3 w-3 shrink-0" />;
-  if (kind === "codex") return <Icon icon="logos:openai-icon" className="h-3 w-3 shrink-0 invert" />;
-  return <TerminalIcon className="h-3 w-3 shrink-0 text-white/45" />;
+  if (kind === "codex") return <Icon icon="logos:openai-icon" className="h-3 w-3 shrink-0 dark:invert" />;
+  return <TerminalIcon className="h-3 w-3 shrink-0 text-muted-foreground" />;
 }
 
 function ConnectionDot({ state }: { state: ConnectionState }) {

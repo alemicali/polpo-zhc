@@ -26,6 +26,7 @@ import {
   Terminal,
   Code2,
   AppWindow,
+  Boxes,
   MousePointerClick,
   Sun,
   Moon,
@@ -102,6 +103,7 @@ const pinnedTabs: TabDef[] = [
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
   { path: "/files", icon: FolderOpen, label: "Files" },
+  { path: "/apps", icon: Boxes, label: "Apps" },
   { path: "/coding", icon: Code2, label: "Coding" },
   { path: "/browser", icon: AppWindow, label: "App Preview" },
   { path: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
@@ -154,6 +156,7 @@ const tabs: TabDef[] = [
   { path: "/memory", icon: Brain, label: "Memory" },
   { path: "/playbooks", icon: Workflow, label: "Playbooks" },
   { path: "/files", icon: FolderOpen, label: "Files" },
+  { path: "/apps", icon: Boxes, label: "Apps" },
   { path: "/coding", icon: Code2, label: "Coding" },
   { path: "/terminal", icon: Terminal, label: "Terminal" },
   { path: "/browser", icon: AppWindow, label: "App Preview" },
@@ -255,10 +258,10 @@ function HeaderTabButton({ tab, active, onSelect }: {
       aria-current={active ? "page" : undefined}
       onClick={onSelect}
       className={cn(
-        "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg transition-colors",
+        "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 transition-colors",
         active
-          ? "px-2.5 text-primary bg-primary/8 hover:bg-primary/10"
-          : "w-8 text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -291,10 +294,10 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
               <button
                 title={group.label}
                 className={cn(
-                  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg transition-colors",
+                  "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 transition-colors",
                   activeTab
-                    ? "px-2 text-primary bg-primary/8 hover:bg-primary/10"
-                    : "w-8 text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
                 )}
               >
                 <GroupIcon className="h-4 w-4 shrink-0" />
@@ -389,7 +392,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
 
   return (
     <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
-      <div className="flex flex-1 min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-lg bg-muted p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {navMode === "inline" && tabs.map(tab => (
           <HeaderTabButton
             key={tab.path}
@@ -577,7 +580,7 @@ function RightPanelContent() {
   const title = resolvePageTitle(pathname);
   // Tool surfaces keep the platform tab strip but meet its edges so their
   // dense, resizable work areas get every available pixel.
-  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser";
+  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser" || pathname === "/apps" || pathname.startsWith("/apps/");
   const showMoreNavigation = navMode === "more" && isSecondaryPath(pathname);
 
   return (
@@ -674,6 +677,7 @@ function resolvePageTitle(pathname: string): string {
     "/coding": "Coding",
     "/terminal": "Terminal",
     "/browser": "App Preview",
+    "/apps": "Apps",
     "/agent-live": "Browser Automation",
     "/config": "Configuration",
   };

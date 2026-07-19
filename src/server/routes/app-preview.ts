@@ -390,20 +390,22 @@ export function appPreviewRoutes(getDeps?: () => AppPreviewRouteDeps): Hono {
       }
       const body = await c.req.json().catch(() => undefined) as {
         url?: unknown;
+        cwd?: unknown;
         theme?: unknown;
         force?: unknown;
       } | undefined;
-      if (typeof body?.url !== "string") throw new Error("Preview URL is required");
+      if (typeof body?.url !== "string" && typeof body?.cwd !== "string") throw new Error("Preview URL or workspace is required");
       const theme: CodeServerTheme = body.theme === "light" ? "light" : "dark";
-      const resolvedTarget = await resolveActivePreviewTarget(body.url);
-      if (resolvedTarget.details.infrastructure) {
-        throw new Error("Platform services cannot be opened as App Preview workspaces");
+      let requestedCwd: string;
+      if (typeof body.cwd === "string" && body.cwd.trim()) {
+        requestedCwd = body.cwd;
+      } else {
+        const resolvedTarget = await resolveActivePreviewTarget(body.url as string);
+        if (resolvedTarget.details.infrastructure) throw new Error("Platform services cannot be opened as App Preview workspaces");
+        if (!resolvedTarget.details.cwd) throw new Error("Could not determine the preview process working directory");
+        requestedCwd = resolvedTarget.details.cwd;
       }
-      if (!resolvedTarget.details.cwd) {
-        throw new Error("Could not determine the preview process working directory");
-      }
-
-      const cwd = await canonicalPath(resolvedTarget.details.cwd);
+      const cwd = await canonicalPath(requestedCwd);
       const { state, workspaceId } = await ensurePreviewWorkspace(deps.codingSessionStore, deps.agentWorkDir, cwd);
       const sessionId = codeServerSessionId(workspaceId);
       const running = deps.codeServerManager.getSession(sessionId);

@@ -9,9 +9,11 @@
  */
 
 import { Type } from "@sinclair/typebox";
+import { nanoid } from "nanoid";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team, Task, TaskStatus } from "../core/types.js";
+import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "../core/app-registry.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
@@ -46,6 +48,8 @@ import {
 } from "./orchestrator-browser-tools.js";
 import { activeTaskWaitRegistry } from "./active-task-waits.js";
 import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
+import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
+import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -78,6 +82,136 @@ const listAppPreviewsTool: Tool = {
   name: "list_app_previews",
   description: "List local web services that are currently running and exposed through this machine's Tailscale Serve configuration. Returns public HTTPS URLs and identifies the recommended App Preview target.",
   parameters: Type.Object({}),
+};
+
+const listAppsTool: Tool = {
+  name: "list_apps",
+  description: "List the persistent internal app registry, optionally filtered by one or more operational categories. Includes local paths, categories, services, deployments, domains, and live managed-process status.",
+  parameters: Type.Object({
+    tags: Type.Optional(Type.Array(Type.String(), { description: "Filter by high-level app categories such as internal, client, or public (case-insensitive)" })),
+    tagMatch: Type.Optional(Type.Union([Type.Literal("any"), Type.Literal("all")], { default: "any", description: "Match any requested category or require all of them" })),
+  }),
+};
+
+const getAppTool: Tool = {
+  name: "get_app",
+  description: "Get one registered app by ID or slug with its complete operational configuration and current runtime state.",
+  parameters: Type.Object({
+    id: Type.String({ description: "Registered app ID or slug" }),
+  }),
+};
+
+const controlAppServiceTool: Tool = {
+  name: "control_app_service",
+  description: "Start, stop, or restart a configured service belonging to a registered app. Use list_apps/get_app first; never guess identifiers.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    serviceId: Type.String({ description: "Service ID from get_app" }),
+    action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart")]),
+  }),
+};
+
+const runAppDeploymentTool: Tool = {
+  name: "run_app_deployment",
+  description: "Run or stop a deployment command configured in the app registry. Use get_app first and report that deployment output remains visible in Apps.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    deploymentId: Type.String({ description: "Deployment ID from get_app" }),
+    action: Type.Optional(Type.Union([Type.Literal("run"), Type.Literal("stop")], { default: "run" })),
+  }),
+};
+
+const registerAppTool: Tool = {
+  name: "register_app",
+  description: "Register a local project in the persistent Apps registry. This creates the operational record; it does not scaffold or modify project files.",
+  parameters: Type.Object({
+    name: Type.String(),
+    localPath: Type.String({ description: "Existing local project directory" }),
+    slug: Type.Optional(Type.String({ description: "Lowercase URL-safe slug; generated from name when omitted" })),
+    description: Type.Optional(Type.String()),
+    repositoryUrl: Type.Optional(Type.String()),
+    branch: Type.Optional(Type.String()),
+    framework: Type.Optional(Type.String()),
+    tags: Type.Optional(Type.Array(Type.String(), { description: "Normally 1-3 high-level operational categories. Do not use languages or frameworks as tags." })),
+  }),
+};
+
+const updateAppRegistryTool: Tool = {
+  name: "update_app_registry",
+  description: "Update metadata for an existing registered app. Omitted fields remain unchanged.",
+  parameters: Type.Object({
+    appId: Type.String(), name: Type.Optional(Type.String()), slug: Type.Optional(Type.String()),
+    localPath: Type.Optional(Type.String()), description: Type.Optional(Type.String()),
+    repositoryUrl: Type.Optional(Type.String()), branch: Type.Optional(Type.String()),
+    framework: Type.Optional(Type.String()), tags: Type.Optional(Type.Array(Type.String(), { description: "Normally 1-3 high-level operational categories. Do not use languages or frameworks as tags." })),
+  }),
+};
+
+const tagAppTool: Tool = {
+  name: "tag_app",
+  description: "Add, remove, replace, or clear an app's small set of operational categories without rewriting unrelated metadata. Prefer 1-3 categories such as internal, client, public, production, or experimental; never tag languages or frameworks. Use list_apps first and never guess the app ID.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    operation: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("set"), Type.Literal("clear")]),
+    tags: Type.Optional(Type.Array(Type.String(), { description: "One or more tags. Required for add/remove/set; set accepts an empty array to clear all tags." })),
+  }),
+};
+
+const removeAppRegistryTool: Tool = {
+  name: "remove_app_registry",
+  description: "Stop all managed processes and remove an app from the registry. Project files are never deleted.",
+  parameters: Type.Object({ appId: Type.String() }),
+};
+
+const configureAppServiceTool: Tool = {
+  name: "configure_app_service",
+  description: "Add, update, or remove a frontend/backend/worker/database service in a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove")]),
+    serviceId: Type.Optional(Type.String()), name: Type.Optional(Type.String()),
+    kind: Type.Optional(Type.Union([Type.Literal("frontend"), Type.Literal("backend"), Type.Literal("worker"), Type.Literal("database")])),
+    command: Type.Optional(Type.String()), cwd: Type.Optional(Type.String()), port: Type.Optional(Type.Number()),
+    healthPath: Type.Optional(Type.String()), publicUrl: Type.Optional(Type.String()), autoStart: Type.Optional(Type.Boolean()),
+  }),
+};
+
+const configureAppDeploymentTool: Tool = {
+  name: "configure_app_deployment",
+  description: "Add, update, or remove a deployment command from a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove")]),
+    deploymentId: Type.Optional(Type.String()), name: Type.Optional(Type.String()),
+    environment: Type.Optional(Type.Union([Type.Literal("development"), Type.Literal("preview"), Type.Literal("staging"), Type.Literal("production")])),
+    command: Type.Optional(Type.String()), cwd: Type.Optional(Type.String()), provider: Type.Optional(Type.String()),
+    url: Type.Optional(Type.String()), branch: Type.Optional(Type.String()),
+  }),
+};
+
+const configureAppDomainTool: Tool = {
+  name: "configure_app_domain",
+  description: "Add, update, remove, or verify a domain and its expected DNS records for a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove"), Type.Literal("verify")]),
+    domainId: Type.Optional(Type.String()), hostname: Type.Optional(Type.String()),
+    environment: Type.Optional(Type.Union([Type.Literal("development"), Type.Literal("preview"), Type.Literal("staging"), Type.Literal("production")])),
+    deploymentId: Type.Optional(Type.String()),
+    expectedRecords: Type.Optional(Type.Array(Type.Object({
+      type: Type.Union([Type.Literal("A"), Type.Literal("AAAA"), Type.Literal("CNAME"), Type.Literal("TXT")]),
+      name: Type.String(), value: Type.String(),
+    }))),
+  }),
+};
+
+const controlAppTool: Tool = {
+  name: "control_app",
+  description: "Start, stop, or restart a registered app as a coordinated unit. Starts autoStart services, or all services when none are marked.",
+  parameters: Type.Object({ appId: Type.String(), action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart")]) }),
+};
+
+const captureAppScreenshotTool: Tool = {
+  name: "capture_app_screenshot",
+  description: "Capture and store the registered app cover from one of its configured service, deployment, or domain URLs.",
+  parameters: Type.Object({ appId: Type.String(), url: Type.Optional(Type.String()) }),
 };
 
 const listTasksTool: Tool = {
@@ -1542,6 +1676,8 @@ Available targets:
 - "approvals" — Approvals page
 - "playbooks" — Playbooks page
 - "config" — Configuration / settings page
+- "apps" — Internal app registry
+- "app" — Specific registered app (requires id)
 - "app_preview" — App Preview page (optional url selects a running app/service)
 
 Examples:
@@ -1552,7 +1688,7 @@ Examples:
 - navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, app_preview, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
@@ -1711,7 +1847,7 @@ export function validateRenderWidgetArgs(args: Record<string, unknown>): string 
 // ═══════════════════════════════════════════════════════
 
 export const READ_TOOLS = new Set([
-  "get_status", "list_app_previews", "list_tasks", "get_task", "list_missions", "get_mission",
+  "get_status", "list_app_previews", "list_apps", "get_app", "list_tasks", "get_task", "list_missions", "get_mission",
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
@@ -1766,6 +1902,10 @@ export const WRITE_TOOLS = new Set([
   "ink_add", "ink_remove", "ink_update",
   // Phone (write — makes/terminates calls, configures inbound)
   "phone_call", "phone_hangup", "phone_setup_inbound", "phone_disable_inbound",
+  // App runtime
+  "register_app", "update_app_registry", "tag_app", "remove_app_registry",
+  "configure_app_service", "configure_app_deployment", "configure_app_domain",
+  "control_app", "control_app_service", "run_app_deployment", "capture_app_screenshot",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1830,7 +1970,7 @@ export function isClientSideChatTool(toolName: string): boolean {
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Read
-  getStatusTool, listAppPreviewsTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
+  getStatusTool, listAppPreviewsTool, listAppsTool, getAppTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
   listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
   listApprovalsTool, listCheckpointsTool, listDelaysTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
@@ -1879,6 +2019,10 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Phone (7)
   phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
   phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
+  // App registry + runtime
+  registerAppTool, updateAppRegistryTool, tagAppTool, removeAppRegistryTool,
+  configureAppServiceTool, configureAppDeploymentTool, configureAppDomainTool,
+  controlAppTool, controlAppServiceTool, runAppDeploymentTool, captureAppScreenshotTool,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -1903,6 +2047,17 @@ const TOOL_LABELS: Record<string, string> = {
   kill_task: "Kill Task",
   reassess_task: "Reassess Task",
   force_fail_task: "Force Fail Task",
+  register_app: "Register App",
+  update_app_registry: "Update App",
+  tag_app: "Tag App",
+  remove_app_registry: "Remove App",
+  configure_app_service: "Configure App Service",
+  configure_app_deployment: "Configure App Deployment",
+  configure_app_domain: "Configure App Domain",
+  control_app: "Control App",
+  control_app_service: "Control App Service",
+  run_app_deployment: "Run App Deployment",
+  capture_app_screenshot: "Capture App Cover",
   create_mission: "Create Mission",
   update_mission: "Update Mission",
   execute_mission: "Execute Mission",
@@ -2061,6 +2216,8 @@ export async function executeOrchestratorTool(
       // ── Read ──
       case "get_status":       return execGetStatus(polpo);
       case "list_app_previews": return execListAppPreviews();
+      case "list_apps":        return execListApps(polpo, args);
+      case "get_app":          return execGetApp(polpo, args);
       case "list_tasks":       return execListTasks(polpo, args);
       case "get_task":         return execGetTask(polpo, args);
       case "list_missions":    return execListMissions(polpo, args);
@@ -2073,6 +2230,19 @@ export async function executeOrchestratorTool(
       case "list_checkpoints": return execListCheckpoints(polpo);
       case "list_delays":      return execListDelays(polpo);
       case "get_logs":         return execGetLogs(polpo, args);
+
+      // ── Apps ──
+      case "control_app_service": return execControlAppService(polpo, args);
+      case "run_app_deployment":  return execRunAppDeployment(polpo, args);
+      case "register_app": return execRegisterApp(polpo, args);
+      case "update_app_registry": return execUpdateAppRegistry(polpo, args);
+      case "tag_app": return execTagApp(polpo, args);
+      case "remove_app_registry": return execRemoveAppRegistry(polpo, args);
+      case "configure_app_service": return execConfigureAppService(polpo, args);
+      case "configure_app_deployment": return execConfigureAppDeployment(polpo, args);
+      case "configure_app_domain": return execConfigureAppDomain(polpo, args);
+      case "control_app": return execControlApp(polpo, args);
+      case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
 
       // ── Task ──
       case "create_task":      return execCreateTask(polpo, args);
@@ -2600,6 +2770,271 @@ async function execListAppPreviews(): Promise<string> {
   }
   lines.push('Use navigate_to with target="app_preview" and one of these exact URLs to show it in the user interface.');
   return lines.join("\n");
+}
+
+async function execListApps(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const requestedTags = normalizeAppTags(stringArray(args.tags));
+  const requestedKeys = requestedTags.map((tag) => tag.toLocaleLowerCase());
+  const tagMatch = args.tagMatch === "all" ? "all" : "any";
+  const apps = (await store.list()).filter((app) => {
+    if (requestedKeys.length === 0) return true;
+    const appTags = new Set(app.tags.map((tag) => tag.toLocaleLowerCase()));
+    return tagMatch === "all"
+      ? requestedKeys.every((tag) => appTags.has(tag))
+      : requestedKeys.some((tag) => appTags.has(tag));
+  });
+  if (apps.length === 0) return requestedTags.length
+    ? `No registered apps matched ${tagMatch === "all" ? "all" : "any"} of these tags: ${requestedTags.join(", ")}.`
+    : "The internal app registry is empty. Register an app from the Apps page first.";
+  return apps.map((app) => {
+    const active = runtime.list(app.id).filter((item) => item.status === "running" || item.status === "starting");
+    const services = app.services.map((service) => `${service.name} (${service.id}, ${service.kind}${service.port ? `, :${service.port}` : ""})`).join(", ") || "none";
+    return `[${app.id}] ${app.name} (${app.slug})\n  path: ${app.localPath}\n  tags: ${app.tags.join(", ") || "none"}\n  services: ${services}\n  deployments: ${app.deployments.length}; domains: ${app.domains.length}; active processes: ${active.length}`;
+  }).join("\n");
+}
+
+async function execGetApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const id = String(args.id ?? "").trim();
+  if (!id) return "Error: id is required";
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await store.get(id);
+  if (!app) return `Error: App "${id}" not found`;
+  return JSON.stringify({ ...app, runtime: runtime.list(app.id) }, null, 2);
+}
+
+async function execControlAppService(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const appId = String(args.appId ?? "").trim();
+  const serviceId = String(args.serviceId ?? "").trim();
+  const action = String(args.action ?? "");
+  if (!appId || !serviceId || !["start", "stop", "restart"].includes(action)) return "Error: appId, serviceId and a valid action are required";
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await store.get(appId);
+  if (!app) return `Error: App "${appId}" not found`;
+  if (action === "stop") {
+    const stopped = await runtime.stop(app.id, "service", serviceId);
+    return stopped ? `Stopped service ${serviceId} for ${app.name}.` : `Service ${serviceId} is not running.`;
+  }
+  const status = action === "restart"
+    ? await runtime.restartService(app.id, serviceId)
+    : await runtime.startService(app.id, serviceId);
+  return `${action === "restart" ? "Restarted" : "Started"} service ${serviceId} for ${app.name} (PID ${status.pid ?? "pending"}).`;
+}
+
+async function execRunAppDeployment(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const appId = String(args.appId ?? "").trim();
+  const deploymentId = String(args.deploymentId ?? "").trim();
+  const action = String(args.action ?? "run");
+  if (!appId || !deploymentId || !["run", "stop"].includes(action)) return "Error: appId, deploymentId and a valid action are required";
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await store.get(appId);
+  if (!app) return `Error: App "${appId}" not found`;
+  if (action === "stop") {
+    const stopped = await runtime.stop(app.id, "deployment", deploymentId);
+    return stopped ? `Stopped deployment ${deploymentId} for ${app.name}.` : `Deployment ${deploymentId} is not running.`;
+  }
+  const status = await runtime.runDeployment(app.id, deploymentId);
+  return `Deployment ${deploymentId} started for ${app.name} (PID ${status.pid ?? "pending"}). Open Apps to follow its live output.`;
+}
+
+async function execRegisterApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const name = String(args.name ?? "").trim();
+  const localPath = resolve(String(args.localPath ?? ""));
+  if (!name || !statSync(localPath, { throwIfNoEntry: false })?.isDirectory()) return "Error: name and an existing localPath directory are required";
+  const slug = normalizeAppSlug(String(args.slug ?? name));
+  if (!slug) return "Error: could not derive a valid app slug";
+  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await store.create({
+    name,
+    slug,
+    localPath,
+    description: optionalString(args.description),
+    repository: optionalString(args.repositoryUrl) ? { url: String(args.repositoryUrl), branch: optionalString(args.branch) } : undefined,
+    framework: optionalString(args.framework),
+    tags: normalizeAppTags(stringArray(args.tags)),
+    services: [], deployments: [], domains: [],
+  });
+  return `Registered app "${app.name}" with ID ${app.id} and slug ${app.slug}. Configure its services, deployments, and domains next, then navigate to target="app" with id="${app.id}".`;
+}
+
+async function execUpdateAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const updates: Record<string, unknown> = {};
+  if (args.name !== undefined) updates.name = String(args.name).trim();
+  if (args.slug !== undefined) updates.slug = normalizeAppSlug(String(args.slug));
+  if (args.description !== undefined) updates.description = optionalString(args.description);
+  if (args.framework !== undefined) updates.framework = optionalString(args.framework);
+  if (args.tags !== undefined) updates.tags = normalizeAppTags(stringArray(args.tags));
+  if (args.localPath !== undefined) {
+    const path = resolve(String(args.localPath));
+    if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) return `Error: Local path is not a directory: ${path}`;
+    updates.localPath = path;
+  }
+  if (args.repositoryUrl !== undefined || args.branch !== undefined) {
+    const url = args.repositoryUrl !== undefined ? optionalString(args.repositoryUrl) : app.repository?.url;
+    updates.repository = url ? { url, branch: optionalString(args.branch) ?? app.repository?.branch } : undefined;
+  }
+  const updated = await store.update(app.id, updates);
+  return `Updated registry metadata for ${updated!.name} (${updated!.id}).`;
+}
+
+async function execTagApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const operation = String(args.operation ?? "");
+  const requested = normalizeAppTags(stringArray(args.tags));
+  if (!["add", "remove", "set", "clear"].includes(operation)) return "Error: operation must be add, remove, set, or clear";
+  if ((operation === "add" || operation === "remove") && requested.length === 0) return `Error: tags are required for ${operation}`;
+  if (operation === "set" && !Array.isArray(args.tags)) return "Error: tags are required for set";
+
+  const removedKeys = new Set(requested.map((tag) => tag.toLocaleLowerCase()));
+  const tags = operation === "clear"
+    ? []
+    : operation === "set"
+      ? requested
+      : operation === "remove"
+        ? app.tags.filter((tag) => !removedKeys.has(tag.toLocaleLowerCase()))
+        : normalizeAppTags([...app.tags, ...requested]);
+  await store.update(app.id, { tags });
+  return `Updated tags for ${app.name} (${app.id}): ${tags.join(", ") || "none"}.`;
+}
+
+async function execRemoveAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  await runtime.stopApp(app.id);
+  await store.delete(app.id);
+  await removeAppScreenshot(polpo.getPolpoDir(), app.id).catch(() => undefined);
+  return `Removed ${app.name} from the registry. Project files were not deleted.`;
+}
+
+async function execConfigureAppService(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.serviceId);
+  if (args.operation === "remove") {
+    if (!id) return "Error: serviceId is required for remove";
+    await runtime.stop(app.id, "service", id);
+    await store.update(app.id, { services: app.services.filter((item) => item.id !== id) });
+    return `Removed service ${id} from ${app.name}.`;
+  }
+  const existing = id ? app.services.find((item) => item.id === id) : undefined;
+  const name = optionalString(args.name) ?? existing?.name;
+  const command = optionalString(args.command) ?? existing?.command;
+  const kind = (optionalString(args.kind) ?? existing?.kind) as AppService["kind"] | undefined;
+  if (!name || !command || !kind) return "Error: name, kind, and command are required for a new service";
+  const service: AppService = {
+    id: existing?.id ?? id ?? nanoid(), name, kind, command,
+    cwd: args.cwd !== undefined ? optionalString(args.cwd) : existing?.cwd,
+    port: typeof args.port === "number" ? args.port : existing?.port,
+    healthPath: args.healthPath !== undefined ? optionalString(args.healthPath) : existing?.healthPath,
+    publicUrl: args.publicUrl !== undefined ? optionalString(args.publicUrl) : existing?.publicUrl,
+    autoStart: typeof args.autoStart === "boolean" ? args.autoStart : existing?.autoStart,
+  };
+  const services = existing ? app.services.map((item) => item.id === service.id ? service : item) : [...app.services, service];
+  await store.update(app.id, { services });
+  return `${existing ? "Updated" : "Added"} service ${service.name} (${service.id}) on ${app.name}.`;
+}
+
+async function execConfigureAppDeployment(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.deploymentId);
+  if (args.operation === "remove") {
+    if (!id) return "Error: deploymentId is required for remove";
+    await runtime.stop(app.id, "deployment", id);
+    await store.update(app.id, { deployments: app.deployments.filter((item) => item.id !== id) });
+    return `Removed deployment ${id} from ${app.name}.`;
+  }
+  const existing = id ? app.deployments.find((item) => item.id === id) : undefined;
+  const name = optionalString(args.name) ?? existing?.name;
+  const command = optionalString(args.command) ?? existing?.command;
+  const environment = (optionalString(args.environment) ?? existing?.environment) as AppEnvironment | undefined;
+  if (!name || !command || !environment) return "Error: name, environment, and command are required for a new deployment";
+  const deployment: AppDeployment = {
+    id: existing?.id ?? id ?? nanoid(), name, command, environment,
+    cwd: args.cwd !== undefined ? optionalString(args.cwd) : existing?.cwd,
+    provider: args.provider !== undefined ? optionalString(args.provider) : existing?.provider,
+    url: args.url !== undefined ? optionalString(args.url) : existing?.url,
+    branch: args.branch !== undefined ? optionalString(args.branch) : existing?.branch,
+    lastRun: existing?.lastRun,
+  };
+  const deployments = existing ? app.deployments.map((item) => item.id === deployment.id ? deployment : item) : [...app.deployments, deployment];
+  await store.update(app.id, { deployments });
+  return `${existing ? "Updated" : "Added"} deployment ${deployment.name} (${deployment.id}) on ${app.name}.`;
+}
+
+async function execConfigureAppDomain(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.domainId);
+  const existing = id ? app.domains.find((item) => item.id === id) : undefined;
+  if (args.operation === "remove") {
+    if (!id) return "Error: domainId is required for remove";
+    await store.update(app.id, { domains: app.domains.filter((item) => item.id !== id) });
+    return `Removed domain ${id} from ${app.name}.`;
+  }
+  if (args.operation === "verify") {
+    if (!existing) return "Error: domainId must identify an existing domain for verify";
+    const verification = await verifyAppDomain(existing);
+    await store.update(app.id, { domains: app.domains.map((item) => item.id === existing.id ? { ...item, verification } : item) });
+    return `Verified ${existing.hostname}: ${verification.status}.\n${verification.details?.join("\n") ?? ""}`;
+  }
+  const hostname = optionalString(args.hostname) ?? existing?.hostname;
+  const environment = (optionalString(args.environment) ?? existing?.environment) as AppEnvironment | undefined;
+  if (!hostname || !environment) return "Error: hostname and environment are required for a new domain";
+  const domain: AppDomain = {
+    id: existing?.id ?? id ?? nanoid(), hostname: hostname.replace(/^https?:\/\//, "").split("/")[0]!.replace(/\.$/, "").toLowerCase(), environment,
+    deploymentId: args.deploymentId !== undefined ? optionalString(args.deploymentId) : existing?.deploymentId,
+    expectedRecords: Array.isArray(args.expectedRecords) ? args.expectedRecords as AppDomain["expectedRecords"] : existing?.expectedRecords ?? [],
+    verification: existing?.verification ?? { status: "unchecked" },
+  };
+  const domains = existing ? app.domains.map((item) => item.id === domain.id ? domain : item) : [...app.domains, domain];
+  await store.update(app.id, { domains });
+  return `${existing ? "Updated" : "Added"} domain ${domain.hostname} (${domain.id}) on ${app.name}.`;
+}
+
+async function execControlApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const action = String(args.action ?? "");
+  if (action === "stop") {
+    await runtime.stopApp(app.id);
+    return `Stopped all managed processes for ${app.name}.`;
+  }
+  const result = action === "restart" ? await runtime.restartApp(app.id) : action === "start" ? await runtime.startApp(app.id) : null;
+  if (!result) return "Error: action must be start, stop, or restart";
+  return `${action === "restart" ? "Restarted" : "Started"} ${app.name}: ${result.statuses.length} service(s) running${result.errors.length ? `; errors: ${result.errors.join("; ")}` : ""}.`;
+}
+
+async function execCaptureAppScreenshot(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const app = await requireRegisteredApp(store, args.appId);
+  const capturedAt = await captureAppScreenshot(app, polpo.getPolpoDir(), optionalString(args.url));
+  await store.update(app.id, { screenshotUpdatedAt: capturedAt });
+  return `Captured a new cover for ${app.name}.`;
+}
+
+async function requireRegisteredApp(store: ReturnType<typeof getAppRegistryRuntime>["store"], idValue: unknown) {
+  const id = String(idValue ?? "").trim();
+  if (!id) throw new Error("appId is required");
+  const app = await store.get(id);
+  if (!app) throw new Error(`App "${id}" not found`);
+  return app;
+}
+
+function normalizeAppSlug(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.map(String).map((item) => item.trim()).filter(Boolean))] : [];
 }
 
 async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

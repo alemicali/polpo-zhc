@@ -88,10 +88,10 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-w-lg max-h-[85vh] flex-col border-white/[0.08] bg-[#141414] text-white/85">
+      <DialogContent className="flex max-w-lg max-h-[85vh] flex-col border-border bg-popover text-foreground">
         <DialogHeader>
-          <DialogTitle className="text-white/90">Coding settings</DialogTitle>
-          <DialogDescription className="text-white/45">
+          <DialogTitle className="text-foreground">Coding settings</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
             Local-only — stored in this browser.
           </DialogDescription>
         </DialogHeader>
@@ -101,11 +101,11 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
         {/* Git identity — read-only surface so the user can confirm
             "who am I committing as" before agents run gh on their behalf. */}
         <section className="space-y-1.5">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Git identity
           </h3>
           {identityState === "loading" && (
-            <div className="text-[11.5px] text-white/40">Loading…</div>
+            <div className="text-[11.5px] text-muted-foreground">Loading…</div>
           )}
           {identityState === "error" && (
             <div className="text-[11.5px] text-rose-300/70">
@@ -113,18 +113,18 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
             </div>
           )}
           {identityState === "ok" && identity && (
-            <div className="space-y-1 rounded-md border border-white/[0.06] bg-white/[0.02] p-2 text-[11.5px]">
+            <div className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-2 text-[11.5px]">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-white/45">git user</span>
-                <span className="truncate font-mono text-white/85">
+                <span className="text-muted-foreground">git user</span>
+                <span className="truncate font-mono text-foreground">
                   {identity.git.name ?? "—"}
                   {identity.git.email && (
-                    <span className="text-white/40"> &lt;{identity.git.email}&gt;</span>
+                    <span className="text-muted-foreground"> &lt;{identity.git.email}&gt;</span>
                   )}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-white/45">gh auth</span>
+                <span className="text-muted-foreground">gh auth</span>
                 {identity.gh ? (
                   <a
                     href={identity.gh.url ?? `https://github.com/${identity.gh.login}`}
@@ -140,17 +140,17 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               </div>
             </div>
           )}
-          <p className="text-[10.5px] text-white/35">
+          <p className="text-[10.5px] text-muted-foreground/80">
             Configure with <code className="font-mono">git config --global user.name/email</code> and <code className="font-mono">gh auth login</code>.
           </p>
         </section>
 
         {/* Agent commands */}
         <section className="space-y-2">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Agent commands
           </h3>
-          <p className="text-[11px] text-white/40">
+          <p className="text-[11px] text-muted-foreground">
             Shell command launched when you start an agent session. Leave empty to use the server default.
           </p>
           <div className="space-y-2">
@@ -160,19 +160,19 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               const overridden = settings.agentCommands[kind] !== undefined;
               return (
                 <div key={kind} className="grid grid-cols-[5rem_1fr_auto] items-center gap-2">
-                  <label className="text-[12px] font-medium text-white/70">{AGENT_LABEL[kind]}</label>
+                  <label className="text-[12px] font-medium text-foreground/70">{AGENT_LABEL[kind]}</label>
                   <Input
                     value={value}
                     onChange={(e) => setCommand(kind, e.target.value)}
                     placeholder={fallback || "(unavailable)"}
-                    className="h-8 border-white/[0.08] bg-white/[0.03] font-mono text-[12px] text-white/85"
+                    className="h-8 border-border bg-muted/30 font-mono text-[12px] text-foreground"
                   />
                   <Button
                     variant="ghost"
                     size="sm"
                     disabled={!overridden}
                     onClick={() => resetCommand(kind)}
-                    className="h-8 px-2 text-[10px] text-white/45 hover:text-white"
+                    className="h-8 px-2 text-[10px] text-muted-foreground hover:text-foreground"
                     title="Reset to server default"
                   >
                     Reset
@@ -184,11 +184,11 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
         </section>
 
         {/* PR command */}
-        <section className="space-y-2 border-t border-white/[0.06] pt-4">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+        <section className="space-y-2 border-t border-border/70 pt-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             PR command
           </h3>
-          <p className="text-[11px] text-white/40">
+          <p className="text-[11px] text-muted-foreground">
             Run by the workspace "PR" button when the current branch has no open PR.
             Defaults to a non-interactive Claude prompt that pushes + opens a PR.
           </p>
@@ -197,7 +197,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
             onChange={(e) => update({ prCommand: e.target.value })}
             rows={3}
             placeholder={DEFAULT_PR_COMMAND}
-            className="border-white/[0.08] bg-white/[0.03] font-mono text-[12px] text-white/85"
+            className="border-border bg-muted/30 font-mono text-[12px] text-foreground"
           />
           <div className="flex justify-end">
             <Button
@@ -205,7 +205,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               size="sm"
               onClick={() => update({ prCommand: DEFAULT_PR_COMMAND })}
               disabled={settings.prCommand === DEFAULT_PR_COMMAND}
-              className="h-7 px-2 text-[10px] text-white/45 hover:text-white"
+              className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
             >
               Reset to default
             </Button>
@@ -213,13 +213,13 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
         </section>
 
         {/* Workspace paths */}
-        <section className="space-y-2 border-t border-white/[0.06] pt-4">
+        <section className="space-y-2 border-t border-border/70 pt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 Workspaces outside server root
               </h3>
-              <p className="mt-0.5 text-[11px] text-white/40">
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
                 Allow "Add workspace" to pick from paths beyond the server work dir.
               </p>
             </div>
@@ -230,7 +230,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               onClick={() => update({ allowOutsideWorkspace: !settings.allowOutsideWorkspace })}
               className={cn(
                 "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-                settings.allowOutsideWorkspace ? "bg-emerald-500/70" : "bg-white/[0.12]",
+                settings.allowOutsideWorkspace ? "bg-emerald-500/70" : "bg-muted",
               )}
             >
               <span
@@ -243,21 +243,21 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
           </div>
 
           {settings.allowOutsideWorkspace && (
-            <div className="space-y-2 rounded-md border border-white/[0.06] bg-white/[0.02] p-2">
-              <div className="text-[11px] text-white/45">
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-2">
+              <div className="text-[11px] text-muted-foreground">
                 Whitelisted roots (absolute paths). These appear as alternative starting points in the picker.
               </div>
               <div className="space-y-1">
                 {settings.allowedExtraRoots.length === 0 && (
-                  <div className="text-[11px] italic text-white/35">No paths added yet.</div>
+                  <div className="text-[11px] italic text-muted-foreground/80">No paths added yet.</div>
                 )}
                 {settings.allowedExtraRoots.map((path) => (
-                  <div key={path} className="flex items-center gap-1.5 rounded bg-white/[0.03] px-2 py-1">
-                    <code className="flex-1 truncate font-mono text-[11.5px] text-white/80">{path}</code>
+                  <div key={path} className="flex items-center gap-1.5 rounded bg-muted/30 px-2 py-1">
+                    <code className="flex-1 truncate font-mono text-[11.5px] text-foreground/80">{path}</code>
                     <button
                       type="button"
                       onClick={() => removePath(path)}
-                      className="inline-flex h-5 w-5 items-center justify-center rounded text-white/40 hover:bg-white/[0.06] hover:text-rose-300"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-rose-300"
                       title="Remove"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -273,7 +273,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
                   value={newPath}
                   onChange={(e) => setNewPath(e.target.value)}
                   placeholder="/data/some-project"
-                  className="h-7 flex-1 border-white/[0.08] bg-white/[0.03] font-mono text-[11.5px] text-white/85"
+                  className="h-7 flex-1 border-border bg-muted/30 font-mono text-[11.5px] text-foreground"
                 />
                 <Button
                   type="submit"

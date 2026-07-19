@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
 
-export type Palette = "tide" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
+export type Palette = "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
 
 export interface PaletteMeta {
   id: Palette;
@@ -34,6 +34,27 @@ export const PALETTES: PaletteMeta[] = [
     blurb: "Coastal teal · soft & friendly",
     swatchLight: ["oklch(0.985 0.006 215)", "oklch(0.6 0.115 205)", "oklch(0.7 0.155 30)"],
     swatchDark:  ["oklch(0.1 0.025 260)",   "oklch(0.7 0.15 200)",  "oklch(0.68 0.18 330)"],
+  },
+  {
+    id: "lovable",
+    name: "Lovable",
+    blurb: "Warm workspace · royal blue · generous surfaces",
+    swatchLight: ["#f7f5f2", "#1b1b1b", "#315efb"],
+    swatchDark: ["#171615", "#f5f2ed", "#7590ff"],
+  },
+  {
+    id: "chatgpt",
+    name: "ChatGPT",
+    blurb: "Neutral monochrome · quiet chrome · high contrast",
+    swatchLight: ["#ffffff", "#0d0d0d", "#e7e7e7"],
+    swatchDark: ["#212121", "#ececec", "#2f2f2f"],
+  },
+  {
+    id: "claude",
+    name: "Claude",
+    blurb: "Warm paper · terracotta · editorial type",
+    swatchLight: ["#f7f6f2", "#2f2e2b", "#c96442"],
+    swatchDark: ["#1f1e1b", "#eeeae3", "#e08b6c"],
   },
   {
     id: "brutal",

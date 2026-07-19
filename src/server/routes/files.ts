@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { resolve, relative, extname, basename, dirname } from "node:path";
 import { POLPO_DIR_NAME } from "../../core/constants.js";
 import type { FileSystem } from "@polpo-ai/core";
+import { uploadExclusionReason } from "../upload-exclusions.js";
 
 // ── MIME type map ────────────────────────────────────────────────────────────
 const EXT_MIME: Record<string, string> = {
@@ -409,6 +410,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
       .filter((value): value is string => typeof value === "string");
     const seenPaths = new Set<string>();
     const candidates: { file: globalThis.File; filePath: string; relativePath: string }[] = [];
+    const excluded: { path: string; reason: string }[] = [];
 
     for (const [index, file] of files.entries()) {
       const fallbackName = basename(file.name.replace(/\\/g, "/"));
@@ -423,6 +425,11 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
         return c.json({ ok: false, error: "Invalid relative upload path" }, 400);
       }
       seenPaths.add(relativePath);
+      const exclusionReason = uploadExclusionReason(relativePath);
+      if (exclusionReason) {
+        excluded.push({ path: relativePath, reason: exclusionReason });
+        continue;
+      }
       candidates.push({ file, filePath, relativePath });
     }
 
@@ -443,7 +450,17 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
       deps.emit("file:changed", { path: uploadedPath, dir: dirname(uploadedPath), action: "created", source: "server" });
     }
 
-    return c.json({ ok: true, data: { uploaded, count: uploaded.length } }, 200);
+    return c.json({
+      ok: true,
+      data: {
+        uploaded,
+        count: uploaded.length,
+        excluded: {
+          count: excluded.length,
+          reasons: [...new Set(excluded.map((entry) => entry.reason))],
+        },
+      },
+    }, 200);
   });
 
   // ── POST /mkdir — create a directory ──
@@ -489,11 +506,38 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     return c.json({ ok: true, data: { oldPath: body.path, newName: body.newName } }, 200);
   });
 
-  // ── POST /delete — delete a file or empty directory ──
+  // ── GET /delete-info — inspect a path before destructive deletion ──
+  app.get("/delete-info", async (c) => {
+    const deps = getDeps();
+    const { fs } = deps;
+    const reqPath = c.req.query("path");
+    if (!reqPath) return c.json({ ok: false, error: "Missing path" }, 400);
+
+    const roots = getAllowedRoots();
+    const resolved = await resolveSandboxed(reqPath, roots, fs);
+    if (!resolved) return c.json({ ok: false, error: "Invalid or disallowed path" }, 400);
+    if (!(await fs.exists(resolved))) return c.json({ ok: false, error: "Path not found" }, 404);
+    for (const root of roots) {
+      if (resolved === root) return c.json({ ok: false, error: "Cannot delete a root directory" }, 400);
+    }
+
+    const s = await fs.stat(resolved);
+    const entries = s.isDirectory ? await fs.readdir(resolved) : [];
+    return c.json({
+      ok: true,
+      data: {
+        path: reqPath,
+        type: s.isDirectory ? "directory" : "file",
+        ...(s.isDirectory ? { empty: entries.length === 0, entryCount: entries.length } : {}),
+      },
+    });
+  });
+
+  // ── POST /delete — delete a file or explicitly recurse into a directory ──
   app.post("/delete", async (c) => {
     const deps = getDeps();
     const { fs } = deps;
-    const body = await c.req.json<{ path: string }>().catch(() => null);
+    const body = await c.req.json<{ path: string; recursive?: boolean }>().catch(() => null);
     if (!body?.path) return c.json({ ok: false, error: "Missing path" }, 400);
 
     const roots = getAllowedRoots();
@@ -508,7 +552,13 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     const s = await fs.stat(resolved);
     if (s.isDirectory) {
       const entries = await fs.readdir(resolved);
-      if (entries.length > 0) return c.json({ ok: false, error: "Directory is not empty" }, 400);
+      if (entries.length > 0 && body.recursive !== true) {
+        return c.json({
+          ok: false,
+          error: "Directory is not empty; recursive confirmation is required",
+          data: { path: body.path, type: "directory", empty: false, entryCount: entries.length },
+        }, 409);
+      }
     }
 
     await fs.remove(resolved);

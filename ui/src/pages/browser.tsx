@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -190,6 +191,7 @@ export function BrowserPage() {
   const { sessionId } = useChatState();
   const previewContext = useAppPreviewContext();
   const requestedUrl = normalizePreviewUrl(searchParams.get("url") ?? "");
+  const requestedCwd = searchParams.get("cwd") ?? undefined;
   const [history, setHistory] = useState<string[]>(requestedUrl ? [requestedUrl] : []);
   const [index, setIndex] = useState(requestedUrl ? 0 : -1);
   const [draft, setDraft] = useState(requestedUrl);
@@ -201,7 +203,7 @@ export function BrowserPage() {
   const [deviceId, setDeviceId] = useState<DeviceId>("fit");
   const [landscape, setLandscape] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<PreviewTheme>("system");
-  const [surface, setSurface] = useState<PreviewSurface>("browser");
+  const [surface, setSurface] = useState<PreviewSurface>(searchParams.get("surface") === "code" ? "code" : "browser");
   const [responsiveViewport, setResponsiveViewport] = useState({ width: 1280, height: 720 });
   const [inspecting, setInspecting] = useState(false);
   const [bridgeReady, setBridgeReady] = useState(false);
@@ -382,7 +384,13 @@ export function BrowserPage() {
     } catch {
       return false;
     }
-  }), [currentUrl, discovery.targets]);
+  }) ?? (requestedCwd ? {
+    port: (() => { try { return Number(new URL(currentUrl).port) || 0; } catch { return 0; } })(),
+    url: currentUrl,
+    label: requestedCwd.split("/").filter(Boolean).pop() ?? "App",
+    infrastructure: false,
+    cwd: requestedCwd,
+  } : undefined), [currentUrl, discovery.targets, requestedCwd]);
   const previewTargets = useMemo(
     () => discovery.targets.filter((target) => !target.infrastructure),
     [discovery.targets],
@@ -699,34 +707,26 @@ export function BrowserPage() {
   return (
     <section className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-background">
       <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-1.5 py-1">
-        <div className="flex h-8 shrink-0 items-center border border-border/70 bg-muted/25 p-0.5" role="tablist" aria-label="App Preview mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={surface === "browser"}
-            onClick={() => setSurface("browser")}
-            className={cn(
-              "inline-flex h-6 items-center gap-1.5 px-2 text-[11px] font-medium transition-colors",
-              surface === "browser" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Globe2 className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">Browser</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={surface === "code"}
-            onClick={() => setSurface("code")}
-            className={cn(
-              "inline-flex h-6 items-center gap-1.5 px-2 text-[11px] font-medium transition-colors",
-              surface === "code" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Code2 className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">Code</span>
-          </button>
-        </div>
+        <Tabs
+          value={surface}
+          onValueChange={(next) => {
+            const value = next as PreviewSurface;
+            setSurface(value);
+            setSearchParams((params) => { params.set("surface", value); return params; }, { replace: true });
+          }}
+          className="contents"
+        >
+          <TabsList className="h-8 shrink-0" aria-label="App Preview mode">
+            <TabsTrigger value="browser" className="h-6 flex-none gap-1.5 px-2 text-[11px]">
+              <Globe2 className="h-3.5 w-3.5" />
+              <span className="hidden xl:inline">Browser</span>
+            </TabsTrigger>
+            <TabsTrigger value="code" className="h-6 flex-none gap-1.5 px-2 text-[11px]">
+              <Code2 className="h-3.5 w-3.5" />
+              <span className="hidden xl:inline">Code</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {surface === "browser" && <>
         <Tooltip>
@@ -755,7 +755,7 @@ export function BrowserPage() {
         </Tooltip>
         </>}
 
-        <form onSubmit={handleSubmit} className="relative flex min-w-[150px] flex-1 items-center">
+        {surface === "browser" ? <form onSubmit={handleSubmit} className="relative flex min-w-[150px] flex-1 items-center">
           {currentUrl.startsWith("https://")
             ? <Lock className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-emerald-500" />
             : <Globe2 className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-muted-foreground" />}
@@ -770,7 +770,16 @@ export function BrowserPage() {
           <Button type="submit" variant="ghost" size="icon" className="absolute right-1 h-6 w-6 text-muted-foreground hover:text-foreground" aria-label="Open preview URL">
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
-        </form>
+        </form> : (
+          <div className="flex min-w-0 flex-1 items-center gap-2 px-2 text-xs text-muted-foreground">
+            <Code2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              {selectedTarget && !selectedTarget.infrastructure
+                ? `${selectedTarget.label} · :${selectedTarget.port}`
+                : "Select an active app to open its workspace"}
+            </span>
+          </div>
+        )}
 
         {surface === "browser" && <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -893,19 +902,19 @@ export function BrowserPage() {
         )}
         </>}
 
-        <Tooltip>
+        {surface === "browser" && <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" disabled={!currentUrl} onClick={() => window.open(currentUrl, "_blank", "noopener,noreferrer")} aria-label="Open preview externally">
               <ExternalLink className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Open in a new tab</TooltipContent>
-        </Tooltip>
+        </Tooltip>}
 
         <Select value={selectedTarget && !selectedTarget.infrastructure ? selectedTarget.url : undefined} onValueChange={replacePreview} disabled={discoveryLoading || previewTargets.length === 0}>
           <SelectTrigger size="sm" className="w-[148px] shrink-0 lg:w-[190px]" aria-label="Active preview port">
-            {discoveryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe2 className="h-3.5 w-3.5" />}
-            <SelectValue placeholder={discoveryError ? "Unavailable" : "Active ports"} />
+            {discoveryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : surface === "code" ? <Code2 className="h-3.5 w-3.5" /> : <Globe2 className="h-3.5 w-3.5" />}
+            <SelectValue placeholder={discoveryError ? "Unavailable" : surface === "code" ? "Active apps" : "Active ports"} />
           </SelectTrigger>
           <SelectContent align="end">
             {previewTargets.map((target) => (
@@ -1157,7 +1166,7 @@ function PreviewCodePane({
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: currentUrl || target.url, theme, force }),
+        body: JSON.stringify({ url: currentUrl || target.url, cwd: target.cwd, theme, force }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok || !body?.ok) throw new Error(body?.error || `VS Code failed to start (${response.status})`);
@@ -1225,28 +1234,28 @@ function PreviewCodePane({
     : null;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-[#0a0a0a] text-white/85">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.08] px-2">
-        <Code2 className="h-3.5 w-3.5 shrink-0 text-white/55" />
-        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/50" title={session?.cwd ?? target.cwd}>
+    <div className="flex h-full min-h-0 w-full flex-col bg-background text-foreground">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/70 px-2">
+        <Code2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={session?.cwd ?? target.cwd}>
           {session?.cwd ?? target.cwd ?? `:${target.port} ${target.label}`}
         </div>
         {session && (
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-white/60 hover:bg-white/[0.06] hover:text-white" onClick={() => navigate("/coding")}>
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-muted-foreground" onClick={() => navigate("/coding")}>
             Open Coding
           </Button>
         )}
         {session && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-white/55 hover:bg-white/[0.06] hover:text-white" onClick={() => window.open(editorUrl!, "_blank", "noopener,noreferrer")} aria-label="Open VS Code externally">
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => window.open(editorUrl!, "_blank", "noopener,noreferrer")} aria-label="Open VS Code externally">
             <ExternalLink className="h-3.5 w-3.5" />
           </Button>
         )}
         {session && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-white/55 hover:bg-white/[0.06] hover:text-white" disabled={busy} onClick={() => void stop()} aria-label="Stop VS Code">
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" disabled={busy} onClick={() => void stop()} aria-label="Stop VS Code">
             <Square className="h-3.5 w-3.5" />
           </Button>
         )}
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-white/70 hover:bg-white/[0.06] hover:text-white" disabled={busy} onClick={() => void start(Boolean(session))}>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => void start(Boolean(session))}>
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : session ? <RotateCw className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {session ? "Restart" : "Start"}
         </Button>
@@ -1264,9 +1273,9 @@ function PreviewCodePane({
         ) : (
           <div className="flex h-full items-center justify-center p-8 text-center">
             <div className="max-w-sm">
-              {busy ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-white/45" /> : <Code2 className="mx-auto h-6 w-6 text-white/40" />}
-              <p className="mt-3 text-sm font-medium text-white/75">{busy ? "Opening workspace" : error ? "VS Code unavailable" : "VS Code stopped"}</p>
-              <p className="mt-1 text-xs leading-relaxed text-white/40">{error ?? target.cwd ?? "Start the editor for this preview workspace."}</p>
+              {busy ? <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" /> : <Code2 className="mx-auto h-6 w-6 text-muted-foreground" />}
+              <p className="mt-3 text-sm font-medium text-foreground">{busy ? "Opening workspace" : error ? "VS Code unavailable" : "VS Code stopped"}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{error ?? target.cwd ?? "Start the editor for this preview workspace."}</p>
               {!busy && (
                 <Button type="button" size="sm" className="mt-4 h-8 px-3 text-xs" onClick={() => void start(false)}>
                   <Play className="h-3.5 w-3.5" />

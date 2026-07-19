@@ -521,7 +521,7 @@ export function AgentBrowserLivePage() {
           : "Offline";
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-background">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
           {status?.running && (
             <DropdownMenu>
@@ -604,17 +604,20 @@ export function AgentBrowserLivePage() {
 
       {selected ? (
         <div className="flex min-h-0 flex-1 flex-col bg-muted/15">
-          <div className="flex h-9 shrink-0 items-end gap-px overflow-x-auto border-b border-border bg-muted/45 px-1 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex h-12 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-background px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Browser tabs">
+            <div className="flex min-w-0 items-center gap-1 rounded-lg bg-muted p-1">
             {tabs.map((tab) => (
               <button
                 key={tab.tabId}
                 type="button"
+                role="tab"
+                aria-selected={tab.active}
                 onClick={() => !tab.active && void runCommand({ action: "activate-tab", tabId: tab.tabId }, `activate-${tab.tabId}`)}
                 className={cn(
-                  "group flex h-8 min-w-28 max-w-56 flex-1 items-center gap-2 border border-b-0 px-2 text-left text-xs transition-colors sm:min-w-36 sm:flex-none sm:w-48",
+                  "group flex h-7 min-w-28 max-w-56 flex-1 items-center gap-2 rounded-md px-2 text-left text-xs transition-colors sm:w-48 sm:min-w-36 sm:flex-none",
                   tab.active
-                    ? "relative -mb-px h-[33px] border-border bg-background text-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-background/55 hover:text-foreground",
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
                 )}
                 title={tab.title || tab.url}
               >
@@ -640,7 +643,8 @@ export function AgentBrowserLivePage() {
                 </span>
               </button>
             ))}
-            <Button type="button" size="icon-xs" variant="ghost" className="mb-1 ml-1 h-7 w-7 shrink-0" onClick={() => void runCommand({ action: "new-tab" })} disabled={commandBusy !== null} title="New tab">
+            </div>
+            <Button type="button" size="icon-xs" variant="ghost" className="ml-1 h-7 w-7 shrink-0" onClick={() => void runCommand({ action: "new-tab" })} disabled={commandBusy !== null} title="New tab">
               {commandBusy === "new-tab" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
             </Button>
           </div>

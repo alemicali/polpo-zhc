@@ -144,16 +144,16 @@ export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }
       <PopoverContent
         side="right"
         align="start"
-        className="w-80 p-0 border-white/[0.08] bg-[#141414] text-white/85"
+        className="w-80 p-0 border-border bg-popover text-foreground"
       >
         {/* Header */}
-        <div className="border-b border-white/[0.06] px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-white/40">
+        <div className="border-b border-border/70 px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           New session
         </div>
 
         {/* Agent picker */}
         <fieldset className="px-2 py-2">
-          <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-white/35">Agent</legend>
+          <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">Agent</legend>
           <div className="mt-1 grid gap-1">
             {availableAgents.map((a) => (
               <button
@@ -162,19 +162,19 @@ export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }
                 onClick={() => setAgent(a.kind)}
                 className={cn(
                   "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                  agent === a.kind ? "bg-white/[0.06] ring-1 ring-emerald-400/30" : "hover:bg-white/[0.03]",
+                  agent === a.kind ? "bg-muted ring-1 ring-emerald-400/30" : "hover:bg-muted/30",
                 )}
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded text-white/85">{a.icon}</span>
+                <span className="flex h-6 w-6 items-center justify-center rounded text-foreground">{a.icon}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium text-white/90">{a.label}</div>
-                  <div className="text-[10px] text-white/40 truncate">{a.description}</div>
+                  <div className="text-[12px] font-medium text-foreground">{a.label}</div>
+                  <div className="text-[10px] text-muted-foreground truncate">{a.description}</div>
                 </div>
                 {agent === a.kind && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
               </button>
             ))}
             {capabilities && availableAgents.length < AGENTS.length && (
-              <div className="px-2 py-1 text-[10px] leading-snug text-white/35">
+              <div className="px-2 py-1 text-[10px] leading-snug text-muted-foreground/80">
                 Claude/Codex appear only when their CLI is installed in the server image.
               </div>
             )}
@@ -183,8 +183,8 @@ export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }
 
         {/* Worktree picker — hidden when the caller forced a mode (sidebar
             +project = "new"; tab-strip + = "same"). */}
-        <fieldset className="border-t border-white/[0.06] px-2 py-2">
-          <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-white/35">Worktree</legend>
+        <fieldset className="border-t border-border/70 px-2 py-2">
+          <legend className="px-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">Worktree</legend>
           {!forceMode && (
             <div className="mt-1 grid grid-cols-2 gap-1">
               <ChoicePill
@@ -202,31 +202,31 @@ export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }
             </div>
           )}
           {forceMode === "same" && (
-            <div className="mt-1 px-1 text-[10.5px] text-white/45">
+            <div className="mt-1 px-1 text-[10.5px] text-muted-foreground">
               New session in the active workspace.
             </div>
           )}
           {worktreeMode === "new" && (
-            <div className="mt-2 flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1">
-              <GitBranch className="h-3.5 w-3.5 text-white/40" />
+            <div className="mt-2 flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1">
+              <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 autoFocus
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder="feat/my-thing  (auto if empty)"
-                className="h-5 min-w-0 flex-1 border-0 bg-transparent px-0.5 font-mono text-[11.5px] text-white/85 shadow-none focus-visible:ring-0"
+                className="h-5 min-w-0 flex-1 border-0 bg-transparent px-0.5 font-mono text-[11.5px] text-foreground shadow-none focus-visible:ring-0"
               />
             </div>
           )}
         </fieldset>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-1.5 border-t border-white/[0.06] px-2 py-2">
+        <div className="flex items-center justify-end gap-1.5 border-t border-border/70 px-2 py-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setOpen(false)}
-            className="h-7 rounded-md px-2 text-[11px] text-white/55 hover:bg-white/[0.05] hover:text-white"
+            className="h-7 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
           >
             Cancel
           </Button>
@@ -273,11 +273,11 @@ function ChoicePill({ selected, onClick, label, detail }: { selected: boolean; o
       onClick={onClick}
       className={cn(
         "rounded-md px-2 py-1.5 text-left transition-colors",
-        selected ? "bg-white/[0.06] ring-1 ring-emerald-400/30" : "hover:bg-white/[0.03]",
+        selected ? "bg-muted ring-1 ring-emerald-400/30" : "hover:bg-muted/30",
       )}
     >
-      <div className="text-[12px] font-medium text-white/90">{label}</div>
-      <div className="text-[10px] text-white/40 truncate">{detail}</div>
+      <div className="text-[12px] font-medium text-foreground">{label}</div>
+      <div className="text-[10px] text-muted-foreground truncate">{detail}</div>
     </button>
   );
 }

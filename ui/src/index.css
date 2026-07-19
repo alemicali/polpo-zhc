@@ -637,6 +637,249 @@
 [data-palette="mono"] [data-slot="card"] { box-shadow: var(--shadow-card); }
 [data-palette="mono"] .deep-sea-bg { background: none; }
 
+/* ─── Lovable — warm workspace chrome with a focused blue signal ─── */
+:root[data-palette="lovable"] {
+  color-scheme: light;
+  --radius: 0.75rem;
+  --background: #f7f5f2;
+  --foreground: #1b1b1b;
+  --card: #fffefa;
+  --card-foreground: #1b1b1b;
+  --popover: #ffffff;
+  --popover-foreground: #1b1b1b;
+  --primary: #315efb;
+  --primary-foreground: #ffffff;
+  --secondary: #efede8;
+  --secondary-foreground: #282725;
+  --muted: #f0eee9;
+  --muted-foreground: #6e6b66;
+  --accent: #e8ebff;
+  --accent-foreground: #1d3fc4;
+  --destructive: #d33d45;
+  --border: #dedbd5;
+  --input: #d4d0c9;
+  --ring: #315efb;
+  --chart-1: #315efb;
+  --chart-2: #e94e87;
+  --chart-3: #f26a2e;
+  --chart-4: #15a37d;
+  --chart-5: #8a64db;
+  --sidebar: #fbfaf7;
+  --sidebar-foreground: #272624;
+  --sidebar-primary: #315efb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eeece7;
+  --sidebar-accent-foreground: #1b1b1b;
+  --sidebar-border: #e3e0da;
+  --sidebar-ring: #315efb;
+  --app-font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --shadow-card: 0 1px 2px rgb(34 31 27 / 6%), 0 8px 24px rgb(34 31 27 / 5%);
+}
+.dark[data-palette="lovable"] {
+  color-scheme: dark;
+  --background: #171615;
+  --foreground: #f5f2ed;
+  --card: #201f1d;
+  --card-foreground: #f5f2ed;
+  --popover: #242321;
+  --popover-foreground: #f5f2ed;
+  --primary: #7590ff;
+  --primary-foreground: #111218;
+  --secondary: #2b2926;
+  --secondary-foreground: #eeeae4;
+  --muted: #292825;
+  --muted-foreground: #aaa69f;
+  --accent: #2d3351;
+  --accent-foreground: #dfe5ff;
+  --destructive: #ff6b72;
+  --border: #3a3834;
+  --input: #48453f;
+  --ring: #7590ff;
+  --chart-1: #7590ff;
+  --chart-2: #ff77ad;
+  --chart-3: #ff8a55;
+  --chart-4: #5ccba7;
+  --chart-5: #ad8ae8;
+  --sidebar: #121211;
+  --sidebar-foreground: #eeeae4;
+  --sidebar-primary: #7590ff;
+  --sidebar-primary-foreground: #111218;
+  --sidebar-accent: #292825;
+  --sidebar-accent-foreground: #f5f2ed;
+  --sidebar-border: #302f2c;
+  --sidebar-ring: #7590ff;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 25%), 0 10px 28px rgb(0 0 0 / 16%);
+}
+
+/* ─── ChatGPT — neutral, low-noise monochrome application chrome ─── */
+:root[data-palette="chatgpt"] {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #0d0d0d;
+  --card: #ffffff;
+  --card-foreground: #0d0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0d0d0d;
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #171717;
+  --muted: #f4f4f4;
+  --muted-foreground: #6b6b6b;
+  --accent: #ececec;
+  --accent-foreground: #0d0d0d;
+  --destructive: #d00e17;
+  --border: #e5e5e5;
+  --input: #d9d9d9;
+  --ring: #707070;
+  --chart-1: #0d0d0d;
+  --chart-2: #10a37f;
+  --chart-3: #6f5bd3;
+  --chart-4: #d97706;
+  --chart-5: #d00e17;
+  --sidebar: #f9f9f9;
+  --sidebar-foreground: #242424;
+  --sidebar-primary: #0d0d0d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececec;
+  --sidebar-accent-foreground: #0d0d0d;
+  --sidebar-border: #eeeeee;
+  --sidebar-ring: #707070;
+  --app-font-family: "OpenAI Sans", "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 4%);
+}
+.dark[data-palette="chatgpt"] {
+  color-scheme: dark;
+  --background: #212121;
+  --foreground: #ececec;
+  --card: #262626;
+  --card-foreground: #ececec;
+  --popover: #2f2f2f;
+  --popover-foreground: #ececec;
+  --primary: #ffffff;
+  --primary-foreground: #171717;
+  --secondary: #2f2f2f;
+  --secondary-foreground: #ececec;
+  --muted: #2f2f2f;
+  --muted-foreground: #b4b4b4;
+  --accent: #383838;
+  --accent-foreground: #ffffff;
+  --destructive: #ff676f;
+  --border: #424242;
+  --input: #4a4a4a;
+  --ring: #9b9b9b;
+  --chart-1: #ffffff;
+  --chart-2: #46c6a3;
+  --chart-3: #9988e8;
+  --chart-4: #f0a64b;
+  --chart-5: #ff676f;
+  --sidebar: #171717;
+  --sidebar-foreground: #ececec;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #171717;
+  --sidebar-accent: #2f2f2f;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2c2c2c;
+  --sidebar-ring: #9b9b9b;
+  --shadow-card: none;
+}
+
+/* ─── Claude — warm paper, terracotta actions, editorial hierarchy ─ */
+:root[data-palette="claude"] {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: #f7f6f2;
+  --foreground: #2f2e2b;
+  --card: #fffefb;
+  --card-foreground: #2f2e2b;
+  --popover: #fffefb;
+  --popover-foreground: #2f2e2b;
+  --primary: #c96442;
+  --primary-foreground: #ffffff;
+  --secondary: #eeeae2;
+  --secondary-foreground: #34312c;
+  --muted: #efede7;
+  --muted-foreground: #77736b;
+  --accent: #e9e4da;
+  --accent-foreground: #4b4037;
+  --destructive: #b93832;
+  --border: #ddd9d0;
+  --input: #d2cdc3;
+  --ring: #c96442;
+  --chart-1: #c96442;
+  --chart-2: #467c74;
+  --chart-3: #6d5a9c;
+  --chart-4: #a77a2d;
+  --chart-5: #b14e67;
+  --sidebar: #f0eee8;
+  --sidebar-foreground: #36342f;
+  --sidebar-primary: #c96442;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6e2d9;
+  --sidebar-accent-foreground: #2f2e2b;
+  --sidebar-border: #dedad1;
+  --sidebar-ring: #c96442;
+  --app-font-family: "Aptos", "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --shadow-card: 0 1px 2px rgb(54 48 40 / 5%);
+}
+.dark[data-palette="claude"] {
+  color-scheme: dark;
+  --background: #1f1e1b;
+  --foreground: #eeeae3;
+  --card: #262521;
+  --card-foreground: #eeeae3;
+  --popover: #2a2925;
+  --popover-foreground: #eeeae3;
+  --primary: #e08b6c;
+  --primary-foreground: #231a16;
+  --secondary: #302e29;
+  --secondary-foreground: #eeeae3;
+  --muted: #2d2c28;
+  --muted-foreground: #aaa49a;
+  --accent: #3a332d;
+  --accent-foreground: #f4e8de;
+  --destructive: #ef716a;
+  --border: #444139;
+  --input: #504c43;
+  --ring: #e08b6c;
+  --chart-1: #e08b6c;
+  --chart-2: #76aaa1;
+  --chart-3: #aa95d2;
+  --chart-4: #d2a65a;
+  --chart-5: #d17b8f;
+  --sidebar: #191815;
+  --sidebar-foreground: #eeeae3;
+  --sidebar-primary: #e08b6c;
+  --sidebar-primary-foreground: #231a16;
+  --sidebar-accent: #302e29;
+  --sidebar-accent-foreground: #f4f0e9;
+  --sidebar-border: #37352f;
+  --sidebar-ring: #e08b6c;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 18%);
+}
+
+[data-palette="lovable"] *,
+[data-palette="chatgpt"] *,
+[data-palette="claude"] * {
+  letter-spacing: 0 !important;
+}
+[data-palette="lovable"] [data-slot="card"],
+[data-palette="chatgpt"] [data-slot="card"],
+[data-palette="claude"] [data-slot="card"] {
+  box-shadow: var(--shadow-card);
+}
+[data-palette="lovable"] .deep-sea-bg,
+[data-palette="chatgpt"] .deep-sea-bg,
+[data-palette="claude"] .deep-sea-bg {
+  background: none;
+}
+[data-palette="claude"] h1,
+[data-palette="claude"] h2 {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 600;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

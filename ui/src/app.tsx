@@ -30,6 +30,7 @@ const SchedulesPage = lazy(() => import("@/pages/schedules").then(m => ({ defaul
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
 const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
 const AgentBrowserLivePage = lazy(() => import("@/pages/agent-browser-live").then(m => ({ default: m.AgentBrowserLivePage })));
+const AppsPage = lazy(() => import("@/pages/apps").then(m => ({ default: m.AppsPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
 const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
 
@@ -182,6 +183,8 @@ export function App() {
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
           <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
+          <Route path="apps" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
+          <Route path="apps/:appId" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
           <Route path="agent-live" element={<Suspense fallback={<PageLoader />}><AgentBrowserLivePage /></Suspense>} />
           <Route path="terminal" element={<></>} />
           <Route path="coding" element={<></>} />

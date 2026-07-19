@@ -17,6 +17,7 @@ import {
   Terminal,
   Code2,
   AppWindow,
+  Boxes,
   Store,
   ExternalLink,
 } from "lucide-react";
@@ -62,6 +63,7 @@ const nav: NavSection[] = [
     section: "System",
     items: [
       { to: "/files", icon: FolderOpen, label: "Files" },
+      { to: "/apps", icon: Boxes, label: "Apps" },
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },

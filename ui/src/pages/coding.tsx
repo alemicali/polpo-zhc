@@ -249,15 +249,15 @@ export function CodingPage() {
   const showCodingRightPanel = rightOpen && (surfaceWidth >= 860 || !showCodingSidebar);
 
   return (
-    <div ref={surfaceRef} className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#0d0d0d] text-white/85">
+    <div ref={surfaceRef} className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
       {/* Coding-local controls only; platform navigation stays outside. */}
-      <header className="flex h-10 shrink-0 items-center gap-1 border-b border-white/[0.08] px-2">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-3">
         <Button
           variant="ghost"
           size="icon"
           className={cn(
-            "h-7 w-7 rounded-md transition-colors",
-            showCodingSidebar ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
+            "h-8 w-8 transition-colors",
+            showCodingSidebar ? "bg-muted text-foreground" : "text-muted-foreground",
           )}
           onClick={() => setSidebarOpen((v) => !v)}
           title="Toggle sidebar"
@@ -268,8 +268,8 @@ export function CodingPage() {
           variant="ghost"
           size="icon"
           className={cn(
-            "h-7 w-7 rounded-md transition-colors",
-            showCodingRightPanel ? "text-white/80 bg-white/[0.05]" : "text-white/40 hover:text-white/70 hover:bg-white/[0.03]",
+            "h-8 w-8 transition-colors",
+            showCodingRightPanel ? "bg-muted text-foreground" : "text-muted-foreground",
           )}
           onClick={() => setRightOpen((v) => !v)}
           title="Toggle right panel"
@@ -287,17 +287,17 @@ export function CodingPage() {
             variant="ghost"
             size="sm"
             disabled={busy}
-            className="h-7 gap-1.5 rounded-md border border-emerald-400/25 bg-emerald-500/[0.08] px-2 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/[0.14] hover:text-emerald-200"
+            className="h-8 gap-1.5 border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/15 dark:text-emerald-300"
             onClick={mergePR}
           >
             <GitMerge className="h-3.5 w-3.5" /> Merge
           </Button>
         ) : (
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             disabled={busy || !git?.branch}
-            className="h-7 gap-1.5 rounded-md border border-white/[0.10] bg-white/[0.02] px-2 text-[11px] text-white/75 hover:bg-white/[0.07] hover:text-white"
+            className="h-8 gap-1.5 px-2.5 text-xs"
             onClick={openPR}
           >
             <GitPullRequestIcon className="h-3.5 w-3.5" /> Open PR
@@ -320,7 +320,7 @@ export function CodingPage() {
                 defaultSize="272px"
                 minSize="180px"
                 maxSize="480px"
-                className="border-r border-white/[0.06]"
+                className="border-r border-border/70 bg-background"
               >
                 <CodingSidebar
                   workspaces={workspaces}
@@ -342,7 +342,7 @@ export function CodingPage() {
           )}
 
           <ResizablePanel id="main">
-            <main className="relative flex h-full w-full flex-col overflow-hidden bg-[#0a0a0a]">
+            <main className="relative flex h-full w-full flex-col overflow-hidden bg-code">
               {activePendingKey ? (() => {
                 const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
                 return pending ? (
@@ -413,7 +413,7 @@ export function CodingPage() {
                 defaultSize="288px"
                 minSize="288px"
                 maxSize="80%"
-                className="border-l border-white/[0.06]"
+                className="border-l border-border/70 bg-background"
               >
                 <RightPanel
                   workspaces={workspaces}
@@ -488,16 +488,16 @@ function HeaderInfo({
         </a>
       )}
       <span className="flex items-center gap-1.5 truncate">
-        <GitBranch className="h-3.5 w-3.5 text-white/40" />
-        <span className="font-medium text-white/85 truncate max-w-[12rem]">{repoLabel}</span>
+        <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="max-w-[12rem] truncate font-medium text-foreground">{repoLabel}</span>
         <EndpointBadge />
         {git?.branch && (
-          <code className="hidden md:inline-block rounded bg-white/[0.03] px-1.5 py-0.5 font-mono text-[11px] text-white/55 truncate max-w-[14rem]">
+          <code className="hidden max-w-[14rem] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground md:inline-block">
             {git.branch}
           </code>
         )}
       </span>
-      <span className="flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[10px] text-white/55">
+      <span className="flex items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
         <span className={cn(
           "inline-flex h-2 w-2 shrink-0 rounded-full",
           state === "connected" ? "bg-emerald-400"
@@ -524,14 +524,14 @@ function CodingNotice({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-[#0d0d0d] p-6 text-white/85">
+    <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background p-6 text-foreground">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.05] text-white/70">
+        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
           {icon}
         </span>
         <div>
           <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-1 text-sm text-white/55">{detail}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{detail}</p>
         </div>
         {action}
       </div>
