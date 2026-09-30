@@ -360,6 +360,7 @@ const ChannelGatewaySchema = z.object({
   allowFrom: z.array(z.string()).optional(),
   enableInbound: z.boolean().optional(),
   sessionIdleMinutes: z.number().int().min(1).optional(),
+  sessionMode: z.enum(["per-peer", "shared"]).optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({

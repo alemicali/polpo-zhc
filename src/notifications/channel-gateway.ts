@@ -8,9 +8,10 @@
  * Capabilities:
  *   - Inbound message routing from Telegram (WhatsApp/Slack/Discord ready to extend)
  *   - Peer identity resolution and DM policy enforcement (allowlist/pairing)
- *   - Session-per-peer management (each peer gets their own conversation thread)
- *   - Slash commands (/tasks, /status, /missions, /approve, /new)
- *   - Free-text chat forwarded to POST /v1/chat/completions internally
+ *   - One-time invite links (/start <token>) that pair a peer without codes
+ *   - Session management per peer and interlocutor, optionally shared with the web UI
+ *   - Slash commands (/tasks, /status, /missions, /approve, /new, /agent, /polpo)
+ *   - Free-text chat to the orchestrator, or to a single agent via the chat runner
  *   - Approval inline buttons (preserves existing TelegramCallbackPoller behavior)
  *   - Presence tracking
  *
@@ -67,6 +68,32 @@ interface CommandResult {
   parseMode?: "HTML" | "Markdown";
 }
 
+/** Agent-direct chat turn executed by the host (the server's completions pipeline). */
+export interface ChannelChatRequest {
+  agent: string;
+  sessionId: string;
+  /** Conversation history including the new user message, oldest first. */
+  messages: { role: "user" | "assistant"; content: string }[];
+}
+
+/** Runs one agent-direct chat turn and returns the reply. The host persists both messages. */
+export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string }>;
+
+/** One-time link that pairs whoever opens it (e.g. t.me/<bot>?start=<token>). */
+export interface ChannelInvite {
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "pending" | "paired" | "expired";
+  peerId?: string;
+  externalId?: string;
+  chatId?: string;
+  displayName?: string;
+}
+
+const INVITE_TTL_MS = 15 * 60 * 1000;
+const START_TOKEN = /^\/start(?:@\S+)?\s+([A-Za-z0-9_-]{8,64})\s*$/;
+
 // ── Slash Commands ──────────────────────────────────────────────────────
 
 const COMMANDS: Record<string, string> = {
@@ -78,6 +105,8 @@ const COMMANDS: Record<string, string> = {
   "/approve": "Approve a pending approval (usage: /approve REQUEST_ID)",
   "/reject":  "Reject a pending approval (usage: /reject REQUEST_ID [reason])",
   "/new":     "Reset your conversation session",
+  "/agent":   "Talk directly to an agent (usage: /agent NAME)",
+  "/polpo":   "Go back to talking with the orchestrator",
   "/pair":    "Approve a pairing code (usage: /pair CODE)",
 };
 
@@ -94,6 +123,8 @@ export class ChannelGateway {
   private recentMessageIds = new Set<string>(); // dedup guard for duplicate polls
   private onTyping?: (chatId: string) => Promise<void>;
   private onPartialResponse?: (chatId: string, text: string) => Promise<void>;
+  private invites = new Map<string, ChannelInvite>(); // token → invite (in-memory, short-lived)
+  private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -149,6 +180,10 @@ export class ChannelGateway {
     // Update presence
     this.peerStore.updatePresence(peerId, "chatting");
 
+    // ── One-time invite link (/start <token>) — pairs without a code ──
+    const invite = this.matchInvite(msg.text);
+    if (invite) return this.redeemInvite(invite, msg, peerId);
+
     // ── DM Policy enforcement ──
     if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
       return this.handleUnauthorized(msg, peerId);
@@ -188,6 +223,62 @@ export class ChannelGateway {
       return "Rejected — tell the agent why. Reply with your feedback:";
     }
     return "Unknown action";
+  }
+
+  // ── Invite links ──────────────────────────────────────────────────
+
+  /** Create a one-time invite. Whoever sends `/start <token>` first is paired. */
+  createInvite(ttlMs = INVITE_TTL_MS): ChannelInvite {
+    this.pruneInvites();
+    const now = Date.now();
+    const invite: ChannelInvite = {
+      token: nanoid(24),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + ttlMs).toISOString(),
+      status: "pending",
+    };
+    this.invites.set(invite.token, invite);
+    return invite;
+  }
+
+  /** Current state of an invite, or undefined if unknown (never created or pruned). */
+  getInvite(token: string): ChannelInvite | undefined {
+    const invite = this.invites.get(token);
+    if (invite?.status === "pending" && Date.now() > new Date(invite.expiresAt).getTime()) {
+      invite.status = "expired";
+    }
+    return invite;
+  }
+
+  private matchInvite(text: string): ChannelInvite | undefined {
+    const token = START_TOKEN.exec(text.trim())?.[1];
+    if (!token) return undefined;
+    const invite = this.getInvite(token);
+    return invite?.status === "pending" ? invite : undefined;
+  }
+
+  private async redeemInvite(invite: ChannelInvite, msg: InboundMessage, peerId: string): Promise<string | undefined> {
+    if ((this.gatewayConfig.dmPolicy ?? "allowlist") === "disabled") return undefined;
+
+    await this.peerStore.addToAllowlist(peerId);
+    const pending = await this.peerStore.getPendingPairing(peerId);
+    if (pending) await this.peerStore.resolvePairing(pending.code);
+
+    invite.status = "paired";
+    invite.peerId = peerId;
+    invite.externalId = msg.externalId;
+    invite.chatId = msg.chatId;
+    invite.displayName = msg.displayName;
+    this.log("info", `Invite redeemed by ${peerId}`);
+
+    return `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to Polpo here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
+  }
+
+  private pruneInvites(): void {
+    const cutoff = Date.now() - INVITE_TTL_MS;
+    for (const [token, invite] of this.invites) {
+      if (new Date(invite.expiresAt).getTime() < cutoff) this.invites.delete(token);
+    }
   }
 
   // ── Unauthorized handler ──────────────────────────────────────────
@@ -241,6 +332,10 @@ export class ChannelGateway {
         return this.cmdReject(args, peerId, msg.chatId);
       case "/new":
         return this.cmdNewSession(peerId);
+      case "/agent":
+        return this.cmdAgent(args, peerId);
+      case "/polpo":
+        return this.cmdPolpo(peerId);
       case "/pair":
         return this.cmdPair(args, peerId);
       default:
@@ -358,8 +453,93 @@ export class ChannelGateway {
   }
 
   private async cmdNewSession(peerId: string): Promise<CommandResult> {
-    await this.peerStore.clearSession(peerId);
-    return { text: "Session reset. Your next message starts a new conversation." };
+    const agent = await this.getActiveAgent(peerId);
+    const key = await this.sessionKey(peerId, agent);
+    await this.peerStore.clearSession(key);
+    this.forceNewSession.add(key);
+    return { text: `Session reset. Your next message starts a new conversation with ${agent ?? "Polpo"}.` };
+  }
+
+  private async cmdAgent(args: string[], peerId: string): Promise<CommandResult> {
+    const agents = await this.orchestrator.getAgents();
+    if (args.length === 0) {
+      const current = await this.getActiveAgent(peerId);
+      const names = agents.map(a => a.name).join(", ") || "none";
+      return {
+        text: `You are talking to ${current ?? "Polpo (orchestrator)"}.\n\nUsage: /agent NAME — switch to an agent\n/polpo — back to the orchestrator\n\nAgents: ${names}`,
+      };
+    }
+
+    const wanted = args[0].toLowerCase();
+    const agent = agents.find(a => a.name.toLowerCase() === wanted);
+    if (!agent) {
+      return { text: `Agent "${args[0]}" not found. Send /agents to see the available agents.` };
+    }
+    if (!this.getChatRunner()) {
+      return { text: "Direct agent chat is not available on this instance." };
+    }
+
+    await this.peerStore.setSessionId(await this.activeAgentKey(peerId), agent.name);
+    return { text: `You are now talking to ${agent.name} (${agent.role}).\nSend /polpo to go back to the orchestrator.` };
+  }
+
+  private async cmdPolpo(peerId: string): Promise<CommandResult> {
+    await this.peerStore.clearSession(await this.activeAgentKey(peerId));
+    return { text: "You are now talking to Polpo (orchestrator)." };
+  }
+
+  // ── Interlocutor and session resolution ────────────────────────────
+
+  private getChatRunner(): ChannelChatRunner | undefined {
+    return this.orchestrator.getChannelChatRunner?.();
+  }
+
+  /** Agent the peer is talking to, or undefined for the orchestrator. Stale names fall back to the orchestrator. */
+  private async getActiveAgent(peerId: string): Promise<string | undefined> {
+    const name = await this.peerStore.getSessionId(await this.activeAgentKey(peerId));
+    if (!name) return undefined;
+    const agents = await this.orchestrator.getAgents();
+    return agents.some(a => a.name === name) ? name : undefined;
+  }
+
+  // The peer→session map doubles as per-peer state: the canonical peer id keys the
+  // orchestrator session, "#agent:<name>" keys agent sessions and "#active-agent"
+  // stores the selected interlocutor. Linked identities share all three.
+  private async activeAgentKey(peerId: string): Promise<string> {
+    return `${await this.peerStore.resolveCanonicalId(peerId)}#active-agent`;
+  }
+
+  private async sessionKey(peerId: string, agent?: string): Promise<string> {
+    const canonical = await this.peerStore.resolveCanonicalId(peerId);
+    return agent ? `${canonical}#agent:${agent}` : canonical;
+  }
+
+  /**
+   * Session for this peer and interlocutor. "per-peer" keeps a channel-owned
+   * session; "shared" continues the interlocutor's latest session, the same
+   * one the web UI resumes. Both start fresh after sessionIdleMinutes.
+   */
+  private async resolveSessionId(peerId: string, agent: string | undefined, firstText: string): Promise<string> {
+    const key = await this.sessionKey(peerId, agent);
+    const idleMs = (this.gatewayConfig.sessionIdleMinutes ?? 60) * 60 * 1000;
+    const isFresh = (updatedAt: string) => Date.now() - new Date(updatedAt).getTime() <= idleMs;
+    const forceNew = this.forceNewSession.delete(key);
+
+    let sessionId: string | undefined;
+    if (!forceNew) {
+      if (this.gatewayConfig.sessionMode === "shared") {
+        const latest = await this.sessionStore.getLatestSession(agent ?? null);
+        if (latest && isFresh(latest.updatedAt)) sessionId = latest.id;
+      } else {
+        const mapped = await this.peerStore.getSessionId(key);
+        const session = mapped ? await this.sessionStore.getSession(mapped) : undefined;
+        if (session && isFresh(session.updatedAt)) sessionId = session.id;
+      }
+    }
+
+    if (!sessionId) sessionId = await this.sessionStore.create(firstText.slice(0, 60), agent);
+    await this.peerStore.setSessionId(key, sessionId);
+    return sessionId;
   }
 
   private async cmdPair(args: string[], peerId: string): Promise<CommandResult> {
@@ -380,26 +560,9 @@ export class ChannelGateway {
 
   private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
     try {
-      // Get or create session
-      let sessionId = await this.peerStore.getSessionId(peerId);
-
-      // Check idle timeout
-      if (sessionId) {
-        const session = await this.sessionStore.getSession(sessionId);
-        if (session) {
-          const idleMinutes = this.gatewayConfig.sessionIdleMinutes ?? 60;
-          const idleMs = Date.now() - new Date(session.updatedAt).getTime();
-          if (idleMs > idleMinutes * 60 * 1000) {
-            // Session expired — create new one
-            sessionId = undefined;
-          }
-        }
-      }
-
-      if (!sessionId) {
-        sessionId = await this.sessionStore.create(msg.text.slice(0, 60));
-        await this.peerStore.setSessionId(peerId, sessionId);
-      }
+      const agent = await this.getActiveAgent(peerId);
+      const sessionId = await this.resolveSessionId(peerId, agent, msg.text);
+      if (agent) return await this.handleAgentChat(msg, agent, sessionId);
 
       // Store user message
       await this.sessionStore.addMessage(sessionId, "user", msg.text);
@@ -525,5 +688,23 @@ export class ChannelGateway {
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
     }
+  }
+
+  /** Agent-direct turn through the host's chat pipeline, which persists both messages. */
+  private async handleAgentChat(msg: InboundMessage, agent: string, sessionId: string): Promise<string> {
+    const runner = this.getChatRunner();
+    if (!runner) return "Direct agent chat is not available on this instance. Send /polpo to talk to the orchestrator.";
+
+    const history = await this.sessionStore.getRecentMessages(sessionId, 40);
+    const messages = history
+      .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
+      .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+    messages.push({ role: "user", content: msg.text });
+
+    if (this.onTyping) await this.onTyping(msg.chatId);
+    const { text } = await runner({ agent, sessionId, messages });
+
+    const reply = text.trim() || `${agent} processed your request but has nothing to say.`;
+    return reply.length > 4000 ? reply.slice(0, 3990) + "\n\n... (truncated)" : reply;
   }
 }

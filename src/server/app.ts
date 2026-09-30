@@ -457,6 +457,39 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return "completed";
   });
 
+  // Messaging channels (Telegram, WhatsApp) talk to a single agent through the
+  // same completions pipeline as the web UI: agent prompt, memory, tools,
+  // compaction and message persistence stay identical across surfaces.
+  o?.setChannelChatRunner(async ({ agent, sessionId, messages }) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": sessionId,
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ stream: false, agent, messages }),
+    }));
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok) {
+      throw new Error(payload?.error?.message ?? payload?.error ?? `Agent chat failed (${response.status})`);
+    }
+    const choice = payload?.choices?.[0];
+    let text: string = choice?.message?.content ?? "";
+    const questions: any[] = choice?.ask_user?.questions ?? [];
+    // Channels have no structured ask_user controls: render the questions as
+    // text and let the user answer in their next message.
+    if (questions.length > 0) {
+      const asked = questions.map((q) => {
+        const options = (q?.options ?? []).map((o: any, i: number) => `  ${i + 1}. ${o?.label ?? o}`).join("\n");
+        return [`• ${q?.question ?? q?.header ?? ""}`, options].filter(Boolean).join("\n");
+      }).join("\n\n");
+      text = [text, asked, "Reply with your answer."].filter(Boolean).join("\n\n");
+    }
+    return { text };
+  });
+
   authed.route("/counts", countsRoutes(() => ({
     getAllTasks: () => o.getStore().getAllTasks(),
     getAllMissions: () => o.getAllMissions(),
@@ -584,9 +617,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getPolpoDir: () => o.getPolpoDir(),
   })));
 
-  authed.route("/peers", peerRoutes(() => ({
-    peerStore: o.getPeerStore(),
-  })));
+  authed.route("/peers", peerRoutes(() => {
+    const channels = o.getConfig()?.settings?.notifications?.channels ?? {};
+    const telegram = Object.values(channels).find((ch: any) => ch?.type === "telegram" && ch.botToken) as any;
+    return {
+      peerStore: o.getPeerStore(),
+      gateway: o.getChannelGateway(),
+      telegramBotToken: telegram?.botToken,
+    };
+  }));
 
   authed.route("/schedules", scheduleRoutes(() => ({
     getScheduler: () => o.getScheduler(),

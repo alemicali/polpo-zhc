@@ -519,6 +519,8 @@ export interface ChannelGatewayConfig {
   allowFrom?: string[];
   enableInbound?: boolean;
   sessionIdleMinutes?: number;
+  /** "per-peer" (default) keeps channel chats separate; "shared" continues the web UI session. */
+  sessionMode?: "per-peer" | "shared";
 }
 
 export interface NotificationChannelConfig {

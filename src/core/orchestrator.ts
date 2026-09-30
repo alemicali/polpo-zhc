@@ -59,7 +59,7 @@ import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
@@ -149,6 +149,7 @@ export class Orchestrator extends TypedEmitter {
   private teamStore!: TeamStore;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
+  private channelChatRunner?: ChannelChatRunner;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
@@ -176,6 +177,9 @@ export class Orchestrator extends TypedEmitter {
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
   getChannelGateway(): ChannelGateway | undefined { return this.channelGateway; }
+  /** Agent-direct chat for messaging channels, provided by the server host. */
+  getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
+  setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }

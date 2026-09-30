@@ -180,6 +180,21 @@ export class FilePeerStore implements PeerStore {
     );
   }
 
+  async listPendingPairings(): Promise<PairingRequest[]> {
+    const now = Date.now();
+    return [...this.pairings.values()]
+      .filter(p => !p.resolved && now < new Date(p.expiresAt).getTime())
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async rejectPairing(code: string): Promise<boolean> {
+    const request = this.pairings.get(code.toUpperCase());
+    if (!request || request.resolved) return false;
+    request.resolved = true;
+    this.savePairings();
+    return true;
+  }
+
   async cleanExpiredPairings(): Promise<number> {
     const now = Date.now();
     let cleaned = 0;

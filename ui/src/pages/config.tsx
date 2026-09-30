@@ -98,6 +98,7 @@ import { PALETTES, usePalette } from "@/lib/palette";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { ChannelAccessPanel, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -785,9 +786,10 @@ function WhatsAppProfileSetup({ config, onChange }: {
   );
 }
 
-function DeliveryFields({ config, onChange }: {
+function DeliveryFields({ config, onChange, gatewayRunning }: {
   config: NotificationChannelConfig;
   onChange: (patch: Partial<NotificationChannelConfig>) => void;
+  gatewayRunning: boolean;
 }) {
   const set = onChange;
 
@@ -803,9 +805,16 @@ function DeliveryFields({ config, onChange }: {
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications">
+          <TelegramTokenCheck api={api} botToken={config.botToken} />
+          <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications. Filled automatically when you connect your Telegram below.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
+          <TelegramConnect
+            api={api}
+            gatewayRunning={gatewayRunning}
+            currentChatId={config.chatId}
+            onPaired={(chatId) => { if (!config.chatId) set({ chatId }); }}
+          />
         </>
       )}
 
@@ -983,7 +992,7 @@ function InboundGatewayForm({ config, onChange }: {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Idle Timeout" hint="Minutes before a session expires.">
+            <Field label="Idle Timeout" hint="Minutes of inactivity before a new conversation starts.">
               <Input
                 className="h-8 text-xs font-mono"
                 type="number"
@@ -994,13 +1003,29 @@ function InboundGatewayForm({ config, onChange }: {
               />
             </Field>
           </div>
+          <Field label="Conversation" hint="How chats from this channel relate to the web chat.">
+            <Select value={gateway.sessionMode ?? "per-peer"} onValueChange={(v) => updateGateway({ sessionMode: v as GatewayConfig["sessionMode"] })}>
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="per-peer" className="text-xs">Separate from web chat</SelectItem>
+                <SelectItem value="shared" className="text-xs">Continue the web chat</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <p className="-mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+            {(gateway.sessionMode ?? "per-peer") === "shared"
+              ? "Messages continue the latest conversation with the same interlocutor (Polpo or the agent chosen with /agent), the one the web chat resumes."
+              : "Each person gets their own conversations here, one per interlocutor. They appear in the web chat list but are not resumed automatically."}
+          </p>
           <Field
             label="Allow From"
             hint={policy === "allowlist"
               ? "Comma-separated external IDs allowed to message Polpo."
               : policy === "open"
                 ? "Optional. Leave empty for open access, or document expected IDs."
-                : "Optional. Pairing policy normally uses /pair CODE instead."}
+                : "Optional. With pairing, connect people with an invite link or approve their requests on the channel card."}
           >
             <Input
               className="h-8 text-xs font-mono"
@@ -1013,7 +1038,7 @@ function InboundGatewayForm({ config, onChange }: {
             />
           </Field>
           <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
-            {policy === "pairing" && "Pairing requires the user to send /pair with a valid code before free text is routed to Polpo."}
+            {policy === "pairing" && "Unknown people receive a pairing code. Approve them from the channel card, or send them an invite link that pairs them automatically."}
             {policy === "allowlist" && "Allowlist accepts only configured IDs. Use this for production channels with known operators."}
             {policy === "open" && "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints."}
             {policy === "disabled" && "Disabled keeps the gateway block configured but rejects inbound messages."}
@@ -1029,9 +1054,11 @@ function InboundGatewayForm({ config, onChange }: {
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange }: {
+function ChannelForm({ config, onChange, gatewayRunning }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
+  /** The saved version of this channel has inbound enabled. */
+  gatewayRunning: boolean;
 }) {
   const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
@@ -1039,7 +1066,7 @@ function ChannelForm({ config, onChange }: {
     <div className="space-y-3">
       <ChannelConceptPanel type={config.type} />
       <ChannelSetupGuide type={config.type} />
-      <DeliveryFields config={config} onChange={set} />
+      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} />
       {channelSupportsInbound(config.type) && (
         <InboundGatewayForm config={config} onChange={onChange} />
       )}
@@ -1186,6 +1213,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                 value={gateway.dmPolicy ?? "allowlist"}
                 mono
               />
+              {(ch.type === "telegram" || ch.type === "whatsapp") && <ChannelAccessPanel api={api} channel={ch.type} />}
             </div>
           )}
         </div>
@@ -1589,7 +1617,11 @@ function ChannelsTab({ settings, onUpdateConfig }: {
                 />
               </Field>
             )}
-            <ChannelForm config={editConfig} onChange={setEditConfig} />
+            <ChannelForm
+              config={editConfig}
+              onChange={setEditConfig}
+              gatewayRunning={!isNew && channels[editName]?.gateway?.enableInbound === true}
+            />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>
             )}

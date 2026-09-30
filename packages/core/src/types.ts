@@ -935,7 +935,18 @@ export interface ChannelGatewayConfig {
   enableInbound?: boolean;
   /** Session idle timeout in minutes before creating a new session. Default: 60. */
   sessionIdleMinutes?: number;
+  /**
+   * How channel conversations map to chat sessions. Default: "per-peer".
+   * - "per-peer": each peer keeps its own sessions, one per interlocutor
+   *   (orchestrator or agent), separate from the web UI.
+   * - "shared": the channel continues the latest session of the same
+   *   interlocutor, the same one the web UI resumes.
+   */
+  sessionMode?: ChannelSessionMode;
 }
+
+/** Session mapping strategy for inbound channel conversations. */
+export type ChannelSessionMode = "per-peer" | "shared";
 
 /**
  * Presence entry — lightweight, ephemeral tracking of connected peers.
