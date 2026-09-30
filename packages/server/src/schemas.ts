@@ -359,8 +359,12 @@ const ChannelGatewaySchema = z.object({
   dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional(),
   allowFrom: z.array(z.string()).optional(),
   enableInbound: z.boolean().optional(),
-  sessionIdleMinutes: z.number().int().min(1).optional(),
+  sessionIdleMinutes: z.number().int().min(0).optional(),
   sessionMode: z.enum(["per-peer", "shared"]).optional(),
+  agentSessions: z.record(z.string(), z.object({
+    sessionMode: z.enum(["per-peer", "shared"]).optional(),
+    sessionIdleMinutes: z.number().int().min(0).optional(),
+  }).strict()).optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({

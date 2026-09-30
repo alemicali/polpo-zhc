@@ -518,9 +518,12 @@ export interface ChannelGatewayConfig {
   dmPolicy?: DmPolicy;
   allowFrom?: string[];
   enableInbound?: boolean;
+  /** Minutes of inactivity before a new session starts. 0 = never expire. */
   sessionIdleMinutes?: number;
   /** "per-peer" (default) keeps channel chats separate; "shared" continues the web UI session. */
   sessionMode?: "per-peer" | "shared";
+  /** Per-agent overrides, keyed by agent name. */
+  agentSessions?: Record<string, { sessionMode?: "per-peer" | "shared"; sessionIdleMinutes?: number }>;
 }
 
 export interface NotificationChannelConfig {

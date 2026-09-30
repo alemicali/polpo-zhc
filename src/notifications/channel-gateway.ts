@@ -514,20 +514,31 @@ export class ChannelGateway {
     return agent ? `${canonical}#agent:${agent}` : canonical;
   }
 
+  /** Channel defaults with the agent's overrides applied (the orchestrator uses the defaults). */
+  private sessionSettings(agent?: string): { sessionMode: "per-peer" | "shared"; idleMinutes: number } {
+    const override = agent ? this.gatewayConfig.agentSessions?.[agent] : undefined;
+    return {
+      sessionMode: override?.sessionMode ?? this.gatewayConfig.sessionMode ?? "per-peer",
+      idleMinutes: override?.sessionIdleMinutes ?? this.gatewayConfig.sessionIdleMinutes ?? 60,
+    };
+  }
+
   /**
    * Session for this peer and interlocutor. "per-peer" keeps a channel-owned
    * session; "shared" continues the interlocutor's latest session, the same
-   * one the web UI resumes. Both start fresh after sessionIdleMinutes.
+   * one the web UI resumes. Both start fresh after the idle timeout, unless
+   * it is 0 (never expire).
    */
   private async resolveSessionId(peerId: string, agent: string | undefined, firstText: string): Promise<string> {
     const key = await this.sessionKey(peerId, agent);
-    const idleMs = (this.gatewayConfig.sessionIdleMinutes ?? 60) * 60 * 1000;
-    const isFresh = (updatedAt: string) => Date.now() - new Date(updatedAt).getTime() <= idleMs;
+    const { sessionMode, idleMinutes } = this.sessionSettings(agent);
+    const isFresh = (updatedAt: string) =>
+      idleMinutes === 0 || Date.now() - new Date(updatedAt).getTime() <= idleMinutes * 60 * 1000;
     const forceNew = this.forceNewSession.delete(key);
 
     let sessionId: string | undefined;
     if (!forceNew) {
-      if (this.gatewayConfig.sessionMode === "shared") {
+      if (sessionMode === "shared") {
         const latest = await this.sessionStore.getLatestSession(agent ?? null);
         if (latest && isFresh(latest.updatedAt)) sessionId = latest.id;
       } else {

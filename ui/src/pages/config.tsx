@@ -99,6 +99,7 @@ import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
+import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -992,11 +993,11 @@ function InboundGatewayForm({ config, onChange }: {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Idle Timeout" hint="Minutes of inactivity before a new conversation starts.">
+            <Field label="Idle Timeout" hint="Minutes of inactivity before a new conversation starts. 0 = never.">
               <Input
                 className="h-8 text-xs font-mono"
                 type="number"
-                min={1}
+                min={0}
                 placeholder="60"
                 value={gateway.sessionIdleMinutes ?? ""}
                 onChange={(e) => updateGateway({ sessionIdleMinutes: e.target.value ? Number(e.target.value) : undefined })}
@@ -1019,6 +1020,11 @@ function InboundGatewayForm({ config, onChange }: {
               ? "Messages continue the latest conversation with the same interlocutor (Polpo or the agent chosen with /agent), the one the web chat resumes."
               : "Each person gets their own conversations here, one per interlocutor. They appear in the web chat list but are not resumed automatically."}
           </p>
+          <AgentSessionOverrides
+            api={api}
+            value={gateway.agentSessions}
+            onChange={(agentSessions) => updateGateway({ agentSessions })}
+          />
           <Field
             label="Allow From"
             hint={policy === "allowlist"

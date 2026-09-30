@@ -294,3 +294,77 @@ describe("ChannelGateway — session modes", () => {
     expect(second).not.toBe(first);
   });
 });
+
+// ── Per-agent session settings ──────────────────────────
+
+describe("ChannelGateway — per-agent session settings", () => {
+  const HOURS_AGO = (h: number) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+
+  it("an agent override applies only to that agent", async () => {
+    const { send, sessionStore, runner } = setup({
+      gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agentSessions: { backend: { sessionMode: "shared" } } },
+    });
+    const webBackend = await sessionStore.create("web backend", "backend");
+    const webGrowth = await sessionStore.create("web growth", "growth");
+
+    await send("/agent backend");
+    await send("hi backend");
+    await send("/agent growth");
+    await send("hi growth");
+
+    const [backendTurn, growthTurn] = runner!.mock.calls.map(c => c[0]);
+    expect(backendTurn.sessionId).toBe(webBackend);     // shared via override
+    expect(growthTurn.sessionId).not.toBe(webGrowth);   // channel default: per-peer
+  });
+
+  it("sessionIdleMinutes 0 never expires, in shared and per-peer mode", async () => {
+    for (const sessionMode of ["shared", "per-peer"] as const) {
+      const { send, sessionStore, runner } = setup({
+        gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agentSessions: { backend: { sessionMode, sessionIdleMinutes: 0 } } },
+      });
+      await send("/agent backend");
+      await send("first");
+      const first = runner!.mock.calls[0][0].sessionId;
+      sessionStore.sessions.get(first)!.updatedAt = HOURS_AGO(24 * 90);
+
+      await send("three months later");
+      expect(runner!.mock.calls[1][0].sessionId).toBe(first);
+    }
+  });
+
+  it("shared + never-expire resumes a months-old web session", async () => {
+    const { send, sessionStore, runner } = setup({
+      gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agentSessions: { backend: { sessionMode: "shared", sessionIdleMinutes: 0 } } },
+    });
+    const old = await sessionStore.create("old web chat", "backend");
+    sessionStore.sessions.get(old)!.updatedAt = HOURS_AGO(24 * 120);
+
+    await send("/agent backend");
+    await send("still there?");
+    expect(runner!.mock.calls[0][0].sessionId).toBe(old);
+  });
+
+  it("an override may change only the idle timeout and inherit the mode", async () => {
+    const { send, sessionStore, runner } = setup({
+      gatewayConfig: { enableInbound: true, dmPolicy: "pairing", sessionMode: "shared", sessionIdleMinutes: 5, agentSessions: { backend: { sessionIdleMinutes: 0 } } },
+    });
+    const web = await sessionStore.create("web", "backend");
+    sessionStore.sessions.get(web)!.updatedAt = HOURS_AGO(48);
+
+    await send("/agent backend");
+    await send("hello");
+    expect(runner!.mock.calls[0][0].sessionId).toBe(web);
+  });
+
+  it("/new still starts a fresh session when the session never expires", async () => {
+    const { send, runner } = setup({
+      gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agentSessions: { backend: { sessionMode: "shared", sessionIdleMinutes: 0 } } },
+    });
+    await send("/agent backend");
+    await send("first");
+    await send("/new");
+    await send("second");
+    const [a, b] = runner!.mock.calls.map(c => c[0].sessionId);
+    expect(b).not.toBe(a);
+  });
+});

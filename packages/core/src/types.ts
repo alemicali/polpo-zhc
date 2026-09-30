@@ -933,7 +933,7 @@ export interface ChannelGatewayConfig {
   allowFrom?: string[];
   /** Enable inbound message routing (chat with orchestrator). Default: false. */
   enableInbound?: boolean;
-  /** Session idle timeout in minutes before creating a new session. Default: 60. */
+  /** Minutes of inactivity before a new session starts. 0 = never expire. Default: 60. */
   sessionIdleMinutes?: number;
   /**
    * How channel conversations map to chat sessions. Default: "per-peer".
@@ -943,10 +943,19 @@ export interface ChannelGatewayConfig {
    *   interlocutor, the same one the web UI resumes.
    */
   sessionMode?: ChannelSessionMode;
+  /** Per-agent overrides of sessionMode / sessionIdleMinutes, keyed by agent name. */
+  agentSessions?: Record<string, ChannelSessionSettings>;
 }
 
 /** Session mapping strategy for inbound channel conversations. */
 export type ChannelSessionMode = "per-peer" | "shared";
+
+/** Session behaviour for one interlocutor on a channel. */
+export interface ChannelSessionSettings {
+  sessionMode?: ChannelSessionMode;
+  /** 0 = never expire. */
+  sessionIdleMinutes?: number;
+}
 
 /**
  * Presence entry — lightweight, ephemeral tracking of connected peers.
