@@ -6,7 +6,7 @@
  * the ChannelGateway can process.
  */
 
-import type { TelegramGatewayHandler } from "./channels/telegram.js";
+import type { InboundAttachment, TelegramGatewayHandler } from "./channels/telegram.js";
 import { ChannelGateway } from "./channel-gateway.js";
 
 export class TelegramGatewayAdapter implements TelegramGatewayHandler {
@@ -18,6 +18,7 @@ export class TelegramGatewayAdapter implements TelegramGatewayHandler {
     text: string,
     senderName?: string,
     messageId?: string,
+    attachments?: InboundAttachment[],
   ): Promise<string | undefined> {
     return this.gateway.handleMessage({
       channel: "telegram",
@@ -26,6 +27,7 @@ export class TelegramGatewayAdapter implements TelegramGatewayHandler {
       displayName: senderName,
       text,
       messageId,
+      attachments,
     });
   }
 

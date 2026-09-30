@@ -28,7 +28,7 @@ import { nanoid } from "nanoid";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
-import type { ApprovalCallbackResolver } from "./channels/telegram.js";
+import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type {
   ChannelGatewayConfig,
   ChannelType,
@@ -61,6 +61,8 @@ interface InboundMessage {
   displayName?: string;
   text: string;
   messageId?: string;
+  /** Media downloaded from the channel (photos, documents, voice notes, …). */
+  attachments?: InboundAttachment[];
 }
 
 interface CommandResult {
@@ -68,12 +70,19 @@ interface CommandResult {
   parseMode?: "HTML" | "Markdown";
 }
 
-/** Agent-direct chat turn executed by the host (the server's completions pipeline). */
+/** OpenAI-format content part, as accepted by the completions pipeline. */
+export type ChannelContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
+
+/** Chat turn executed by the host (the server's completions pipeline). */
 export interface ChannelChatRequest {
-  agent: string;
+  /** Target agent; omitted = the orchestrator. */
+  agent?: string;
   sessionId: string;
   /** Conversation history including the new user message, oldest first. */
-  messages: { role: "user" | "assistant"; content: string }[];
+  messages: { role: "user" | "assistant"; content: string | ChannelContentPart[] }[];
 }
 
 /** Runs one agent-direct chat turn and returns the reply. The host persists both messages. */
@@ -92,6 +101,30 @@ export interface ChannelInvite {
 }
 
 const INVITE_TTL_MS = 15 * 60 * 1000;
+/** Per-file limit of the chat attachment store (saveChatUserMessage). */
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const VISION_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const ATTACHMENT_LABEL: Record<InboundAttachment["kind"], string> = {
+  photo: "a photo", document: "a file", voice: "a voice message", audio: "an audio file", video: "a video",
+};
+
+/** Build the user turn: caption (or a short description) plus image/file parts. */
+export function attachmentContent(text: string, attachments: InboundAttachment[]): ChannelContentPart[] {
+  const described = attachments.map(a => `${ATTACHMENT_LABEL[a.kind]} (${a.filename})`).join(", ");
+  const voiceHint = attachments.some(a => a.kind === "voice" || a.kind === "audio")
+    ? " Audio is attached as a file; transcribe it with your tools if you can, otherwise say you cannot listen to it."
+    : "";
+  const parts: ChannelContentPart[] = [{ type: "text", text: text.trim() || `[The user sent ${described}.${voiceHint}]` }];
+  if (text.trim() && voiceHint) parts.push({ type: "text", text: `[${voiceHint.trim()}]` });
+  for (const a of attachments) {
+    const dataUrl = `data:${a.mimeType};base64,${a.data.toString("base64")}`;
+    parts.push(VISION_TYPES.has(a.mimeType)
+      ? { type: "image_url", image_url: { url: dataUrl } }
+      : { type: "file", file: { filename: a.filename, file_data: dataUrl } });
+  }
+  return parts;
+}
 const START_TOKEN = /^\/start(?:@\S+)?\s+([A-Za-z0-9_-]{8,64})\s*$/;
 
 // ── Slash Commands ──────────────────────────────────────────────────────
@@ -585,8 +618,11 @@ export class ChannelGateway {
   private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
     try {
       const agent = await this.getActiveAgent(peerId);
-      const sessionId = await this.resolveSessionId(peerId, agent, msg.text);
-      if (agent) return await this.handleAgentChat(msg, agent, sessionId);
+      const attachments = msg.attachments ?? [];
+      const title = msg.text || attachments.map(a => a.filename).join(", ");
+      const sessionId = await this.resolveSessionId(peerId, agent, title);
+      // Agents, and any turn with media, go through the host pipeline (vision + attachment storage).
+      if (agent || attachments.length > 0) return await this.handleRunnerChat(msg, agent, sessionId);
 
       // Store user message
       await this.sessionStore.addMessage(sessionId, "user", msg.text);
@@ -714,21 +750,33 @@ export class ChannelGateway {
     }
   }
 
-  /** Agent-direct turn through the host's chat pipeline, which persists both messages. */
-  private async handleAgentChat(msg: InboundMessage, agent: string, sessionId: string): Promise<string> {
+  /**
+   * Turn through the host's chat pipeline (agent-direct, or orchestrator when
+   * agent is undefined). The pipeline persists both messages and attachments.
+   */
+  private async handleRunnerChat(msg: InboundMessage, agent: string | undefined, sessionId: string): Promise<string> {
+    const who = agent ?? "Polpo";
     const runner = this.getChatRunner();
-    if (!runner) return "Direct agent chat is not available on this instance. Send /polpo to talk to the orchestrator.";
+    if (!runner) {
+      return agent
+        ? "Direct agent chat is not available on this instance. Send /polpo to talk to the orchestrator."
+        : "Attachments are not supported on this instance yet. Please send text.";
+    }
+
+    const attachments = msg.attachments ?? [];
+    const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
+    if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
 
     const history = await this.sessionStore.getRecentMessages(sessionId, 40);
-    const messages = history
+    const messages: ChannelChatRequest["messages"] = history
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
-    messages.push({ role: "user", content: msg.text });
+    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
 
     if (this.onTyping) await this.onTyping(msg.chatId);
     const { text } = await runner({ agent, sessionId, messages });
 
-    const reply = text.trim() || `${agent} processed your request but has nothing to say.`;
+    const reply = text.trim() || `${who} processed your request but has nothing to say.`;
     return reply.length > 4000 ? reply.slice(0, 3990) + "\n\n... (truncated)" : reply;
   }
 }

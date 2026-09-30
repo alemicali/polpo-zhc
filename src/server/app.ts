@@ -457,9 +457,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return "completed";
   });
 
-  // Messaging channels (Telegram, WhatsApp) talk to a single agent through the
-  // same completions pipeline as the web UI: agent prompt, memory, tools,
-  // compaction and message persistence stay identical across surfaces.
+  // Messaging channels (Telegram, WhatsApp) run agent turns, and any turn with
+  // media, through the same completions pipeline as the web UI: prompt, memory,
+  // tools, compaction, attachment storage and persistence stay identical.
   o?.setChannelChatRunner(async ({ agent, sessionId, messages }) => {
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -469,7 +469,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const response = await completionApp.request(new Request("http://polpo.internal/", {
       method: "POST",
       headers,
-      body: JSON.stringify({ stream: false, agent, messages }),
+      body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages }),
     }));
     const payload = await response.json().catch(() => null) as any;
     if (!response.ok) {

@@ -410,3 +410,111 @@ describe("ChannelGateway — dedicated agent channel", () => {
     expect(await send(`/start ${gateway.createInvite().token}`)).toContain("talk to backend here");
   });
 });
+
+// ── Inbound attachments ─────────────────────────────────
+
+import { attachmentContent } from "../notifications/channel-gateway.js";
+import { inboundMediaOf } from "../notifications/channels/telegram.js";
+import type { InboundAttachment } from "../notifications/channels/telegram.js";
+
+const photo = (): InboundAttachment => ({ kind: "photo", filename: "photo.jpg", mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes") });
+const pdf = (): InboundAttachment => ({ kind: "document", filename: "referto.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF") });
+const voice = (): InboundAttachment => ({ kind: "voice", filename: "voice.ogg", mimeType: "audio/ogg", data: Buffer.from("ogg") });
+
+describe("attachmentContent", () => {
+  it("sends images as vision input and other files as file parts", () => {
+    const parts = attachmentContent("guarda", [photo(), pdf()]);
+    expect(parts[0]).toEqual({ type: "text", text: "guarda" });
+    expect(parts[1]).toEqual({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${Buffer.from("jpeg-bytes").toString("base64")}` } });
+    expect(parts[2]).toMatchObject({ type: "file", file: { filename: "referto.pdf" } });
+    expect((parts[2] as any).file.file_data).toMatch(/^data:application\/pdf;base64,/);
+  });
+
+  it("describes caption-less media and asks to transcribe audio", () => {
+    const [text] = attachmentContent("", [voice()]);
+    expect((text as any).text).toContain("a voice message (voice.ogg)");
+    expect((text as any).text).toContain("transcribe it");
+  });
+
+  it("keeps the caption and adds the audio hint separately", () => {
+    const parts = attachmentContent("ascolta", [voice()]);
+    expect(parts[0]).toEqual({ type: "text", text: "ascolta" });
+    expect((parts[1] as any).text).toContain("transcribe");
+  });
+});
+
+describe("ChannelGateway — inbound attachments", () => {
+  it("routes an orchestrator turn with media through the host pipeline", async () => {
+    const { gateway, runner } = setup();
+    const reply = await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "", attachments: [photo()] });
+
+    expect(reply).toBe("agent reply");
+    const request = runner!.mock.calls[0][0];
+    expect(request.agent).toBeUndefined();
+    const last = request.messages[request.messages.length - 1];
+    expect(Array.isArray(last.content)).toBe(true);
+    expect((last.content as any[]).some(p => p.type === "image_url")).toBe(true);
+  });
+
+  it("sends media to the selected agent in its session", async () => {
+    const { gateway, send, runner, sessionStore } = setup();
+    await send("/agent backend");
+    await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "il referto", attachments: [pdf()] });
+
+    const request = runner!.mock.calls[0][0];
+    expect(request.agent).toBe("backend");
+    expect(sessionStore.create).toHaveBeenCalledWith("il referto", "backend");
+  });
+
+  it("names a caption-less session after the file", async () => {
+    const { gateway, sessionStore } = setup();
+    await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "", attachments: [pdf()] });
+    expect(sessionStore.create).toHaveBeenCalledWith("referto.pdf", undefined);
+  });
+
+  it("rejects files over 15 MB before calling the model", async () => {
+    const { gateway, runner } = setup();
+    const big = { ...pdf(), data: Buffer.alloc(16 * 1024 * 1024) };
+    const reply = await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "", attachments: [big] });
+    expect(reply).toContain("too large");
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("explains when the host has no pipeline for media", async () => {
+    const { gateway } = setup({ runner: null });
+    const reply = await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "", attachments: [photo()] });
+    expect(reply).toContain("not supported");
+  });
+
+  it("still requires authorization for media from unknown peers", async () => {
+    const { gateway, runner } = setup({ allowed: false });
+    const reply = await gateway.handleMessage({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "", attachments: [photo()] });
+    expect(reply).toContain("pairing code");
+    expect(runner).not.toHaveBeenCalled();
+  });
+});
+
+describe("inboundMediaOf (Telegram)", () => {
+  const base = { message_id: 1, chat: { id: 1 } };
+  it("takes the largest photo size and maps voice, audio, video and documents", () => {
+    const refs = inboundMediaOf({
+      ...base,
+      photo: [{ file_id: "small", file_unique_id: "s", file_size: 10 }, { file_id: "big", file_unique_id: "b", file_size: 900 }],
+      voice: { file_id: "v", file_unique_id: "v", mime_type: "audio/ogg" },
+      audio: { file_id: "a", file_unique_id: "a", file_name: "song.mp3", mime_type: "audio/mpeg" },
+      video_note: { file_id: "vn", file_unique_id: "vn" },
+      document: { file_id: "d", file_unique_id: "d", file_name: "dieta.xlsx" },
+    });
+    expect(refs.map(r => [r.kind, r.fileId, r.filename, r.mimeType])).toEqual([
+      ["photo", "big", "photo.jpg", "image/jpeg"],
+      ["document", "d", "dieta.xlsx", "application/octet-stream"],
+      ["voice", "v", "voice.ogg", "audio/ogg"],
+      ["audio", "a", "song.mp3", "audio/mpeg"],
+      ["video", "vn", "video.mp4", "video/mp4"],
+    ]);
+  });
+
+  it("returns nothing for text-only messages", () => {
+    expect(inboundMediaOf({ ...base, text: "ciao" })).toEqual([]);
+  });
+});
