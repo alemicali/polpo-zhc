@@ -945,6 +945,11 @@ export interface ChannelGatewayConfig {
   sessionMode?: ChannelSessionMode;
   /** Per-agent overrides of sessionMode / sessionIdleMinutes, keyed by agent name. */
   agentSessions?: Record<string, ChannelSessionSettings>;
+  /**
+   * Dedicate this channel (e.g. its own Telegram bot) to one agent: every message
+   * goes to that agent and /agent is disabled. Unset = orchestrator with /agent.
+   */
+  agent?: string;
 }
 
 /** Session mapping strategy for inbound channel conversations. */

@@ -43,7 +43,7 @@ describe("peer routes — pending pairings", () => {
 describe("peer routes — invites", () => {
   it("creates an invite with a t.me deep link when the bot token is valid", async () => {
     const gateway = { createInvite: vi.fn().mockReturnValue(invite()), getInvite: vi.fn() };
-    const res = await call({ gateway, telegramBotToken: "123:abc", fetch: telegramFetch(BOT_OK) }, "POST", "/invites");
+    const res = await call({ getGateway: () => gateway, getTelegramBotToken: () => "123:abc", fetch: telegramFetch(BOT_OK) }, "POST", "/invites");
     const { data } = await res.json();
     expect(res.status).toBe(200);
     expect(data.link).toBe("https://t.me/polpo_orchestrator_bot?start=tok_123456789");
@@ -54,7 +54,7 @@ describe("peer routes — invites", () => {
   it("still returns the manual command when Telegram cannot be reached", async () => {
     const gateway = { createInvite: vi.fn().mockReturnValue(invite()), getInvite: vi.fn() };
     const failing = vi.fn().mockRejectedValue(new Error("offline")) as unknown as typeof fetch;
-    const { data } = await (await call({ gateway, telegramBotToken: "123:abc", fetch: failing }, "POST", "/invites")).json();
+    const { data } = await (await call({ getGateway: () => gateway, getTelegramBotToken: () => "123:abc", fetch: failing }, "POST", "/invites")).json();
     expect(data.link).toBeUndefined();
     expect(data.command).toBe("/start tok_123456789");
   });
@@ -68,9 +68,9 @@ describe("peer routes — invites", () => {
   it("returns the invite status for polling", async () => {
     const paired = invite({ status: "paired", chatId: "5062560138", displayName: "Alessio" });
     const gateway = { createInvite: vi.fn(), getInvite: vi.fn().mockImplementation((t: string) => (t === paired.token ? paired : undefined)) };
-    const res = await call({ gateway }, "GET", `/invites/${paired.token}`);
+    const res = await call({ getGateway: () => gateway }, "GET", `/invites/${paired.token}`);
     expect((await res.json()).data).toMatchObject({ status: "paired", chatId: "5062560138" });
-    expect((await call({ gateway }, "GET", "/invites/unknown")).status).toBe(404);
+    expect((await call({ getGateway: () => gateway }, "GET", "/invites/unknown")).status).toBe(404);
   });
 });
 
@@ -84,12 +84,33 @@ describe("peer routes — Telegram token verification", () => {
   });
 
   it("falls back to the configured token and surfaces Telegram errors", async () => {
-    const res = await call({ telegramBotToken: "bad", fetch: telegramFetch({ ok: false, description: "Unauthorized" }, 401) }, "POST", "/telegram/verify", {});
+    const res = await call({ getTelegramBotToken: () => "bad", fetch: telegramFetch({ ok: false, description: "Unauthorized" }, 401) }, "POST", "/telegram/verify", {});
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("Unauthorized");
   });
 
   it("requires a token", async () => {
     expect((await call({}, "POST", "/telegram/verify", {})).status).toBe(400);
+  });
+});
+
+describe("peer routes — dedicated bots", () => {
+  it("routes invites and verification to the channel named in ?channel", async () => {
+    const primary = { createInvite: vi.fn().mockReturnValue(invite({ token: "primary_tok1" })), getInvite: vi.fn() };
+    const coach = { createInvite: vi.fn().mockReturnValue(invite({ token: "coach_tok123" })), getInvite: vi.fn() };
+    const getGateway = (channel?: string) => (channel === "coach-bot" ? coach : channel ? undefined : primary);
+    const getTelegramBotToken = vi.fn((channel?: string) => (channel === "coach-bot" ? "999:coach" : "123:main"));
+    const fetchImpl = telegramFetch({ ok: true, result: { id: 9, username: "health_coach_bot", first_name: "Coach" } });
+
+    const res = await call({ getGateway, getTelegramBotToken, fetch: fetchImpl }, "POST", "/invites?channel=coach-bot");
+    const { data } = await res.json();
+    expect(data.link).toBe("https://t.me/health_coach_bot?start=coach_tok123");
+    expect(primary.createInvite).not.toHaveBeenCalled();
+    expect((fetchImpl as any).mock.calls[0][0]).toContain("bot999%3Acoach");
+
+    await call({ getTelegramBotToken, fetch: fetchImpl }, "POST", "/telegram/verify?channel=coach-bot", {});
+    expect(getTelegramBotToken).toHaveBeenLastCalledWith("coach-bot");
+
+    expect((await call({ getGateway }, "POST", "/invites?channel=missing")).status).toBe(404);
   });
 });

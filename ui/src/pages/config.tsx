@@ -100,6 +100,7 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
+import { useAgentNames } from "@/hooks/use-agent-names";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -787,10 +788,11 @@ function WhatsAppProfileSetup({ config, onChange }: {
   );
 }
 
-function DeliveryFields({ config, onChange, gatewayRunning }: {
+function DeliveryFields({ config, onChange, gatewayRunning, channelName }: {
   config: NotificationChannelConfig;
   onChange: (patch: Partial<NotificationChannelConfig>) => void;
   gatewayRunning: boolean;
+  channelName?: string;
 }) {
   const set = onChange;
 
@@ -806,12 +808,13 @@ function DeliveryFields({ config, onChange, gatewayRunning }: {
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <TelegramTokenCheck api={api} botToken={config.botToken} />
+          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning ? channelName : undefined} />
           <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications. Filled automatically when you connect your Telegram below.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
           <TelegramConnect
             api={api}
+            channel={channelName}
             gatewayRunning={gatewayRunning}
             currentChatId={config.chatId}
             onPaired={(chatId) => { if (!config.chatId) set({ chatId }); }}
@@ -939,6 +942,7 @@ function InboundGatewayForm({ config, onChange }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
 }) {
+  const agentNames = useAgentNames(api);
   const gateway = config.gateway ?? {};
   const enabled = gateway.enableInbound === true;
   const policy = gateway.dmPolicy ?? "pairing";
@@ -1004,6 +1008,19 @@ function InboundGatewayForm({ config, onChange }: {
               />
             </Field>
           </div>
+          {config.type === "telegram" && (
+            <Field label="Dedicated agent" hint="Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot.">
+              <Select value={gateway.agent ?? "__polpo__"} onValueChange={(v) => updateGateway({ agent: v === "__polpo__" ? undefined : v })}>
+                <SelectTrigger className="h-8 text-xs w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__polpo__" className="text-xs">Polpo (orchestrator, /agent to switch)</SelectItem>
+                  {agentNames.map((name) => <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Conversation" hint="How chats from this channel relate to the web chat.">
             <Select value={gateway.sessionMode ?? "per-peer"} onValueChange={(v) => updateGateway({ sessionMode: v as GatewayConfig["sessionMode"] })}>
               <SelectTrigger className="h-8 text-xs w-full">
@@ -1060,11 +1077,12 @@ function InboundGatewayForm({ config, onChange }: {
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange, gatewayRunning }: {
+function ChannelForm({ config, onChange, gatewayRunning, channelName }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
   /** The saved version of this channel has inbound enabled. */
   gatewayRunning: boolean;
+  channelName?: string;
 }) {
   const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
@@ -1072,7 +1090,7 @@ function ChannelForm({ config, onChange, gatewayRunning }: {
     <div className="space-y-3">
       <ChannelConceptPanel type={config.type} />
       <ChannelSetupGuide type={config.type} />
-      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} />
+      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} />
       {channelSupportsInbound(config.type) && (
         <InboundGatewayForm config={config} onChange={onChange} />
       )}
@@ -1139,6 +1157,9 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                 <Badge variant="secondary" className="text-[9px] gap-0.5 px-1.5 py-0 h-4">
                   <Zap className="h-2 w-2" /> Inbound
                 </Badge>
+              )}
+              {gateway?.agent && (
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">→ {gateway.agent}</Badge>
               )}
             </div>
             <p className="text-[10.5px] text-muted-foreground/80 mt-0.5 flex items-center gap-1.5">
@@ -1627,6 +1648,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
               config={editConfig}
               onChange={setEditConfig}
               gatewayRunning={!isNew && channels[editName]?.gateway?.enableInbound === true}
+              channelName={isNew ? undefined : editName}
             />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>

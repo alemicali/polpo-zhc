@@ -143,6 +143,10 @@ export class Orchestrator extends TypedEmitter {
   private backgroundWaitMgr?: BackgroundWaitManager;
   private backgroundWaitContinuation?: BackgroundWaitContinuation;
   private telegramPoller?: TelegramCallbackPoller;
+  /** Pollers of dedicated-agent bots (extra Telegram channels with gateway.agent). */
+  private dedicatedTelegramPollers: TelegramCallbackPoller[] = [];
+  /** Gateways by channel name; the primary one is also exposed as channelGateway. */
+  private channelGateways = new Map<string, ChannelGateway>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
@@ -176,7 +180,10 @@ export class Orchestrator extends TypedEmitter {
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
-  getChannelGateway(): ChannelGateway | undefined { return this.channelGateway; }
+  /** Primary gateway, or the gateway of a specific channel by name. */
+  getChannelGateway(channelName?: string): ChannelGateway | undefined {
+    return channelName ? this.channelGateways.get(channelName) : this.channelGateway;
+  }
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
@@ -1277,6 +1284,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
+    this.stopDedicatedTelegramPollers();
     this.whatsappBridge?.stop();
     this.whatsappStore?.close();
     this.whatsappStore = undefined;
@@ -1319,6 +1327,7 @@ export class Orchestrator extends TypedEmitter {
     // 1. Dispose optional subsystems (scheduler is handled separately to preserve state)
     this.telegramPoller?.stop();
     this.telegramPoller = undefined;
+    this.stopDedicatedTelegramPollers();
     this.whatsappBridge?.stop();
     this.whatsappBridge = undefined;
     this.whatsappStore?.close();
@@ -1488,76 +1497,88 @@ export class Orchestrator extends TypedEmitter {
   private startTelegramApprovalPoller(): void {
     if (!this.notificationRouter) return;
 
-    // Stop any existing poller to prevent duplicate polling
+    // Stop any existing pollers to prevent duplicate polling
     if (this.telegramPoller) {
       this.telegramPoller.stop();
       this.telegramPoller = undefined;
     }
+    this.stopDedicatedTelegramPollers();
+    this.channelGateways.clear();
 
-    // Find the Telegram channel instance from notification config
-    const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
-      .find(k => this.config.settings.notifications?.channels[k]?.type === "telegram");
-    if (!telegramConfigKey) return;
+    const channels = this.config.settings.notifications?.channels ?? {};
+    const telegramKeys = Object.keys(channels).filter(k => channels[k]?.type === "telegram");
+    if (telegramKeys.length === 0) return;
 
-    const ch = this.notificationRouter!.getChannel(telegramConfigKey);
-    if (!ch || ch.type !== "telegram") return;
-    const telegramChannel = ch as import("../notifications/channels/telegram.js").TelegramChannel;
+    // The primary bot talks to the orchestrator (and to agents via /agent); it keeps
+    // the approval chat. Extra bots with gateway.agent are dedicated to one agent.
+    const primaryKey = telegramKeys.find(k => !channels[k]?.gateway?.agent) ?? telegramKeys[0];
+    const ordered = [primaryKey, ...telegramKeys.filter(k => k !== primaryKey)];
 
-    const botToken = telegramChannel.getBotToken();
-    const chatId = telegramChannel.getChatId();
-
-    const poller = new TelegramCallbackPoller(botToken, chatId);
-
-    // Build approval resolver (if approval manager is available)
     const approvalMgr = this.approvalMgr;
-    let resolver: ApprovalCallbackResolver | undefined;
-    if (approvalMgr) {
-      resolver = {
-        approve: async (requestId, resolvedBy) => {
-          const result = await approvalMgr.approve(requestId, resolvedBy);
-          return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-        },
-        reject: async (requestId, feedback, resolvedBy) => {
-          const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
-          return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
-        },
-      };
-      poller.setResolver(resolver);
+    const resolver: ApprovalCallbackResolver | undefined = approvalMgr ? {
+      approve: async (requestId, resolvedBy) => {
+        const result = await approvalMgr.approve(requestId, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+      },
+      reject: async (requestId, feedback, resolvedBy) => {
+        const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+      },
+    } : undefined;
+
+    const usedTokens = new Set<string>();
+    for (const key of ordered) {
+      const ch = this.notificationRouter!.getChannel(key);
+      if (!ch || ch.type !== "telegram") continue;
+      const telegramChannel = ch as import("../notifications/channels/telegram.js").TelegramChannel;
+      const botToken = telegramChannel.getBotToken();
+
+      // Two pollers on one token steal each other's updates (Telegram 409).
+      if (usedTokens.has(botToken)) {
+        this.emit("log", { level: "warn", message: `[telegram] Channel "${key}" reuses another channel's bot token — skipped` });
+        continue;
+      }
+      usedTokens.add(botToken);
+
+      const isPrimary = key === primaryKey;
+      const poller = new TelegramCallbackPoller(botToken, telegramChannel.getChatId());
+      if (resolver) poller.setResolver(resolver);
+
+      const channelConfig = channels[key];
+      if (channelConfig?.gateway?.enableInbound) {
+        this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+
+        const gateway = new ChannelGateway({
+          orchestrator: this,
+          peerStore: this.peerStore!,
+          sessionStore: this.sessionStore,
+          channelConfig,
+          approvalResolver: resolver,
+          onTyping: (chatId) => poller.sendTyping(chatId),
+        });
+        gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+        poller.setGateway(new TelegramGatewayAdapter(gateway));
+        this.channelGateways.set(key, gateway);
+        if (isPrimary) this.channelGateway = gateway;
+
+        const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+        this.emit("log", {
+          level: "info",
+          message: `Telegram channel gateway "${key}" started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, ${target})`,
+        });
+      }
+
+      poller.start(2000); // Poll every 2 seconds
+      if (isPrimary) this.telegramPoller = poller;
+      else this.dedicatedTelegramPollers.push(poller);
     }
 
-    // Check if inbound gateway is enabled for this Telegram channel
-    const channelConfig = this.config.settings.notifications?.channels[telegramConfigKey];
-    if (channelConfig?.gateway?.enableInbound) {
-      // Initialize peer store
-      this.peerStore = this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+    this.emit("log", { level: "info", message: `Telegram callback poller started (${usedTokens.size} bot${usedTokens.size === 1 ? "" : "s"})` });
+  }
 
-      // Create ChannelGateway with typing indicator support
-      this.channelGateway = new ChannelGateway({
-        orchestrator: this,
-        peerStore: this.peerStore!,
-        sessionStore: this.sessionStore,
-        channelConfig,
-        approvalResolver: resolver,
-        onTyping: (chatId) => poller.sendTyping(chatId),
-      });
-
-      // Send partial responses as separate Telegram messages during multi-turn tool loops
-      this.channelGateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
-
-      // Attach gateway adapter to poller
-      const adapter = new TelegramGatewayAdapter(this.channelGateway);
-      poller.setGateway(adapter);
-
-      this.emit("log", {
-        level: "info",
-        message: `Telegram channel gateway started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, inbound: enabled)`,
-      });
-    }
-
-    poller.start(2000); // Poll every 2 seconds
-    this.telegramPoller = poller;
-
-    this.emit("log", { level: "info", message: "Telegram callback poller started" });
+  private stopDedicatedTelegramPollers(): void {
+    for (const poller of this.dedicatedTelegramPollers) poller.stop();
+    this.dedicatedTelegramPollers = [];
   }
 
   // ── WhatsApp Bridge ──

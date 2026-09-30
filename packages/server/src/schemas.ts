@@ -365,6 +365,7 @@ const ChannelGatewaySchema = z.object({
     sessionMode: z.enum(["per-peer", "shared"]).optional(),
     sessionIdleMinutes: z.number().int().min(0).optional(),
   }).strict()).optional(),
+  agent: z.string().min(1).optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({

@@ -271,7 +271,10 @@ export class ChannelGateway {
     invite.displayName = msg.displayName;
     this.log("info", `Invite redeemed by ${peerId}`);
 
-    return `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to Polpo here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
+    const dedicated = this.gatewayConfig.agent;
+    return dedicated
+      ? `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to ${dedicated} here.`
+      : `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to Polpo here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
   }
 
   private pruneInvites(): void {
@@ -460,7 +463,12 @@ export class ChannelGateway {
     return { text: `Session reset. Your next message starts a new conversation with ${agent ?? "Polpo"}.` };
   }
 
+  private dedicatedMessage(): CommandResult {
+    return { text: `This bot is dedicated to ${this.gatewayConfig.agent}. Use the main bot to talk to Polpo or other agents.` };
+  }
+
   private async cmdAgent(args: string[], peerId: string): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) return this.dedicatedMessage();
     const agents = await this.orchestrator.getAgents();
     if (args.length === 0) {
       const current = await this.getActiveAgent(peerId);
@@ -484,6 +492,7 @@ export class ChannelGateway {
   }
 
   private async cmdPolpo(peerId: string): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) return this.dedicatedMessage();
     await this.peerStore.clearSession(await this.activeAgentKey(peerId));
     return { text: "You are now talking to Polpo (orchestrator)." };
   }
@@ -494,8 +503,12 @@ export class ChannelGateway {
     return this.orchestrator.getChannelChatRunner?.();
   }
 
-  /** Agent the peer is talking to, or undefined for the orchestrator. Stale names fall back to the orchestrator. */
+  /**
+   * Agent the peer is talking to, or undefined for the orchestrator. A dedicated
+   * channel always targets its agent; stale selections fall back to the orchestrator.
+   */
   private async getActiveAgent(peerId: string): Promise<string | undefined> {
+    if (this.gatewayConfig.agent) return this.gatewayConfig.agent;
     const name = await this.peerStore.getSessionId(await this.activeAgentKey(peerId));
     if (!name) return undefined;
     const agents = await this.orchestrator.getAgents();

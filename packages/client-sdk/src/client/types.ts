@@ -524,6 +524,8 @@ export interface ChannelGatewayConfig {
   sessionMode?: "per-peer" | "shared";
   /** Per-agent overrides, keyed by agent name. */
   agentSessions?: Record<string, { sessionMode?: "per-peer" | "shared"; sessionIdleMinutes?: number }>;
+  /** Dedicate the channel to one agent (no /agent switching). */
+  agent?: string;
 }
 
 export interface NotificationChannelConfig {

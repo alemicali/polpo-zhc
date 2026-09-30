@@ -9,9 +9,11 @@
  * POST   /peers/pair        — approve a pairing code
  * GET    /peers/pairings    — list pending pairing requests
  * POST   /peers/pairings/:code/reject — dismiss a pending pairing request
- * POST   /peers/invites     — create a one-time invite link (/start <token>)
- * GET    /peers/invites/:token — poll an invite until it is redeemed
- * POST   /peers/telegram/verify — check a Telegram bot token (getMe)
+ * POST   /peers/invites?channel=NAME — create a one-time invite link (/start <token>)
+ * GET    /peers/invites/:token?channel=NAME — poll an invite until it is redeemed
+ * POST   /peers/telegram/verify?channel=NAME — check a Telegram bot token (getMe)
+ *
+ * `channel` selects a Telegram channel by name (dedicated-agent bots); omitted = primary bot.
  * POST   /peers/link        — link two peer identities
  */
 
@@ -154,6 +156,9 @@ const createInviteRoute = createRoute({
   path: "/invites",
   tags: ["Peers"],
   summary: "Create invite link",
+  request: {
+    query: z.object({ channel: z.string().optional() }),
+  },
   responses: {
     200: { content: { "application/json": { schema: SuccessResponse } }, description: "Invite created" },
     404: { content: { "application/json": { schema: ErrorResponse } }, description: "Gateway not running" },
@@ -167,6 +172,7 @@ const getInviteRoute = createRoute({
   summary: "Get invite status",
   request: {
     params: z.object({ token: z.string() }),
+    query: z.object({ channel: z.string().optional() }),
   },
   responses: {
     200: { content: { "application/json": { schema: SuccessResponse } }, description: "Invite status" },
@@ -180,6 +186,7 @@ const verifyTelegramRoute = createRoute({
   tags: ["Peers"],
   summary: "Verify Telegram bot token",
   request: {
+    query: z.object({ channel: z.string().optional() }),
     body: { content: { "application/json": { schema: z.object({ botToken: z.string().optional() }) } } },
   },
   responses: {
@@ -209,9 +216,10 @@ export interface PeerInviteGateway {
 
 export interface PeerRouteDeps {
   peerStore?: any;
-  gateway?: PeerInviteGateway;
-  /** Bot token of the configured Telegram channel, used for getMe and deep links. */
-  telegramBotToken?: string;
+  /** Gateway of the named channel, or the primary one when omitted. */
+  getGateway?: (channel?: string) => PeerInviteGateway | undefined;
+  /** Bot token of the named Telegram channel (or the primary one), for getMe and deep links. */
+  getTelegramBotToken?: (channel?: string) => string | undefined;
   fetch?: typeof fetch;
 }
 
@@ -310,7 +318,10 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
 
   // ── Create invite link ──
   app.openapi(createInviteRoute, async (c) => {
-    const { gateway, telegramBotToken, fetch: fetchImpl = fetch } = getDeps();
+    const { getGateway, getTelegramBotToken, fetch: fetchImpl = fetch } = getDeps();
+    const channel = c.req.valid("query").channel;
+    const gateway = getGateway?.(channel);
+    const telegramBotToken = getTelegramBotToken?.(channel);
     if (!gateway) {
       return c.json({ ok: false, error: "Channel gateway is not running. Enable inbound messages and save the channel first." }, 404);
     }
@@ -326,7 +337,7 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
 
   // ── Invite status (polled by the UI) ──
   app.openapi(getInviteRoute, async (c) => {
-    const { gateway } = getDeps();
+    const gateway = getDeps().getGateway?.(c.req.valid("query").channel);
     if (!gateway) return c.json({ ok: false, error: "Channel gateway is not running" }, 404);
     const invite = gateway.getInvite(c.req.valid("param").token);
     if (!invite) return c.json({ ok: false, error: "Unknown invite" }, 404);
@@ -335,8 +346,8 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
 
   // ── Verify Telegram bot token ──
   app.openapi(verifyTelegramRoute, async (c) => {
-    const { telegramBotToken, fetch: fetchImpl = fetch } = getDeps();
-    const botToken = c.req.valid("json").botToken?.trim() || telegramBotToken;
+    const { getTelegramBotToken, fetch: fetchImpl = fetch } = getDeps();
+    const botToken = c.req.valid("json").botToken?.trim() || getTelegramBotToken?.(c.req.valid("query").channel);
     if (!botToken) return c.json({ ok: false, error: "botToken is required" }, 400);
     const me = await telegramGetMe(botToken, fetchImpl);
     if ("error" in me) return c.json({ ok: false, error: me.error }, 400);

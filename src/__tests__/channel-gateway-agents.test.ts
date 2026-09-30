@@ -368,3 +368,45 @@ describe("ChannelGateway — per-agent session settings", () => {
     expect(b).not.toBe(a);
   });
 });
+
+// ── Dedicated-agent bots ────────────────────────────────
+
+describe("ChannelGateway — dedicated agent channel", () => {
+  const dedicated = { enableInbound: true, dmPolicy: "pairing" as const, agent: "backend" };
+
+  it("routes every message to the dedicated agent without /agent", async () => {
+    const { send, runner } = setup({ gatewayConfig: dedicated });
+    expect(await send("hello coach")).toBe("agent reply");
+    expect(runner!.mock.calls[0][0].agent).toBe("backend");
+  });
+
+  it("disables /agent and /polpo", async () => {
+    const { send, runner } = setup({ gatewayConfig: dedicated });
+    expect(await send("/agent growth")).toContain("dedicated to backend");
+    expect(await send("/polpo")).toContain("dedicated to backend");
+    await send("still backend?");
+    expect(runner!.mock.calls[0][0].agent).toBe("backend");
+  });
+
+  it("uses the same agent session key as the main bot, so conversations are shared", async () => {
+    const { send, peerStore } = setup({ gatewayConfig: dedicated });
+    await send("hello");
+    expect(peerStore.sessions.has("telegram:7#agent:backend")).toBe(true);
+    expect(peerStore.sessions.has("telegram:7#active-agent")).toBe(false);
+  });
+
+  it("applies the agent's session override", async () => {
+    const { send, sessionStore, runner } = setup({
+      gatewayConfig: { ...dedicated, agentSessions: { backend: { sessionMode: "shared", sessionIdleMinutes: 0 } } },
+    });
+    const web = await sessionStore.create("web", "backend");
+    sessionStore.sessions.get(web)!.updatedAt = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    await send("hi");
+    expect(runner!.mock.calls[0][0].sessionId).toBe(web);
+  });
+
+  it("welcomes invite redeemers with the agent name", async () => {
+    const { gateway, send } = setup({ allowed: false, gatewayConfig: dedicated });
+    expect(await send(`/start ${gateway.createInvite().token}`)).toContain("talk to backend here");
+  });
+});

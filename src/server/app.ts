@@ -618,12 +618,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/peers", peerRoutes(() => {
-    const channels = o.getConfig()?.settings?.notifications?.channels ?? {};
-    const telegram = Object.values(channels).find((ch: any) => ch?.type === "telegram" && ch.botToken) as any;
+    const channels: Record<string, any> = o.getConfig()?.settings?.notifications?.channels ?? {};
     return {
       peerStore: o.getPeerStore(),
-      gateway: o.getChannelGateway(),
-      telegramBotToken: telegram?.botToken,
+      getGateway: (channel?: string) => o.getChannelGateway(channel),
+      getTelegramBotToken: (channel?: string) => {
+        if (channel) return channels[channel]?.type === "telegram" ? channels[channel].botToken : undefined;
+        // Primary bot: the first Telegram channel not dedicated to an agent (as in the orchestrator).
+        const telegram = Object.values(channels).filter((ch) => ch?.type === "telegram" && ch.botToken);
+        return (telegram.find((ch) => !ch.gateway?.agent) ?? telegram[0])?.botToken;
+      },
     };
   }));
 

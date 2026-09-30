@@ -6,12 +6,12 @@
  * conversation expires (0 = never). Unset values inherit the channel defaults.
  */
 
-import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, X } from "lucide-react";
 import type { PolpoApi } from "./telegram-connect";
+import { useAgentNames } from "@/hooks/use-agent-names";
 
 type SessionMode = "per-peer" | "shared";
 export interface AgentSessionSettings { sessionMode?: SessionMode; sessionIdleMinutes?: number }
@@ -19,21 +19,14 @@ export interface AgentSessionSettings { sessionMode?: SessionMode; sessionIdleMi
 const INHERIT = "inherit";
 const NEVER = "never";
 
+
 export function AgentSessionOverrides({ api, value, onChange }: {
   api: PolpoApi;
   value: Record<string, AgentSessionSettings> | undefined;
   onChange: (next: Record<string, AgentSessionSettings> | undefined) => void;
 }) {
-  const [agents, setAgents] = useState<string[]>([]);
+  const agents = useAgentNames(api);
   const overrides = value ?? {};
-
-  useEffect(() => {
-    let cancelled = false;
-    void api("/agents").then((res) => {
-      if (!cancelled && res.ok) setAgents(((res.data ?? []) as { name: string }[]).map((a) => a.name).sort());
-    });
-    return () => { cancelled = true; };
-  }, [api]);
 
   const update = (agent: string, patch: AgentSessionSettings | null) => {
     const next = { ...overrides };

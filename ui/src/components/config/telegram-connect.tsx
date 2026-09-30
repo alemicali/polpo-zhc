@@ -23,14 +23,17 @@ const POLL_MS = 2000;
 
 // ── Token check ─────────────────────────────────────────
 
-export function TelegramTokenCheck({ api, botToken }: { api: PolpoApi; botToken?: string }) {
+/** `?channel=NAME` for a named channel; the server falls back to the primary bot. */
+const channelQuery = (channel?: string) => (channel ? `?channel=${encodeURIComponent(channel)}` : "");
+
+export function TelegramTokenCheck({ api, botToken, channel }: { api: PolpoApi; botToken?: string; channel?: string }) {
   const [result, setResult] = useState<{ token?: string; status: "idle" | "checking" | "ok" | "error"; text?: string }>({ status: "idle" });
   // A result only applies to the token it was computed for; editing the token resets the badge.
   const state = result.token === botToken ? result : { status: "idle" as const };
 
   const check = async () => {
     setResult({ token: botToken, status: "checking" });
-    const res = await api("/peers/telegram/verify", { method: "POST", body: JSON.stringify({ botToken }) });
+    const res = await api(`/peers/telegram/verify${channelQuery(channel)}`, { method: "POST", body: JSON.stringify({ botToken }) });
     setResult(res.ok
       ? { token: botToken, status: "ok", text: `@${(res.data as { username: string }).username}` }
       : { token: botToken, status: "error", text: res.error ?? "Verification failed" });
@@ -64,8 +67,10 @@ interface Invite {
   displayName?: string;
 }
 
-export function TelegramConnect({ api, gatewayRunning, currentChatId, onPaired }: {
+export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, onPaired }: {
   api: PolpoApi;
+  /** Saved channel name, so invites are created for this bot. */
+  channel?: string;
   /** Inbound is enabled in the saved config, so the gateway can receive /start. */
   gatewayRunning: boolean;
   currentChatId?: string;
@@ -82,7 +87,7 @@ export function TelegramConnect({ api, gatewayRunning, currentChatId, onPaired }
   const create = async () => {
     setCreating(true);
     setError(null);
-    const res = await api("/peers/invites", { method: "POST" });
+    const res = await api(`/peers/invites${channelQuery(channel)}`, { method: "POST" });
     setCreating(false);
     if (!res.ok) { setError(res.error ?? "Could not create the link"); return; }
     const created = res.data as Invite;
@@ -94,7 +99,7 @@ export function TelegramConnect({ api, gatewayRunning, currentChatId, onPaired }
   useEffect(() => {
     if (!invite || invite.status !== "pending") return;
     const timer = setInterval(async () => {
-      const res = await api(`/peers/invites/${invite.token}`);
+      const res = await api(`/peers/invites/${invite.token}${channelQuery(channel)}`);
       if (!res.ok) return;
       const next = { ...invite, ...(res.data as Partial<Invite>) };
       if (next.status === "pending" && Date.now() > new Date(next.expiresAt).getTime()) next.status = "expired";
@@ -104,7 +109,7 @@ export function TelegramConnect({ api, gatewayRunning, currentChatId, onPaired }
       }
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [api, invite]);
+  }, [api, channel, invite]);
 
   const copy = async (text: string) => {
     await navigator.clipboard.writeText(text).catch(() => {});
