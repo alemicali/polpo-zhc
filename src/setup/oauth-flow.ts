@@ -1,8 +1,8 @@
 import { oauthLogin, OAUTH_PROVIDERS } from "../auth/index.js";
-import type { LoginCallbacks } from "../auth/index.js";
+import type { LoginCallbacks, LoginDeviceCode, LoginPrompt, LoginPromptOption } from "../auth/index.js";
 import type { OAuthProviderName } from "../auth/types.js";
 
-export type { LoginCallbacks };
+export type { LoginCallbacks, LoginDeviceCode, LoginPrompt, LoginPromptOption };
 
 /**
  * Find an OAuth provider by ID. Returns the provider definition or undefined.

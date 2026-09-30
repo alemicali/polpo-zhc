@@ -1,7 +1,6 @@
 import { Terminal as TerminalIcon } from "lucide-react";
 import { Icon } from "@iconify/react";
 import { ensureLogosPack } from "@/lib/iconify-bootstrap";
-import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 type AgentKind = "claude" | "codex" | "terminal";
@@ -23,7 +22,7 @@ type Props = {
  * cwd) and a higher-grade body for the prose lines.
  */
 export function EmptyWorkspaceQuickStart({ branch, projectName, cwd, onStart }: Props) {
-  useEffect(() => { ensureLogosPack(); }, []);
+  ensureLogosPack();
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-background text-foreground">
       <div className="relative z-10 mx-auto flex w-full max-w-[640px] flex-col items-center px-6 py-10">

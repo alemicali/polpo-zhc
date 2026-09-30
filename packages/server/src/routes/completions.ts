@@ -27,6 +27,7 @@ import {
   summarizeContextMessages,
 } from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
+import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
 
 const DEFAULT_MAX_TURNS = 200;
 
@@ -144,10 +145,11 @@ async function persistAssistantMessage(
 /** OpenAI-compatible content part (text or image_url). */
 const contentPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("file"), file: z.object({ filename: z.string().min(1).max(255), file_data: z.string().max(22 * 1024 * 1024) }) }),
   z.object({
     type: z.literal("image_url"),
     image_url: z.object({
-      url: z.string().openapi({ description: "Data URL (data:image/…;base64,…) or HTTPS URL" }),
+      url: z.string().max(22 * 1024 * 1024).openapi({ description: "Base64 data URL for a persistent image attachment" }),
       detail: z.enum(["auto", "low", "high"]).optional(),
     }),
   }),
@@ -274,6 +276,7 @@ function extractText(content: z.infer<typeof messageSchema>["content"]): string 
 /** Convert OpenAI-format content to pi-ai UserMessage content. */
 function toPiContent(content: z.infer<typeof messageSchema>["content"]): string | ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
   if (typeof content === "string") return content;
+  content = content.map(p => p.type === "file" ? { type: "text" as const, text: `[file: ${p.file.filename}]` } : p);
 
   // Check if there are any image parts
   const hasImages = content.some((p) => p.type === "image_url");
@@ -284,8 +287,8 @@ function toPiContent(content: z.infer<typeof messageSchema>["content"]): string 
 
   // Mixed content → convert to pi-ai TextContent | ImageContent array
   return content.map((p) => {
-    if (p.type === "text") {
-      return { type: "text" as const, text: p.text };
+    if (p.type !== "image_url") {
+      return { type: "text" as const, text: p.type === "text" ? p.text : p.file.filename };
     }
     // image_url → ImageContent
     const url = p.image_url.url;
@@ -425,6 +428,10 @@ export interface CompletionRouteDeps {
   getConfig: () => any;
   getMemoryStore: () => any;
   getSessionStore: () => any;
+  contextCheckpoints?: ContextCheckpointStore;
+  /** Host persists binary parts and links them to the authoritative message id. */
+  saveUserMessage?: (sessionId: string, content: any) => Promise<any>;
+  resolveAttachmentReferences?: (text: string) => string;
   getStore: () => any;
   emit: (event: string, data: any) => void;
   /** Resolve agent model + streaming options. */
@@ -614,6 +621,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
           sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+          deps.emit("session:created", { sessionId, title: sessionTitle });
           isFirstTurn = true;
         } else {
           // Reuse latest session if recent (< 30 min), scoped by agent
@@ -623,6 +631,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             sessionId = latest.id;
           } else {
             sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+            deps.emit("session:created", { sessionId, title: sessionTitle });
             isFirstTurn = true;
           }
         }
@@ -641,7 +650,34 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         ? undefined
         : [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
-        await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
+        let userMessage;
+        try {
+          userMessage = deps.saveUserMessage
+            ? await deps.saveUserMessage(sessionId, lastUserMsg.content)
+            : await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
+        } catch (error) {
+          return c.json({ error: { message: error instanceof Error ? error.message : "Attachment persistence failed", type: "invalid_request_error", code: "attachment_save_failed" } }, 400 as any);
+        }
+        if (userMessage.modelContent) {
+          let index = piMessages.length - 1;
+          while (index >= 0 && piMessages[index].role !== "user") index--;
+          if (index >= 0) piMessages[index].content = toPiContent(userMessage.modelContent);
+        }
+        c.header("x-user-message-id", userMessage.id);
+        deps.emit("message:added", { sessionId, messageId: userMessage.id, role: "user" });
+      }
+    }
+
+    // Resolve durable references for both the new upload and previous turns.
+    // File tools may use a different cwd from the API's project-relative paths.
+    if (deps.resolveAttachmentReferences) {
+      for (const message of piMessages) {
+        if (typeof message.content === "string") {
+          message.content = deps.resolveAttachmentReferences(message.content);
+        } else if (Array.isArray(message.content)) {
+          message.content = message.content.map((part: any) => part.type === "text"
+            ? { ...part, text: deps.resolveAttachmentReferences!(part.text) } : part);
+        }
       }
     }
 
@@ -664,7 +700,13 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       ? "background_wait"
       : agentMode ? "agent_chat" : "orchestrator_chat";
 
-    const prepareContext = (current: any[], force = false) => {
+    const session = sessionId && sessionStore ? await sessionStore.getSession(sessionId) : undefined;
+    const projection = await contextCheckpointProjection(
+      session ? deps.contextCheckpoints : undefined, sessionId,
+      JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]), piMessages,
+    );
+
+    const prepareContext = async (current: any[], force = false) => {
       const beforeTokens = estimateContextTokens({
         systemPrompt: fullSystemPrompt,
         messages: current,
@@ -679,6 +721,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         force ? Math.floor(contextBudget.keepRecentTokens / 2) : contextBudget.keepRecentTokens,
       );
       const prefix = cut > 0 ? current.slice(0, cut) : current;
+      let checkpointPrefix = prefix;
       const summary = summarizeContextMessages(prefix);
       let compacted = cut > 0
         ? compactContextMessages(current, cut, summary)
@@ -696,6 +739,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       // A single oversized recent tool result can still exceed the budget.
       // Collapse the projection further while leaving the persisted transcript untouched.
       if (afterTokens > contextBudget.softLimit) {
+        checkpointPrefix = current;
         compacted = [{
           role: "user",
           content: `[Context checkpoint: earlier conversation compacted]\n\n${summarizeContextMessages(current)}\n\n[End context checkpoint]`,
@@ -708,6 +752,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         });
       }
 
+      // Keep only the stable caller-history prefix in durable storage. A
+      // storage failure must not prevent an otherwise valid completion.
+      await projection.remember(checkpointPrefix, compacted[0])
+        .catch(error => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
       return {
         messages: compacted,
         info: {
@@ -786,7 +834,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           assistantMsgId = placeholder.id;
         }
 
-        let messages: any[] = [...piMessages];
+        let messages: any[] = [...projection.messages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
         const segmentsAccum: MessageSegment[] = [];
@@ -797,17 +845,20 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
 
-            const prepared = prepareContext(messages);
+            const prepared = await prepareContext(messages);
             messages = prepared.messages;
             if (prepared.info) {
               await emit(sseChunk(completionId, {}, null, { context_compaction: prepared.info }));
             }
 
-            const piStream = deps.streamLLM(m, {
+            const streamResult = deps.streamLLM(m, {
               systemPrompt: fullSystemPrompt,
               messages,
               tools: effectiveTools,
             }, { ...streamOpts, signal: abortController.signal });
+            const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
+              ? streamResult
+              : await streamResult;
 
             let turnText = "";
             let streamError: string | undefined;
@@ -869,7 +920,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             if (streamError) {
               if (overflowRetries === 0 && isContextOverflowError(streamError)) {
                 overflowRetries += 1;
-                const recovered = prepareContext(messages, true);
+                const recovered = await prepareContext(messages, true);
                 messages = recovered.messages;
                 if (recovered.info) {
                   await emit(sseChunk(completionId, {}, null, { context_compaction: recovered.info }));
@@ -877,8 +928,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 continue;
               }
               finalText += `\n\nError: ${streamError}`;
+              appendTextSegment(segmentsAccum, `\n\nError: ${streamError}`);
               await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }));
-              break;
+              throw new Error(streamError);
             }
 
             const response = await piStream.result();
@@ -1071,6 +1123,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     const ok = await sessionStore.renameSession(sessionId, title);
                     if (ok) {
                       resultText = `Session title set to: "${title}".`;
+                      deps.emit("session:updated", { sessionId, title });
                       await emit(sseChunk(completionId, {}, null, {
                         session_title: { sessionId, title },
                       }));
@@ -1181,8 +1234,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // Suppress AbortError — expected when explicit user abort fires
           if (!(err instanceof DOMException && err.name === "AbortError") && !abortController.signal.aborted) {
             // Surface to subscribers so resume clients see the failure
-            streamRegistry.error(turnId, (err as Error)?.message ?? "stream failed");
-            throw err;
+            const message = (err as Error)?.message ?? "stream failed";
+            await emit(JSON.stringify({ error: { message, code: "model_stream_failed" } }));
+            streamRegistry.error(turnId, message);
           }
         } finally {
           // Mark the registry entry as done so resume subscribers terminate
@@ -1195,6 +1249,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
             await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
+            deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
           }
         }
       }) as any;
@@ -1207,7 +1262,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         assistantMsgId = placeholder.id;
       }
 
-      let messages: any[] = [...piMessages];
+      let messages: any[] = [...projection.messages];
       let finalText = "";
       const toolCallsAccum: any[] = [];
       const segmentsAccum: MessageSegment[] = [];
@@ -1215,13 +1270,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
       try {
         for (let turn = 0; turn < maxTurns; turn++) {
-          const prepared = prepareContext(messages);
+          const prepared = await prepareContext(messages);
           messages = prepared.messages;
-          const piStream = deps.streamLLM(m, {
+          const streamResult = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
             messages,
             tools: effectiveTools,
           }, streamOpts);
+          const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
+            ? streamResult
+            : await streamResult;
 
           let turnText = "";
           let streamError: string | undefined;
@@ -1239,7 +1297,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           if (streamError) {
             if (overflowRetries === 0 && isContextOverflowError(streamError)) {
               overflowRetries += 1;
-              messages = prepareContext(messages, true).messages;
+              messages = (await prepareContext(messages, true)).messages;
               continue;
             }
             return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
@@ -1562,6 +1620,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
           await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
+          deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
         }
       }
     }

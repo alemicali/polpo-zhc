@@ -12,7 +12,6 @@ const isElectron = process.env.POLPO_ELECTRON === "1";
 
 const pwaPlugin = VitePWA({
   registerType: "autoUpdate",
-  includeAssets: ["favicon.svg", "icons/*.png"],
   manifest: {
     name: "Polpo ZHC — AI Factory",
     short_name: "Polpo ZHC",
@@ -45,39 +44,30 @@ const pwaPlugin = VitePWA({
   },
   workbox: {
     importScripts: ["push-handlers.js"],
+    cleanupOutdatedCaches: true,
     navigateFallback: "/index.html",
-    // Precache only the shell — entry, vendor splits, css, html, fonts.
-    // Lazy chunks (route bundles, shiki grammars, mermaid diagrams, the
-    // base64-inlined onig WASM, the iconify packs) are fetched on demand
-    // via runtimeCaching so first-visit network cost stays small.
+    // Precache only the application shell. Entry chunks use the `app-`
+    // prefix below so this cannot accidentally match generic `index-*`
+    // chunks emitted by dependencies.
     globPatterns: [
       "index.html",
-      "manifest.webmanifest",
-      "assets/index-*.{js,css}",
-      "assets/vendor-*.{js,css}",
-      "**/*.{css,svg,woff2,png,webp}",
-    ],
-    globIgnores: [
-      // Lazy route + vendor chunks
-      "assets/coding-*.js",
-      "assets/terminal-*.js",
-      "assets/mission-detail-*.js",
-      "assets/model-picker-*.js",
-      // Iconify packs (~11 MB combined)
-      "assets/icons.json-*.js",
-      // Shiki grammars + themes
-      "assets/{abap,actionscript-3,ada,angular-html,angular-ts,apache,apex,apl,applescript,ara,asciidoc,asm,astro,awk,ayu-dark,ayu-mirage,ballerina,bat,beancount,berry,bibtex,bicep,blade,c,c3,cadence,catppuccin-frappe,catppuccin-latte,catppuccin-macchiato,catppuccin-mocha,clojure,cmake,cobol,codeowners,coffee,common-lisp,coq,cpp,crystal,csharp,css,csv,cue,cypher,d,dart,dax,desktop,diff,docker,dotenv,dream-maker,dreamweaver,edge,elixir,elm,emacs-lisp,erb,erlang,fennel,fish,fluent,fortran-fixed-form,fortran-free-form,fsharp,gdresource,gdscript,gdshader,genie,gherkin,gleam,glimmer-js,glimmer-ts,glsl,gnuplot,go,graphql,groovy,hack,haml,handlebars,haskell,haxe,hcl,hjson,hlsl,html,html-derivative,http,hxml,hy,imba,ini,jade,java,javascript,jinja,jison,json,json5,jsonc,jsonl,jsonnet,jssm,jsx,julia,kotlin,kusto,latex,lean,less,liquid,log,logo,lua,luau,make,markdown,marko,matlab,mdc,mdx,mermaid,mojo,monkey-patch-c,move,narrat,nextflow,nginx,nim,nix,noir,objective-c,objective-cpp,ocaml,one-dark-pro,one-light,pascal,perl,php,plsql,po,polar,postcss,powerquery,powershell,prisma,prolog,proto,pug,puppet,purescript,python,qml,qmldir,qss,r,racket,raku,razor,reg,regexp,rel,riscv,rst,ruby,rust,sas,sass,scala,scheme,scss,sdbl,shaderlab,shellsession,smalltalk,solidity,solar-flare,solarized-dark,solarized-light,soy,sparql,splunk-spl,sql,squirrel,ssh-config,stata,stylus,svelte,swift,system-verilog,systemd,tasl,tcl,terraform,tex,toml,ts-tags,tsv,tsx,turtle,twig,typescript,typespec,typst,v,vala,vb,verilog,vhdl,viml,vue,vue-html,vyper,wasm,wenyan,wgsl,wikitext,wolfram,xml,xsl,yaml,zenscript,zig,sandcastle}-*.js",
-      // Inlined base64 WASM
-      "assets/wasm-*.js",
+      "assets/app-*.js",
+      "assets/vendor-react-*.js",
+      "assets/vendor-ui-*.js",
+      "assets/*.css",
+      "favicon.svg",
     ],
     maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
     runtimeCaching: [
       {
-        // Lazy JS chunks — stale-while-revalidate keeps offline use fast and
-        // self-heals on rolling deployments.
+        // Hashed chunks are immutable: cache-first avoids a redundant network
+        // revalidation on every repeat visit. A changed chunk gets a new URL.
         urlPattern: /\/assets\/[A-Za-z0-9_-]+(?:-[A-Za-z0-9_-]+)?\.js$/,
-        handler: "StaleWhileRevalidate",
-        options: { cacheName: "lazy-chunks" },
+        handler: "CacheFirst",
+        options: {
+          cacheName: "lazy-chunks",
+          expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
+        },
       },
       {
         urlPattern: /\.(png|jpg|svg|woff2|webp)$/,
@@ -95,9 +85,9 @@ const pwaPlugin = VitePWA({
     ],
   },
   devOptions: {
-    // Enable the PWA service worker in web dev so install/update behavior can
-    // be tested locally. Keep it disabled for Electron/file:// builds.
-    enabled: !isElectron,
+    // A dev service worker can retain transformed Vite modules and make HMR
+    // appear intermittently stale. PWA behavior is exercised by `ui serve`.
+    enabled: false,
   },
 });
 
@@ -117,9 +107,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        entryFileNames: "assets/app-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
         manualChunks: {
           "vendor-react": ["react", "react-dom", "react-router-dom"],
-          "vendor-recharts": ["recharts"],
           "vendor-ui": ["radix-ui"],
         },
       },

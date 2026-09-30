@@ -14,6 +14,7 @@ import {
   getProviderModels,
   modelLabel as rawModelLabel,
   type DetectedProvider,
+  type LoginPrompt,
   type ModelInfo,
 } from "../../setup/index.js";
 
@@ -71,8 +72,25 @@ async function runOAuthLogin(provider: string): Promise<boolean> {
         console.log(`  ${chalk.cyan(url)}`);
         console.log();
       },
-      onPrompt: async (message: string, placeholder?: string) => {
+      onPrompt: async (message: string, placeholder?: string, authPrompt?: LoginPrompt) => {
+        if (authPrompt?.type === "select") {
+          const options = authPrompt.options ?? [];
+          const index = await pickFromList(
+            options.map((option) => option.description
+              ? `${option.label} ${chalk.dim(`— ${option.description}`)}`
+              : option.label),
+            authPrompt.message,
+          );
+          if (index < 0) throw new Error("Invalid selection");
+          return options[index].id;
+        }
         return promptUser(`  ${message}${placeholder ? chalk.dim(` (${placeholder})`) : ""}: `);
+      },
+      onDeviceCode: ({ verificationUri, userCode }) => {
+        console.log(`  ${chalk.bold("Open this URL in your browser:")}`);
+        console.log(`  ${chalk.cyan(verificationUri)}`);
+        console.log(`  ${chalk.bold("Enter code:")} ${chalk.cyan(userCode)}`);
+        console.log();
       },
       onProgress: (message: string) => {
         console.log(chalk.dim(`  ${message}`));

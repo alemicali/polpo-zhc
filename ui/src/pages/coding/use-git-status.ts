@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { apiUrl } from "@/lib/config";
 import type { GitFile } from "./types";
 
 /** Polls /api/v1/git/status for a given cwd. Empty list when no changes / not a repo. */
 export function useGitStatus(cwd: string, refreshKey: number = 0): GitFile[] {
   const [files, setFiles] = useState<GitFile[]>([]);
+  const { pathname } = useLocation();
+  const active = pathname === "/coding" || pathname.startsWith("/coding/");
 
   useEffect(() => {
-    if (!cwd) return;
+    if (!cwd || !active) return;
     let cancelled = false;
     const controller = new AbortController();
 
@@ -33,7 +36,7 @@ export function useGitStatus(cwd: string, refreshKey: number = 0): GitFile[] {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [cwd, refreshKey]);
+  }, [active, cwd, refreshKey]);
 
   return files;
 }

@@ -217,6 +217,11 @@ export const UpdateSettingsSchema = z.object({
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  branding: z.object({
+    productName: z.string().trim().max(80).optional(),
+    tagline: z.string().trim().max(120).optional(),
+    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo")]).optional(),
+  }).optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────

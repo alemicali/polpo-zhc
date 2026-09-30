@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useEvents } from "@polpo-ai/react";
 import { apiUrl, config } from "@/lib/config";
 
 export type AppRuntime = {
@@ -49,6 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function useApps(selectedId?: string) {
+  const { events } = useEvents(["app:changed"], 1);
   const [apps, setApps] = useState<RegisteredApp[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,9 +70,34 @@ export function useApps(selectedId?: string) {
 
   useEffect(() => {
     void refetch();
-    const interval = window.setInterval(() => void refetch(true), 3_000);
-    return () => window.clearInterval(interval);
+    const recover = () => {
+      if (document.visibilityState === "visible") void refetch(true);
+    };
+    const interval = window.setInterval(recover, 60_000);
+    document.addEventListener("visibilitychange", recover);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", recover);
+    };
   }, [refetch]);
+
+  const lastEvent = events.at(-1);
+  const lastEventId = lastEvent?.id;
+  const handledEventRef = useRef(lastEventId);
+  const eventRefreshTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!lastEventId || handledEventRef.current === lastEventId) return;
+    handledEventRef.current = lastEventId;
+    if (eventRefreshTimerRef.current !== null) return;
+    const delay = (lastEvent?.data as { action?: string } | undefined)?.action === "log" ? 1_000 : 120;
+    eventRefreshTimerRef.current = window.setTimeout(() => {
+      eventRefreshTimerRef.current = null;
+      void refetch(true);
+    }, delay);
+  }, [lastEvent, lastEventId, refetch]);
+  useEffect(() => () => {
+    if (eventRefreshTimerRef.current !== null) window.clearTimeout(eventRefreshTimerRef.current);
+  }, []);
 
   const create = useCallback(async (input: AppInput) => {
     const result = await request<RegisteredApp>("", { method: "POST", body: JSON.stringify(input) });

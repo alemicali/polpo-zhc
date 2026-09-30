@@ -8,6 +8,7 @@ import { uploadExclusionReason } from "../upload-exclusions.js";
 const EXT_MIME: Record<string, string> = {
   // Text / code
   ".txt": "text/plain", ".md": "text/markdown", ".markdown": "text/markdown",
+  ".mmd": "text/vnd.mermaid", ".mermaid": "text/vnd.mermaid",
   ".html": "text/html", ".htm": "text/html", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".jsx": "text/javascript",
   ".ts": "text/typescript", ".tsx": "text/typescript",

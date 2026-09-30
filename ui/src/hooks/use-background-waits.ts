@@ -67,11 +67,20 @@ export function useBackgroundWaits(sessionId?: string | null) {
     setWaits([]);
     setLoading(Boolean(normalizedSessionId));
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2_000);
+    if (!normalizedSessionId) return;
+
+    // SSE is the primary update path. Poll only as a low-frequency recovery
+    // mechanism and never while the document is hidden.
+    const recover = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const timer = window.setInterval(recover, 30_000);
     const onChanged = () => void refresh();
+    document.addEventListener("visibilitychange", recover);
     window.addEventListener("polpo:background-waits-changed", onChanged);
     return () => {
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", recover);
       window.removeEventListener("polpo:background-waits-changed", onChanged);
     };
   }, [normalizedSessionId, refresh]);

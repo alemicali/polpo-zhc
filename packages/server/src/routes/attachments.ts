@@ -133,10 +133,14 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     if (!sessionId) {
       return c.json({ ok: false, error: "sessionId is required" }, 400);
     }
+    if (!/^[\w-]+$/.test(sessionId)) return c.json({ ok: false, error: "Invalid sessionId" }, 400);
 
     const files = Array.isArray(body.file) ? body.file : body.file ? [body.file] : [];
     if (files.length === 0) {
       return c.json({ ok: false, error: "No file provided" }, 400);
+    }
+    if (files.length > 5 || files.some(file => !(file instanceof File) || file.size > 15 * 1024 * 1024)) {
+      return c.json({ ok: false, error: "Maximum 5 files, 15 MB each" }, 400);
     }
 
     const results: Attachment[] = [];
@@ -145,8 +149,8 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
       if (!(file instanceof File)) continue;
 
       const id = nanoid(12);
-      const filename = file.name || `upload-${id}`;
-      const relPath = `workspace/attachments/${sessionId}/${filename}`;
+      const filename = (file.name || `upload-${id}`).replace(/[\\/\x00-\x1f\x7f]/g, "_").slice(0, 160);
+      const relPath = `workspace/attachments/${sessionId}/${id}-${filename}`;
       const absPath = join(workDir, relPath);
 
       // Ensure directory exists
@@ -220,7 +224,9 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     return new Response(Buffer.from(data), {
       headers: {
         "Content-Type": attachment.mimeType,
-        "Content-Disposition": `inline; filename="${attachment.filename}"`,
+        "Content-Disposition": `${/^image\/(png|jpeg|webp|gif)$/.test(attachment.mimeType) ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'",
         "Content-Length": String(data.byteLength),
       },
     });

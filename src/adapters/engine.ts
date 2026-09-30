@@ -31,11 +31,13 @@ export function createActivity(): AgentActivity {
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
-import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, streamSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
+import { createDataAgentTools } from "../tools/data-tools.js";
+import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -199,6 +201,31 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "- `phone_disable_inbound` — disable AI for incoming calls",
       "Use phone tools for scheduling calls, follow-ups, surveys, or any phone conversation.",
       "ALWAYS use these tools for phone operations. Never try to make calls via bash or other means.",
+    );
+  }
+
+  if (hasPattern("data_")) {
+    extended.push(
+      "",
+      "**Structured data:**",
+      "- `data_list_sources` / `data_describe` — discover your scoped sources and datasets",
+      "- `data_register_source` / `data_update_source` / `data_set_source_grant` — manage sources only when these tools are explicitly enabled; credentials always go to Vault",
+      "- `data_query` — run bounded typed queries and receive a standard DataFrame",
+      "- `data_create_view` / `data_update_view` — compose native interactive views from live source bindings, bounded inline data, or both",
+      "- `data_sql` — optional read-only SQL escape hatch",
+      "- `data_mutate` — change records only when explicitly assigned and requested",
+      "Use data tools instead of shell/database clients so grants, audit, limits, and generated views remain enforced.",
+    );
+  }
+
+  if (hasPattern("brain_")) {
+    extended.push(
+      "",
+      "**Company Brain:**",
+      "- `brain_search` / `brain_get_context` — retrieve grounded entities, claims, relations, and provenance",
+      "- `brain_upsert_entity` / `brain_upsert_relation` / `brain_upsert_claim` — maintain canonical knowledge only within your scoped grant",
+      "- `brain_ingest_data_source` / `brain_enrich_text` — map governed sources or text into reviewable semantic candidates",
+      "Treat Data Sources as authoritative raw data and the Company Brain as the evidence-aware semantic layer. Never invent evidence or silently replace conflicting claims.",
     );
   }
 
@@ -474,7 +501,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
   const contextBudget = contextBudgetForModel(model);
   const agent = new Agent({
-    getApiKey: (provider: string) => resolveApiKeyAsync(provider),
+    streamFn: streamSimpleWithAuth,
     transformContext: async (messages) => {
       const estimate = estimateContextTokens({
         systemPrompt: initialSystemPrompt,
@@ -672,6 +699,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
         });
+      }
+      if (ctx?.polpoDir) {
+        allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+        allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
       }
       agent.state.tools = allTools;
 

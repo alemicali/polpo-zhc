@@ -66,6 +66,10 @@ export function ChatNavigationEffects() {
       case "playbooks":      route = "/playbooks"; break;
       case "apps":           route = "/apps"; break;
       case "app":            route = id ? `/apps/${encodeURIComponent(id)}` : "/apps"; break;
+      case "data":           route = "/data"; break;
+      case "views":          route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
+      case "view":           route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
+      case "brain":          route = id ? `/brain?entity=${encodeURIComponent(id)}` : "/brain"; break;
       case "config":
       case "settings":       route = "/config"; break;
       case "files": {

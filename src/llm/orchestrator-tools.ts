@@ -50,6 +50,9 @@ import { activeTaskWaitRegistry } from "./active-task-waits.js";
 import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
 import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
+import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
+import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
+import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -274,7 +277,7 @@ const getMemoryTool: Tool = {
 
 const getConfigTool: Tool = {
   name: "get_config",
-  description: "Get the current Polpo configuration: settings, models, providers, notification rules, approval gates, SLA config.",
+  description: "Get the current Polpo configuration, including branding, settings, models, providers, notification rules, approval gates, and SLA config. Use this instead of reading .polpo/polpo.json with file tools.",
   parameters: Type.Object({}),
 };
 
@@ -1147,6 +1150,18 @@ const reloadConfigTool: Tool = {
   parameters: Type.Object({}),
 };
 
+const updateInstanceBrandingTool: Tool = {
+  name: "update_instance_branding",
+  description: "Update the shared instance product name, tagline, or logo. The logo can be an HTTP(S) URL or an existing PNG/JPEG/WebP/GIF file in the workspace. Omitted fields remain unchanged.",
+  parameters: Type.Object({
+    productName: Type.Optional(Type.String({ maxLength: 80, description: "Primary product name shown in navigation. Use an empty string to restore the default." })),
+    tagline: Type.Optional(Type.String({ maxLength: 120, description: "Short secondary label shown below the product name. Use an empty string to restore the default." })),
+    logoUrl: Type.Optional(Type.String({ description: "Public HTTP(S) logo URL" })),
+    logoPath: Type.Optional(Type.String({ description: "Existing local image path, absolute or relative to the workspace" })),
+    clearLogo: Type.Optional(Type.Boolean({ description: "Remove the configured logo and restore the default mark" })),
+  }),
+};
+
 const saveMemoryTool: Tool = {
   name: "save_memory",
   description: "Overwrite memory with new content. By default writes shared memory (.polpo/memory.md). Pass `agent` to write a specific agent's private memory.",
@@ -1679,6 +1694,8 @@ Available targets:
 - "apps" — Internal app registry
 - "app" — Specific registered app (requires id)
 - "app_preview" — App Preview page (optional url selects a running app/service)
+- "data" — Data sources and query explorer
+- "views" / "view" — Generated view registry or a specific view (id)
 
 Examples:
 - navigate_to({ target: "dashboard" })
@@ -1686,9 +1703,10 @@ Examples:
 - navigate_to({ target: "agent", name: "coder" })
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
 - navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })
+- navigate_to({ target: "view", id: "view-id" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
@@ -1864,6 +1882,10 @@ export const READ_TOOLS = new Set([
   "search_web",
   // WhatsApp (read-only)
   "whatsapp_read",
+  // Structured data
+  "data_list_sources", "data_test_source", "data_describe", "data_query", "data_sql", "data_list_views", "data_get_view",
+  // Company Brain
+  "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -1885,7 +1907,7 @@ export const WRITE_TOOLS = new Set([
   // Task watchers
   "watch_task", "remove_watcher",
   // Config & Self
-  "reload_config", "save_memory", "append_memory", "update_memory", "append_system_context",
+  "reload_config", "update_instance_branding", "save_memory", "append_memory", "update_memory", "append_system_context",
   // Skills (write)
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
@@ -1906,6 +1928,12 @@ export const WRITE_TOOLS = new Set([
   "register_app", "update_app_registry", "tag_app", "remove_app_registry",
   "configure_app_service", "configure_app_deployment", "configure_app_domain",
   "control_app", "control_app_service", "run_app_deployment", "capture_app_screenshot",
+  // Structured data
+  "data_register_source", "data_update_source", "data_delete_source", "data_set_source_grant",
+  "data_mutate", "data_create_view", "data_update_view", "data_delete_view",
+  // Company Brain
+  "brain_upsert_entity", "brain_upsert_relation", "brain_upsert_claim", "brain_ingest_data_source",
+  "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -1999,8 +2027,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   addNotificationRuleTool, removeNotificationRuleTool, sendNotificationTool,
   // Task watchers (2 write + 2 read above)
   watchTaskTool, waitForTaskTool, removeWatcherTool,
-  // Config & Self (4)
-  reloadConfigTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
+  // Config & Self
+  reloadConfigTool, updateInstanceBrandingTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
   // Skills (10)
   listOrchestratorSkillsTool, createOrchestratorSkillTool, updateOrchestratorSkillTool,
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
@@ -2023,6 +2051,10 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   registerAppTool, updateAppRegistryTool, tagAppTool, removeAppRegistryTool,
   configureAppServiceTool, configureAppDeploymentTool, configureAppDomainTool,
   controlAppTool, controlAppServiceTool, runAppDeploymentTool, captureAppScreenshotTool,
+  // Structured data + generated views
+  ...DATA_ORCHESTRATOR_TOOLS,
+  // Evidence-grounded semantic company graph
+  ...BRAIN_ORCHESTRATOR_TOOLS,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2031,7 +2063,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   openFileTool, navigateToTool, openTabTool, setDesignTool,
   // Session meta (1)
   setSessionTitleTool,
-  // Browser (6) — wired to agent-browser CLI, session="orchestrator",
+  // Browser (7) — wired to agent-browser CLI, session="orchestrator",
   // viewable live in the Agent Live tab.
   ...ALL_ORCHESTRATOR_BROWSER_TOOLS,
 ];
@@ -2058,6 +2090,33 @@ const TOOL_LABELS: Record<string, string> = {
   control_app_service: "Control App Service",
   run_app_deployment: "Run App Deployment",
   capture_app_screenshot: "Capture App Cover",
+  data_list_sources: "List Data Sources",
+  data_register_source: "Register Data Source",
+  data_update_source: "Update Data Source",
+  data_delete_source: "Remove Data Source",
+  data_test_source: "Test Data Source",
+  data_set_source_grant: "Set Data Access",
+  data_describe: "Describe Data Source",
+  data_query: "Query Data",
+  data_sql: "Run Read-only SQL",
+  data_mutate: "Change Source Data",
+  data_list_views: "List Data Views",
+  data_get_view: "Get Data View",
+  data_create_view: "Create Data View",
+  data_update_view: "Update Data View",
+  data_delete_view: "Delete Data View",
+  brain_stats: "Inspect Company Brain",
+  brain_search: "Search Company Brain",
+  brain_get_entity: "Get Brain Entity",
+  brain_get_context: "Get Semantic Context",
+  brain_list_runs: "List Brain Runs",
+  brain_upsert_entity: "Update Brain Entity",
+  brain_upsert_relation: "Update Brain Relation",
+  brain_upsert_claim: "Update Brain Claim",
+  brain_ingest_data_source: "Ingest Data into Brain",
+  brain_enrich_text: "Enrich Company Brain",
+  brain_merge_entities: "Merge Brain Entities",
+  brain_set_grant: "Set Brain Access",
   create_mission: "Create Mission",
   update_mission: "Update Mission",
   execute_mission: "Execute Mission",
@@ -2106,6 +2165,7 @@ const TOOL_LABELS: Record<string, string> = {
   remove_watcher: "Remove Watcher",
   // Config & Self
   reload_config: "Reload Config",
+  update_instance_branding: "Update Instance Branding",
   save_memory: "Save Memory",
   append_memory: "Append Memory",
   update_memory: "Update Memory",
@@ -2244,6 +2304,28 @@ export async function executeOrchestratorTool(
       case "control_app": return execControlApp(polpo, args);
       case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
 
+      // ── Structured data ──
+      case "data_list_sources": case "data_register_source": case "data_update_source": case "data_delete_source":
+      case "data_test_source": case "data_set_source_grant": case "data_describe": case "data_query": case "data_sql": case "data_mutate":
+      case "data_list_views": case "data_get_view": case "data_create_view": case "data_update_view": case "data_delete_view":
+        return executeDataTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), context.sessionId, (event) => {
+          if (event.type === "source") {
+            const { type: _type, ...payload } = event;
+            polpo.emit("data-source:changed", payload);
+          } else {
+            const { type: _type, ...payload } = event;
+            polpo.emit("data-view:changed", payload);
+          }
+        });
+
+      // ── Company Brain ──
+      case "brain_stats": case "brain_search": case "brain_get_entity": case "brain_get_context": case "brain_list_runs":
+      case "brain_upsert_entity": case "brain_upsert_relation": case "brain_upsert_claim": case "brain_ingest_data_source":
+      case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
+        return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
+          polpo.emit("brain:changed" as any, event);
+        });
+
       // ── Task ──
       case "create_task":      return execCreateTask(polpo, args);
       case "update_task":      return execUpdateTask(polpo, args);
@@ -2327,6 +2409,7 @@ export async function executeOrchestratorTool(
 
       // ── Config & Self ──
       case "reload_config":        return execReloadConfig(polpo);
+      case "update_instance_branding": return execUpdateInstanceBranding(polpo, args);
       case "save_memory":          return execSaveMemory(polpo, args);
       case "append_memory":        return execAppendMemory(polpo, args);
       case "update_memory":        return execUpdateMemory(polpo, args);
@@ -2401,7 +2484,7 @@ export async function executeOrchestratorTool(
 
       default:
         // ── Browser (delegated) ──
-        // Six browser_* tools share a single executor in
+        // Browser tools share a single executor in
         // orchestrator-browser-tools.ts. Routed here so we don't have to
         // mirror every case branch.
         if (ORCHESTRATOR_BROWSER_TOOL_NAMES.has(toolName)) {
@@ -2773,7 +2856,7 @@ async function execListAppPreviews(): Promise<string> {
 }
 
 async function execListApps(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const requestedTags = normalizeAppTags(stringArray(args.tags));
   const requestedKeys = requestedTags.map((tag) => tag.toLocaleLowerCase());
   const tagMatch = args.tagMatch === "all" ? "all" : "any";
@@ -2797,7 +2880,7 @@ async function execListApps(polpo: Orchestrator, args: Record<string, unknown>):
 async function execGetApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const id = String(args.id ?? "").trim();
   if (!id) return "Error: id is required";
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await store.get(id);
   if (!app) return `Error: App "${id}" not found`;
   return JSON.stringify({ ...app, runtime: runtime.list(app.id) }, null, 2);
@@ -2808,7 +2891,7 @@ async function execControlAppService(polpo: Orchestrator, args: Record<string, u
   const serviceId = String(args.serviceId ?? "").trim();
   const action = String(args.action ?? "");
   if (!appId || !serviceId || !["start", "stop", "restart"].includes(action)) return "Error: appId, serviceId and a valid action are required";
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await store.get(appId);
   if (!app) return `Error: App "${appId}" not found`;
   if (action === "stop") {
@@ -2826,7 +2909,7 @@ async function execRunAppDeployment(polpo: Orchestrator, args: Record<string, un
   const deploymentId = String(args.deploymentId ?? "").trim();
   const action = String(args.action ?? "run");
   if (!appId || !deploymentId || !["run", "stop"].includes(action)) return "Error: appId, deploymentId and a valid action are required";
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await store.get(appId);
   if (!app) return `Error: App "${appId}" not found`;
   if (action === "stop") {
@@ -2843,7 +2926,7 @@ async function execRegisterApp(polpo: Orchestrator, args: Record<string, unknown
   if (!name || !statSync(localPath, { throwIfNoEntry: false })?.isDirectory()) return "Error: name and an existing localPath directory are required";
   const slug = normalizeAppSlug(String(args.slug ?? name));
   if (!slug) return "Error: could not derive a valid app slug";
-  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store } = getLiveAppRegistry(polpo);
   const app = await store.create({
     name,
     slug,
@@ -2858,7 +2941,7 @@ async function execRegisterApp(polpo: Orchestrator, args: Record<string, unknown
 }
 
 async function execUpdateAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const updates: Record<string, unknown> = {};
   if (args.name !== undefined) updates.name = String(args.name).trim();
@@ -2880,7 +2963,7 @@ async function execUpdateAppRegistry(polpo: Orchestrator, args: Record<string, u
 }
 
 async function execTagApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const operation = String(args.operation ?? "");
   const requested = normalizeAppTags(stringArray(args.tags));
@@ -2901,7 +2984,7 @@ async function execTagApp(polpo: Orchestrator, args: Record<string, unknown>): P
 }
 
 async function execRemoveAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   await runtime.stopApp(app.id);
   await store.delete(app.id);
@@ -2910,7 +2993,7 @@ async function execRemoveAppRegistry(polpo: Orchestrator, args: Record<string, u
 }
 
 async function execConfigureAppService(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const id = optionalString(args.serviceId);
   if (args.operation === "remove") {
@@ -2938,7 +3021,7 @@ async function execConfigureAppService(polpo: Orchestrator, args: Record<string,
 }
 
 async function execConfigureAppDeployment(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const id = optionalString(args.deploymentId);
   if (args.operation === "remove") {
@@ -2966,7 +3049,7 @@ async function execConfigureAppDeployment(polpo: Orchestrator, args: Record<stri
 }
 
 async function execConfigureAppDomain(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const id = optionalString(args.domainId);
   const existing = id ? app.domains.find((item) => item.id === id) : undefined;
@@ -2996,7 +3079,7 @@ async function execConfigureAppDomain(polpo: Orchestrator, args: Record<string, 
 }
 
 async function execControlApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store, runtime } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store, runtime } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const action = String(args.action ?? "");
   if (action === "stop") {
@@ -3009,11 +3092,15 @@ async function execControlApp(polpo: Orchestrator, args: Record<string, unknown>
 }
 
 async function execCaptureAppScreenshot(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
-  const { store } = getAppRegistryRuntime(polpo.getPolpoDir());
+  const { store } = getLiveAppRegistry(polpo);
   const app = await requireRegisteredApp(store, args.appId);
   const capturedAt = await captureAppScreenshot(app, polpo.getPolpoDir(), optionalString(args.url));
   await store.update(app.id, { screenshotUpdatedAt: capturedAt });
   return `Captured a new cover for ${app.name}.`;
+}
+
+function getLiveAppRegistry(polpo: Orchestrator): ReturnType<typeof getAppRegistryRuntime> {
+  return getAppRegistryRuntime(polpo.getPolpoDir(), (event) => polpo.emit("app:changed", event));
 }
 
 async function requireRegisteredApp(store: ReturnType<typeof getAppRegistryRuntime>["store"], idValue: unknown) {
@@ -4118,6 +4205,77 @@ async function execReloadConfig(polpo: Orchestrator): Promise<string> {
   return reloaded ? "Configuration reloaded from polpo.json." : "Error: Failed to reload configuration.";
 }
 
+async function execUpdateInstanceBranding(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const hasProductName = typeof args.productName === "string";
+  const hasTagline = typeof args.tagline === "string";
+  const logoUrl = typeof args.logoUrl === "string" ? args.logoUrl.trim() : undefined;
+  const logoPath = typeof args.logoPath === "string" ? args.logoPath.trim() : undefined;
+  const clearLogo = args.clearLogo === true;
+  if (!hasProductName && !hasTagline && !logoUrl && !logoPath && !clearLogo) {
+    return "Error: Provide at least one branding field to update.";
+  }
+  if ([Boolean(logoUrl), Boolean(logoPath), clearLogo].filter(Boolean).length > 1) {
+    return "Error: Use only one of logoUrl, logoPath, or clearLogo.";
+  }
+  if (logoUrl) {
+    try {
+      const url = new URL(logoUrl);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported protocol");
+    } catch {
+      return "Error: logoUrl must be a valid HTTP(S) URL.";
+    }
+  }
+
+  const polpoDir = polpo.getPolpoDir();
+  const config = loadPolpoConfig(polpoDir);
+  if (!config) return "Error: No polpo.json configuration found.";
+  const branding = { ...(config.settings.branding ?? {}) };
+  if (hasProductName) {
+    const productName = String(args.productName).trim().slice(0, 80);
+    if (productName) branding.productName = productName;
+    else delete branding.productName;
+  }
+  if (hasTagline) {
+    const tagline = String(args.tagline).trim().slice(0, 120);
+    if (tagline) branding.tagline = tagline;
+    else delete branding.tagline;
+  }
+
+  const extensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+  const brandingDir = join(polpoDir, "branding");
+  const clearManaged = () => {
+    for (const extension of ["png", "jpg", "webp", "gif"]) {
+      const path = join(brandingDir, `logo.${extension}`);
+      if (existsSync(path)) rmSync(path);
+    }
+  };
+
+  if (logoPath) {
+    const source = resolveFilePath(polpo, logoPath);
+    if (!existsSync(source) || !statSync(source).isFile()) return `Error: Logo file not found: ${source}`;
+    const extension = extname(source).toLowerCase();
+    if (!extensions.has(extension)) return "Error: Local logo must be PNG, JPEG, WebP, or GIF.";
+    if (statSync(source).size > 4 * 1024 * 1024) return "Error: Local logo must be smaller than 4 MB.";
+    mkdirSync(brandingDir, { recursive: true });
+    clearManaged();
+    const normalizedExtension = extension === ".jpeg" ? "jpg" : extension.slice(1);
+    cpSync(source, join(brandingDir, `logo.${normalizedExtension}`));
+    branding.logoUrl = "/api/v1/config/branding/logo";
+  } else if (logoUrl) {
+    clearManaged();
+    branding.logoUrl = logoUrl;
+  } else if (clearLogo) {
+    clearManaged();
+    delete branding.logoUrl;
+  }
+
+  config.settings.branding = branding;
+  savePolpoConfig(polpoDir, config);
+  const reloaded = await polpo.reloadConfig();
+  if (!reloaded) return "Error: Branding was saved but the runtime config reload failed.";
+  return `Instance branding updated:\n${JSON.stringify(branding, null, 2)}`;
+}
+
 async function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agent = args.agent as string | undefined;
   if (agent) {
@@ -4460,6 +4618,7 @@ function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   }
 
   const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools });
+  emitSkillChanged(polpo, "orchestrator", "created", name);
   return `Created orchestrator skill "${name}" at ${path}`;
 }
 
@@ -4473,6 +4632,8 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates);
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
 
+  emitSkillChanged(polpo, "orchestrator", "updated", name);
+
   const fields = Object.keys(updates);
   return `Updated orchestrator skill "${name}": ${fields.join(", ")}`;
 }
@@ -4481,6 +4642,7 @@ function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   const name = args.name as string;
   const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name);
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
+  emitSkillChanged(polpo, "orchestrator", "deleted", name);
   return `Removed orchestrator skill "${name}"`;
 }
 
@@ -4490,6 +4652,7 @@ function execInstallOrchestratorSkill(polpo: Orchestrator, args: Record<string, 
   const force = args.force as boolean | undefined;
 
   const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  if (result.installed.length > 0) emitSkillChanged(polpo, "orchestrator", "installed");
 
   const lines: string[] = [];
   if (result.installed.length > 0) {
@@ -4526,6 +4689,7 @@ function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown
   const force = args.force as boolean | undefined;
 
   const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  if (result.installed.length > 0) emitSkillChanged(polpo, "agent", "installed");
 
   const lines: string[] = [];
   if (result.installed.length > 0) {
@@ -4565,6 +4729,7 @@ function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
   }
 
   const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools });
+  emitSkillChanged(polpo, "agent", "created", name);
   return `Created agent skill "${name}" at ${skillPath}. Assign it to agents with update_agent (add to their skills array).`;
 }
 
@@ -4572,6 +4737,7 @@ function execRemoveAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
   const name = args.name as string;
   const ok = removeSkill(polpo.getPolpoDir(), name);
   if (!ok) return `Error: Agent skill "${name}" not found.`;
+  emitSkillChanged(polpo, "agent", "deleted", name);
   return `Removed agent skill "${name}"`;
 }
 
@@ -4635,11 +4801,21 @@ function execTagSkill(polpo: Orchestrator, args: Record<string, unknown>): strin
   if (category) entry.category = category;
 
   updateSkillIndex(polpoDir, name, entry as { tags?: string[]; category?: string });
+  emitSkillChanged(polpo, "agent", "indexed", name);
 
   const parts = [`Skill "${name}" index updated.`];
   if (tags) parts.push(`Tags: ${tags.join(", ")}`);
   if (category) parts.push(`Category: ${category}`);
   return parts.join("\n");
+}
+
+function emitSkillChanged(
+  polpo: Orchestrator,
+  scope: "agent" | "orchestrator",
+  action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed",
+  skillName?: string,
+): void {
+  polpo.emit("skill:changed", { scope, action, skillName, timestamp: new Date().toISOString() });
 }
 
 // ═══════════════════════════════════════════════════════════════════════

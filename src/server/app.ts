@@ -1,7 +1,7 @@
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { streamSimpleWithAuth } from "../llm/pi-client.js";
 import { buildSystemPrompt } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -34,7 +34,7 @@ import {
   streamRegistry,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
-import { publicConfigRoutes } from "./routes/config.js";
+import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
@@ -43,6 +43,7 @@ import { instanceAuthRoutes } from "./routes/instance-auth.js";
 import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
+import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -54,9 +55,16 @@ import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
 import { appsRoutes } from "./routes/apps.js";
+import { dataRoutes } from "./routes/data.js";
+import { dataViewRoutes } from "./routes/data-views.js";
+import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
+import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
+import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
 import { getAppRegistryRuntime } from "./app-runtime-manager.js";
+import { getDataRegistryRuntime } from "./data-runtime.js";
+import { getCompanyBrainRuntime } from "./company-brain-runtime.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
@@ -89,7 +97,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
   const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
-  const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir());
+  const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir(), (event) => orchestrator.emit("app:changed", event));
+  const activeDataRegistry = () => getDataRegistryRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (event) => {
+    if (event.type === "source") {
+      const { type: _type, ...payload } = event;
+      orchestrator.emit("data-source:changed", payload);
+    } else {
+      const { type: _type, ...payload } = event;
+      orchestrator.emit("data-view:changed", payload);
+    }
+  });
+  const activeCompanyBrain = () => getCompanyBrainRuntime(activePolpoDir(), activeDataRegistry(), (event) => {
+    orchestrator.emit("brain:changed" as any, event);
+  });
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -97,7 +117,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("/api/*", rateLimitMiddleware());
   app.use("/v1/*", rateLimitMiddleware());
 
-  const corsExposeHeaders = ["x-session-id"];
+  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
@@ -164,19 +184,25 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
   const completionApp = completionRoutes(() => ({
+    contextCheckpoints: new FileContextCheckpointStore(o.getPolpoDir()),
+    resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
+    saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
+      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
-    recordTokenUsage: (usage) => new FileTokenUsageStore(activePolpoDir()).record(usage),
+    recordTokenUsage: async (usage) => {
+      await new FileTokenUsageStore(activePolpoDir()).record(usage);
+      o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+    },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
-      const { resolveModel, resolveApiKeyAsync, buildStreamOpts } = await import("../llm/pi-client.js");
+      const { resolveModel, buildStreamOpts } = await import("../llm/pi-client.js");
       const m = resolveModel(agentConfig.model);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
       const r = agentConfig.reasoning ?? reasoning;
-      return { model: m, streamOpts: buildStreamOpts(apiKey, r, m.maxTokens) };
+      return { model: m, streamOpts: buildStreamOpts(undefined, r, m.maxTokens) };
     },
     buildAgentPrompt: async (agentConfig: any) => {
       // Pull the agent's mailboxes from vault so the prompt enumerates
@@ -193,6 +219,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     resolveAgentTools: async (agentConfig: any) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
+      const { createDataAgentTools } = await import("../tools/data-tools.js");
+      const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
       const {
         CLIENT_SIDE_CHAT_TOOLS,
@@ -256,6 +284,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
+      tools.push(...createDataAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
+        if (event.type === "source") {
+          const { type: _type, ...payload } = event;
+          o.emit("data-source:changed", payload);
+        } else {
+          const { type: _type, ...payload } = event;
+          o.emit("data-view:changed", payload);
+        }
+      }));
+      tools.push(...createCompanyBrainAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
+        o.emit("brain:changed" as any, event);
+      }));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
@@ -327,21 +367,20 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const isInteractive = (name: string) => name === "ask_user" || isClientSideChatTool(name) || isSideEffectGated(name);
       return { tools, executor, isInteractive };
     },
-    streamLLM: streamSimple as any,
+    streamLLM: streamSimpleWithAuth as any,
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
-      const { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
+      const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
       const { ALL_ORCHESTRATOR_TOOLS, executeOrchestratorTool, isInteractive } = await import("../llm/orchestrator-tools.js");
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
       const systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
       return {
         systemPrompt,
         model: m,
-        streamOpts: buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens),
+        streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
         tools: ALL_ORCHESTRATOR_TOOLS,
         executor: (name: string, args: Record<string, unknown>, context) => executeOrchestratorTool(name, args, o, context),
         isInteractive,
@@ -493,13 +532,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/events", eventRoutes(sseBridge));
 
   authed.route("/chat", chatRoutes(() => ({
+    attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     sessionStore: o.getSessionStore(),
+    emit: (event: string, data: unknown) => o.emit(event as any, data),
   })));
 
   authed.route("/skills", skillRoutes(() => ({
     polpoDir: o.getPolpoDir(),
     workDir: o.getWorkDir(),
     getAgents: () => o.getAgents(),
+    emit: (event, data) => o.emit(event, data),
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({
@@ -529,11 +571,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/config", configRoutes(() => ({
     getConfig: () => o.getConfig(),
     reloadConfig: () => o.reloadConfig(),
+    getPolpoDir: () => o.getPolpoDir(),
     saveConfig: async (config: any) => {
       const { savePolpoConfig } = await import("../core/config.js");
       savePolpoConfig(o.getPolpoDir(), config);
     },
     getNotificationRouter: () => o.getNotificationRouter(),
+  })));
+  authed.route("/config", brandingConfigRoutes(() => ({
+    getConfig: () => o.getConfig(),
+    reloadConfig: () => o.reloadConfig(),
+    getPolpoDir: () => o.getPolpoDir(),
   })));
 
   authed.route("/peers", peerRoutes(() => ({
@@ -553,6 +601,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/background-waits", backgroundWaitRoutes(o));
   authed.route("/apps", appsRoutes(() => ({ ...activeAppRegistry(), polpoDir: activePolpoDir() })));
+  authed.route("/data", dataRoutes(() => {
+    const runtime = activeDataRegistry();
+    return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
+  }));
+  authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
+  authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),
@@ -571,6 +625,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/audio", audioRoutes());
+  authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
   authed.route("/app-preview", appPreviewRoutes(() => ({

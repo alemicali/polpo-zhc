@@ -14,6 +14,11 @@ import {
   type Model,
   type Api,
   type KnownProvider,
+  type Context,
+  type ModelAuth,
+  type SimpleStreamOptions,
+  type AssistantMessage,
+  type AssistantMessageEventStream,
   type Usage,
 } from "@earendil-works/pi-ai";
 import {
@@ -21,6 +26,7 @@ import {
   getBuiltinModels as getModels,
   getBuiltinProviders as getProviders,
 } from "@earendil-works/pi-ai/providers/all";
+import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 import {
   completeSimple,
   getEnvApiKey,
@@ -81,6 +87,7 @@ const PREFIX_MAP: [string, KnownProvider][] = [
 /** Map provider names to their standard environment variable for API keys. */
 export const PROVIDER_ENV_MAP: Record<string, string> = {
   "ant-ling": "ANT_LING_API_KEY",
+  "baseten": "BASETEN_API_KEY",
   "openai": "OPENAI_API_KEY",
   "anthropic": "ANTHROPIC_API_KEY",
   "google": "GEMINI_API_KEY",
@@ -105,6 +112,9 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "together": "TOGETHER_API_KEY",
   "opencode": "OPENCODE_API_KEY",
   "opencode-go": "OPENCODE_API_KEY",
+  "qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
+  "qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
   "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
   "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
@@ -200,6 +210,57 @@ export async function resolveApiKeyAsync(provider: string): Promise<string | und
   }
 }
 
+/** Resolve the complete request auth required by pi-ai 0.84 providers. */
+export async function resolveModelAuthAsync(provider: string): Promise<ModelAuth | undefined> {
+  const apiKey = resolveApiKey(provider);
+  if (apiKey) return { apiKey };
+
+  try {
+    const { getOAuthModelAuthForProvider } = await import("../auth/oauth-manager.js");
+    return (await getOAuthModelAuthForProvider(provider))?.auth;
+  } catch {
+    return undefined;
+  }
+}
+
+function modelWithAuth<TApi extends Api>(model: Model<TApi>, auth?: ModelAuth): Model<TApi> {
+  return auth?.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+}
+
+function optionsWithAuth(
+  options: SimpleStreamOptions | undefined,
+  auth: ModelAuth | undefined,
+): SimpleStreamOptions | undefined {
+  if (!auth) return options;
+  return {
+    ...options,
+    apiKey: options?.apiKey ?? auth.apiKey,
+    headers: auth.headers || options?.headers
+      ? { ...auth.headers, ...options?.headers }
+      : undefined,
+  };
+}
+
+/** Auth-aware stream function suitable for pi-agent-core's required streamFn. */
+export async function streamSimpleWithAuth(
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): Promise<AssistantMessageEventStream> {
+  const auth = await resolveModelAuthAsync(model.provider);
+  return streamSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth));
+}
+
+/** Auth-aware completion for callers outside the Agent loop. */
+export async function completeSimpleWithAuth(
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): Promise<AssistantMessage> {
+  const auth = await resolveModelAuthAsync(model.provider);
+  return completeSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth));
+}
+
 // ─── Model Spec Parsing ─────────────────────────────
 // Core logic lives in @polpo-ai/core. Re-exported here for backward compat.
 
@@ -239,7 +300,7 @@ export function resolveModel(spec?: string): Model<Api> {
 
   // 1. Try pi-ai built-in catalog first
   try {
-    const model = getModel(provider as KnownProvider, modelId as never) as Model<Api> | undefined;
+    const model = getModel(provider as BuiltinProvider, modelId as never) as Model<Api> | undefined;
     if (model) {
       if (override?.baseUrl) {
         return { ...model, baseUrl: override.baseUrl };
@@ -289,7 +350,7 @@ export function resolveModel(spec?: string): Model<Api> {
 
   // 4. Unknown provider with no override — try pi-ai, but guard against undefined return
   try {
-    const model = getModel(provider as KnownProvider, modelId as never) as Model<Api> | undefined;
+    const model = getModel(provider as BuiltinProvider, modelId as never) as Model<Api> | undefined;
     if (model) return model;
   } catch {
     // Fall through to error
@@ -330,7 +391,7 @@ export function listModels(provider?: string): ModelInfo[] {
 
   for (const p of providers) {
     try {
-      const pModels = getModels(p as KnownProvider);
+      const pModels = getModels(p as BuiltinProvider);
       for (const m of pModels) {
         models.push({
           id: m.id,
@@ -501,7 +562,7 @@ export function buildModelListingForPrompt(): string {
 
   for (const { provider, label, picks } of FEATURED_PROVIDERS) {
     try {
-      const models = getModels(provider as KnownProvider);
+      const models = getModels(provider as BuiltinProvider);
       if (models.length === 0) continue;
       // Sort by most capable: reasoning first, then by context window
       const sorted = [...models].sort((a, b) => {
@@ -525,7 +586,7 @@ export function buildModelListingForPrompt(): string {
   // Count total available
   const allProviders = getProviders();
   const totalModels = allProviders.reduce((sum, p) => {
-    try { return sum + getModels(p as KnownProvider).length; } catch { return sum; }
+    try { return sum + getModels(p as BuiltinProvider).length; } catch { return sum; }
   }, 0);
 
   lines.push(`- ... and ${allProviders.length} total providers with ${totalModels}+ models (use "provider:model" format)`);
@@ -591,7 +652,7 @@ export async function resolveModelWithFallbackAsync(config: ModelConfig): Promis
     throw new Error("No primary model configured. Run 'polpo setup' or set POLPO_MODEL env var.");
   }
   const { provider: primaryProvider } = parseModelSpec(primary);
-  if (await resolveApiKeyAsync(primaryProvider)) {
+  if (await resolveModelAuthAsync(primaryProvider)) {
     try {
       return { model: resolveModel(primary), spec: primary };
     } catch {
@@ -603,7 +664,7 @@ export async function resolveModelWithFallbackAsync(config: ModelConfig): Promis
   if (config.fallbacks) {
     for (const fallback of config.fallbacks) {
       const { provider: fbProvider } = parseModelSpec(fallback);
-      if (await resolveApiKeyAsync(fbProvider)) {
+      if (await resolveModelAuthAsync(fbProvider)) {
         try {
           return { model: resolveModel(fallback), spec: fallback };
         } catch {
@@ -782,16 +843,18 @@ async function handleBillingDisable(provider: string): Promise<void> {
  * - Google → thinking.enabled + thinking.budgetTokens
  */
 export function buildStreamOpts(
-  apiKey?: string,
+  auth?: string | ModelAuth,
   reasoning?: ReasoningLevel,
   maxTokens?: number,
 ): Record<string, unknown> | undefined {
   const reasoningVal = reasoning && reasoning !== "off" ? reasoning : undefined;
+  const modelAuth = typeof auth === "string" ? { apiKey: auth } : auth;
 
-  if (!apiKey && !reasoningVal && !maxTokens) return undefined;
+  if (!modelAuth && !reasoningVal && !maxTokens) return undefined;
 
   const opts: Record<string, unknown> = {};
-  if (apiKey) opts.apiKey = apiKey;
+  if (modelAuth?.apiKey) opts.apiKey = modelAuth.apiKey;
+  if (modelAuth?.headers) opts.headers = modelAuth.headers;
   if (reasoningVal) opts.reasoning = reasoningVal;
   if (maxTokens) opts.maxTokens = maxTokens;
   return opts;
@@ -807,11 +870,10 @@ export function buildStreamOpts(
 export async function queryText(prompt: string, model?: string, reasoning?: ReasoningLevel): Promise<{ text: string; usage?: Usage; model: Model<Api> }> {
   const m = resolveModel(model);
   const provider = m.provider as string;
-  const apiKey = await resolveApiKeyAsync(provider);
   try {
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
     const textBlocks = response.content.filter((c): c is { type: "text"; text: string } => c.type === "text");
     const text = textBlocks.map(b => b.text).join("\n").trim();
     // Success — clear any cooldown for this provider
@@ -847,11 +909,10 @@ export async function queryStream(
 ): Promise<{ text: string; usage?: Usage; model: Model<Api> }> {
   const m = resolveModel(model);
   const provider = m.provider as string;
-  const apiKey = await resolveApiKeyAsync(provider);
   try {
-    const s = streamSimple(m, {
+    const s = await streamSimpleWithAuth(m, {
       messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     for await (const event of s) {
       if (event.type === "text_delta" && onProgress) {

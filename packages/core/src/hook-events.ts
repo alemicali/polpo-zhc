@@ -100,6 +100,8 @@ export const HOOK_EVENT_CATALOG: HookEventDef[] = [
 
   // ── Chat sessions ─────────────────────────────────────────────
   { name: "session:created", label: "Chat session created", description: "A new chat session was opened.", category: "session", placeholders: ["sessionId", "title"] },
+  { name: "session:updated", label: "Chat session updated", description: "A chat session title or star status changed.", category: "session", placeholders: ["sessionId", "title", "starred"] },
+  { name: "session:deleted", label: "Chat session deleted", description: "A chat session was removed.", category: "session", placeholders: ["sessionId"] },
   { name: "message:added", label: "Chat message added", description: "A new message was appended to a chat session.", category: "session", placeholders: ["sessionId", "messageId", "role"] },
 
   // ── Approval gates ────────────────────────────────────────────

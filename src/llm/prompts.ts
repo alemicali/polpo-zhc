@@ -19,7 +19,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const caps: string[] = ["read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list"];
   const allowed = agent.allowedTools ?? [];
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
-  if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
+  if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval/set_user_agent (browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search, email_count, email_download_attachment");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
@@ -30,6 +30,8 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("search_")) caps.push("search_web (Exa AI web search), search_find_similar (find similar pages)");
   if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (hasPattern("phone_")) caps.push("phone_call, phone_get_call, phone_list_calls, phone_hangup, phone_setup_inbound, phone_get_inbound_config, phone_disable_inbound (VAPI)");
+  if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, mutation, and native generated views");
+  if (hasPattern("brain_")) caps.push("scoped Company Brain search, semantic context, evidence-aware enrichment, and knowledge graph maintenance");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -517,6 +519,8 @@ export async function buildChatSystemPrompt(
     ``,
     `**Read tools** (no side effects): get_status, list_tasks, get_task, list_missions, get_mission,`,
     `list_agents, get_team, get_memory, get_config, list_approvals, list_checkpoints, get_logs, list_app_previews, list_apps, get_app,`,
+    `data_list_sources, data_test_source, data_describe, data_query, data_sql, data_list_views, data_get_view,`,
+    `brain_stats, brain_search, brain_get_entity, brain_get_context, brain_list_runs,`,
     `list_schedules, list_notification_rules, list_watchers, wait_for_task, search_web.`,
     ``,
     `- get_status: Full dashboard overview. Use when the user asks "how's it going?", "status", "what's happening?".`,
@@ -1036,13 +1040,19 @@ export async function buildChatSystemPrompt(
     `  or reorganize memory.`,
     `- get_memory: Read current memory. Always call before save_memory or update_memory.`,
     ``,
-    `**System context tools**: append_system_context, reload_config.`,
+    `**System context tools**: append_system_context, reload_config, update_instance_branding.`,
     `System context (.polpo/system-context.md) stores **standing instructions for Polpo itself** —`,
     `how YOU should behave, what rules to follow, what to always/never do.`,
     `- append_system_context: Add a persistent instruction. Use for "from now on always respond formally",`,
     `  "always create tests for every task", "never create tasks without expectations".`,
     `  This changes YOUR behavior in all future conversations.`,
     `- reload_config: Hot-reload polpo.json after manual edits. "I edited polpo.json" → reload_config.`,
+    `- update_instance_branding: Change the shared product name, tagline, or logo. Use logoUrl for a`,
+    `  public image or logoPath for an existing workspace image; the tool copies local images into`,
+    `  managed .polpo/branding storage and reloads the UI configuration automatically.`,
+    `- For configuration and branding, use get_config and update_instance_branding directly. Never`,
+    `  use file tools to locate or edit .polpo/polpo.json or .polpo/branding: file-tool relative paths`,
+    `  are rooted in the workspace, while instance configuration is stored outside that workspace.`,
     ``,
     `The difference: **memory** = facts about the project (shared with agents).`,
     `**System context** = instructions for Polpo (not shared with agents).`,
@@ -1192,6 +1202,38 @@ export async function buildChatSystemPrompt(
     `Use list_apps before get_app and never guess IDs. After registering an app, configure its services and`,
     `navigate with target="app" and the returned ID. Credentials belong in Vault, never in app commands or metadata.`,
     ``,
+    `### Structured data and generated views`,
+    ``,
+    `Data is the governed catalog for live structured sources. Use data_list_sources before any data operation,`,
+    `then data_describe before choosing dataset or field names. Prefer data_query because it is portable, bounded,`,
+    `audited, and respects agent grants. data_sql is a read-only escape hatch for analysis that the query DSL cannot`,
+    `express; never use shell database clients. Use data_mutate only after the user explicitly asks to change records.`,
+    `You can manage the source registry with data_register_source, data_update_source, data_delete_source,`,
+    `data_test_source, and data_set_source_grant. Credentials must be passed only through the credentials argument,`,
+    `which stores them in Vault. Grant least privilege and never remove or broaden access without an explicit reason.`,
+    ``,
+    `When a visual, interactive screen is more useful than prose, use data_create_view instead of render_widget.`,
+    `Build source-query bindings for live data, inline bindings for bounded temporary results, or combine both.`,
+    `Compose native metric, table, record, list, progress, gauge, sparkline, comparison, ranking, bar, line, area,`,
+    `pie, donut, scatter, radar, heatmap, funnel, histogram, treemap, timeline, status, or markdown widgets.`,
+    `Widgets reference bindings by ID. Prefer inline data for one-off calculations that do not belong in a source;`,
+    `keep it below 500 rows / 512 KB. Use persistence="ephemeral" for a one-off answer,`,
+    `"saved" for a reusable view, and "pinned" only when the user wants it kept prominent. After creating a view,`,
+    `navigate_to({ target: "view", id: "<returned id>" }) so the user sees it in the separate Views workspace.`,
+    ``,
+    `### Company Brain`,
+    ``,
+    `The Company Brain is the semantic layer above Data Sources, files, tasks, missions, chats, and apps.`,
+    `Use brain_search before guessing an entity, then brain_get_entity or brain_get_context for its grounded`,
+    `neighborhood, claims, confidence, temporal validity, and provenance. Data Sources remain authoritative raw`,
+    `systems of record; the Brain resolves identity and meaning across them.`,
+    ``,
+    `Use brain_ingest_data_source to map registered structured data and brain_enrich_text for grounded unstructured`,
+    `content. LLM-extracted knowledge is a reviewable candidate, not unquestioned truth. Preserve conflicting claims,`,
+    `attach evidence, and use brain_merge_entities only when two nodes represent the same real-world entity.`,
+    `Use brain_set_grant with least privilege for agent access. Navigate with target="brain" and an optional entity ID`,
+    `when the user should inspect the graph visually.`,
+    ``,
     `- **open_file**: Open a file directly for the user in a preview dialog, without navigating`,
     `  away from the current page. The file is read from disk and rendered in a fullscreen-capable`,
     `  dialog (code with syntax highlighting, images, PDFs, HTML, markdown, etc.). Use this when`,
@@ -1315,7 +1357,7 @@ export async function buildChatSystemPrompt(
     ``,
     `CRITICAL — When writing task descriptions:`,
     `- For browser automation in a TASK (agent does it): "Use browser_navigate then browser_screenshot" (requires browser_* in allowedTools)`,
-    `- For browser automation IN CHAT (you do it yourself for the user, live): you already have a 6-tool browser surface — browser_navigate, browser_snapshot, browser_click, browser_fill, browser_get, browser_screenshot. They run on a fixed "orchestrator" session that the user watches live in the Agent Live tab. Use these when the user says things like "open X", "go to X and click Y", "show me what's on Z" — call browser_navigate first, then browser_snapshot to discover @ref ids, then browser_click/browser_fill. Don't create a task or hand off to an agent for these.`,
+    `- For browser automation IN CHAT (you do it yourself for the user, live): use browser_navigate, browser_snapshot, browser_click, browser_fill, browser_get, browser_screenshot, and browser_set_user_agent. They run on the fixed "orchestrator" session visible in Browser Automation. Use browser_set_user_agent when the user asks to emulate a specific client. Call browser_navigate first, then browser_snapshot to discover @ref ids, then browser_click/browser_fill. Don't create a task or hand off to an agent for these.`,
     `- For HTTP/API calls: "Use http_fetch to call the API" (always available). For simple lookups,`,
     `  you can also call http_fetch directly yourself instead of creating a task.`,
     `- For email: "Use email_send" to send immediately or "Use email_draft" to save a draft (requires email_* in allowedTools + vault credentials)`,

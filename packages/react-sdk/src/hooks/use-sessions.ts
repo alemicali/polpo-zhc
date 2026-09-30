@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useEvents } from "./use-events.js";
 import { readCached, writeCached } from "./use-swr-cache.js";
 import type { ChatSession, ChatMessage } from "@polpo-ai/sdk";
 
@@ -26,6 +27,7 @@ export interface UseSessionsReturn {
 
 export function useSessions(): UseSessionsReturn {
   const { client } = usePolpoContext();
+  const { events } = useEvents(["session:created", "session:updated", "session:deleted", "message:added"], 1);
 
   // Synchronous SWR seed: read stale snapshot on the very first render so
   // the sidebar paints instantly. The background fetch below replaces it
@@ -64,6 +66,14 @@ export function useSessions(): UseSessionsReturn {
     // initial is captured at mount; refetch is stable per client.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch]);
+
+  const latestEventId = events.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
+  useEffect(() => {
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    void refetch();
+  }, [latestEventId, refetch]);
 
   const getMessages = useCallback(
     async (sessionId: string) => {

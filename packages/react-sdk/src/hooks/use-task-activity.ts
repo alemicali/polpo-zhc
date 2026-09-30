@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useEvents } from "./use-events.js";
 import type { RunActivityEntry } from "@polpo-ai/sdk";
 
 export interface UseTaskActivityReturn {
@@ -24,6 +25,7 @@ export function useTaskActivity(
   options?: { pollIntervalMs?: number },
 ): UseTaskActivityReturn {
   const { client } = usePolpoContext();
+  const { events } = useEvents(["agent:activity", "agent:finished", "task:transition"], 1);
   const [entries, setEntries] = useState<RunActivityEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -72,6 +74,12 @@ export function useTaskActivity(
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  const latestEvent = events.at(-1);
+  useEffect(() => {
+    const eventTaskId = (latestEvent?.data as { taskId?: string } | undefined)?.taskId;
+    if (eventTaskId === taskId) void refetch();
+  }, [latestEvent, refetch, taskId]);
 
   // Auto-poll when interval is set
   useEffect(() => {

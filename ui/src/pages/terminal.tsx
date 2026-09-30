@@ -143,8 +143,8 @@ export function TerminalPage() {
 
   return (
     <TerminalShell>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-[#101418]">
-        <div className="flex h-10 shrink-0 items-center border-b border-white/10 bg-black/20 px-2">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101418]">
+        <div className="flex h-9 shrink-0 items-center border-b border-white/10 bg-black/20 px-1">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const selected = tab.id === activeId;
@@ -154,7 +154,7 @@ export function TerminalPage() {
                 type="button"
                 onClick={() => setActiveId(tab.id)}
                 className={cn(
-                  "group inline-flex h-8 max-w-[180px] shrink-0 items-center gap-2 rounded-md px-2 text-xs transition-colors",
+                  "group inline-flex h-8 max-w-[180px] shrink-0 items-center gap-2 px-2 text-xs transition-colors",
                   selected ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
                 )}
               >
@@ -175,7 +175,7 @@ export function TerminalPage() {
                     }
                   }}
                   className={cn(
-                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/45 hover:bg-white/10 hover:text-white",
+                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center text-white/45 hover:bg-white/10 hover:text-white",
                     tabs.length <= 1 && "pointer-events-none opacity-30",
                   )}
                   aria-label={`Close ${tab.name}`}
@@ -185,7 +185,7 @@ export function TerminalPage() {
               </button>
             );
           })}
-          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-white/60 hover:bg-white/5 hover:text-white" onClick={addTab}>
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-none text-white/60 hover:bg-white/5 hover:text-white" onClick={addTab}>
             <Plus className="h-4 w-4" />
           </Button>
           </div>
@@ -197,7 +197,7 @@ export function TerminalPage() {
               onClick={restartActive}
               title="Restart terminal"
               aria-label="Restart terminal"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+              className="inline-flex h-8 w-8 items-center justify-center text-white/60 transition-colors hover:bg-white/5 hover:text-white"
             >
               <RefreshCcw className="h-4 w-4" />
             </button>

@@ -1,4 +1,7 @@
+import { ChatAttachments } from "@/components/chat-attachments";
 import {
+  lazy,
+  Suspense,
   useState,
   useCallback,
   useRef,
@@ -61,6 +64,8 @@ import {
   MoreHorizontal,
   ClockArrowUp,
   AppWindow,
+  Database,
+  Table2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -116,12 +121,12 @@ import {
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
-import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
+import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { Queue } from "@/components/ai-elements/queue";
@@ -143,6 +148,11 @@ import {
   setAppPreviewContext,
   useAppPreviewContext,
 } from "@/hooks/use-app-preview-context";
+import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
+
+const MissionPreviewDialog = lazy(() =>
+  import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
+);
 
 /** Like formatDistanceToNow but returns "just now" for < 30 s */
 function chatTimeAgo(date: Date): string {
@@ -334,8 +344,9 @@ function MicButton({
 
 // ── Attachment preview strip (lives inside PromptInput) ──
 
-function AttachmentPreview() {
+function AttachmentPreview({ onCount }: { onCount?: (count: number) => void }) {
   const { files, remove } = usePromptInputAttachments();
+  useEffect(() => { onCount?.(files.length); return () => onCount?.(0); }, [files.length, onCount]);
   if (files.length === 0) return null;
 
   return (
@@ -558,11 +569,15 @@ function MissionPreviewCard({
         </Badge>
       </div>
 
-      <MissionPreviewDialog
-        preview={preview}
-        open={fullViewOpen}
-        onOpenChange={setFullViewOpen}
-      />
+      {fullViewOpen ? (
+        <Suspense fallback={null}>
+          <MissionPreviewDialog
+            preview={preview}
+            open
+            onOpenChange={setFullViewOpen}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
       <div className="max-h-56 space-y-0.5 overflow-y-auto px-3 py-2 sm:max-h-80 sm:space-y-1 sm:px-4 sm:py-3">
@@ -3154,9 +3169,10 @@ function ChatMessages() {
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
                       <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        <ChatAttachments attachments={msg.attachments} />
+                        <CollapsibleUserMessage key={msg.id} text={msg.content}>
                           <MentionText text={msg.content} variant="inverted" />
-                        </p>
+                        </CollapsibleUserMessage>
                       </div>
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
@@ -3435,6 +3451,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const { client } = usePolpo();
   const previewContext = useAppPreviewContext();
   const activePreviewContext = previewContext?.sessionId === sessionId ? previewContext : null;
+  const dataContext = useDataPromptContext();
+  const activeDataContext = dataContext?.sessionId === sessionId ? dataContext : null;
   const [expandedPreviewImage, setExpandedPreviewImage] = useState<{ url: string; label: string } | null>(null);
 
   const removePreviewSelection = useCallback((index: number) => {
@@ -3457,6 +3475,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   }, [activePreviewContext]);
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
+  const attachmentCountRef = useRef(0);
+  const setAttachmentCount = useCallback((count: number) => { attachmentCountRef.current = count; }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -3555,41 +3575,43 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   }, [client]);
 
   const handleSubmit = useCallback(
-    async (message: PromptInputMessage) => {
+    async (message: PromptInputMessage, _event: unknown, acknowledge: () => void) => {
       if (isLoading) {
         throw new Error("Cannot submit while a response is streaming.");
       }
-      if (!message.text.trim()) return;
+      if (!message.text.trim() && !message.files.length) return;
       // Resolve display mentions → wire mentions
       const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
       const images = message.files
-        .filter((f) => f.url && f.mediaType?.startsWith("image/"))
-        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
+        .filter((f) => f.url)
+        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "application/octet-stream", filename: f.filename }));
+      if (images.some(f => !f.url.startsWith("data:"))) throw new Error("Could not read an attachment. Please select it again.");
       const previewImages = [
         activePreviewContext?.screenshotDataUrl,
         ...(activePreviewContext?.selections?.map((selection) => selection.screenshotDataUrl) ?? []),
       ].filter((url): url is string => Boolean(url));
       for (const url of previewImages) {
-        if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png" });
+        if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png", filename: undefined });
       }
-      // PromptInput resets the form on successful submit — drop any cached
-      // draft for this session so a later tab-switch does not rehydrate it.
-      // We clear both the current id key and the new-session sentinel to
-      // cover the first-send-from-new-session case where sessionId is still
-      // null at this point and only flips after the stream returns.
-      chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
-      chatInputDrafts.delete(NEW_SESSION_DRAFT_KEY);
-      historyIndexRef.current = null;
-      historyDraftRef.current = "";
-      setHasDraft(false);
+      const context = [
+        activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
+        activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
+      ].filter(Boolean).join("\n\n");
       await send(
         resolvedText,
         images.length > 0 ? images : undefined,
-        activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
+        context || undefined,
+        { onAccepted: () => {
+          const key = sessionId ?? NEW_SESSION_DRAFT_KEY;
+          // A switched-away draft may have been edited independently.
+          if (chatInputDrafts.get(key) === message.text) chatInputDrafts.delete(key);
+          acknowledge();
+        } },
       );
       if (activePreviewContext) clearAppPreviewContext();
+      if (activeDataContext) clearDataPromptContext();
     },
-    [activePreviewContext, isLoading, send, sessionId]
+    [activeDataContext, activePreviewContext, isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -3657,6 +3679,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   //    to the manager (Auto-send switch, edit/delete existing items)
   //    even on an empty queue without forcing them to type first.
   const enqueueCurrentDraft = useCallback(() => {
+    if (attachmentCountRef.current > 0) {
+      toast.info("Attachments stay in this draft. Send it when the current response finishes.");
+      return;
+    }
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     const raw = textarea?.value ?? "";
     const text = raw.trim();
@@ -3750,9 +3776,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // The composer is uncontrolled. When the user switches tabs we need to
   // (a) snapshot the current draft under the OUTGOING session id, and
   // (b) hydrate the textarea with the INCOMING session id's draft (if any).
-  // The submit path triggers form.reset() in PromptInput, which clears the
-  // textarea after a successful send — `chatInputDrafts.delete` in
-  // handleSubmit keeps our cache aligned. The cleanup also saves on
+  // PromptInput clears only the acknowledged draft, before new-session
+  // migration; handleSubmit keeps the cached draft aligned. Cleanup saves on
   // unmount (e.g. compact-mode sidebar takeover).
   const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
   const prevDraftKeyRef = useRef<string>(draftKey);
@@ -3967,6 +3992,25 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             </div>
           </div>
         )}
+        {activeDataContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <Database className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">Data context</span>
+              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{activeDataContext.items.length} selected reference{activeDataContext.items.length === 1 ? "" : "s"}</span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearDataPromptContext} aria-label="Remove all data context"><X className="h-3 w-3" /></Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activeDataContext.items.map((item, index) => (
+                <div key={`${item.sourceId}-${item.dataset}-${index}`} className="flex h-8 min-w-0 max-w-[280px] items-center gap-1.5 border border-border/60 bg-background pl-2">
+                  <Table2 className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1 truncate text-[10px]" title={`${item.sourceId}/${item.dataset}`}>{item.label}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeDataPromptItem(index)} aria-label={`Remove ${item.label}`}><X className="h-3 w-3" /></Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <Dialog open={Boolean(expandedPreviewImage)} onOpenChange={(open) => { if (!open) setExpandedPreviewImage(null); }}>
           <DialogContent className="flex h-[86vh] w-[92vw] max-w-[1280px] flex-col gap-0 overflow-hidden p-0">
             <div className="flex h-11 shrink-0 items-center border-b border-border px-3 pr-12">
@@ -3992,7 +4036,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         >
           <PromptInput
             onSubmit={handleSubmit}
-            accept="image/*"
+            submissionKey={draftKey}
+            accept="*/*"
             multiple
             globalDrop
             maxFiles={5}
@@ -4000,7 +4045,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             onError={(err) => toast.error(err.message)}
             className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
-            <AttachmentPreview />
+            <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
               ref={textareaRef}
               placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}

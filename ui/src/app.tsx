@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { PolpoProvider } from "@polpo-ai/react";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -31,6 +31,9 @@ const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.Fil
 const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
 const AgentBrowserLivePage = lazy(() => import("@/pages/agent-browser-live").then(m => ({ default: m.AgentBrowserLivePage })));
 const AppsPage = lazy(() => import("@/pages/apps").then(m => ({ default: m.AppsPage })));
+const DataPage = lazy(() => import("@/pages/data").then(m => ({ default: m.DataPage })));
+const DataViewsPage = lazy(() => import("@/pages/data").then(m => ({ default: m.DataViewsPage })));
+const CompanyBrainPage = lazy(() => import("@/pages/company-brain").then(m => ({ default: m.CompanyBrainPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
 const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
 
@@ -40,22 +43,24 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<"loading" | "ready">("loading");
   const [message, setMessage] = useState("Connecting to Polpo...");
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
-
-  const loginPath = () => {
-    const next = `${location.pathname}${location.search}${location.hash}`;
-    return `/login?next=${encodeURIComponent(next === "/" ? "/chat" : next)}`;
-  };
+  const validatedRef = useRef(false);
+  const isPublicRoute = location.pathname === "/setup" || location.pathname === "/login";
 
   // Keep the bootstrap gate alive until the server answers. In hosted deploys the
   // UI container can become reachable before the server container; giving up on
   // the first failed status call drops users into the app with a permanent
   // "Connecting..." sidebar instead of routing them to setup/login.
   useEffect(() => {
-    if (location.pathname === "/setup" || location.pathname === "/login") {
+    if (isPublicRoute) {
+      validatedRef.current = false;
       setRedirectTo(null);
       setState("ready");
       return;
     }
+    if (validatedRef.current) return;
+
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    const loginPath = `/login?next=${encodeURIComponent(next === "/" ? "/chat" : next)}`;
 
     let cancelled = false;
     let retry: number | undefined;
@@ -84,16 +89,17 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
             .catch(() => null);
           if (cancelled) return;
           if (authStatus?.ok && !authStatus.data.authenticated) {
-            setRedirectTo(loginPath());
+            setRedirectTo(loginPath);
             setState("ready");
             return;
           }
           if (!authStatus?.ok) {
-            setRedirectTo(loginPath());
+            setRedirectTo(loginPath);
             setState("ready");
             return;
           }
         }
+        validatedRef.current = true;
         setRedirectTo(null);
         setState("ready");
       } catch {
@@ -110,8 +116,10 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
       cancelled = true;
       if (retry) window.clearTimeout(retry);
     };
+  // Revalidate only when entering the authenticated app from setup/login.
+  // Normal in-app navigation must not add a blocking status round-trip.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, location.search, location.hash]);
+  }, [isPublicRoute]);
 
   // Block rendering only during the initial setup check
   if (state === "loading") {
@@ -185,6 +193,9 @@ export function App() {
           <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />
           <Route path="apps" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
           <Route path="apps/:appId" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
+          <Route path="data" element={<Suspense fallback={<PageLoader />}><DataPage /></Suspense>} />
+          <Route path="views" element={<Suspense fallback={<PageLoader />}><DataViewsPage /></Suspense>} />
+          <Route path="brain" element={<Suspense fallback={<PageLoader />}><CompanyBrainPage /></Suspense>} />
           <Route path="agent-live" element={<Suspense fallback={<PageLoader />}><AgentBrowserLivePage /></Suspense>} />
           <Route path="terminal" element={<></>} />
           <Route path="coding" element={<></>} />

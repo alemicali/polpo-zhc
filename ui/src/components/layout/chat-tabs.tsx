@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Plus, X, Star, StarOff, Pencil, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useChatActions, useChatState } from "@/hooks/chat-context";
+import { useChatActions, useChatSessionState } from "@/hooks/chat-context";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -239,7 +239,7 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
 }
 
 export function ChatTabs() {
-  const { sessionId, sessions, streamingSessionIds } = useChatState();
+  const { sessionId, sessions, streamingSessionIds } = useChatSessionState();
   const { loadSession, newSession, renameSession, setStarred } = useChatActions();
   const tabIds = useOpenTabs();
   const streamingSet = useMemo(() => new Set(streamingSessionIds), [streamingSessionIds]);

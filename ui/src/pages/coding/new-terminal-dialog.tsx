@@ -45,15 +45,13 @@ const AGENTS: { kind: CodingAgentKind; label: string; description: string; icon:
 ];
 
 export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }: Props) {
+  ensureLogosPack();
   const [open, setOpen] = useState(false);
-  // Pre-warm the logos pack the first time the dialog opens so the
-  // Anthropic / OpenAI brand icons render without a flash.
   const [agent, setAgent] = useState<CodingAgentKind>("terminal");
   const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>(forceMode ?? "same");
   const [branch, setBranch] = useState("");
   // Keep forced state in sync when the prop changes mid-mount.
   useEffect(() => { if (forceMode) setWorktreeMode(forceMode); }, [forceMode]);
-  useEffect(() => { if (open) ensureLogosPack(); }, [open]);
   const [busy, setBusy] = useState(false);
   const [capabilities, setCapabilities] = useState<CodingCapabilities | null>(null);
 

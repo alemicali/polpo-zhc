@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useEvents } from "@polpo-ai/react";
 import { apiUrl, config } from "@/lib/config";
 
-export type TokenUsageRange = "24h" | "7d" | "30d" | "all";
+export type TokenUsageRange = "today" | "24h" | "7d" | "30d" | "all";
 
 export interface TokenUsageStats {
   range: TokenUsageRange;
@@ -16,6 +17,7 @@ export interface TokenUsageStats {
 }
 
 export function useTokenUsage(range: TokenUsageRange) {
+  const { events } = useEvents(["token-usage:recorded", "agent:finished", "task:transition"], 1);
   const [usage, setUsage] = useState<TokenUsageStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -36,9 +38,17 @@ export function useTokenUsage(range: TokenUsageRange) {
   useEffect(() => {
     setLoading(true);
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15_000);
+    const timer = window.setInterval(() => void refresh(), 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  const latestEventId = events.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
+  useEffect(() => {
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    void refresh();
+  }, [latestEventId, refresh]);
 
   return { usage, loading, refresh };
 }

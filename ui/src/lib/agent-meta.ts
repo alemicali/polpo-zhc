@@ -39,6 +39,7 @@ import {
   Wand2,
   Palette,
   Upload,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 import type { TaskStatus } from "@polpo-ai/react";
@@ -67,6 +68,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("image_")) return { icon: Image, color: "text-emerald-400", bg: "bg-emerald-500/10" };
   if (n.startsWith("video_")) return { icon: Video, color: "text-red-400", bg: "bg-red-500/10" };
   if (n.startsWith("search_")) return { icon: Search, color: "text-cyan-400", bg: "bg-cyan-500/10" };
+  if (n.startsWith("data_")) return { icon: Database, color: "text-teal-400", bg: "bg-teal-500/10" };
   if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" };
   if (n === "register_outcome") return { icon: Target, color: "text-teal-400", bg: "bg-teal-500/10" };
   return { icon: Wrench, color: "text-muted-foreground", bg: "bg-muted/30" };
@@ -105,6 +107,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)", icon: Mic, color: "text-pink-400" },
   { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: "text-cyan-400" },
   { prefix: "phone_", label: "Phone (VAPI)", tools: "phone_call, phone_get_call, phone_list_calls, phone_hangup, inbound call configuration", icon: PhoneCall, color: "text-lime-400" },
+  { prefix: "data_", label: "Structured Data", tools: "source registry, scoped grants, typed queries, mutations, and native views", icon: Database, color: "text-teal-400" },
 ];
 
 // ── Task status display config ──

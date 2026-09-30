@@ -17,6 +17,7 @@ describe("useMissions", () => {
   let wrapper: React.ComponentType<{ children: React.ReactNode }>;
 
   beforeEach(() => {
+    localStorage.clear();
     const missions = [
       fakeMission({ id: "m1", name: "Mission 1" }),
       fakeMission({ id: "m2", name: "Mission 2" }),

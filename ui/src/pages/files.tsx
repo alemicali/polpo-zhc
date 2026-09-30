@@ -382,7 +382,7 @@ function isPreviewableEntry(entry: FileEntry): boolean {
   if (entry.type === "directory") return false;
   const mime = entry.mimeType ?? mimeFromPath(entry.name);
   if (!mime) return false;
-  const cat = previewCategory(mime);
+  const cat = previewCategory(mime, entry.name);
   return cat !== "binary";
 }
 
@@ -695,7 +695,7 @@ interface FileTileProps {
 /** Finder-style tile: square thumb + 2-line filename. */
 function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu }: FileTileProps) {
   const [ref, inView] = useInView();
-  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name));
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name), entry.name);
   const isPreviewable = entry.type === "file" && (category === "image" || category === "video");
 
   return (
@@ -745,7 +745,7 @@ function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu
  * are short and there are typically fewer in viewport at once.
  */
 function RowThumb({ entry, path }: { entry: FileEntry; path: string }) {
-  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name));
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name), entry.name);
   return (
     <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-border/50 bg-card/60">
       <FileThumb entry={entry} path={path} category={category} inView />

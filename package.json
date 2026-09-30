@@ -35,8 +35,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && tsc",
-    "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
+    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build && ./node_modules/.bin/tsc",
+    "build:all": "pnpm build && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
@@ -79,8 +79,8 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
-    "@earendil-works/pi-agent-core": "^0.80.6",
-    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@polpo-ai/core": "workspace:*",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",

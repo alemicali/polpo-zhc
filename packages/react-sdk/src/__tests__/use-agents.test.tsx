@@ -18,6 +18,7 @@ describe("useAgents", () => {
   let wrapper: React.ComponentType<{ children: React.ReactNode }>;
 
   beforeEach(() => {
+    localStorage.clear();
     const agents = [
       fakeAgent({ name: "agent-1" }),
       fakeAgent({ name: "agent-2" }),
@@ -45,6 +46,18 @@ describe("useAgents", () => {
     expect(result.current.teams).toHaveLength(1);
     expect(result.current.teams[0].name).toBe("team-1");
     expect(result.current.error).toBe(null);
+  });
+
+  it("deduplicates concurrent consumers against the shared store", async () => {
+    const { result } = renderHook(() => ({ first: useAgents(), second: useAgents() }), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.first.isLoading).toBe(false);
+      expect(result.current.second.isLoading).toBe(false);
+    });
+
+    expect(client.getAgents).toHaveBeenCalledTimes(1);
+    expect(client.getTeams).toHaveBeenCalledTimes(1);
   });
 
   it("isLoading starts true, becomes false after fetch", async () => {

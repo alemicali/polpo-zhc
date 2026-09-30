@@ -49,6 +49,7 @@ vi.mock("../llm/pi-client.js", async (importOriginal) => {
     resolveModel: () => mockModel(),
     resolveModelSpec: (spec: unknown) => spec ?? "anthropic:mock-model",
     resolveApiKeyAsync: async () => "mock-api-key",
+    streamSimpleWithAuth: (...args: unknown[]) => streamSimpleImpl(...args),
     buildStreamOpts: (apiKey?: string, reasoning?: string, maxTokens?: number) => {
       const opts: Record<string, unknown> = {};
       if (apiKey) opts.apiKey = apiKey;
@@ -122,6 +123,35 @@ async function parseSSE(res: Response): Promise<Record<string, unknown>[]> {
 }
 
 // ── Lifecycle ───────────────────────────────────────────
+
+test("model failures emit a terminal SSE error instead of a success", async () => {
+  setStreamImpl(() => mockStream([{ type: "error", reason: "error", error: { errorMessage: "Could not process image" } }] as any, mockTextResponse("")));
+  const res = await postCompletions({ stream: true, messages: [{ role: "user", content: "QA error" }] }, { "x-session-id": "new" });
+  const body = await res.text();
+  expect(body).toContain('"code":"model_stream_failed"');
+  expect(body).not.toContain('[DONE]');
+});
+
+test("mobile multimodal request persists an attachment receipt readable from another client", async () => {
+  setStreamImpl(() => mockTextStream("Attachment received."));
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA3sAAAAASUVORK5CYII=";
+  const res = await postCompletions({ agent: "agent-1", stream: true, messages: [{ role: "user", content: [
+    { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+    { type: "file", file: { filename: "notes.txt", file_data: "data:text/plain;base64,aGVsbG8=" } },
+  ] }] }, { "x-session-id": "new" });
+  expect(res.status).toBe(200);
+  await res.text();
+  const sid = res.headers.get("x-session-id");
+  const messageId = res.headers.get("x-user-message-id");
+  expect(messageId).toBeTruthy();
+  const history = await (await app.request(`/api/v1/chat/sessions/${sid}/messages`)).json();
+  const user = history.data.messages.find((m: any) => m.id === messageId);
+  expect(user.content).toBe("");
+  expect(user.attachments).toHaveLength(2);
+  const download = await app.request(`/api/v1/attachments/${user.attachments[0].id}/download`);
+  expect(download.status).toBe(200);
+  expect(Buffer.from(await download.arrayBuffer()).toString("base64")).toBe(png);
+});
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "polpo-completions-test-"));
@@ -262,6 +292,39 @@ describe("POST /v1/chat/completions", () => {
       expect(info.afterTokens).toBeLessThan(info.beforeTokens);
       expect(info.afterTokens).toBeLessThanOrEqual(160_000);
       expect(providerContext.messages[0].content).toContain("Context checkpoint");
+    });
+
+    test("reuses durable compacted context on the next client turn without changing visible history", async () => {
+      const contexts: any[] = [];
+      setStreamImpl((_model, context) => { contexts.push(structuredClone(context)); return mockTextStream("First answer."); });
+      const large = "remember-important-decision ".repeat(10_000);
+      const history = [
+        { role: "user", content: large }, { role: "assistant", content: large },
+        { role: "user", content: "Keep these decisions and answer now." },
+      ];
+      const first = await postCompletions({ messages: history, stream: true }, { "x-session-id": "new" });
+      const sid = first.headers.get("x-session-id")!;
+      const firstChunks = await parseSSE(first);
+      expect(firstChunks.some((c: any) => c.choices?.[0]?.context_compaction)).toBe(true);
+      // Fresh createApp produces fresh dependency/store objects, emulating a
+      // different client and process-level loss of in-memory checkpoint state.
+      const { createApp } = await import("../server/app.js");
+      const { SSEBridge } = await import("../server/sse-bridge.js");
+      const nextApp = createApp(orchestrator, new SSEBridge(orchestrator));
+      const next = await nextApp.request("/v1/chat/completions", { method: "POST",
+        headers: { "Content-Type": "application/json", "x-session-id": sid },
+        body: JSON.stringify({ stream: true, messages: [...history,
+          { role: "assistant", content: "First answer." }, { role: "user", content: "Continue from the decisions." }] }),
+      });
+      const nextChunks = await parseSSE(next);
+      expect(nextChunks.some((c: any) => c.choices?.[0]?.context_compaction)).toBe(false);
+      expect(contexts.at(-1).messages[0].content).toContain("Context checkpoint");
+      expect(contexts.at(-1).messages.at(-1).content).toBe("Continue from the decisions.");
+      const persisted = await orchestrator.getSessionStore()!.getMessages(sid);
+      expect(persisted.filter(m => m.role === "user").map(m => m.content)).toEqual([
+        "Keep these decisions and answer now.", "Continue from the decisions.",
+      ]);
+      expect(persisted.some(m => m.content.includes("Context checkpoint"))).toBe(false);
     });
 
     test("retries once with forced compaction after a provider overflow", async () => {

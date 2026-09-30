@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, memo } from "react";
+import { useMemo, useState, memo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -67,9 +67,8 @@ import {
 import {
   FilePreviewDialog,
   fileReadUrl,
-  filePreviewUrl,
   previewCategory,
-  type FilePreviewState,
+  useFilePreview,
 } from "@/components/shared/file-preview";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
@@ -79,7 +78,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTask, useTasks, useProcesses, useTaskActivity, useTaskDirections, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
+import type { TaskStatus, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
 import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
@@ -886,56 +885,7 @@ export function TaskDetailPage() {
   };
 
   // ── File preview state ──
-  const [previewState, setPreviewState] = useState<FilePreviewState | null>(null);
-
-  const openPreview = useCallback(async (o: TaskOutcome) => {
-    const item = { label: o.label, path: o.path, url: o.url, mimeType: o.mimeType, size: o.size, text: o.text, data: o.data, type: o.type };
-    const category = previewCategory(o.mimeType);
-    // For binary-served types (image, audio, video, pdf) no content fetch needed
-    if (["image", "audio", "video", "pdf"].includes(category)) {
-      setPreviewState({ item, loading: false });
-      return;
-    }
-    // Inline text content
-    if (o.text) {
-      setPreviewState({ item, content: o.text, loading: false });
-      return;
-    }
-    // Inline JSON data
-    if (o.type === "json" && o.data !== undefined) {
-      setPreviewState({ item, content: JSON.stringify(o.data, null, 2), loading: false });
-      return;
-    }
-    // External URL — open in dialog (iframe or link)
-    if (!o.path && o.url) {
-      setPreviewState({ item, loading: false });
-      return;
-    }
-    // Fetch content from the preview API
-    if (!o.path) {
-      setPreviewState({ item, loading: false, error: "No file path available" });
-      return;
-    }
-    setPreviewState({ item, loading: true });
-    try {
-      // For HTML files, fetch full content from /read (not /preview which truncates at 500 lines)
-      const isHtml = o.mimeType === "text/html" || /\.html?$/i.test(o.path);
-      if (isHtml) {
-        const res = await fetch(fileReadUrl(o.path));
-        if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
-        const text = await res.text();
-        setPreviewState({ item, content: text, loading: false });
-      } else {
-        const res = await fetch(filePreviewUrl(o.path));
-        if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error ?? "Preview failed");
-        setPreviewState({ item, content: json.data.content ?? "", loading: false });
-      }
-    } catch (e) {
-      setPreviewState({ item, loading: false, error: (e as Error).message });
-    }
-  }, []);
+  const { previewState, openPreview, closePreview } = useFilePreview();
 
   if (isLoading) {
     return (
@@ -1818,7 +1768,7 @@ export function TaskDetailPage() {
                         const isImage = o.mimeType?.startsWith("image/");
                         const isAudio = o.mimeType?.startsWith("audio/");
                         const isVideo = o.mimeType?.startsWith("video/");
-                        const category = previewCategory(o.mimeType);
+                        const category = previewCategory(o.mimeType, o.path ?? o.label);
                         const canPreview =
                           (o.path && category !== "binary") || // file on disk (non-binary)
                           !!o.text ||                          // inline text content
@@ -2158,7 +2108,7 @@ export function TaskDetailPage() {
       </Tabs>
 
       {/* File preview dialog */}
-      <FilePreviewDialog preview={previewState} onClose={() => setPreviewState(null)} />
+      <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </div>
   );
 }

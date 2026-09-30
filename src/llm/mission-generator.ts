@@ -12,8 +12,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { Tool, Message } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "./pi-client.js";
+import { resolveModel, completeSimpleWithAuth, buildStreamOpts } from "./pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
 import { withRetry } from "./retry.js";
 import { sanitizeExpectations } from "../core/schemas.js";
@@ -231,17 +230,16 @@ export async function generateMission(
 ): Promise<MissionData> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
     ];
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt,
       messages,
       tools: [submitMissionTool],
-    }, buildStreamOpts(apiKey, reasoning));
+    }, buildStreamOpts(undefined, reasoning));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -290,13 +288,12 @@ async function _runMissionStep(
   reasoning?: ReasoningLevel,
 ): Promise<GenerateMissionResult> {
   const m = resolveModel(model);
-  const apiKey = await resolveApiKeyAsync(m.provider);
 
-  const response = await completeSimple(m, {
+  const response = await completeSimpleWithAuth(m, {
     systemPrompt,
     messages,
     tools,
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -382,17 +379,16 @@ export async function generateTaskPrep(
 ): Promise<MissionTaskData> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
     ];
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt,
       messages,
       tools: [submitTaskTool],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     // Track tokens if callback provided
     if (onTokens && "usage" in response && response.usage && typeof response.usage === "object") {
@@ -436,17 +432,16 @@ export async function generateTeam(
 ): Promise<MissionTeamData[]> {
   return withRetry(async () => {
     const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider);
 
     const messages: Message[] = [
       { role: "user", content: userPrompt, timestamp: Date.now() },
     ];
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt,
       messages,
       tools: [submitTeamTool],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     // Extract from tool call (primary path)
     const toolCall = response.content.find(

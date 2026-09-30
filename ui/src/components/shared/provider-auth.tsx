@@ -15,8 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   CheckCircle2,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   CircleAlert,
   Eye,
   EyeOff,
@@ -43,6 +45,14 @@ export interface OAuthProvider {
   name: string;
   flow: string;
   free: boolean;
+}
+
+type OAuthPromptType = "text" | "secret" | "select" | "manual_code";
+
+interface OAuthPromptOption {
+  id: string;
+  label: string;
+  description?: string;
 }
 
 /** Generic API fetch function — returns { ok, data?, error? } */
@@ -361,6 +371,12 @@ export function OAuthFlow({
   const [instructions, setInstructions] = useState<string | null>(null);
   const [promptMsg, setPromptMsg] = useState<string | null>(null);
   const [promptPlaceholder, setPromptPlaceholder] = useState<string | null>(null);
+  const [promptType, setPromptType] = useState<OAuthPromptType | null>(null);
+  const [promptOptions, setPromptOptions] = useState<OAuthPromptOption[]>([]);
+  const [deviceCode, setDeviceCode] = useState<string | null>(null);
+  const [deviceVerificationUri, setDeviceVerificationUri] = useState<string | null>(null);
+  const [deviceCodeExpiresAt, setDeviceCodeExpiresAt] = useState<number | null>(null);
+  const [deviceCodeCopied, setDeviceCodeCopied] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -390,7 +406,15 @@ export function OAuthFlow({
     setStatus("starting");
     setError(null);
     setAuthUrl(null);
+    setInstructions(null);
     setPromptMsg(null);
+    setPromptPlaceholder(null);
+    setPromptType(null);
+    setPromptOptions([]);
+    setDeviceCode(null);
+    setDeviceVerificationUri(null);
+    setDeviceCodeExpiresAt(null);
+    setDeviceCodeCopied(false);
     setProgressMsg(null);
     openedUrlRef.current = null;
     onActiveChange?.(true);
@@ -409,13 +433,13 @@ export function OAuthFlow({
     const id = res.data.flowId;
     setFlowId(id);
 
-    // Start polling (with 5-minute timeout)
+    // Device authorization can remain valid for up to 15 minutes.
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
       if (pollRef.current) clearInterval(pollRef.current);
       setError("Authentication timed out. Please try again.");
       setStatus("error");
-    }, 5 * 60 * 1000);
+    }, 16 * 60 * 1000);
 
     pollRef.current = setInterval(async () => {
       const r = await apiFetch(`/providers/oauth/status/${id}`);
@@ -432,6 +456,9 @@ export function OAuthFlow({
       }
       if (d.instructions) setInstructions(d.instructions);
       if (d.progressMessage) setProgressMsg(d.progressMessage);
+      if (d.deviceCode) setDeviceCode(d.deviceCode);
+      if (d.deviceVerificationUri) setDeviceVerificationUri(d.deviceVerificationUri);
+      if (d.deviceCodeExpiresAt) setDeviceCodeExpiresAt(d.deviceCodeExpiresAt);
 
       if (d.status === "awaiting_browser") {
         setStatus("awaiting_browser");
@@ -439,6 +466,10 @@ export function OAuthFlow({
         setStatus("awaiting_input");
         setPromptMsg(d.promptMessage || null);
         setPromptPlaceholder(d.promptPlaceholder || null);
+        setPromptType(d.promptType || "text");
+        setPromptOptions(d.promptOptions || []);
+      } else if (d.status === "awaiting_device") {
+        setStatus("awaiting_device");
       } else if (d.status === "in_progress") {
         setStatus("in_progress");
       } else if (d.status === "complete") {
@@ -455,15 +486,24 @@ export function OAuthFlow({
     }, 1000);
   };
 
-  const sendInput = async () => {
-    if (!flowId || !inputValue) return;
+  const sendInput = async (value = inputValue) => {
+    if (!flowId || !value) return;
     await apiFetch(`/providers/oauth/input/${flowId}`, {
       method: "POST",
-      body: JSON.stringify({ value: inputValue }),
+      body: JSON.stringify({ value }),
     });
     setInputValue("");
     setStatus("in_progress");
     setPromptMsg(null);
+    setPromptType(null);
+    setPromptOptions([]);
+  };
+
+  const copyDeviceCode = async () => {
+    if (!deviceCode) return;
+    await navigator.clipboard.writeText(deviceCode);
+    setDeviceCodeCopied(true);
+    setTimeout(() => setDeviceCodeCopied(false), 1500);
   };
 
   // Provider selection
@@ -560,13 +600,13 @@ export function OAuthFlow({
         )}
 
         {/* Auth URL — always visible when available */}
-        {authUrl && status !== "starting" && status !== "complete" && status !== "error" && (
+        {authUrl && !deviceCode && status !== "starting" && status !== "complete" && status !== "error" && (
           <div className="space-y-3">
             {instructions && (
               <p className="text-sm text-muted-foreground">{instructions}</p>
             )}
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Step 1 — Open this link in your browser
+              Open this link in your browser
             </p>
             <a
               href={authUrl}
@@ -580,33 +620,105 @@ export function OAuthFlow({
           </div>
         )}
 
+        {/* Device authorization — URL and one-time code are both required. */}
+        {status === "awaiting_device" && deviceCode && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Open the verification page
+              </p>
+              <a
+                href={deviceVerificationUri || authUrl || undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-primary/30 bg-primary/5 text-sm hover:bg-primary/10 transition-colors"
+              >
+                <ExternalLink className="h-4 w-4 shrink-0 text-primary" />
+                <span className="min-w-0 truncate text-primary">
+                  {deviceVerificationUri || authUrl}
+                </span>
+              </a>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Enter this device code
+              </p>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
+                <code className="text-lg font-semibold tracking-normal text-foreground">{deviceCode}</code>
+                <Button variant="ghost" size="icon" onClick={copyDeviceCode} title="Copy device code">
+                  {deviceCodeCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+              {deviceCodeExpiresAt && (
+                <p className="text-xs text-muted-foreground">
+                  Code valid until {new Date(deviceCodeExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+                </p>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {progressMsg || "Waiting for device authorization..."}
+            </p>
+          </div>
+        )}
+
         {/* Awaiting input — show prompt below the URL */}
         {status === "awaiting_input" && promptMsg && (
           <div className="space-y-3">
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-              <div className="flex items-start gap-2">
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>
-                  If the browser shows an error or a blank white page, paste the full address exactly as it appears, starting with http:// or https:// through the final character.
-                </p>
+            {promptType === "manual_code" && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+                <div className="flex items-start gap-2">
+                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>
+                    If the callback page cannot reach this server, paste its full address here, including the final query parameters.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Step 2 — {promptMsg}
+              {promptMsg}
             </p>
-            <div className="flex gap-2">
-              <Input
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder={promptPlaceholder || ""}
-                className="font-mono text-sm"
-                onKeyDown={(e) => e.key === "Enter" && sendInput()}
-                autoFocus
-              />
-              <Button onClick={sendInput} disabled={!inputValue} size="sm">
-                Submit
-              </Button>
-            </div>
+            {promptType === "select" ? (
+              <div className="space-y-2">
+                {promptOptions.map((option) => {
+                  const remoteHint = option.id === "device_code"
+                    && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => sendInput(option.id)}
+                      className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">{option.label}</span>
+                        {(option.description || remoteHint) && (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {option.description || "Recommended when Polpo runs on another machine."}
+                          </span>
+                        )}
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  type={promptType === "secret" ? "password" : "text"}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder={promptPlaceholder || ""}
+                  className="font-mono text-sm"
+                  onKeyDown={(e) => e.key === "Enter" && sendInput()}
+                  autoFocus
+                />
+                <Button onClick={() => sendInput()} disabled={!inputValue} size="sm">
+                  Submit
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

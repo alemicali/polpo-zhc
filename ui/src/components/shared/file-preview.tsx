@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,6 +22,7 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
+import { MermaidFilePreview } from "./mermaid-file-preview";
 
 // ── Helpers ──
 
@@ -40,7 +41,8 @@ export function filePreviewUrl(path: string): string {
 }
 
 /** Determine the preview category from a MIME type */
-export function previewCategory(mime?: string): "image" | "audio" | "video" | "pdf" | "code" | "text" | "binary" {
+export function previewCategory(mime?: string, path?: string): "image" | "audio" | "video" | "pdf" | "code" | "text" | "mermaid" | "binary" {
+  if (/\.(mmd|mermaid)$/i.test(path ?? "") || /^(text\/(vnd\.|x-)?mermaid|application\/mermaid)(;|$)/i.test(mime ?? "")) return "mermaid";
   if (!mime) return "binary";
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("audio/")) return "audio";
@@ -90,6 +92,7 @@ export function mimeFromPath(path: string): string | undefined {
     sql: "text/x-sql", sh: "text/x-shellscript", bash: "text/x-shellscript",
     yaml: "text/yaml", yml: "text/yaml",
     md: "text/markdown", mdx: "text/markdown",
+    mmd: "text/vnd.mermaid", mermaid: "text/vnd.mermaid",
     txt: "text/plain", csv: "text/csv", log: "text/plain",
     svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg",
     jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
@@ -129,9 +132,18 @@ export interface FilePreviewState {
 
 export function useFilePreview() {
   const [previewState, setPreviewState] = useState<FilePreviewState | null>(null);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
 
-  const openPreview = useCallback(async (item: FilePreviewItem) => {
-    const category = previewCategory(item.mimeType);
+  const openPreview = useCallback(async (input: FilePreviewItem) => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const item = { ...input, mimeType: input.mimeType ?? mimeFromPath(input.path ?? input.label) };
+    const category = previewCategory(item.mimeType, item.path ?? item.label);
+    const update = (state: FilePreviewState) => {
+      if (!controller.signal.aborted) setPreviewState(state);
+    };
 
     // Binary-served types: no content fetch needed
     if (["image", "audio", "video", "pdf"].includes(category)) {
@@ -139,14 +151,8 @@ export function useFilePreview() {
       return;
     }
 
-    // Binary/unknown types: skip fetch, let fallback UI handle it
-    if (category === "binary") {
-      setPreviewState({ item, loading: false });
-      return;
-    }
-
     // Inline text
-    if (item.text) {
+    if (item.text !== undefined) {
       setPreviewState({ item, content: item.text, loading: false });
       return;
     }
@@ -154,6 +160,12 @@ export function useFilePreview() {
     // Inline JSON
     if (item.type === "json" && item.data !== undefined) {
       setPreviewState({ item, content: JSON.stringify(item.data, null, 2), loading: false });
+      return;
+    }
+
+    // Binary/unknown types: skip fetch, let fallback UI handle it
+    if (category === "binary") {
+      setPreviewState({ item, loading: false });
       return;
     }
 
@@ -172,30 +184,36 @@ export function useFilePreview() {
     setPreviewState({ item, loading: true });
 
     try {
-      // HTML files: fetch full content via read endpoint
-      if (item.mimeType === "text/html" || /\.html?$/i.test(item.path)) {
-        const resp = await fetch(fileReadUrl(item.path));
+      // Mermaid must not be truncated at the preview endpoint's 500-line limit.
+      if (category === "mermaid" || item.mimeType === "text/html" || /\.html?$/i.test(item.path)) {
+        if (category === "mermaid" && (item.size ?? 0) > 1024 * 1024) throw new Error("Mermaid file exceeds the 1 MB preview limit. Download it to view the source.");
+        const resp = await fetch(fileReadUrl(item.path), { signal: controller.signal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (category === "mermaid" && Number(resp.headers.get("Content-Length")) > 1024 * 1024) throw new Error("Mermaid file exceeds the 1 MB preview limit. Download it to view the source.");
         const text = await resp.text();
-        setPreviewState({ item, content: text, loading: false });
+        if (category === "mermaid" && text.length > 1024 * 1024) throw new Error("Mermaid file exceeds the 1 MB preview limit. Download it to view the source.");
+        update({ item, content: text, loading: false });
         return;
       }
 
       // Other text/code files: fetch via preview endpoint
-      const resp = await fetch(filePreviewUrl(item.path));
+      const resp = await fetch(filePreviewUrl(item.path), { signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
-      if (json.ok && json.data?.content) {
-        setPreviewState({ item, content: json.data.content, loading: false });
+      if (json.ok && typeof json.data?.content === "string") {
+        update({ item, content: json.data.content, loading: false });
       } else {
-        setPreviewState({ item, loading: false, error: json.error || "Preview not available" });
+        update({ item, loading: false, error: json.error || "Preview not available" });
       }
     } catch (err) {
-      setPreviewState({ item, loading: false, error: err instanceof Error ? err.message : "Failed to load preview" });
+      update({ item, loading: false, error: err instanceof Error ? err.message : "Failed to load preview" });
     }
   }, []);
 
-  const closePreview = useCallback(() => setPreviewState(null), []);
+  const closePreview = useCallback(() => {
+    request.current?.abort();
+    setPreviewState(null);
+  }, []);
 
   return { previewState, openPreview, closePreview };
 }
@@ -242,6 +260,10 @@ function PreviewContent({
         )}
       </div>
     );
+  }
+
+  if (category === "mermaid" && content !== undefined) {
+    return <MermaidFilePreview key={o.path ?? o.label} content={content} />;
   }
 
   // Media types served directly from URL
@@ -378,7 +400,7 @@ export function FilePreviewDialog({
 
   if (!preview) return null;
   const { item: o, content, loading, error } = preview;
-  const category = previewCategory(o.mimeType);
+  const category = previewCategory(o.mimeType, o.path ?? o.label);
   const readUrl = o.path ? fileReadUrl(o.path) : o.url;
   const downloadUrl = o.path ? fileReadUrl(o.path, true) : o.url;
 

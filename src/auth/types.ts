@@ -107,12 +107,20 @@ export const DEFAULT_BILLING_CONFIG: BillingDisableConfig = {
 /** Supported OAuth provider IDs */
 export type OAuthProviderName =
   | "anthropic"
+  | "github-copilot"
+  | "kimi-coding"
   | "openai-codex"
-  | "github-copilot";
+  | "openrouter"
+  | "radius"
+  | "xai";
 
 /** OAuth providers that are available */
 export const OAUTH_PROVIDERS: { id: OAuthProviderName; name: string; flow: string }[] = [
   { id: "anthropic", name: "Anthropic (Claude Pro/Max)", flow: "Browser + code paste" },
-  { id: "openai-codex", name: "OpenAI Codex (ChatGPT Plus/Pro)", flow: "Browser + localhost callback" },
   { id: "github-copilot", name: "GitHub Copilot", flow: "Device code (no browser needed)" },
+  { id: "kimi-coding", name: "Kimi Code (subscription)", flow: "Browser sign-in" },
+  { id: "openai-codex", name: "OpenAI Codex (ChatGPT Plus/Pro)", flow: "Browser + localhost callback" },
+  { id: "openrouter", name: "OpenRouter", flow: "Browser + localhost callback" },
+  { id: "radius", name: "Radius", flow: "Browser or device code" },
+  { id: "xai", name: "xAI (Grok/X subscription)", flow: "Browser + localhost callback" },
 ];

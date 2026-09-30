@@ -182,7 +182,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
           </div>
         </div>
       ) : (
-        <div ref={containerRef} className="h-full w-full p-2" />
+        <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
       )}
     </div>
   );

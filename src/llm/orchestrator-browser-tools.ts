@@ -10,8 +10,8 @@
  * Profile dir: <polpoDir>/browser-profiles/orchestrator — cookies and
  * auth survive across chat sessions (same pattern as agent profiles).
  *
- * The 6 tools mirror the most-used agent-side ones: navigate, snapshot,
- * click, fill, get, screenshot. Snapshot returns the accessibility tree
+ * These tools mirror the most-used agent-side operations: navigate, snapshot,
+ * click, fill, get, screenshot, and User-Agent override. Snapshot returns the accessibility tree
  * with @ref ids the model uses to target click/fill.
  */
 
@@ -98,9 +98,17 @@ export const browserScreenshotTool: Tool = {
   }),
 };
 
+export const browserSetUserAgentTool: Tool = {
+  name: "browser_set_user_agent",
+  description: "Override the User-Agent of the orchestrator browser and reload the active page. Use an exact UA string when testing responsive/mobile behavior or server-side client detection.",
+  parameters: Type.Object({
+    userAgent: Type.String({ minLength: 1, maxLength: 512, description: "Exact User-Agent string" }),
+  }),
+};
+
 export const ALL_ORCHESTRATOR_BROWSER_TOOLS: Tool[] = [
   browserNavigateTool, browserSnapshotTool, browserClickTool,
-  browserFillTool, browserGetTool, browserScreenshotTool,
+  browserFillTool, browserGetTool, browserScreenshotTool, browserSetUserAgentTool,
 ];
 
 export const ORCHESTRATOR_BROWSER_TOOL_NAMES = new Set(
@@ -165,6 +173,15 @@ export async function executeOrchestratorBrowserTool(
       if (args.path) cli.push(String(args.path));
       if (args.full_page) cli.push("--full-page");
       const r = await execBrowserAsync(cli, { ...base, timeout: 20_000 });
+      return summarize(r);
+    }
+    case "browser_set_user_agent": {
+      const userAgent = String(args.userAgent ?? "").trim();
+      if (!userAgent) return "Error: 'userAgent' is required.";
+      const r = await execBrowserAsync(
+        ["--user-agent", userAgent, "reload"],
+        cdpPort ? { session } : base,
+      );
       return summarize(r);
     }
     default:

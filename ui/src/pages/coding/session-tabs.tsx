@@ -367,6 +367,7 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
 }
 
 function AgentDot({ kind }: { kind: CodingAgentKind | undefined }) {
+  if (kind === "codex") ensureLogosPack();
   if (kind === "claude") return <img src="/claude-favicon.svg" alt="Claude" className="h-3 w-3 shrink-0" />;
   if (kind === "codex") return <Icon icon="logos:openai-icon" className="h-3 w-3 shrink-0 dark:invert" />;
   return <TerminalIcon className="h-3 w-3 shrink-0 text-muted-foreground" />;

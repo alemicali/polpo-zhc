@@ -9,16 +9,21 @@ import type {
   AppService,
   RegisteredApp,
 } from "../core/app-registry.js";
-import { FileAppRegistryStore } from "../stores/file-app-registry-store.js";
+import { FileAppRegistryStore, type AppChangeEmitter } from "../stores/file-app-registry-store.js";
 
 type Runtime = AppRuntimeStatus & { process: ChildProcessWithoutNullStreams };
 const MAX_LOGS = 600;
 
 export class AppRuntimeManager {
   private readonly runtimes = new Map<string, Runtime>();
+  private readonly logEmitTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private sequence = 0;
 
-  constructor(private readonly store: AppRegistryStore) {}
+  constructor(private readonly store: AppRegistryStore, private emitChange?: AppChangeEmitter) {}
+
+  setEmitter(emitChange?: AppChangeEmitter): void {
+    if (emitChange) this.emitChange = emitChange;
+  }
 
   list(appId?: string): AppRuntimeStatus[] {
     return [...this.runtimes.values()]
@@ -74,6 +79,7 @@ export class AppRuntimeManager {
     if (!runtime || runtime.process.exitCode != null) return false;
     this.append(runtime, "system", "Stopping process");
     runtime.status = "cancelled";
+    this.emit(runtime, "runtime");
     await new Promise<void>((done) => {
       let settled = false;
       const finish = () => {
@@ -128,17 +134,20 @@ export class AppRuntimeManager {
       process: child,
     };
     this.runtimes.set(key, runtime);
+    this.emit(runtime, "runtime");
     this.append(runtime, "system", `Started ${command}`);
     child.stdout.on("data", (chunk) => this.append(runtime, "stdout", String(chunk)));
     child.stderr.on("data", (chunk) => this.append(runtime, "stderr", String(chunk)));
     child.once("spawn", () => {
       if (runtime.status === "starting") runtime.status = "running";
+      this.emit(runtime, "runtime");
     });
     child.once("error", (error) => {
       runtime.status = "failed";
       runtime.error = error.message;
       runtime.finishedAt = new Date().toISOString();
       this.append(runtime, "system", error.message);
+      this.emit(runtime, "runtime");
     });
     child.once("exit", (code, signal) => {
       runtime.exitCode = code ?? undefined;
@@ -146,6 +155,7 @@ export class AppRuntimeManager {
       if (runtime.status !== "cancelled") runtime.status = code === 0 ? "succeeded" : "failed";
       if (signal) runtime.error = `Exited with signal ${signal}`;
       this.append(runtime, "system", code === null ? `Exited with signal ${signal}` : `Exited with code ${code}`);
+      this.emit(runtime, "runtime");
       if (kind === "deployment") void this.finishDeployment(app.id, resource.id, runtime);
     });
     return this.publicStatus(runtime);
@@ -162,6 +172,21 @@ export class AppRuntimeManager {
       runtime.logs.push({ seq: ++this.sequence, at: new Date().toISOString(), stream, text: line });
     }
     if (runtime.logs.length > MAX_LOGS) runtime.logs.splice(0, runtime.logs.length - MAX_LOGS);
+    this.emit(runtime, "log");
+  }
+
+  private emit(runtime: Runtime, action: "runtime" | "log"): void {
+    if (action === "log") {
+      if (this.logEmitTimers.has(runtime.key)) return;
+      const timer = setTimeout(() => {
+        this.logEmitTimers.delete(runtime.key);
+        this.emitChange?.({ appId: runtime.appId, action, resourceId: runtime.resourceId, timestamp: new Date().toISOString() });
+      }, 100);
+      timer.unref?.();
+      this.logEmitTimers.set(runtime.key, timer);
+      return;
+    }
+    this.emitChange?.({ appId: runtime.appId, action, resourceId: runtime.resourceId, timestamp: new Date().toISOString() });
   }
 
   private signal(runtime: Runtime, signal: NodeJS.Signals): void {
@@ -227,12 +252,15 @@ export function appRuntimePath(home = process.env.HOME || homedir(), current = p
 
 const registries = new Map<string, { store: FileAppRegistryStore; runtime: AppRuntimeManager }>();
 
-export function getAppRegistryRuntime(polpoDir: string): { store: FileAppRegistryStore; runtime: AppRuntimeManager } {
+export function getAppRegistryRuntime(polpoDir: string, emitChange?: AppChangeEmitter): { store: FileAppRegistryStore; runtime: AppRuntimeManager } {
   let registry = registries.get(polpoDir);
   if (!registry) {
-    const store = new FileAppRegistryStore(polpoDir);
-    registry = { store, runtime: new AppRuntimeManager(store) };
+    const store = new FileAppRegistryStore(polpoDir, emitChange);
+    registry = { store, runtime: new AppRuntimeManager(store, emitChange) };
     registries.set(polpoDir, registry);
+  } else if (emitChange) {
+    registry.store.setEmitter(emitChange);
+    registry.runtime.setEmitter(emitChange);
   }
   return registry;
 }

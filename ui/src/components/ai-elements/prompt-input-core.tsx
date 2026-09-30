@@ -116,13 +116,16 @@ export type PromptInputProps = Omit<
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
+  /** Identifies the draft owner so a late acknowledgement cannot clear another chat. */
+  submissionKey?: string;
   onError?: (err: {
     code: "max_files" | "max_file_size" | "accept";
     message: string;
   }) => void;
   onSubmit: (
     message: PromptInputMessage,
-    event: FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>,
+    acknowledge: () => void,
   ) => void | Promise<void>;
 };
 
@@ -134,6 +137,7 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  submissionKey,
   onError,
   onSubmit,
   children,
@@ -146,6 +150,9 @@ export const PromptInput = ({
   // Refs
   const inputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const submittingRef = useRef<symbol | null>(null);
+  const latestSubmissionRef = useRef({ submissionKey, controller });
+  latestSubmissionRef.current = { submissionKey, controller };
 
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
@@ -323,11 +330,6 @@ export const PromptInput = ({
     ? controller.attachments.openFileDialog
     : openFileDialogLocal;
 
-  const clear = useCallback(() => {
-    clearAttachments();
-    clearReferencedSources();
-  }, [clearAttachments, clearReferencedSources]);
-
   // Let provider know about our hidden file input so external menus can call openFileDialog()
   useEffect(() => {
     if (!usingProvider) {
@@ -459,6 +461,9 @@ export const PromptInput = ({
   const handleSubmit: FormEventHandler<HTMLFormElement> = useCallback(
     async (event) => {
       event.preventDefault();
+      if (submittingRef.current) return;
+      const submission = Symbol();
+      submittingRef.current = submission;
 
       const form = event.currentTarget;
       const text = usingProvider
@@ -468,11 +473,27 @@ export const PromptInput = ({
             return (formData.get("message") as string) || "";
           })();
 
-      // Reset form immediately after capturing text to avoid race condition
-      // where user input during async blob conversion would be lost
-      if (!usingProvider) {
-        form.reset();
-      }
+      // Keep the draft until acknowledgement. Failed conversion/send must remain retryable.
+      let acknowledged = false;
+      const acknowledge = () => {
+        if (acknowledged) return;
+        acknowledged = true;
+        if (submittingRef.current === submission) submittingRef.current = null;
+        const latest = latestSubmissionRef.current;
+        if (latest.submissionKey !== submissionKey || !form.isConnected) return;
+        const submittedSourceIds = new Set(referencedSources.map(source => source.id));
+        setReferencedSources(current => current.filter(source => !submittedSourceIds.has(source.id)));
+        for (const file of files) remove(file.id);
+        if (usingProvider) {
+          if (latest.controller?.textInput.value === text) latest.controller.textInput.clear();
+        } else {
+          const textarea = form.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+          if (textarea?.value === text) {
+            textarea.value = "";
+            textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+      };
 
       try {
         // Convert blob URLs to data URLs asynchronously
@@ -480,7 +501,7 @@ export const PromptInput = ({
           files.map(async ({ id: _id, ...item }) => {
             if (item.url?.startsWith("blob:")) {
               const dataUrl = await convertBlobUrlToDataUrl(item.url);
-              // If conversion failed, keep the original blob URL
+              if (!dataUrl) throw new Error("Could not read attachment");
               return {
                 ...item,
                 url: dataUrl ?? item.url,
@@ -490,31 +511,27 @@ export const PromptInput = ({
           })
         );
 
-        const result = onSubmit({ files: convertedFiles, text }, event);
+        const result = onSubmit({ files: convertedFiles, text }, event, acknowledge);
 
         // Handle both sync and async onSubmit
         if (result instanceof Promise) {
           try {
             await result;
-            clear();
-            if (usingProvider) {
-              controller.textInput.clear();
-            }
+            acknowledge();
           } catch {
             // Don't clear on error - user may want to retry
           }
         } else {
           // Sync function completed without throwing, clear inputs
-          clear();
-          if (usingProvider) {
-            controller.textInput.clear();
-          }
+          acknowledge();
         }
       } catch {
         // Don't clear on error - user may want to retry
+      } finally {
+        if (submittingRef.current === submission) submittingRef.current = null;
       }
     },
-    [usingProvider, controller, files, onSubmit, clear]
+    [usingProvider, controller, files, onSubmit, remove, referencedSources, submissionKey]
   );
 
   // Render with or without local provider

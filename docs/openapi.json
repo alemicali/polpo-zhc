@@ -332,6 +332,39 @@
                                       "type": {
                                         "type": "string",
                                         "enum": [
+                                          "file"
+                                        ]
+                                      },
+                                      "file": {
+                                        "type": "object",
+                                        "properties": {
+                                          "filename": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 255
+                                          },
+                                          "file_data": {
+                                            "type": "string",
+                                            "maxLength": 23068672
+                                          }
+                                        },
+                                        "required": [
+                                          "filename",
+                                          "file_data"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "file"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
                                           "image_url"
                                         ]
                                       },
@@ -340,7 +373,8 @@
                                         "properties": {
                                           "url": {
                                             "type": "string",
-                                            "description": "Data URL (data:image/…;base64,…) or HTTPS URL"
+                                            "maxLength": 23068672,
+                                            "description": "Base64 data URL for a persistent image attachment"
                                           },
                                           "detail": {
                                             "type": "string",
@@ -8916,6 +8950,33 @@
                       "xhigh",
                       "max"
                     ]
+                  },
+                  "branding": {
+                    "type": "object",
+                    "properties": {
+                      "productName": {
+                        "type": "string",
+                        "maxLength": 80
+                      },
+                      "tagline": {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      "logoUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "/api/v1/config/branding/logo"
+                            ]
+                          }
+                        ]
+                      }
+                    }
                   }
                 }
               }
@@ -9886,6 +9947,240 @@
           },
           "500": {
             "description": "Failed to save",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/instance-logo": {
+      "post": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Upload the managed instance logo",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "content-type",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logo uploaded and configuration reloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No configuration loaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image exceeds the size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported image type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to persist configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Remove the managed instance logo",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "x-polpo-operation",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logo removed and configuration reloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No configuration loaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to persist configuration",
             "content": {
               "application/json": {
                 "schema": {
@@ -11807,6 +12102,245 @@
                   "required": [
                     "ok",
                     "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/mobile": {
+      "post": {
+        "tags": [
+          "Diagnostics"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string",
+                    "enum": [
+                      "app",
+                      "voice",
+                      "sidebar"
+                    ]
+                  },
+                  "event": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "updateId": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android",
+                      "web",
+                      "unknown"
+                    ]
+                  },
+                  "launchId": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "attemptId": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "nativeState": {
+                    "type": "string",
+                    "pattern": "^[\\w.:-]{1,100}$"
+                  },
+                  "elapsedMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 86400000
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "granted": {
+                    "type": "boolean"
+                  },
+                  "onDevice": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "topic",
+                  "event",
+                  "revision",
+                  "updateId",
+                  "runtime",
+                  "platform",
+                  "launchId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted diagnostic metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Diagnostics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent mobile diagnostic metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "topic": {
+                                "type": "string",
+                                "enum": [
+                                  "app",
+                                  "voice",
+                                  "sidebar"
+                                ]
+                              },
+                              "event": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "revision": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "updateId": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "runtime": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "platform": {
+                                "type": "string",
+                                "enum": [
+                                  "ios",
+                                  "android",
+                                  "web",
+                                  "unknown"
+                                ]
+                              },
+                              "launchId": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "attemptId": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "nativeState": {
+                                "type": "string",
+                                "pattern": "^[\\w.:-]{1,100}$"
+                              },
+                              "elapsedMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 86400000
+                              },
+                              "count": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              },
+                              "granted": {
+                                "type": "boolean"
+                              },
+                              "onDevice": {
+                                "type": "boolean"
+                              },
+                              "receivedAt": {
+                                "type": "string"
+                              },
+                              "sequence": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "topic",
+                              "event",
+                              "revision",
+                              "updateId",
+                              "runtime",
+                              "platform",
+                              "launchId",
+                              "receivedAt",
+                              "sequence"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "entries"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
                   ]
                 }
               }

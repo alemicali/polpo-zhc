@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { TokenUsageRecord } from "@polpo-ai/server";
 
-export type TokenUsageRange = "24h" | "7d" | "30d" | "all";
+export type TokenUsageRange = "today" | "24h" | "7d" | "30d" | "all";
 
 export interface TaskTokenEvent {
   timestamp: string;
@@ -16,11 +16,21 @@ interface CachedTaskLog {
 
 const taskLogCache = new Map<string, Map<string, CachedTaskLog>>();
 
-const RANGE_MS: Record<Exclude<TokenUsageRange, "all">, number> = {
+const RANGE_MS: Record<Exclude<TokenUsageRange, "all" | "today">, number> = {
   "24h": 24 * 60 * 60 * 1_000,
   "7d": 7 * 24 * 60 * 60 * 1_000,
   "30d": 30 * 24 * 60 * 60 * 1_000,
 };
+
+function rangeCutoff(range: TokenUsageRange): number {
+  if (range === "all") return 0;
+  if (range === "today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
+  }
+  return Date.now() - RANGE_MS[range];
+}
 
 export class FileTokenUsageStore {
   private readonly usageDir: string;
@@ -36,7 +46,7 @@ export class FileTokenUsageStore {
   }
 
   async list(range: TokenUsageRange): Promise<TokenUsageRecord[]> {
-    const cutoff = range === "all" ? 0 : Date.now() - RANGE_MS[range];
+    const cutoff = rangeCutoff(range);
     let files: string[];
     try {
       files = (await readdir(this.usageDir)).filter((file) => file.endsWith(".jsonl"));

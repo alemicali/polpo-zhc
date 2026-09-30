@@ -66,13 +66,14 @@ import {
   Upload,
   Download,
   EyeOff,
+  Image as ImageIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useConfig } from "@/hooks/use-polpo";
+import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react";
-import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig } from "@polpo-ai/react";
+import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig, BrandingConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
@@ -95,12 +96,15 @@ import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifec
 import { useAppearance } from "@/lib/appearance";
 import { PALETTES, usePalette } from "@/lib/palette";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/shared/brand-mark";
+import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 
 // ── API helper (same pattern as setup.tsx) ──
 
 const api = async (path: string, init?: RequestInit) => {
   try {
     const headers: Record<string, string> = { ...init?.headers as Record<string, string> };
+    if (appConfig.apiKey) headers.Authorization = `Bearer ${appConfig.apiKey}`;
     // Only set Content-Type for requests with a body
     if (init?.body) headers["Content-Type"] = "application/json";
     const res = await fetch(`${appConfig.baseUrl}/api/v1${path}`, {
@@ -1683,9 +1687,18 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
-function AppearanceTab() {
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo }: {
+  branding?: BrandingConfig;
+  onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
+  onUploadLogo: (file: File) => Promise<void>;
+  onRemoveLogo: () => Promise<void>;
+}) {
   const { palette, setPalette } = usePalette();
   const { appearance, setAppearance, resetAppearance } = useAppearance();
+  const [productName, setProductName] = useState(branding?.productName ?? "");
+  const [tagline, setTagline] = useState(branding?.tagline ?? "");
+  const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
+  const [brandingBusy, setBrandingBusy] = useState(false);
   const [mode, setMode] = useState<"light" | "dark">("light");
   const activeTheme = appearance[mode];
   const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
@@ -1744,6 +1757,94 @@ function AppearanceTab() {
   return (
     <div className="space-y-6">
       <section>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-muted-foreground">
+            <ImageIcon className="h-3.5 w-3.5" /> Instance branding
+          </h3>
+          <span className="text-[10px] text-muted-foreground">Shared with every user</span>
+        </div>
+        <div className="grid gap-3 border-y border-border/60 py-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium">Product name</span>
+              <Input value={productName} maxLength={80} onChange={(event) => setProductName(event.target.value)} placeholder={DEFAULT_PRODUCT_NAME} />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium">Tagline</span>
+              <Input value={tagline} maxLength={120} onChange={(event) => setTagline(event.target.value)} placeholder={DEFAULT_PRODUCT_TAGLINE} />
+            </label>
+            <label className="grid gap-1.5 sm:col-span-2">
+              <span className="text-xs font-medium">Logo URL</span>
+              <div className="flex min-w-0 gap-2">
+                <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
+                <Button
+                  variant="outline"
+                  disabled={brandingBusy}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+                    input.onchange = () => {
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      setBrandingBusy(true);
+                      void onUploadLogo(file)
+                        .then(() => setLogoUrl("/api/v1/config/branding/logo"))
+                        .catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"))
+                        .finally(() => setBrandingBusy(false));
+                    };
+                    input.click();
+                  }}
+                >
+                  <Upload className="h-3.5 w-3.5" /> Upload
+                </Button>
+              </div>
+              <span className="text-[10px] text-muted-foreground">Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB.</span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+              <Button
+                disabled={brandingBusy}
+                onClick={() => {
+                  setBrandingBusy(true);
+                  void onUpdateBranding({
+                    productName: productName.trim() || undefined,
+                    tagline: tagline.trim() || undefined,
+                    logoUrl: logoUrl.trim() || undefined,
+                  }).catch((error) => toast.error(error instanceof Error ? error.message : "Failed to update branding"))
+                    .finally(() => setBrandingBusy(false));
+                }}
+              >
+                {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
+              </Button>
+              {branding?.logoUrl && (
+                <Button
+                  variant="ghost"
+                  disabled={brandingBusy}
+                  onClick={() => {
+                    setBrandingBusy(true);
+                    void onRemoveLogo().then(() => setLogoUrl(""))
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to remove logo"))
+                      .finally(() => setBrandingBusy(false));
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove logo
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="flex min-h-36 items-center justify-center border border-border/50 bg-muted/15 p-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <BrandMark branding={{ productName, tagline, logoUrl }} className="h-12 w-12 rounded-lg text-xl" />
+              <div className="min-w-0">
+                <div className="max-w-40 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
+                <div className="max-w-40 truncate text-[10px] uppercase text-muted-foreground">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
           <PaletteIcon className="h-3.5 w-3.5" /> Palette
         </h3>
@@ -1773,6 +1874,7 @@ function AppearanceTab() {
             </button>
           ))}
         </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">Theme, palette, and overrides are saved in this browser and scoped to this Polpo instance.</p>
       </section>
 
       <section>
@@ -3084,7 +3186,42 @@ export function ConfigPage() {
 
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (
-          <AppearanceTab />
+          <AppearanceTab
+            branding={settings.branding}
+            onUpdateBranding={async (branding) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ branding }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to update branding");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Branding updated");
+            }}
+            onUploadLogo={async (file) => {
+              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": file.type,
+                  ...(appConfig.apiKey ? { Authorization: `Bearer ${appConfig.apiKey}` } : {}),
+                },
+                credentials: "include",
+                body: file,
+              });
+              const result = await response.json().catch(() => null);
+              if (!response.ok || !result?.ok) throw new Error(result?.error ?? `Logo upload failed (${response.status})`);
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Logo uploaded");
+            }}
+            onRemoveLogo={async () => {
+              const result = await api("/config/instance-logo", { method: "DELETE" });
+              if (!result.ok) throw new Error(result.error ?? "Failed to remove logo");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Logo removed");
+            }}
+          />
         )}
 
         {/* ═══ MEMBERS ═══ */}

@@ -22,6 +22,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { connect as connectTcp } from "node:net";
 import { parse as parseUrl } from "node:url";
 import { homedir } from "node:os";
 import type { IncomingMessage } from "node:http";
@@ -33,6 +35,10 @@ const DEFAULT_PORT = 4848;
 const EXEC_TIMEOUT_MS = 10_000;
 const DASHBOARD_VIEW_PREFIX = "/api/v1/browser-dashboard/view";
 const DASHBOARD_CDP_PREFIX = "/api/v1/browser-dashboard/cdp/";
+const VNC_PORT = 5900;
+const VIRTUAL_DISPLAY_START = 99;
+export const VNC_WS_HIGH_WATER_MARK = 512 * 1024;
+export const VNC_WS_LOW_WATER_MARK = 128 * 1024;
 
 // ── CDP Chrome (the user's real profile) ─────────────────────────────────
 //
@@ -56,6 +62,14 @@ const CHROME_USER_DATA_DIR =
 const CHROME_PROFILE_DIR = process.env.POLPO_CHROME_PROFILE || "Profile 8";
 const CDP_VIEWPORT_WIDTH = readViewportDimension("POLPO_BROWSER_VIEWPORT_WIDTH", 1920);
 const CDP_VIEWPORT_HEIGHT = readViewportDimension("POLPO_BROWSER_VIEWPORT_HEIGHT", 1080);
+const LOCAL_X11VNC_ROOT = `${homedir()}/.local/share/polpo/x11vnc`;
+const LOCAL_TIGERVNC_ROOT = `${homedir()}/.local/share/polpo/tigervnc`;
+const LOCAL_TIGERVNC_BIN = `${LOCAL_TIGERVNC_ROOT}/bin/X0tigervnc`;
+const VNC_BIN = process.env.POLPO_VNC_BIN || process.env.POLPO_X11VNC_BIN ||
+  (existsSync(LOCAL_TIGERVNC_BIN)
+    ? LOCAL_TIGERVNC_BIN
+    : existsSync(`${LOCAL_X11VNC_ROOT}/bin/x11vnc`) ? `${LOCAL_X11VNC_ROOT}/bin/x11vnc` : "x11vnc");
+const VNC_ENGINE = VNC_BIN.toLowerCase().includes("tigervnc") ? "tigervnc" : "x11vnc";
 
 function readViewportDimension(name: string, fallback: number): number {
   const value = Number(process.env[name]);
@@ -74,6 +88,78 @@ async function applyCdpViewport(): Promise<void> {
 
 /** Live handle to the launched Chrome. Null when not running. */
 let chromeProc: ChildProcess | null = null;
+let xvfbProc: ChildProcess | null = null;
+let vncProc: ChildProcess | null = null;
+let browserDisplay = process.env.DISPLAY || "";
+let vncLastError: string | null = null;
+let vncStopping = false;
+let vncActiveConnections = 0;
+let vncDisconnectCount = 0;
+let vncLastDisconnectAt: string | null = null;
+let vncLastDisconnectReason: string | null = null;
+let vncBytesToClient = 0;
+let vncBytesFromClient = 0;
+let vncPeakBufferedBytes = 0;
+let vncGeometry = "";
+
+export function shouldPauseVncUpstream(bufferedBytes: number): boolean {
+  return bufferedBytes >= VNC_WS_HIGH_WATER_MARK;
+}
+
+export function shouldResumeVncUpstream(bufferedBytes: number): boolean {
+  return bufferedBytes <= VNC_WS_LOW_WATER_MARK;
+}
+
+function childIsRunning(child: ChildProcess | null): boolean {
+  return Boolean(child && child.exitCode === null && !child.killed);
+}
+
+async function waitFor(
+  probe: () => boolean | Promise<boolean>,
+  attempts = 30,
+  delayMs = 100,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (await probe()) return true;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return false;
+}
+
+async function ensureBrowserDisplay(): Promise<string> {
+  if (process.env.DISPLAY) {
+    browserDisplay = process.env.DISPLAY;
+    return browserDisplay;
+  }
+  if (browserDisplay && childIsRunning(xvfbProc)) return browserDisplay;
+
+  let displayNumber = VIRTUAL_DISPLAY_START;
+  while (displayNumber < VIRTUAL_DISPLAY_START + 20 && existsSync(`/tmp/.X11-unix/X${displayNumber}`)) {
+    displayNumber += 1;
+  }
+  if (displayNumber >= VIRTUAL_DISPLAY_START + 20) {
+    throw new Error("No free X display is available for Browser Control");
+  }
+
+  browserDisplay = `:${displayNumber}`;
+  xvfbProc = spawn("Xvfb", [
+    browserDisplay,
+    "-screen", "0", `${CDP_VIEWPORT_WIDTH}x${CDP_VIEWPORT_HEIGHT}x24`,
+    "-nolisten", "tcp",
+    "-ac",
+  ], { stdio: "ignore", detached: false });
+  let displayError: Error | null = null;
+  xvfbProc.once("error", (err) => { displayError = err; });
+  xvfbProc.once("exit", () => {
+    xvfbProc = null;
+    if (!process.env.DISPLAY) browserDisplay = "";
+  });
+
+  const ready = await waitFor(() => displayError !== null || existsSync(`/tmp/.X11-unix/X${displayNumber}`));
+  if (displayError) throw displayError;
+  if (!ready) throw new Error("The virtual display did not start in time");
+  return browserDisplay;
+}
 
 /** True once Chrome answers CDP HTTP discovery on the debug port. */
 async function cdpReady(port: number): Promise<boolean> {
@@ -84,6 +170,64 @@ async function cdpReady(port: number): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+async function setChromeWindowViewport(width: number, height: number): Promise<void> {
+  const targetsResponse = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`, {
+    signal: AbortSignal.timeout(2_000),
+  });
+  if (!targetsResponse.ok) throw new Error(`Chrome targets returned ${targetsResponse.status}`);
+  const targets = await targetsResponse.json() as Array<{
+    id?: string;
+    type?: string;
+    webSocketDebuggerUrl?: string;
+  }>;
+  const target = targets.find((item) => item.type === "page" && item.id && item.webSocketDebuggerUrl);
+  if (!target?.id || !target.webSocketDebuggerUrl) throw new Error("No Chrome page target is available");
+
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Chrome DevTools connection timed out")), 2_000);
+    socket.once("open", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+
+  let commandId = 0;
+  const command = <T>(method: string, params: Record<string, unknown> = {}) => new Promise<T>((resolve, reject) => {
+    const id = ++commandId;
+    const timeout = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error(`${method} timed out`));
+    }, 2_000);
+    const onMessage = (raw: import("ws").RawData) => {
+      let message: { id?: number; result?: T; error?: { message?: string } };
+      try { message = JSON.parse(raw.toString()) as typeof message; } catch { return; }
+      if (message.id !== id) return;
+      clearTimeout(timeout);
+      socket.off("message", onMessage);
+      if (message.error) reject(new Error(message.error.message || `${method} failed`));
+      else resolve(message.result as T);
+    };
+    socket.on("message", onMessage);
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+
+  try {
+    const window = await command<{ windowId: number }>("Browser.getWindowForTarget", { targetId: target.id });
+    await command("Browser.setWindowBounds", {
+      windowId: window.windowId,
+      bounds: { left: 0, top: 0, width, height, windowState: "normal" },
+    });
+    await command("Emulation.clearDeviceMetricsOverride");
+  } finally {
+    socket.close();
   }
 }
 
@@ -107,17 +251,20 @@ export async function launchCdpChrome(): Promise<{ running: boolean; port: numbe
     `--remote-debugging-port=${CDP_PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
+    `--window-size=${CDP_VIEWPORT_WIDTH},${CDP_VIEWPORT_HEIGHT}`,
+    "--window-position=0,0",
+    "--start-maximized",
   ];
 
-  // Headed Chrome needs a display. Wrap in xvfb-run when none is present.
-  const headless = !process.env.DISPLAY;
-  const cmd = headless ? "xvfb-run" : CHROME_BIN;
-  const args = headless
-    ? ["-a", "--server-args=-screen 0 1920x1080x24", CHROME_BIN, ...chromeArgs]
-    : chromeArgs;
-
+  const launchState: { error?: string } = {};
   try {
-    chromeProc = spawn(cmd, args, { stdio: "ignore", detached: false });
+    const display = await ensureBrowserDisplay();
+    chromeProc = spawn(CHROME_BIN, chromeArgs, {
+      stdio: "ignore",
+      detached: false,
+      env: { ...process.env, DISPLAY: display },
+    });
+    chromeProc.once("error", (err) => { launchState.error = err.message; });
   } catch (err) {
     chromeProc = null;
     return { running: false, port: CDP_PORT, error: err instanceof Error ? err.message : String(err) };
@@ -126,6 +273,9 @@ export async function launchCdpChrome(): Promise<{ running: boolean; port: numbe
 
   // Poll the debug port until Chrome is accepting CDP (up to ~15s).
   for (let i = 0; i < 30; i++) {
+    if (launchState.error) {
+      return { running: false, port: CDP_PORT, error: launchState.error };
+    }
     if (await cdpReady(CDP_PORT)) {
       const connected = await runAgentBrowser(["--session", ORCH_SESSION, "connect", String(CDP_PORT)]);
       if (!connected.ok) {
@@ -142,13 +292,137 @@ export async function launchCdpChrome(): Promise<{ running: boolean; port: numbe
 
 /** Stop the launched Chrome and detach the orchestrator session. */
 export async function stopCdpChrome(): Promise<{ stopped: boolean }> {
+  stopVncServer();
   await runAgentBrowser(["--session", ORCH_SESSION, "close"]);
   if (chromeProc && !chromeProc.killed) {
     chromeProc.kill("SIGTERM");
   }
   chromeProc = null;
+  if (xvfbProc && !xvfbProc.killed) xvfbProc.kill("SIGTERM");
+  xvfbProc = null;
+  if (!process.env.DISPLAY) browserDisplay = "";
   setCdpTarget(null);
   return { stopped: true };
+}
+
+function x11VncEnvironment(): NodeJS.ProcessEnv {
+  const localLibraryPaths = [LOCAL_TIGERVNC_ROOT, LOCAL_X11VNC_ROOT]
+    .map((root) => `${root}/lib`)
+    .filter((path) => existsSync(path));
+  const ldLibraryPath = [...localLibraryPaths, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":");
+  return { ...process.env, DISPLAY: browserDisplay, LD_LIBRARY_PATH: ldLibraryPath };
+}
+
+export function browserVncCommandArgs(
+  display: string,
+  port = VNC_PORT,
+  engine: "tigervnc" | "x11vnc" = "tigervnc",
+  geometry = "",
+): string[] | null {
+  if (!/^:\d{1,3}$/.test(display) || !Number.isInteger(port) || port <= 1024 || port > 65535) return null;
+  if (geometry && !/^\d{3,4}x\d{3,4}\+\d{1,4}\+\d{1,4}$/.test(geometry)) return null;
+  if (engine === "tigervnc") {
+    const args = [
+      "-display", display,
+      "-rfbport", String(port),
+      "-localhost=1",
+      "-SecurityTypes=None",
+      "-AlwaysShared=1",
+      "-FrameRate=30",
+      "-MaxProcessorUsage=80",
+      "-PollingCycle=5",
+      "-CompareFB=2",
+    ];
+    if (geometry) args.push("-Geometry", geometry);
+    return args;
+  }
+  const args = [
+    "-display", display,
+    "-rfbport", String(port),
+    "-localhost",
+    "-forever",
+    "-shared",
+    "-nopw",
+    "-repeat",
+    "-xkb",
+    "-threads",
+    "-wait", "5",
+    "-defer", "5",
+    "-quiet",
+  ];
+  if (geometry) args.push("-clip", geometry);
+  return args;
+}
+
+async function ensureVncServer(): Promise<{ running: boolean; port: number; error?: string }> {
+  if (childIsRunning(vncProc) && await probeTcp("127.0.0.1", VNC_PORT)) {
+    await applyCdpViewport().catch(() => undefined);
+    return { running: true, port: VNC_PORT };
+  }
+
+  const chrome = await launchCdpChrome();
+  if (!chrome.running) return { running: false, port: VNC_PORT, error: chrome.error };
+  if (!browserDisplay) {
+    return { running: false, port: VNC_PORT, error: "Chrome is not attached to a VNC-capable display" };
+  }
+
+  vncLastError = null;
+  vncStopping = false;
+  const vncArgs = browserVncCommandArgs(browserDisplay, VNC_PORT, VNC_ENGINE, vncGeometry);
+  if (!vncArgs) return { running: false, port: VNC_PORT, error: "Invalid VNC display or port" };
+  try {
+    vncProc = spawn(VNC_BIN, vncArgs, {
+      stdio: ["ignore", "ignore", "pipe"],
+      detached: false,
+      env: x11VncEnvironment(),
+    });
+  } catch (err) {
+    vncProc = null;
+    vncLastError = err instanceof Error ? err.message : String(err);
+    return { running: false, port: VNC_PORT, error: vncLastError };
+  }
+
+  let stderr = "";
+  vncProc.stderr?.on("data", (chunk) => {
+    stderr = `${stderr}${chunk.toString()}`.slice(-4_000);
+  });
+  vncProc.once("error", (err) => { vncLastError = err.message; });
+  vncProc.once("exit", (code) => {
+    if (!vncStopping && code && !vncLastError) {
+      vncLastError = stderr.trim() || `x11vnc exited with code ${code}`;
+    }
+    vncStopping = false;
+    vncProc = null;
+  });
+
+  const ready = await waitFor(() => probeTcp("127.0.0.1", VNC_PORT), 40, 100);
+  if (!ready) {
+    const error = vncLastError || stderr.trim() ||
+      `A VNC server is unavailable. Install TigerVNC or x11vnc, or set POLPO_VNC_BIN.`;
+    stopVncServer();
+    vncLastError = error;
+    return { running: false, port: VNC_PORT, error };
+  }
+  return { running: true, port: VNC_PORT };
+}
+
+function stopVncServer(): void {
+  vncStopping = true;
+  vncLastError = null;
+  if (vncProc && !vncProc.killed) vncProc.kill("SIGTERM");
+  vncProc = null;
+}
+
+async function setVncCaptureGeometry(width: number, height: number): Promise<{ running: boolean; error?: string }> {
+  const geometry = `${width}x${height}+0+0`;
+  if (geometry === vncGeometry && childIsRunning(vncProc) && await probeTcp("127.0.0.1", VNC_PORT)) {
+    return { running: true };
+  }
+  vncGeometry = geometry;
+  stopVncServer();
+  await waitFor(async () => !await probeTcp("127.0.0.1", VNC_PORT), 30, 50);
+  const result = await ensureVncServer();
+  return { running: result.running, error: result.error };
 }
 
 // ── Lifecycle helpers ────────────────────────────────────────────────────
@@ -597,6 +871,88 @@ export function browserDashboardRoutes(): Hono {
     await stopCdpChrome();
     return c.json({ ok: true, data: { running: false } });
   });
+  app.post("/chrome/viewport", async (c) => {
+    let body: { width?: number; height?: number };
+    try { body = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid JSON body" }, 400); }
+    const width = Math.round(Number(body.width));
+    const height = Math.round(Number(body.height));
+    if (!Number.isInteger(width) || width < 320 || width > 1920 || !Number.isInteger(height) || height < 240 || height > 1080) {
+      return c.json({ ok: false, error: "viewport is outside supported bounds" }, 400);
+    }
+    if (!await cdpReady(CDP_PORT)) return c.json({ ok: false, error: "Chrome is not running" }, 409);
+    try {
+      const vnc = await setVncCaptureGeometry(width, height);
+      if (!vnc.running) throw new Error(vnc.error || "VNC viewport update failed");
+      await setChromeWindowViewport(width, height);
+      return c.json({ ok: true, data: { width, height } });
+    } catch (error) {
+      return c.json({ ok: false, error: error instanceof Error ? error.message : "Chrome viewport update failed" }, 500);
+    }
+  });
+  app.post("/chrome/user-agent", async (c) => {
+    let body: { userAgent?: string | null };
+    try { body = await c.req.json(); } catch { return c.json({ ok: false, error: "invalid JSON body" }, 400); }
+    if (!await cdpReady(CDP_PORT)) return c.json({ ok: false, error: "Chrome is not running" }, 409);
+    let userAgent = typeof body.userAgent === "string" ? body.userAgent.trim() : "";
+    if (!userAgent) {
+      const versionResponse = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      const version = await versionResponse.json() as { "User-Agent"?: string };
+      userAgent = version["User-Agent"] ?? "";
+    }
+    if (!userAgent || userAgent.length > 512 || /[\r\n]/.test(userAgent)) {
+      return c.json({ ok: false, error: "invalid User-Agent" }, 400);
+    }
+    const result = await runAgentBrowser([
+      "--session", ORCH_SESSION,
+      "--user-agent", userAgent,
+      "reload",
+      "--json",
+    ]);
+    if (!result.ok) {
+      return c.json({ ok: false, error: result.stderr.trim() || result.stdout.trim() || "User-Agent update failed" }, 500);
+    }
+    return c.json({ ok: true, data: { userAgent } });
+  });
+
+  app.get("/vnc/status", async (c) => {
+    const running = childIsRunning(vncProc) && await probeTcp("127.0.0.1", VNC_PORT);
+    return c.json({
+      ok: true,
+      data: {
+        running,
+        available: existsSync(VNC_BIN) || VNC_BIN === "x11vnc",
+        engine: VNC_ENGINE,
+        display: browserDisplay || null,
+        connections: vncActiveConnections,
+        disconnects: vncDisconnectCount,
+        lastDisconnectAt: vncLastDisconnectAt,
+        lastDisconnectReason: vncLastDisconnectReason,
+        bytesToClient: vncBytesToClient,
+        bytesFromClient: vncBytesFromClient,
+        peakBufferedBytes: vncPeakBufferedBytes,
+        error: running ? null : vncLastError,
+      },
+    });
+  });
+  app.post("/vnc/start", async (c) => {
+    const result = await ensureVncServer();
+    if (!result.running) {
+      return c.json({ ok: false, error: result.error || "VNC failed to start" }, 500);
+    }
+    return c.json({
+      ok: true,
+      data: { running: true, display: browserDisplay, viewport: {
+        width: CDP_VIEWPORT_WIDTH,
+        height: CDP_VIEWPORT_HEIGHT,
+      } },
+    });
+  });
+  app.post("/vnc/stop", (c) => {
+    stopVncServer();
+    return c.json({ ok: true, data: { running: false } });
+  });
 
   // Native Agent Live consumes only the dashboard's session registry. The
   // viewport itself connects straight to the selected session daemon below,
@@ -721,6 +1077,73 @@ function rejectUpgrade(socket: Duplex, status: number, message: string): void {
   socket.destroy();
 }
 
+function pipeTcpWebSocket(
+  wss: WebSocketServer,
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  port: number,
+): void {
+  wss.handleUpgrade(req, socket, head, (client) => {
+    const upstream = connectTcp({ host: "127.0.0.1", port });
+    let closed = false;
+    let clientAlive = true;
+    vncActiveConnections += 1;
+    vncLastDisconnectReason = null;
+    upstream.setNoDelay(true);
+    upstream.setKeepAlive(true, 15_000);
+    upstream.on("data", (data) => {
+      if (client.readyState !== WebSocket.OPEN) return;
+      vncBytesToClient += data.byteLength;
+      client.send(data, { binary: true }, (error) => {
+        if (error) {
+          closeBoth("proxy", `WebSocket send failed: ${error.message}`);
+          return;
+        }
+        if (!upstream.destroyed && shouldResumeVncUpstream(client.bufferedAmount)) upstream.resume();
+      });
+      vncPeakBufferedBytes = Math.max(vncPeakBufferedBytes, client.bufferedAmount);
+      if (shouldPauseVncUpstream(client.bufferedAmount)) upstream.pause();
+    });
+    client.on("message", (data) => {
+      const payload = Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.isBuffer(data) ? data : Buffer.from(data);
+      vncBytesFromClient += payload.byteLength;
+      if (!upstream.destroyed) upstream.write(payload);
+    });
+    client.on("pong", () => { clientAlive = true; });
+    const heartbeat = setInterval(() => {
+      if (client.readyState !== WebSocket.OPEN) return;
+      if (!clientAlive) {
+        client.terminate();
+        return;
+      }
+      clientAlive = false;
+      client.ping();
+    }, 15_000);
+    heartbeat.unref();
+
+    const closeBoth = (source: "client" | "upstream" | "proxy", reason: string) => {
+      if (closed) return;
+      closed = true;
+      clearInterval(heartbeat);
+      vncActiveConnections = Math.max(0, vncActiveConnections - 1);
+      vncDisconnectCount += 1;
+      vncLastDisconnectAt = new Date().toISOString();
+      vncLastDisconnectReason = reason;
+      if (!upstream.destroyed) upstream.destroy();
+      if (source !== "client" && client.readyState === WebSocket.OPEN) {
+        client.close(1011, "VNC upstream disconnected");
+      }
+    };
+    client.on("close", (code, reason) => closeBoth("client", `client closed (${code}${reason.length ? `: ${reason.toString()}` : ""})`));
+    client.on("error", (error) => closeBoth("client", `client error: ${error.message}`));
+    upstream.on("close", (hadError) => closeBoth("upstream", hadError ? "VNC upstream closed after an error" : "VNC upstream closed"));
+    upstream.on("error", (error) => closeBoth("upstream", `VNC upstream error: ${error.message}`));
+  });
+}
+
 /**
  * Proxy an upstream WebSocket. Pipes both directions, closes both on any
  * error / close. Shared by the dashboard (/view/*) and dynamic CDP
@@ -755,6 +1178,18 @@ export function attachBrowserDashboardWebSocket(server: UpgradeServer): { close:
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = parseUrl(req.url ?? "", true);
     const pathname = url.pathname ?? "";
+
+    if (pathname === "/api/v1/browser-dashboard/vnc") {
+      void probeTcp("127.0.0.1", VNC_PORT).then((reachable) => {
+        const running = childIsRunning(vncProc) && reachable;
+        if (!running) {
+          rejectUpgrade(socket, 503, "VNC is not running");
+          return;
+        }
+        pipeTcpWebSocket(wss, req, socket, head, VNC_PORT);
+      }).catch(() => rejectUpgrade(socket, 502, "VNC probe failed"));
+      return;
+    }
 
     // Dashboard UI path → proxy to the dashboard server (default :4848).
     const viewMatch = pathname.match(/^\/api\/v1\/browser-dashboard\/view\/?(.*)$/);

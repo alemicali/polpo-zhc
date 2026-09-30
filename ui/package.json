@@ -11,10 +11,14 @@
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
+    "generate:icons": "node scripts/generate-icon-subsets.mjs",
+    "predev": "pnpm run generate:icons",
     "dev": "vite",
+    "prebuild": "pnpm run generate:icons",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "serve": "node server.mjs",
     "electron:dev": "POLPO_ELECTRON=1 VITE_POLPO_API_URL=http://localhost:3890 vite build && electron .",
     "electron:build": "POLPO_ELECTRON=1 VITE_POLPO_API_URL=http://localhost:3890 vite build && electron-builder"
   },
@@ -23,6 +27,7 @@
     "@iconify-json/logos": "^1.2.11",
     "@iconify/react": "^6.0.2",
     "@lobehub/icons": "^2.46.0",
+    "@novnc/novnc": "1.7.0",
     "@polpo-ai/core": "workspace:*",
     "@polpo-ai/react": "workspace:*",
     "@radix-ui/react-use-controllable-state": "^1.2.2",

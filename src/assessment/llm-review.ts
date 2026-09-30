@@ -27,10 +27,10 @@ import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, Revie
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { validateReviewPayload, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./schemas.js";
 import { withRetry } from "../llm/retry.js";
-import { resolveModel, resolveApiKeyAsync, buildStreamOpts } from "../llm/pi-client.js";
+import { resolveModel, resolveModelAuthAsync, completeSimpleWithAuth, buildStreamOpts } from "../llm/pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
 import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
-import { complete, completeSimple } from "@earendil-works/pi-ai/compat";
+import { complete } from "@earendil-works/pi-ai/compat";
 
 export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 
@@ -199,8 +199,7 @@ async function runExploration(
   reasoning?: ReasoningLevel,
 ): Promise<{ analysis: string; filesRead: string[]; messages: ReviewerMessage[] }> {
   const m = resolveModel(model);
-  const apiKey = await resolveApiKeyAsync(m.provider as string);
-  const opts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+  const opts = buildStreamOpts(undefined, reasoning, m.maxTokens);
 
   const filesRead: string[] = [];
 
@@ -218,7 +217,7 @@ async function runExploration(
       });
     }
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt: "You are a thorough code reviewer. Use tools to explore the codebase. Focus on finding evidence for each evaluation dimension. Do NOT attempt to output scores as text — you will be given a dedicated scoring step after exploration.",
       messages,
       tools: EXPLORATION_TOOLS,
@@ -300,7 +299,7 @@ async function runScoring(
   reasoning?: ReasoningLevel,
 ): Promise<{ payload: ReviewPayload | null; attemptErrors: string[] }> {
   const m = resolveModel(model);
-  const apiKey = await resolveApiKeyAsync(m.provider as string);
+  const auth = await resolveModelAuthAsync(m.provider as string);
 
   const scoringPrompt = `Based on the following code analysis, score each dimension and call submit_review.
 
@@ -343,8 +342,9 @@ RULES:
   // Strategy 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
   onProgress?.("Scoring with forced tool choice...");
   try {
-    const response = await complete(m, context, {
-      apiKey,
+    const response = await complete(auth?.baseUrl ? { ...m, baseUrl: auth.baseUrl } : m, context, {
+      apiKey: auth?.apiKey,
+      headers: auth?.headers,
       toolChoice: { type: "tool", name: "submit_review" },
       ...(reasoningVal ? { reasoning: reasoningVal } : {}),
     } as any);
@@ -365,7 +365,7 @@ RULES:
   // Strategy 2: Strong prompting without toolChoice (cross-provider fallback)
   onProgress?.("Scoring with prompt-based enforcement...");
   try {
-    const response = await completeSimple(m, context, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    const response = await completeSimpleWithAuth(m, context, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     // Check for tool call first
     const payload = extractSubmitReview(response);
@@ -398,11 +398,11 @@ Return this exact JSON structure (nothing else):
         timestamp: Date.now(),
       },
     ];
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt: "You are a JSON-only scorer. Output ONLY valid JSON matching the requested schema. No markdown fences, no explanations, no commentary — just the raw JSON object.",
       messages: jsonMessages,
       tools: [],
-    }, buildStreamOpts(apiKey, reasoning, m.maxTokens));
+    }, buildStreamOpts(undefined, reasoning, m.maxTokens));
 
     const fullText = extractText(response);
     const parsed = tryParseReviewJSON(fullText);
@@ -494,14 +494,13 @@ async function runSingleReview(
     // Run a single LLM call to produce the analysis from the provided context.
     onProgress?.("Analyzing execution evidence (no file exploration needed)...");
     const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider as string);
-    const opts = buildStreamOpts(apiKey, reasoning, m.maxTokens);
+    const opts = buildStreamOpts(undefined, reasoning, m.maxTokens);
 
     const messages: Message[] = [
       { role: "user", content: explorationPrompt, timestamp: Date.now() },
     ];
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt: "You are a thorough reviewer. Analyze the provided execution evidence and write a detailed assessment for each evaluation dimension. Do NOT attempt to output scores as text — you will be given a dedicated scoring step after your analysis.",
       messages,
       tools: [], // No tools — all evidence is in the prompt
@@ -779,7 +778,6 @@ async function generateDimensions(
 
   try {
     const m = resolveModel(model);
-    const apiKey = await resolveApiKeyAsync(m.provider as string);
 
     const messages: Message[] = [
       {
@@ -802,11 +800,11 @@ Example for an image generation task:
       },
     ];
 
-    const response = await completeSimple(m, {
+    const response = await completeSimpleWithAuth(m, {
       systemPrompt: "You are an evaluation expert. Output ONLY a valid JSON array. No markdown fences, no explanations.",
       messages,
       tools: [],
-    }, buildStreamOpts(apiKey, undefined, m.maxTokens));
+    }, buildStreamOpts(undefined, undefined, m.maxTokens));
 
     // Extract text from response
     let text = "";

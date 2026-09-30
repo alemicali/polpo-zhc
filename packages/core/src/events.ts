@@ -74,6 +74,8 @@ export interface PolpoEventMap {
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };
+  "session:updated": { sessionId: string; title?: string; starred?: boolean };
+  "session:deleted": { sessionId: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
 
   // Durable background task waits
@@ -118,6 +120,13 @@ export interface PolpoEventMap {
   "schedule:created": { scheduleId: string; missionId: string; nextRunAt?: string };
   "schedule:completed": { scheduleId: string; missionId: string };
   "schedule:expired": { scheduleId: string; missionId: string; endDate?: string };
+
+  // Registries and operational surfaces
+  "app:changed": { appId: string; action: "created" | "updated" | "deleted" | "runtime" | "log"; resourceId?: string; timestamp: string };
+  "data-source:changed": { sourceId: string; action: "created" | "updated" | "deleted" | "activity" | "data"; timestamp: string };
+  "data-view:changed": { viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
+  "skill:changed": { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string };
+  "token-usage:recorded": { timestamp: string };
 
   // Notifications
   "notification:sent": { ruleId: string; channel: string; event: string };

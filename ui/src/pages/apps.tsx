@@ -67,13 +67,9 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
     return next;
   });
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="shrink-0 border-b border-border/70 px-5 py-4 lg:px-6">
-        <div className="flex items-start justify-between gap-4">
-          <div><h1 className="text-lg font-semibold">Apps</h1><p className="mt-0.5 text-xs text-muted-foreground">Build, preview and ship your projects.</p></div>
-          <AppEditor mode="create" onSave={async (input) => { const app = await api.create(input); navigate(`/apps/${app.id}`); }} />
-        </div>
-        <div className="mt-4 flex items-center gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 bg-background">
+      <div className="shrink-0">
+        <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search projects" className="h-8 bg-muted/20 pl-8 shadow-none" />
@@ -109,6 +105,7 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
               <TooltipContent>List view</TooltipContent>
             </Tooltip>
           </div>
+          <AppEditor mode="create" onSave={async (input) => { const app = await api.create(input); navigate(`/apps/${app.id}`); }} />
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void api.refetch()} aria-label="Refresh apps"><RefreshCw className="h-3.5 w-3.5" /></Button>
         </div>
         {selectedTags.size > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="mr-1 text-[10px] text-muted-foreground">{filtered.length} of {api.apps.length}</span>{[...selectedTags].map((tag) => <button key={tag} type="button" onClick={() => toggleTag(tag)} className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 text-[10px] text-foreground hover:bg-muted"><Tag className="h-3 w-3 text-muted-foreground" />{tag}<X className="h-3 w-3 text-muted-foreground" /></button>)}</div>}
@@ -116,7 +113,7 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
       {api.isLoading ? <CenteredLoader /> : api.error ? <Empty icon={XCircle} title="Apps unavailable" detail={api.error} /> : filtered.length === 0 ? (
         <Empty icon={AppWindow} title={api.apps.length ? "No matching apps" : "No apps yet"} detail="Add a local project to manage development, previews and delivery." />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto p-5 lg:p-6">
+        <div className="min-h-0 flex-1 overflow-auto">
           {view === "cards"
             ? <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,340px),1fr))] gap-4">
                 {filtered.map((app) => <AppProjectCard key={app.id} app={app} api={api} onOpen={() => navigate(`/apps/${app.id}`)} />)}
@@ -155,7 +152,7 @@ function AppProjectListRow({ app, api, onOpen }: { app: RegisteredApp; api: Retu
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left sm:px-4">
         <div className="h-12 w-20 shrink-0 overflow-hidden rounded-md border border-border/70 bg-muted/25">
           {screenshot
-            ? <img src={screenshot} alt="" className="h-full w-full object-cover object-top" />
+            ? <img src={screenshot} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover object-top" />
             : <div className="flex h-full items-center justify-center"><AppWindow className="h-4 w-4 text-muted-foreground/40" /></div>}
         </div>
         <div className="min-w-0 flex-1">
@@ -204,7 +201,7 @@ function AppProjectCard({ app, api, onOpen }: { app: RegisteredApp; api: ReturnT
     <article className="group min-w-0 overflow-hidden rounded-md border border-border/70 bg-background transition-[border-color,box-shadow] hover:border-foreground/25 hover:shadow-sm">
       <button type="button" onClick={onOpen} className="block w-full text-left">
         <div className="relative aspect-[16/9] overflow-hidden border-b border-border/60 bg-muted/25">
-          {screenshot ? <img src={screenshot} alt={`${app.name} preview`} className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.015]" /> : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><AppWindow className="h-7 w-7 opacity-30" /><span className="mt-2 text-[11px]">No preview yet</span></div>}
+          {screenshot ? <img src={screenshot} alt={`${app.name} preview`} loading="lazy" decoding="async" className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.015]" /> : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><AppWindow className="h-7 w-7 opacity-30" /><span className="mt-2 text-[11px]">No preview yet</span></div>}
         </div>
         <div className="p-4">
           <div className="flex min-w-0 items-center gap-3"><h2 className="truncate text-sm font-semibold">{app.name}</h2><ArrowLeft className="ml-auto h-3.5 w-3.5 shrink-0 rotate-180 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" /></div>
@@ -818,19 +815,57 @@ function appCoverTarget(app: RegisteredApp): AppCoverTarget | undefined {
   };
 }
 
+const screenshotCache = new Map<string, Promise<Blob>>();
+const SCREENSHOT_CACHE_LIMIT = 100;
+
+function loadAppScreenshot(appId: string, screenshotUpdatedAt: string): Promise<Blob> {
+  const key = `${appId}:${screenshotUpdatedAt}`;
+  const cached = screenshotCache.get(key);
+  if (cached) return cached;
+
+  const headers = new Headers();
+  if (config.apiKey) headers.set("authorization", `Bearer ${config.apiKey}`);
+  const request = fetch(apiUrl(`/api/v1/apps/${encodeURIComponent(appId)}/screenshot?v=${encodeURIComponent(screenshotUpdatedAt)}`), {
+    credentials: "include",
+    headers,
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("Cover unavailable");
+      return response.blob();
+    })
+    .catch((error) => {
+      screenshotCache.delete(key);
+      throw error;
+    });
+  screenshotCache.set(key, request);
+
+  while (screenshotCache.size > SCREENSHOT_CACHE_LIMIT) {
+    const oldestKey = screenshotCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    screenshotCache.delete(oldestKey);
+  }
+  return request;
+}
+
 function useAppScreenshot(app: RegisteredApp): string | undefined {
-  const [url, setUrl] = useState<string>();
+  const { id, screenshotUpdatedAt } = app;
+  const key = screenshotUpdatedAt ? `${id}:${screenshotUpdatedAt}` : undefined;
+  const [loaded, setLoaded] = useState<{ key: string; url: string }>();
   useEffect(() => {
-    if (!app.screenshotUpdatedAt) { setUrl(undefined); return; }
-    const controller = new AbortController();
-    const headers = new Headers();
-    if (config.apiKey) headers.set("authorization", `Bearer ${config.apiKey}`);
+    if (!key || !screenshotUpdatedAt) return;
+    let active = true;
     let objectUrl: string | undefined;
-    fetch(apiUrl(`/api/v1/apps/${encodeURIComponent(app.id)}/screenshot?v=${encodeURIComponent(app.screenshotUpdatedAt)}`), { credentials: "include", headers, signal: controller.signal })
-      .then((response) => { if (!response.ok) throw new Error("Cover unavailable"); return response.blob(); })
-      .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); })
-      .catch(() => { if (!controller.signal.aborted) setUrl(undefined); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [app.id, app.screenshotUpdatedAt]);
-  return url;
+    void loadAppScreenshot(id, screenshotUpdatedAt)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLoaded({ key, url: objectUrl });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, key, screenshotUpdatedAt]);
+  return loaded?.key === key ? loaded?.url : undefined;
 }

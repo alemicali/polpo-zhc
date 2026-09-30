@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useEvents } from "./use-events.js";
 import type { SkillWithAssignment } from "@polpo-ai/sdk";
 
 export interface UseSkillsReturn {
@@ -11,9 +12,10 @@ export interface UseSkillsReturn {
 
 /**
  * Fetch available project-level skills with agent assignment info.
- * Skills are not reactive (no SSE updates) — they're discovered on demand.
+ * Refetches when a skill is created, changed, installed, removed, or reassigned.
  */
 export function useSkills(): UseSkillsReturn {
+  const { events } = useEvents(["skill:changed", "agent:created", "agent:updated", "agent:removed"], 1);
   const { client } = usePolpoContext();
   const [skills, setSkills] = useState<SkillWithAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,6 +35,14 @@ export function useSkills(): UseSkillsReturn {
     setIsLoading(true);
     fetch_().finally(() => setIsLoading(false));
   }, [fetch_]);
+
+  const latestEventId = events.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
+  useEffect(() => {
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    void fetch_();
+  }, [fetch_, latestEventId]);
 
   return { skills, isLoading, error, refetch: fetch_ };
 }

@@ -97,6 +97,7 @@ export type {
   PolpoState,
   PolpoConfig,
   PolpoSettings,
+  BrandingConfig,
   ReasoningLevel,
   ModelConfig,
   ModelAllowlistEntry,

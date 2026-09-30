@@ -1,9 +1,15 @@
 /**
  * Static config from env vars.
  */
+declare global {
+  var __POLPO_RUNTIME_CONFIG__: { baseUrl?: string; apiKey?: string } | undefined;
+}
+
+const runtimeConfig = globalThis.__POLPO_RUNTIME_CONFIG__;
+
 export const config = {
-  baseUrl: import.meta.env.VITE_POLPO_API_URL ?? "",
-  apiKey: import.meta.env.VITE_POLPO_API_KEY ?? undefined,
+  baseUrl: runtimeConfig?.baseUrl ?? import.meta.env.VITE_POLPO_API_URL ?? "",
+  apiKey: runtimeConfig?.apiKey ?? import.meta.env.VITE_POLPO_API_KEY ?? undefined,
 } as const;
 
 export function apiUrl(path: string): string {

@@ -39,6 +39,19 @@ describe("app registry", () => {
     expect(await store.get(app.id)).toBeNull();
   });
 
+  test("emits live registry changes after persistence", async () => {
+    const events: Array<{ appId: string; action: string }> = [];
+    store.setEmitter((event) => events.push(event));
+    const app = await store.create(appInput(project));
+    await store.update(app.id, { description: "Live" });
+    await store.delete(app.id);
+    expect(events).toMatchObject([
+      { appId: app.id, action: "created" },
+      { appId: app.id, action: "updated" },
+      { appId: app.id, action: "deleted" },
+    ]);
+  });
+
   test("normalizes app tags without case-insensitive duplicates", () => {
     expect(normalizeAppTags([" frontend ", "Internal Tools", "FRONTEND", "", "internal   tools", "api"]))
       .toEqual(["api", "frontend", "Internal Tools"]);
@@ -61,6 +74,8 @@ describe("app registry", () => {
   });
 
   test("starts and stops a service process group while retaining logs", async () => {
+    const events: Array<{ action: string; resourceId?: string }> = [];
+    runtime.setEmitter((event) => events.push(event));
     await store.create(appInput(project, {
       services: [{ id: "web", name: "Web", kind: "frontend", command: "node -e 'console.log(\"ready\"); setInterval(() => {}, 1000)'" }],
     }));
@@ -70,6 +85,8 @@ describe("app registry", () => {
     await waitFor(() => runtime.get("app_test", "service", "web")?.logs.some((line) => line.text === "ready") === true);
     expect(await runtime.stop("app_test", "service", "web")).toBe(true);
     expect(runtime.get("app_test", "service", "web")?.status).toBe("cancelled");
+    await waitFor(() => events.some((event) => event.action === "log"));
+    expect(events.some((event) => event.action === "runtime" && event.resourceId === "web")).toBe(true);
   });
 
   test("runs deployments and persists their result", async () => {
@@ -126,6 +143,11 @@ describe("app registry", () => {
       expect(WRITE_TOOLS.has(name)).toBe(true);
       expect(ALL_ORCHESTRATOR_TOOLS.some((tool) => tool.name === name)).toBe(true);
     }
+  });
+
+  test("advertises instance branding as an orchestrator write tool", () => {
+    expect(WRITE_TOOLS.has("update_instance_branding")).toBe(true);
+    expect(ALL_ORCHESTRATOR_TOOLS.some((tool) => tool.name === "update_instance_branding")).toBe(true);
   });
 });
 

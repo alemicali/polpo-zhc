@@ -9,7 +9,7 @@
  * work seamlessly. Tab icons call navigate() for top-level sections.
  */
 
-import { memo, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -45,6 +45,9 @@ import {
   Rows3,
   SlidersHorizontal,
   CalendarClock,
+  Database,
+  ChartNoAxesCombined,
+  BrainCircuit,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -65,7 +68,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { ChatPage } from "@/pages/chat";
 import { useChatActions } from "@/hooks/chat-context";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import {
@@ -81,9 +83,23 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
+import { BrandMark } from "@/components/shared/brand-mark";
+import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { ChatTabs } from "./chat-tabs";
+
+const ChatPage = lazy(() =>
+  import("@/pages/chat").then((module) => ({ default: module.ChatPage })),
+);
+
+function ChatLoader() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
+    </div>
+  );
+}
 
 type TabDef = {
   path: string;
@@ -104,7 +120,10 @@ const pinnedTabs: TabDef[] = [
   { path: "/agents", icon: Bot, label: "Agents" },
   { path: "/files", icon: FolderOpen, label: "Files" },
   { path: "/apps", icon: Boxes, label: "Apps" },
+  { path: "/data", icon: Database, label: "Data" },
+  { path: "/views", icon: ChartNoAxesCombined, label: "Views" },
   { path: "/coding", icon: Code2, label: "Coding" },
+  { path: "/terminal", icon: Terminal, label: "Terminal" },
   { path: "/browser", icon: AppWindow, label: "App Preview" },
   { path: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
 ];
@@ -126,13 +145,7 @@ const secondaryGroups: TabGroup[] = [
       { path: "/skills", icon: Sparkles, label: "Skills" },
       { path: "/memory", icon: Brain, label: "Memory" },
       { path: "/playbooks", icon: Workflow, label: "Playbooks" },
-    ],
-  },
-  {
-    label: "Tools",
-    icon: Code2,
-    tabs: [
-      { path: "/terminal", icon: Terminal, label: "Terminal" },
+      { path: "/brain", icon: BrainCircuit, label: "Company Brain" },
     ],
   },
   {
@@ -157,6 +170,9 @@ const tabs: TabDef[] = [
   { path: "/playbooks", icon: Workflow, label: "Playbooks" },
   { path: "/files", icon: FolderOpen, label: "Files" },
   { path: "/apps", icon: Boxes, label: "Apps" },
+  { path: "/data", icon: Database, label: "Data" },
+  { path: "/views", icon: ChartNoAxesCombined, label: "Views" },
+  { path: "/brain", icon: BrainCircuit, label: "Company Brain" },
   { path: "/coding", icon: Code2, label: "Coding" },
   { path: "/terminal", icon: Terminal, label: "Terminal" },
   { path: "/browser", icon: AppWindow, label: "App Preview" },
@@ -197,11 +213,11 @@ function ChatPanelHeader() {
             </Button>
           </MobileNavSheet>
         </div>
-        <span className="text-lg">🐙</span>
+        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-bold tracking-tight">{info?.project ?? "Polpo"}</h2>
-          <p className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/50 leading-none">
-            AI Factory
+          <h2 className="truncate text-sm font-bold tracking-tight">{info?.branding?.productName || DEFAULT_PRODUCT_NAME}</h2>
+          <p className="truncate text-[9px] font-mono uppercase text-muted-foreground/50 leading-none">
+            {info?.branding?.tagline || DEFAULT_PRODUCT_TAGLINE}
           </p>
         </div>
       </div>
@@ -523,12 +539,12 @@ function MoreNavigation({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
 
   return (
-    <aside className="flex w-14 shrink-0 flex-col overflow-y-auto border-r border-border/50 bg-muted/10 px-1.5 py-3 lg:w-44 lg:px-2.5">
+    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border/50 bg-muted/10 px-1.5 py-3 lg:w-44 lg:px-2.5">
       <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
         <MoreHorizontal className="h-4 w-4 text-primary" />
         <span className="text-xs font-semibold">More</span>
       </div>
-      <nav className="space-y-3" aria-label="More pages">
+      <nav className="space-y-3 pb-3" aria-label="More pages">
         {secondaryGroups.map(group => (
           <div key={group.label}>
             <p className="mb-1 hidden px-2 text-[9px] font-semibold uppercase text-muted-foreground/55 lg:block">
@@ -580,7 +596,12 @@ function RightPanelContent() {
   const title = resolvePageTitle(pathname);
   // Tool surfaces keep the platform tab strip but meet its edges so their
   // dense, resizable work areas get every available pixel.
-  const fullBleed = pathname === "/coding" || pathname.startsWith("/coding/") || pathname === "/browser" || pathname === "/apps" || pathname.startsWith("/apps/");
+  const fullBleed = pathname === "/coding"
+    || pathname.startsWith("/coding/")
+    || pathname === "/terminal"
+    || pathname === "/browser"
+    || pathname === "/agent-live"
+    || pathname.startsWith("/apps/");
   const showMoreNavigation = navMode === "more" && isSecondaryPath(pathname);
 
   return (
@@ -588,7 +609,7 @@ function RightPanelContent() {
       <PagesPanelHeader />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {showMoreNavigation && (
-          <div className="max-lg:hidden">
+          <div className="flex min-h-0 shrink-0 max-lg:hidden">
             <MoreNavigation pathname={pathname} />
           </div>
         )}
@@ -630,7 +651,9 @@ export function ChatFirstLayout() {
           <ChatPanelHeader />
           <ChatTabs />
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <ChatPage embedded />
+            <Suspense fallback={<ChatLoader />}>
+              <ChatPage embedded />
+            </Suspense>
           </div>
         </div>
       );
@@ -646,7 +669,9 @@ export function ChatFirstLayout() {
           <ChatPanelHeader />
           <ChatTabs />
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-            <ChatPage embedded />
+            <Suspense fallback={<ChatLoader />}>
+              <ChatPage embedded />
+            </Suspense>
           </div>
         </div>
       </ResizablePanel>
@@ -678,6 +703,9 @@ function resolvePageTitle(pathname: string): string {
     "/terminal": "Terminal",
     "/browser": "App Preview",
     "/apps": "Apps",
+    "/data": "Data",
+    "/views": "Views",
+    "/brain": "Company Brain",
     "/agent-live": "Browser Automation",
     "/config": "Configuration",
   };

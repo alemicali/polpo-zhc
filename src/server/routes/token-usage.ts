@@ -6,12 +6,22 @@ import {
   type TokenUsageRange,
 } from "../../stores/file-token-usage-store.js";
 
-const VALID_RANGES = new Set<TokenUsageRange>(["24h", "7d", "30d", "all"]);
-const RANGE_MS: Record<Exclude<TokenUsageRange, "all">, number> = {
+const VALID_RANGES = new Set<TokenUsageRange>(["today", "24h", "7d", "30d", "all"]);
+const RANGE_MS: Record<Exclude<TokenUsageRange, "all" | "today">, number> = {
   "24h": 24 * 60 * 60 * 1_000,
   "7d": 7 * 24 * 60 * 60 * 1_000,
   "30d": 30 * 24 * 60 * 60 * 1_000,
 };
+
+function rangeCutoff(range: TokenUsageRange): number {
+  if (range === "all") return 0;
+  if (range === "today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
+  }
+  return Date.now() - RANGE_MS[range];
+}
 
 export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => RunStore): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -20,7 +30,7 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
     const requested = c.req.query("range") as TokenUsageRange | undefined;
     const range = requested && VALID_RANGES.has(requested) ? requested : "7d";
     const records = await new FileTokenUsageStore(getPolpoDir()).list(range);
-    const cutoff = range === "all" ? 0 : Date.now() - RANGE_MS[range];
+    const cutoff = rangeCutoff(range);
     const taskEvents = (await readTaskTokenEvents(getPolpoDir()))
       .filter((event) => Date.parse(event.timestamp) >= cutoff);
 

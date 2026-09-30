@@ -149,6 +149,14 @@ function parseSettings(raw: any): PolpoSettings {
     logLevel: raw?.logLevel ?? DEFAULT_SETTINGS.logLevel,
   };
   if (raw?.taskTimeout != null) settings.taskTimeout = raw.taskTimeout;
+  if (raw?.branding && typeof raw.branding === "object") {
+    const branding = raw.branding as Record<string, unknown>;
+    settings.branding = {
+      productName: typeof branding.productName === "string" ? branding.productName.trim().slice(0, 80) : undefined,
+      tagline: typeof branding.tagline === "string" ? branding.tagline.trim().slice(0, 120) : undefined,
+      logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl.trim() : undefined,
+    };
+  }
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;
   if (raw?.orchestratorModel) settings.orchestratorModel = parseOrchestratorModel(raw.orchestratorModel);
   if (raw?.imageModel && typeof raw.imageModel === "string") settings.imageModel = raw.imageModel;

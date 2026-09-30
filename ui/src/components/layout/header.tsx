@@ -25,6 +25,7 @@ import { MobileNavSheet } from "./mobile-nav-sheet";
 import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
+import { BrandMark } from "@/components/shared/brand-mark";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -41,6 +42,10 @@ const titles: Record<string, string> = {
   "/playbooks": "Playbooks",
   "/files": "Files",
   "/config": "Configuration",
+  "/apps": "Apps",
+  "/data": "Data",
+  "/views": "Views",
+  "/brain": "Company Brain",
 };
 
 function resolveTitle(pathname: string): string {
@@ -177,7 +182,7 @@ export function Header() {
             <Menu className="h-5 w-5" />
           </Button>
         </MobileNavSheet>
-        <span className="text-lg">🐙</span>
+        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
         <span className="truncate text-sm font-bold tracking-tight">{title}</span>
       </div>
 

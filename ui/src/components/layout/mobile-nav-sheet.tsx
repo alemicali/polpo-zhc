@@ -20,6 +20,9 @@ import {
   Workflow,
   MousePointerClick,
   CalendarClock,
+  Database,
+  ChartNoAxesCombined,
+  BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -48,6 +51,9 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/apps", icon: Boxes, label: "Apps" },
+      { to: "/data", icon: Database, label: "Data" },
+      { to: "/views", icon: ChartNoAxesCombined, label: "Views" },
+      { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },
       { to: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },

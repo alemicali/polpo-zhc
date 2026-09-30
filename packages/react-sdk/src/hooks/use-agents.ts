@@ -2,7 +2,27 @@ import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useMutation } from "./use-mutation.js";
 import { readCached, writeCached } from "./use-swr-cache.js";
-import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest } from "@polpo-ai/sdk";
+import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest, PolpoClient, PolpoStore } from "@polpo-ai/sdk";
+
+const inflightAgentFetches = new WeakMap<PolpoStore, Promise<void>>();
+
+function fetchAgentData(client: PolpoClient, store: PolpoStore): Promise<void> {
+  const inflight = inflightAgentFetches.get(store);
+  if (inflight) return inflight;
+
+  const request = Promise.all([client.getAgents(), client.getTeams()]).then(([agents, teams]) => {
+    store.setAgents(agents);
+    store.setTeams(teams);
+    writeCached("agents", agents);
+    writeCached("teams", teams);
+  });
+  inflightAgentFetches.set(store, request);
+  const clear = () => {
+    if (inflightAgentFetches.get(store) === request) inflightAgentFetches.delete(store);
+  };
+  void request.then(clear, clear);
+  return request;
+}
 
 export interface UseAgentsReturn {
   agents: AgentConfig[];
@@ -67,11 +87,7 @@ export function useAgents(): UseAgentsReturn {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [a, t] = await Promise.all([client.getAgents(), client.getTeams()]);
-      store.setAgents(a);
-      store.setTeams(t);
-      writeCached("agents", a);
-      writeCached("teams", t);
+      await fetchAgentData(client, store);
     } catch (err) {
       setError(err as Error);
     }

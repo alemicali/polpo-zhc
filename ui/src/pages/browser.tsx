@@ -50,7 +50,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { sidebarActions, useChatState } from "@/hooks/chat-context";
+import { sidebarActions, useChatSessionState } from "@/hooks/chat-context";
 import { useTheme } from "@/hooks/use-theme";
 import {
   clearAppPreviewContext,
@@ -188,7 +188,7 @@ function screenshotFile(dataUrl: string): File {
 export function BrowserPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { resolved: platformTheme } = useTheme();
-  const { sessionId } = useChatState();
+  const { sessionId } = useChatSessionState();
   const previewContext = useAppPreviewContext();
   const requestedUrl = normalizePreviewUrl(searchParams.get("url") ?? "");
   const requestedCwd = searchParams.get("cwd") ?? undefined;

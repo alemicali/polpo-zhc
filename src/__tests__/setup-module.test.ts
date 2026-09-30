@@ -298,7 +298,15 @@ describe("auth-options", () => {
 
     // Should have OAuth options
     const oauthOptions = options.filter((o) => o.type === "oauth");
-    expect(oauthOptions).toHaveLength(3);
+    expect(oauthOptions.map((option) => option.id)).toEqual([
+      "anthropic",
+      "github-copilot",
+      "kimi-coding",
+      "openai-codex",
+      "openrouter",
+      "radius",
+      "xai",
+    ]);
 
     // Should have manual API key option
     const manualOption = options.find((o) => o.type === "api_key");
@@ -357,7 +365,15 @@ describe("oauth-flow", () => {
     const { getOAuthProviderList } = await import("../setup/oauth-flow.js");
     const list = getOAuthProviderList();
 
-    expect(list).toHaveLength(3);
+    expect(list.map((provider) => provider.id)).toEqual([
+      "anthropic",
+      "github-copilot",
+      "kimi-coding",
+      "openai-codex",
+      "openrouter",
+      "radius",
+      "xai",
+    ]);
 
     for (const p of list) {
       expect(p).toHaveProperty("id");
@@ -444,6 +460,24 @@ describe("models", () => {
         expect(models[i].cost.input).toBeGreaterThanOrEqual(models[i - 1].cost.input);
       }
     }
+  });
+
+  it("exposes the pi-ai 0.84 provider and flagship model additions", async () => {
+    const { listProviders, listModels } = await import("../llm/pi-client.js");
+    const providers = listProviders();
+    const modelSpecs = new Set(listModels().map((model) => `${model.provider}:${model.id}`));
+
+    expect(providers).toEqual(expect.arrayContaining([
+      "baseten",
+      "qwen-token-plan",
+      "qwen-token-plan-cn",
+      "qwen-token-plan-individual",
+    ]));
+    expect(modelSpecs.has("anthropic:claude-opus-5")).toBe(true);
+    expect(modelSpecs.has("openai-codex:gpt-5.6-sol")).toBe(true);
+    expect(modelSpecs.has("google:gemini-3.7-flash")).toBe(true);
+    expect(modelSpecs.has("xai:grok-4.6")).toBe(true);
+    expect(modelSpecs.has("zai:glm-5.3")).toBe(true);
   });
 
   it("exposes the current pi-ai model catalog", async () => {

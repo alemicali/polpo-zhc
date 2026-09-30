@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
+import type { AttachmentStore } from "@polpo-ai/core";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -116,7 +117,7 @@ const deleteSessionRoute = createRoute({
  * Chat session management routes.
  * Conversational AI is handled by /v1/chat/completions (see completions.ts).
  */
-export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
+export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?: AttachmentStore; emit?: (event: string, data: unknown) => void }): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // GET /chat/sessions — list chat sessions
@@ -144,7 +145,19 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
-    const allMessages = await sessionStore.getMessages(id);
+    const [rawMessages, attachments] = await Promise.all([
+      sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
+    ]);
+    const byMessage = new Map<string, typeof attachments>();
+    for (const attachment of attachments) {
+      if (!attachment.messageId) continue;
+      const list = byMessage.get(attachment.messageId) ?? [];
+      list.push(attachment);
+      byMessage.set(attachment.messageId, list);
+    }
+    const allMessages = rawMessages.map((message: any) => ({ ...message,
+      ...(byMessage.has(message.id) ? { attachments: byMessage.get(message.id) } : {}),
+    }));
     // Incremental sync: ?after=<msgId> returns only messages strictly newer
     // than that id. Big win for clients with a warm cache — they only pay
     // for the delta instead of the whole transcript (long chats persist
@@ -227,6 +240,7 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!touched) {
       return c.json({ ok: false, error: "Nothing to update", code: "VALIDATION_ERROR" }, 404);
     }
+    getDeps().emit?.("session:updated", { sessionId: id, ...(body.title !== undefined ? { title: body.title } : {}), ...(body.starred !== undefined ? { starred: body.starred } : {}) });
     return c.json({ ok: true, data: result }, 200);
   });
 
@@ -241,6 +255,7 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!deleted) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    getDeps().emit?.("session:deleted", { sessionId: id });
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
 
@@ -267,10 +282,12 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     }
 
     const sessionId = await sessionStore.create(body.title, body.agent);
+    getDeps().emit?.("session:created", { sessionId, title: body.title });
     let imported = 0;
 
     for (const msg of body.messages) {
       const added = await sessionStore.addMessage(sessionId, msg.role, msg.content);
+      getDeps().emit?.("message:added", { sessionId, messageId: added.id, role: msg.role });
       if ((msg.toolCalls && msg.toolCalls.length > 0) || (msg.segments && msg.segments.length > 0)) {
         await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any, msg.segments as any);
       }

@@ -5,12 +5,25 @@ import type { AppRegistryStore, CreateRegisteredApp, RegisteredApp } from "../co
 
 type RegistryFile = { version: 1; apps: RegisteredApp[] };
 
+export type AppChangeEvent = {
+  appId: string;
+  action: "created" | "updated" | "deleted" | "runtime" | "log";
+  resourceId?: string;
+  timestamp: string;
+};
+
+export type AppChangeEmitter = (event: AppChangeEvent) => void;
+
 export class FileAppRegistryStore implements AppRegistryStore {
   private readonly path: string;
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(polpoDir: string) {
+  constructor(polpoDir: string, private emitChange?: AppChangeEmitter) {
     this.path = join(polpoDir, "apps.json");
+  }
+
+  setEmitter(emitChange?: AppChangeEmitter): void {
+    if (emitChange) this.emitChange = emitChange;
   }
 
   async list(): Promise<RegisteredApp[]> {
@@ -31,6 +44,7 @@ export class FileAppRegistryStore implements AppRegistryStore {
       }
       data.apps.push(app);
     });
+    this.emit("created", app.id);
     return app;
   }
 
@@ -47,19 +61,28 @@ export class FileAppRegistryStore implements AppRegistryStore {
       data.apps[index] = next;
       updated = next;
     });
-    return updated;
+    const result = updated as RegisteredApp | null;
+    if (result) this.emit("updated", result.id);
+    return result;
   }
 
   async delete(id: string): Promise<boolean> {
     let deleted = false;
+    let appId = id;
     await this.mutate((data) => {
       const index = data.apps.findIndex((app) => app.id === id || app.slug === id);
       if (index >= 0) {
+        appId = data.apps[index]!.id;
         data.apps.splice(index, 1);
         deleted = true;
       }
     });
+    if (deleted) this.emit("deleted", appId);
     return deleted;
+  }
+
+  private emit(action: AppChangeEvent["action"], appId: string, resourceId?: string): void {
+    this.emitChange?.({ appId, action, resourceId, timestamp: new Date().toISOString() });
   }
 
   private async read(): Promise<RegistryFile> {

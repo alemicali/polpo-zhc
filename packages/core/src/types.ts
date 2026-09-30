@@ -292,7 +292,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*, data_*.
   // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
@@ -686,10 +686,21 @@ export interface PolpoConfig {
   providers?: Record<string, ProviderConfig>;
 }
 
+export interface BrandingConfig {
+  /** Primary product name shown in navigation chrome. */
+  productName?: string;
+  /** Short secondary label shown below the product name. */
+  tagline?: string;
+  /** HTTPS image URL or the managed `/api/v1/config/branding/logo` asset. */
+  logoUrl?: string;
+}
+
 export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
+  /** Instance-wide UI branding. Unlike themes, this is shared by every user. */
+  branding?: BrandingConfig;
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;

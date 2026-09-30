@@ -10,7 +10,7 @@ export interface UseSchedulesReturn {
   refetch: () => Promise<void>;
 }
 
-const SCHEDULE_EVENTS = ["schedule:created", "schedule:triggered", "schedule:completed"];
+const SCHEDULE_EVENTS = ["schedule:created", "schedule:triggered", "schedule:completed", "schedule:expired"];
 
 export function useSchedules(): UseSchedulesReturn {
   const { client } = usePolpoContext();
@@ -35,13 +35,13 @@ export function useSchedules(): UseSchedulesReturn {
 
   // Auto-refetch on schedule SSE events
   const { events } = useEvents(SCHEDULE_EVENTS);
-  const prevCountRef = useRef(events.length);
+  const latestEventId = events.at(-1)?.id;
+  const previousEventRef = useRef(latestEventId);
   useEffect(() => {
-    if (events.length !== prevCountRef.current) {
-      prevCountRef.current = events.length;
-      fetchSchedules();
-    }
-  }, [events.length, fetchSchedules]);
+    if (!latestEventId || previousEventRef.current === latestEventId) return;
+    previousEventRef.current = latestEventId;
+    void fetchSchedules();
+  }, [latestEventId, fetchSchedules]);
 
   return { schedules, isLoading, error, refetch: fetchSchedules };
 }

@@ -33,10 +33,9 @@ import type {
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
-import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../llm/pi-client.js";
+import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth } from "../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
 import type { Message } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
@@ -436,8 +435,7 @@ export class ChannelGateway {
       const settings = this.orchestrator.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const streamOpts = buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens);
+      const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;
@@ -449,7 +447,7 @@ export class ChannelGateway {
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         this.log("verbose", `Turn ${turn + 1}: sending ${messages.length} messages`);
-        const piStream = streamSimple(m, {
+        const piStream = await streamSimpleWithAuth(m, {
           systemPrompt: systemPrompt + peerContext,
           messages,
           tools: ALL_ORCHESTRATOR_TOOLS,

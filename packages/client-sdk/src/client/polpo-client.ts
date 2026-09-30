@@ -96,6 +96,7 @@ export interface PolpoClientConfig {
 export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> {
   /** Session ID assigned by the server. Available after the first `next()` call. */
   sessionId: string | null = null;
+  userMessageId: string | null = null;
 
   /**
    * Turn ID assigned by the server (`x-turn-id` header). Identifies this
@@ -202,6 +203,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
     // Capture session/turn IDs from response headers
     this.sessionId = res.headers.get("x-session-id");
+    this.userMessageId = res.headers.get("x-user-message-id");
     this.turnId = res.headers.get("x-turn-id");
 
     this.reader = res.body?.getReader() ?? null;
@@ -228,6 +230,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
           if (data === "[DONE]") return;
           try {
             const chunk = JSON.parse(data) as ChatCompletionChunk;
+            if ((chunk as any).error) throw new Error((chunk as any).error.message || "Stream failed");
             // Capture ask_user payload from the chunk
             const choice = chunk.choices[0];
             if (choice?.finish_reason === "ask_user" && choice.ask_user) {
@@ -270,8 +273,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
               this.emailPreview = choice.email_preview;
             }
             yield chunk;
-          } catch {
-            // skip malformed chunks
+          } catch (error) {
+            // A server error is terminal; only malformed JSON is ignorable.
+            if (!(error instanceof SyntaxError)) throw error;
           }
         }
       }

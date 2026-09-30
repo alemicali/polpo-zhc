@@ -17,6 +17,7 @@ describe("useTasks", () => {
   let wrapper: React.ComponentType<{ children: React.ReactNode }>;
 
   beforeEach(() => {
+    localStorage.clear();
     const tasks = [
       fakeTask({ id: "t1", title: "Task 1" }),
       fakeTask({ id: "t2", title: "Task 2" }),

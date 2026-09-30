@@ -534,7 +534,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   const { cwd, allowedPaths, browserSession } = options;
   const tools: AgentTool<any>[] = [];
 
-  // Expand wildcards in allowedTools once — e.g. "browser_*" → all 18 browser tool names.
+  // Expand wildcards in allowedTools once — e.g. "browser_*" → all browser tool names.
   // This way individual factory functions don't need wildcard awareness.
   const rawAllowed = options.allowedTools;
   const allowedTools = rawAllowed

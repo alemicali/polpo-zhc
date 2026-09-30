@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Icon } from "@iconify/react";
 import { ensureVscodeIconsPack } from "@/lib/iconify-bootstrap";
 
@@ -40,7 +39,7 @@ function iconName(path: string): string {
     "postcss.config.js": "vscode-icons:file-type-postcss",
     "next.config.js": "vscode-icons:file-type-next",
     "next.config.ts": "vscode-icons:file-type-next",
-    "readme.md": "vscode-icons:file-type-readme",
+    "readme.md": "vscode-icons:file-type-markdown",
     "license": "vscode-icons:file-type-license",
     "makefile": "vscode-icons:file-type-makefile",
   };
@@ -49,7 +48,7 @@ function iconName(path: string): string {
   // Multi-segment extensions (e.g. ".d.ts", ".test.ts")
   if (lower.endsWith(".d.ts")) return "vscode-icons:file-type-typescriptdef";
   if (lower.endsWith(".test.ts") || lower.endsWith(".spec.ts")) return "vscode-icons:file-type-testts";
-  if (lower.endsWith(".test.tsx") || lower.endsWith(".spec.tsx")) return "vscode-icons:file-type-reacttest";
+  if (lower.endsWith(".test.tsx") || lower.endsWith(".spec.tsx")) return "vscode-icons:file-type-reactts";
   if (lower.endsWith(".test.js") || lower.endsWith(".spec.js")) return "vscode-icons:file-type-testjs";
 
   // Single-segment extension lookup
@@ -120,7 +119,7 @@ function iconName(path: string): string {
     mp4: "vscode-icons:file-type-video",
     webm: "vscode-icons:file-type-video",
     mov: "vscode-icons:file-type-video",
-    lock: "vscode-icons:file-type-lock",
+    lock: "vscode-icons:default-file",
     log: "vscode-icons:file-type-log",
     csv: "vscode-icons:file-type-excel",
     txt: "vscode-icons:file-type-text",
@@ -135,15 +134,7 @@ function iconName(path: string): string {
 }
 
 export function FileIcon({ path, className }: { path: string; className?: string }) {
-  // Lazy-load the (~3.5 MB) vscode-icons pack on first render. While the
-  // fetch is in-flight, render an empty span of the same size to avoid
-  // layout jumps. Subsequent FileIcon mounts share the cached promise.
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    ensureVscodeIconsPack().then(() => { if (!cancelled) setReady(true); });
-    return () => { cancelled = true; };
-  }, []);
-  if (!ready) return <span className={className} aria-hidden />;
+  // Registration is synchronous and contains only the icon subset used here.
+  ensureVscodeIconsPack();
   return <Icon icon={iconName(path)} className={className} />;
 }

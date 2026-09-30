@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   browserSessionCommandArgs,
+  browserVncCommandArgs,
   browserViewportCommandArgs,
   rewriteDashboardHtml,
+  shouldPauseVncUpstream,
+  shouldResumeVncUpstream,
+  VNC_WS_HIGH_WATER_MARK,
+  VNC_WS_LOW_WATER_MARK,
 } from "../server/routes/browser-dashboard.js";
 
 describe("browser dashboard proxy", () => {
@@ -67,5 +72,31 @@ describe("native Agent Live commands", () => {
     expect(browserViewportCommandArgs("orchestrator", 200, 720)).toBeNull();
     expect(browserViewportCommandArgs("orchestrator", 2560, 1440)).toBeNull();
     expect(browserViewportCommandArgs("orchestrator", 960, 540, 3)).toBeNull();
+  });
+
+  it("binds TigerVNC to localhost with a low-latency update budget", () => {
+    const args = browserVncCommandArgs(":99", 5900, "tigervnc");
+    expect(args).toContain("-localhost=1");
+    expect(args).toContain("-AlwaysShared=1");
+    expect(args).toContain("-FrameRate=30");
+    expect(args).toContain("-PollingCycle=5");
+    expect(args).toContain("-MaxProcessorUsage=80");
+    expect(browserVncCommandArgs(":99", 5900, "tigervnc", "1280x720+0+0"))
+      .toEqual(expect.arrayContaining(["-Geometry", "1280x720+0+0"]));
+    expect(browserVncCommandArgs(":99", 5900, "x11vnc")).toContain("-threads");
+    expect(browserVncCommandArgs(":99", 5900, "x11vnc", "1280x720+0+0"))
+      .toEqual(expect.arrayContaining(["-clip", "1280x720+0+0"]));
+    expect(browserVncCommandArgs("example.com:0", 5900)).toBeNull();
+    expect(browserVncCommandArgs(":99", 80)).toBeNull();
+    expect(browserVncCommandArgs(":99", 5900, "tigervnc", "../../bad")).toBeNull();
+  });
+
+  it("applies backpressure before the VNC websocket builds a stale frame queue", () => {
+    expect(VNC_WS_HIGH_WATER_MARK).toBe(512 * 1024);
+    expect(VNC_WS_LOW_WATER_MARK).toBe(128 * 1024);
+    expect(shouldPauseVncUpstream(VNC_WS_HIGH_WATER_MARK - 1)).toBe(false);
+    expect(shouldPauseVncUpstream(VNC_WS_HIGH_WATER_MARK)).toBe(true);
+    expect(shouldResumeVncUpstream(VNC_WS_LOW_WATER_MARK)).toBe(true);
+    expect(shouldResumeVncUpstream(VNC_WS_LOW_WATER_MARK + 1)).toBe(false);
   });
 });

@@ -743,10 +743,17 @@ export interface CustomModelDef {
   maxTokens?: number;
 }
 
+export interface BrandingConfig {
+  productName?: string;
+  tagline?: string;
+  logoUrl?: string;
+}
+
 export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
+  branding?: BrandingConfig;
   taskTimeout?: number;
   staleThreshold?: number;
   defaultRetryPolicy?: RetryPolicy;
@@ -1050,6 +1057,7 @@ export interface UpdateSettingsRequest {
   orchestratorModel?: string | ModelConfig;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
+  branding?: BrandingConfig;
 }
 
 // === SSE ===
@@ -1221,6 +1229,7 @@ export interface ChatSession {
 }
 
 export interface ChatMessage {
+  attachments?: Array<{ id: string; sessionId: string; messageId?: string; filename: string; mimeType: string; size: number; path: string; createdAt: string }>;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -1248,7 +1257,7 @@ export interface ImageUrlContentPart {
   };
 }
 
-export type ContentPart = TextContentPart | ImageUrlContentPart;
+export type ContentPart = TextContentPart | ImageUrlContentPart | { type: "file"; file: { filename: string; file_data: string } };
 
 export interface ChatCompletionMessage {
   role: "system" | "user" | "assistant";

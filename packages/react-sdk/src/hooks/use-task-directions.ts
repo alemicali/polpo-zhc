@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useEvents } from "./use-events.js";
 import type {
   SendTaskDirectionRequest,
   SendTaskDirectionResult,
@@ -20,6 +21,7 @@ export function useTaskDirections(
   options?: { pollIntervalMs?: number },
 ): UseTaskDirectionsReturn {
   const { client } = usePolpoContext();
+  const { events } = useEvents(["task:direction"], 1);
   const [directions, setDirections] = useState<TaskDirection[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -66,6 +68,11 @@ export function useTaskDirections(
   }, [client, taskId]);
 
   useEffect(() => { void refetch(); }, [refetch]);
+  const latestEvent = events.at(-1);
+  useEffect(() => {
+    const eventTaskId = (latestEvent?.data as { taskId?: string } | undefined)?.taskId;
+    if (eventTaskId === taskId) void refetch();
+  }, [latestEvent, refetch, taskId]);
   useEffect(() => {
     if (!taskId || pollInterval <= 0) return;
     const timer = setInterval(() => { void refetch(); }, pollInterval);

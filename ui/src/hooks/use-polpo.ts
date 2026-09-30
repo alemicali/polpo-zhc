@@ -298,6 +298,7 @@ interface SessionPendingState {
 
 export function useChat() {
   const { client } = usePolpo();
+  const { events: messageEvents } = useEvents(["message:added"], 50);
   const { events: backgroundWaitEvents } = useEvents([
     "background-wait:completed",
     "background-wait:failed",
@@ -348,6 +349,8 @@ export function useChat() {
    */
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const lastBackgroundWaitEventRef = useRef<string | undefined>(undefined);
+  const lastMessageEventRef = useRef<string | undefined>(undefined);
+  const remoteRefreshVersionRef = useRef(0);
 
   useEffect(() => {
     activeSessionKeyRef.current = activeSessionKey;
@@ -663,7 +666,7 @@ export function useChat() {
       const serverMsg = m as ChatMessageWithQuestions;
       const hasText = m.content.trim().length > 0;
       const hasToolCalls = !!serverMsg.toolCalls && serverMsg.toolCalls.length > 0;
-      return hasText || hasToolCalls;
+      return hasText || hasToolCalls || !!m.attachments?.length;
     })
     .map((m) => {
       // Drop the server's `segments` from the spread — the SDK shape
@@ -703,7 +706,7 @@ export function useChat() {
 
   const conversationFromMessages = useCallback((msgs: ChatMessageWithQuestions[]): ChatCompletionMessage[] => msgs.map((m) => ({
     role: m.role as "user" | "assistant",
-    content: m.content,
+    content: [m.content, ...(m.attachments ?? []).map(a => `[file: ${a.path}]`)].filter(Boolean).join("\n\n"),
   })), []);
 
   const applyServerMessages = useCallback((key: string, raw: ChatMessage[]) => {
@@ -987,6 +990,29 @@ export function useChat() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [applyServerMessages, sessionId, getMessages, refetchSessions]);
 
+  // Another device can update an already-open or warm-cached conversation.
+  // Invalidate those snapshots and reconcile the visible one without ever
+  // replacing a locally running stream with a partial server snapshot.
+  useEffect(() => {
+    const latest = messageEvents.at(-1);
+    if (!latest || latest.id === lastMessageEventRef.current) return;
+    const previousIndex = messageEvents.findIndex((event) => event.id === lastMessageEventRef.current);
+    const added = messageEvents.slice(previousIndex + 1);
+    lastMessageEventRef.current = latest.id;
+    const changedSessions = new Set(added.map((event) =>
+      (event.data as { sessionId?: string } | undefined)?.sessionId,
+    ).filter((id): id is string => !!id));
+    for (const id of changedSessions) loadedSessionsRef.current.delete(id);
+    if (!sessionId || !changedSessions.has(sessionId)) return;
+    const version = ++remoteRefreshVersionRef.current;
+    if (streamsBySessionRef.current.has(sessionId) || resumeAbortBySessionRef.current.has(sessionId)) return;
+    void getMessages(sessionId).then((raw) => {
+      if (version !== remoteRefreshVersionRef.current) return;
+      if (streamsBySessionRef.current.has(sessionId) || resumeAbortBySessionRef.current.has(sessionId)) return;
+      applyServerMessages(sessionId, raw);
+    }).catch(() => { /* focus or the next event retries reconciliation */ });
+  }, [applyServerMessages, getMessages, messageEvents, sessionId]);
+
   useEffect(() => {
     const latest = backgroundWaitEvents.at(-1);
     if (!latest || latest.id === lastBackgroundWaitEventRef.current) return;
@@ -1007,8 +1033,10 @@ export function useChat() {
 
   // Core streaming function (shared between send and answerQuestions)
   const streamCompletion = useCallback(
-    async (assistantId: string, options: { sessionKey: string; requestSessionId?: string; agent?: string | null }) => {
+    async (assistantId: string, options: { sessionKey: string; requestSessionId?: string; agent?: string | null; userMessageId?: string; onAccepted?: () => void }) => {
       let streamSessionKey = options.sessionKey;
+      const requestHistory = conversationBySessionRef.current.get(streamSessionKey) ?? [];
+      const requestContent = [...requestHistory].reverse().find(m => m.role === "user")?.content;
       const stream = client.chatCompletionsStream({
         messages: conversationBySessionRef.current.get(streamSessionKey) ?? [],
         sessionId: options.requestSessionId,
@@ -1131,6 +1159,7 @@ export function useChat() {
         nextFinalSlot = widgets.length;
       };
 
+      let receiptRequested = false;
       const syncServerIds = () => {
         const nextSessionId = stream.sessionId;
         if (nextSessionId && nextSessionId !== streamSessionKey) {
@@ -1144,9 +1173,33 @@ export function useChat() {
         if (stream.turnId) {
           turnIdsBySessionRef.current.set(streamSessionKey, stream.turnId);
         }
+        if (nextSessionId && options.userMessageId && !receiptRequested) {
+          receiptRequested = true;
+          const key = streamSessionKey;
+          void getMessages(nextSessionId).then(raw => {
+            const savedUser = raw.find(m => m.id === stream.userMessageId);
+            if (!savedUser?.attachments?.length) return;
+            updateSessionMessages(key, prev => prev.map(m => m.id === options.userMessageId ? { ...m, attachments: savedUser.attachments } : m));
+            // Drop historical base64 once a durable reference is available.
+            const history = conversationBySessionRef.current.get(key) ?? [];
+            const index = history.findIndex(m => m.role === "user" && m.content === requestContent);
+            if (index >= 0 && Array.isArray(history[index].content)) {
+              const text = [savedUser.content, ...savedUser.attachments.map(a => `[file: ${a.path}]`)].filter(Boolean).join("\n\n");
+              setConversation(key, history.map((m, i) => i === index ? { ...m, content: text } : m));
+            }
+          }).catch(() => { /* A later history refresh will confirm the attachments. */ });
+        }
       };
 
+      let accepted = false;
       for await (const chunk of stream) {
+        // The server persists the user message/attachments before emitting
+        // the initial role chunk. Acknowledge before migrating a new session
+        // so its outgoing composer draft cannot be saved and resurrected.
+        if (!accepted) {
+          accepted = true;
+          options.onAccepted?.();
+        }
         syncServerIds();
         const choice = chunk.choices[0];
         const delta = choice?.delta;
@@ -1496,13 +1549,13 @@ export function useChat() {
       refetchSessions();
       return fullContent;
     },
-    [appendConversation, clearSessionPending, client, migrateSessionKey, refetchSessions, setSessionId, setSessionPending, setSessionStreaming, updateSessionMessages]
+    [appendConversation, clearSessionPending, client, migrateSessionKey, refetchSessions, setSessionId, setSessionPending, setSessionStreaming, updateSessionMessages, getMessages, setConversation]
   );
 
   const appendUserAndStream = useCallback(async (
     userContent: string,
     conversationContent: ChatCompletionMessage["content"] = userContent,
-    opts?: { forceNew?: boolean },
+    opts?: { forceNew?: boolean; onAccepted?: () => void },
   ) => {
     const sessionKey = activeSessionKeyRef.current;
     const requestSessionId = opts?.forceNew || isLocalNewSessionKey(sessionKey)
@@ -1515,6 +1568,9 @@ export function useChat() {
       role: "user",
       content: userContent,
       ts: new Date().toISOString(),
+      ...(Array.isArray(conversationContent) ? { attachments: conversationContent.flatMap((part, i) => part.type === "image_url"
+        ? [{ id: `pending-${Date.now()}-${i}`, sessionId: sessionKey, filename: `photo-${i}.png`, mimeType: "image/png", size: 0, path: "", createdAt: new Date().toISOString(), previewUrl: part.image_url.url }]
+        : part.type === "file" ? [{ id: `pending-${Date.now()}-${i}`, sessionId: sessionKey, filename: part.file.filename, mimeType: "application/octet-stream", size: 0, path: "", createdAt: new Date().toISOString(), previewUrl: part.file.file_data }] : []) } : {}),
     };
     const assistantId = `temp-${Date.now()}-a`;
     updateSessionMessages(sessionKey, (prev) => [
@@ -1525,7 +1581,7 @@ export function useChat() {
     appendConversation(sessionKey, { role: "user", content: conversationContent });
 
     try {
-      await streamCompletion(assistantId, { sessionKey, requestSessionId, agent });
+      await streamCompletion(assistantId, { sessionKey, requestSessionId, agent, userMessageId: userMsg.attachments?.length ? userMsg.id : undefined, onAccepted: opts?.onAccepted });
     } catch (e) {
       const stream = streamsBySessionRef.current.get(sessionKey);
       if (stream?.aborted) {
@@ -1540,6 +1596,7 @@ export function useChat() {
         );
       }
       setSessionStreaming(sessionKey, false);
+      throw e;
     }
   }, [appendConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
 
@@ -1576,7 +1633,7 @@ export function useChat() {
 
   // Send a message (streaming). Optionally attach images (data URLs).
   const send = useCallback(
-    async (message: string, images?: { url: string; mimeType: string }[], context?: string) => {
+    async (message: string, images?: { url: string; mimeType: string; filename?: string }[], context?: string, options?: { onAccepted?: () => void }) => {
       const sessionKey = activeSessionKeyRef.current;
       clearSessionPending(sessionKey);
       const modelMessage = context
@@ -1588,16 +1645,16 @@ export function useChat() {
         images && images.length > 0
           ? [
               { type: "text" as const, text: modelMessage },
-              ...images.map((img) => ({
+              ...images.map((img) => img.mimeType.startsWith("image/") ? ({
                 type: "image_url" as const,
                 image_url: { url: img.url },
-              })),
+              }) : ({ type: "file" as const, file: { filename: img.filename || "document.bin", file_data: img.url } })),
             ]
           : modelMessage;
 
       const forceNew = wantsNewSessionRef.current;
       wantsNewSessionRef.current = false;
-      await appendUserAndStream(message, content, { forceNew });
+      await appendUserAndStream(message, content, { forceNew, onAccepted: options?.onAccepted });
     },
     [appendUserAndStream, clearSessionPending]
   );
@@ -2087,6 +2144,21 @@ export function useAsyncAction<T extends unknown[]>(
 
 // ── useProjectInfo ──
 
+export interface InstanceBranding {
+  productName?: string;
+  tagline?: string;
+  logoUrl?: string;
+}
+
+const BRANDING_CHANGE_EVENT = "polpo:branding-change";
+type ProjectInfo = { project: string; version?: string; branding?: InstanceBranding };
+const projectInfoCache = new WeakMap<object, ProjectInfo>();
+const projectInfoRequests = new WeakMap<object, Promise<ProjectInfo | null>>();
+
+export function notifyBrandingChanged(): void {
+  window.dispatchEvent(new Event(BRANDING_CHANGE_EVENT));
+}
+
 function inferProjectNameFromConfig(value: unknown): string | null {
   const config = value as {
     project?: unknown;
@@ -2116,33 +2188,69 @@ function inferProjectNameFromConfig(value: unknown): string | null {
   return null;
 }
 
+function loadProjectInfo(client: ReturnType<typeof usePolpo>["client"], force = false): Promise<ProjectInfo | null> {
+  const key = client as object;
+  if (force) projectInfoCache.delete(key);
+  const cached = projectInfoCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const inflight = projectInfoRequests.get(key);
+  if (inflight) return inflight;
+
+  const request = Promise.all([
+    client.getState().catch(() => null),
+    client.getConfig().catch(() => null),
+    client.getHealth().catch(() => null),
+  ]).then(([state, config, health]) => {
+    const project = inferProjectNameFromConfig(state) ?? inferProjectNameFromConfig(config);
+    if (!project) return null;
+    const branding = (config?.settings as { branding?: InstanceBranding } | undefined)?.branding;
+    const value = { project, version: health?.version, branding };
+    projectInfoCache.set(key, value);
+    setAppearanceScope({ project });
+    return value;
+  });
+  projectInfoRequests.set(key, request);
+  const clear = () => {
+    if (projectInfoRequests.get(key) === request) projectInfoRequests.delete(key);
+  };
+  void request.then(clear, clear);
+  return request;
+}
+
 export function useProjectInfo() {
   const { client } = usePolpo();
-  const [info, setInfo] = useState<{ project: string; version?: string } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { events: configEvents } = useEvents(["config:reloaded"], 1);
+  const [info, setInfo] = useState<ProjectInfo | null>(() => projectInfoCache.get(client as object) ?? null);
+  const [loading, setLoading] = useState(() => !projectInfoCache.has(client as object));
+
+  const refresh = useCallback(async (force = false) => {
+    const value = await loadProjectInfo(client, force);
+    if (value) setInfo(value);
+    setLoading(false);
+  }, [client]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    Promise.all([
-      client.getState().catch(() => null),
-      client.getConfig().catch(() => null),
-      client.getHealth().catch(() => null),
-    ]).then(([state, config, health]) => {
-      if (cancelled) return;
-      const project = inferProjectNameFromConfig(state) ?? inferProjectNameFromConfig(config);
-      if (project) {
-        setAppearanceScope({ project });
-        setInfo({ project, version: health?.version });
-      }
+    let active = true;
+    void loadProjectInfo(client).then((value) => {
+      if (active && value) setInfo(value);
     }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (active) setLoading(false);
     });
-
+    const onBrandingChanged = () => void refresh(true);
+    window.addEventListener(BRANDING_CHANGE_EVENT, onBrandingChanged);
     return () => {
-      cancelled = true;
+      active = false;
+      window.removeEventListener(BRANDING_CHANGE_EVENT, onBrandingChanged);
     };
-  }, [client]);
+  }, [client, refresh]);
+
+  const latestConfigEventId = configEvents.at(-1)?.id;
+  const handledConfigEventRef = useRef(latestConfigEventId);
+  useEffect(() => {
+    if (!latestConfigEventId || handledConfigEventRef.current === latestConfigEventId) return;
+    handledConfigEventRef.current = latestConfigEventId;
+    void refresh(true);
+  }, [latestConfigEventId, refresh]);
 
   return { info, loading };
 }
