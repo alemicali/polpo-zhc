@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
@@ -96,5 +96,15 @@ describe("syncTelegramBotProfile", () => {
 
     const retry = okFetch();
     expect((await sync(retry)).photo).toBe("updated");
+  });
+});
+
+describe("syncTelegramBotProfile — shared state file", () => {
+  it("keeps every bot's entry when several bots sync concurrently", async () => {
+    const statePath = join(dir, "profiles.json");
+    const run = (botToken: string) => syncTelegramBotProfile({ botToken, agent: agent(), roots: [dir], statePath, fetch: okFetch() });
+    await Promise.all([run("1:a"), run("2:b"), run("3:c")]);
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(Object.keys(state)).toHaveLength(3);
   });
 });

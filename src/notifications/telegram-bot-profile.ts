@@ -120,7 +120,9 @@ export async function syncTelegramBotProfile(opts: BotProfileSyncOptions): Promi
     }
   }
 
-  state[botKey] = current;
-  try { writeFileSync(opts.statePath, JSON.stringify(state, null, 2)); } catch { /* best effort */ }
+  // Re-read before writing: several bots sync concurrently and share this file.
+  const latest = loadState(opts.statePath);
+  latest[botKey] = current;
+  try { writeFileSync(opts.statePath, JSON.stringify(latest, null, 2)); } catch { /* best effort */ }
   return result;
 }
