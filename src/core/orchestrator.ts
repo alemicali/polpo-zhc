@@ -148,6 +148,8 @@ export class Orchestrator extends TypedEmitter {
   private dedicatedTelegramPollers: TelegramCallbackPoller[] = [];
   /** Gateways by channel name; the primary one is also exposed as channelGateway. */
   private channelGateways = new Map<string, ChannelGateway>();
+  /** @usernames of running Telegram bots by channel name (getMe at start), for the chat prompt. */
+  private telegramBotUsernames = new Map<string, string>();
   /** Bots dedicated to one agent, refreshed (menu, photo, description) when that agent changes. */
   private dedicatedTelegramBots = new Map<string, { agent: string; botToken: string; poller: TelegramCallbackPoller; gateway: ChannelGateway }>();
   private whatsappBridge?: WhatsAppBridge;
@@ -187,6 +189,7 @@ export class Orchestrator extends TypedEmitter {
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
     return channelName ? this.channelGateways.get(channelName) : this.channelGateway;
   }
+  getTelegramBotUsernames(): Map<string, string> { return this.telegramBotUsernames; }
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
@@ -1510,6 +1513,7 @@ export class Orchestrator extends TypedEmitter {
     this.stopDedicatedTelegramPollers();
     this.channelGateways.clear();
     this.dedicatedTelegramBots.clear();
+    this.telegramBotUsernames.clear();
 
     const channels = this.config.settings.notifications?.channels ?? {};
     const telegramKeys = Object.keys(channels).filter(k => channels[k]?.type === "telegram");
@@ -1579,6 +1583,10 @@ export class Orchestrator extends TypedEmitter {
       }
 
       poller.start(2000); // Poll every 2 seconds
+      void fetch(`https://api.telegram.org/bot${botToken}/getMe`)
+        .then(r => r.json() as Promise<{ ok?: boolean; result?: { username?: string } }>)
+        .then(me => { if (me.ok && me.result?.username) this.telegramBotUsernames.set(key, me.result.username); })
+        .catch(() => {});
       if (isPrimary) this.telegramPoller = poller;
       else this.dedicatedTelegramPollers.push(poller);
 

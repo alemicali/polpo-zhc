@@ -68,6 +68,63 @@ function buildConnectedProviderGuidance(orchestratorModel: string | undefined, a
 }
 
 /** Build the system prompt for chat mode responses */
+/** Minimal channel shape needed to describe how people reach this instance. */
+export interface ReachabilityChannel {
+  type: string;
+  gateway?: { enableInbound?: boolean; agent?: string; dmPolicy?: string };
+}
+
+/**
+ * "How people reach you" — generated from the configured channels so the
+ * orchestrator can answer "how do I contact Polpo?" accurately and never
+ * invents inbound webhooks or email intake that do not exist.
+ */
+export function buildReachabilitySection(
+  channels: Record<string, ReachabilityChannel>,
+  botUsernames: Map<string, string> = new Map(),
+): string {
+  const entries = Object.entries(channels);
+  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp") && ch.gateway?.enableInbound);
+  const outboundOnly = entries.filter(([, ch]) => !inbound.some(([, i]) => i === ch));
+
+  const describeInbound = ([name, ch]: [string, ReachabilityChannel]) => {
+    const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
+    const target = ch.gateway?.agent
+      ? `dedicated to agent ${ch.gateway.agent} (every message goes to it)`
+      : "talks to you; /agent NAME (or the /agent buttons) switches to an agent, /polpo comes back";
+    const access = ch.gateway?.dmPolicy === "open" ? "open to anyone" : "authorized people only (pairing or invite link)";
+    return `- ${ch.type === "telegram" ? "Telegram" : "WhatsApp"} ${handle}: ${target}; ${access}. Accepts text, photos, documents, voice notes, audio and video.`;
+  };
+  const outboundPurpose: Record<string, string> = {
+    webhook: "Polpo POSTs notifications to an external URL",
+    email: "Polpo sends notification emails",
+    slack: "Polpo posts notifications to Slack",
+    push: "Polpo sends browser push notifications",
+    "expo-push": "Polpo sends mobile push notifications",
+    telegram: "Polpo sends notifications to Telegram (inbound disabled)",
+    whatsapp: "Polpo sends notifications to WhatsApp (inbound disabled)",
+  };
+
+  return [
+    ``,
+    `## How people reach you`,
+    ``,
+    `Answer questions like "how do I contact Polpo / an agent?" from this list only.`,
+    ``,
+    `**Inbound — ways to talk to you or your agents:**`,
+    `- Web chat of this instance (talk to you, or pick an agent).`,
+    ...inbound.map(describeInbound),
+    `- HTTP API of this Polpo server, for other programs: OpenAI-compatible \`POST /v1/chat/completions\` (add \`"agent": "<name>"\` to talk to one agent) plus REST under \`/api/v1\` (tasks, missions, agents, sessions). Requests need the instance's API key when one is configured.`,
+    ``,
+    `**Outbound only — you send through these, nobody can reach you through them:**`,
+    ...(outboundOnly.length > 0
+      ? outboundOnly.map(([name, ch]) => `- "${name}" (${ch.type}): ${outboundPurpose[ch.type] ?? "outbound notifications"}.`)
+      : [`- none configured`]),
+    ``,
+    `Webhook channels are outbound: Polpo calls the URL, it does not expose one. There is no email intake: forwarding an email to Polpo does nothing. An agent with email_* tools and IMAP credentials can read a mailbox, but only when asked or on a schedule.`,
+  ].join("\n");
+}
+
 export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
@@ -1684,6 +1741,12 @@ export async function buildChatSystemPrompt(
       `teach the agent specific workflows and can be added later when the pool is available.`,
     );
   }
+
+  // ── Reachability ──
+  parts.push(buildReachabilitySection(
+    (config?.settings?.notifications?.channels ?? {}) as Record<string, ReachabilityChannel>,
+    orchestrator.getTelegramBotUsernames?.(),
+  ));
 
   // ── Models ──
   parts.push(
