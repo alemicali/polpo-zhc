@@ -1564,8 +1564,10 @@ export class Orchestrator extends TypedEmitter {
         });
         gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
-        // Menu entries depend on the agent's suggestions (async); registered as soon as they resolve.
-        void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
+        // The main bot's menu is static; dedicated bots get theirs (agent suggestions) once agents are loaded.
+        if (!channelConfig.gateway.agent) {
+          void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
+        }
         this.channelGateways.set(key, gateway);
         if (isPrimary) this.channelGateway = gateway;
 
@@ -1584,7 +1586,7 @@ export class Orchestrator extends TypedEmitter {
       const gateway = this.channelGateways.get(key);
       if (dedicatedAgent && gateway) {
         this.dedicatedTelegramBots.set(key, { agent: dedicatedAgent, botToken, poller, gateway });
-        void this.syncDedicatedBotProfile(key);
+        this.scheduleDedicatedBotRefresh(key);
       }
     }
 
@@ -1594,9 +1596,38 @@ export class Orchestrator extends TypedEmitter {
   /** Re-register menus and re-sync profiles of the bots dedicated to `agentName`. */
   private refreshDedicatedTelegramBots(agentName: string): void {
     for (const [key, bot] of this.dedicatedTelegramBots) {
-      if (bot.agent !== agentName) continue;
-      void bot.gateway.menuCommands().then(commands => bot.poller.setMenuCommands(commands)).catch(() => {});
-      void this.syncDedicatedBotProfile(key);
+      if (bot.agent === agentName) void this.refreshDedicatedBot(key);
+    }
+  }
+
+  /**
+   * Telegram pollers start during init, possibly before agents are loaded:
+   * retry until the dedicated agent is visible (0s, 5s, 15s, 30s, 60s).
+   */
+  private scheduleDedicatedBotRefresh(key: string, delays = [0, 5_000, 15_000, 30_000, 60_000]): void {
+    const [delay, ...rest] = delays;
+    setTimeout(() => {
+      void this.refreshDedicatedBot(key).then(done => {
+        if (done || !this.dedicatedTelegramBots.has(key)) return;
+        if (rest.length > 0) this.scheduleDedicatedBotRefresh(key, rest);
+        else console.error(`[polpo/telegram] "${key}": agent "${this.dedicatedTelegramBots.get(key)?.agent}" not found — menu and profile not synced`);
+      });
+    }, delay).unref?.();
+  }
+
+  /** Menu (agent suggestions) + profile of one dedicated bot. Returns false if the agent is not loaded yet. */
+  private async refreshDedicatedBot(key: string): Promise<boolean> {
+    const bot = this.dedicatedTelegramBots.get(key);
+    if (!bot) return true;
+    try {
+      const agents = await this.getAgents();
+      if (!agents.some(a => a.name === bot.agent)) return false;
+      bot.poller.setMenuCommands(await bot.gateway.menuCommands());
+      await this.syncDedicatedBotProfile(key);
+      return true;
+    } catch (err) {
+      console.error(`[polpo/telegram] "${key}" refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 
