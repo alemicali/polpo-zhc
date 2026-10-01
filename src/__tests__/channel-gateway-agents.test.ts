@@ -518,3 +518,56 @@ describe("inboundMediaOf (Telegram)", () => {
     expect(inboundMediaOf({ ...base, text: "ciao" })).toEqual([]);
   });
 });
+
+// ── Command menu and agent picker ───────────────────────
+
+import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+
+describe("ChannelGateway — command menu and agent picker", () => {
+  it("/agent without a name replies with one button per agent plus Polpo, two per row", async () => {
+    const { gateway } = setup();
+    const reply = await gateway.handleMessageReply({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "/agent" });
+
+    expect(reply?.buttons).toEqual([
+      [{ text: "🐙 Polpo ✓", data: "agent:__polpo__" }, { text: "backend", data: "agent:backend" }],
+      [{ text: "growth", data: "agent:growth" }],
+    ]);
+  });
+
+  it("marks the current agent in the picker", async () => {
+    const { gateway, send } = setup();
+    await send("/agent backend");
+    const reply = await gateway.handleMessageReply({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "/agent" });
+    expect(reply?.buttons?.flat().map(b => b.text)).toEqual(["🐙 Polpo", "backend ✓", "growth"]);
+  });
+
+  it("a picker button switches agent, and the Polpo button goes back", async () => {
+    const { gateway, send, runner } = setup();
+    const msg = { channel: "telegram" as const, externalId: "7", chatId: "chat-7" };
+
+    expect(await gateway.handleMenuCallback("agent", "growth", msg)).toContain("now talking to growth");
+    await send("hello");
+    expect(runner!.mock.calls[0][0].agent).toBe("growth");
+
+    expect(await gateway.handleMenuCallback("agent", "__polpo__", msg)).toContain("Polpo (orchestrator)");
+  });
+
+  it("ignores picker buttons from unauthorized peers", async () => {
+    const { gateway } = setup({ allowed: false });
+    expect(await gateway.handleMenuCallback("agent", "backend", { channel: "telegram", externalId: "7", chatId: "chat-7" })).toBeUndefined();
+  });
+
+  it("exposes the full menu on the main bot and a short one on dedicated bots", () => {
+    const main = setup().gateway.menuCommands().map(c => c.command);
+    expect(main).toEqual(["agent", "polpo", "new", "status", "tasks", "missions", "agents", "approve", "help"]);
+    expect(setup({ gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agent: "backend" } }).gateway.menuCommands().map(c => c.command)).toEqual(["new", "help"]);
+    for (const c of setup().gateway.menuCommands()) expect(c.description.length).toBeGreaterThan(0);
+  });
+
+  it("the Telegram adapter forwards replies with buttons and picker callbacks", async () => {
+    const { gateway } = setup();
+    const adapter = new TelegramGatewayAdapter(gateway);
+    expect((await adapter.handleInboundMessage("7", "chat-7", "/agent"))?.buttons?.length).toBeGreaterThan(0);
+    expect(await adapter.handleMenuCallback("agent", "backend", "chat-7", "7")).toContain("now talking to backend");
+  });
+});

@@ -6,7 +6,7 @@
  * the ChannelGateway can process.
  */
 
-import type { InboundAttachment, TelegramGatewayHandler } from "./channels/telegram.js";
+import type { InboundAttachment, TelegramGatewayHandler, TelegramReply } from "./channels/telegram.js";
 import { ChannelGateway } from "./channel-gateway.js";
 
 export class TelegramGatewayAdapter implements TelegramGatewayHandler {
@@ -19,8 +19,8 @@ export class TelegramGatewayAdapter implements TelegramGatewayHandler {
     senderName?: string,
     messageId?: string,
     attachments?: InboundAttachment[],
-  ): Promise<string | undefined> {
-    return this.gateway.handleMessage({
+  ): Promise<TelegramReply | undefined> {
+    return this.gateway.handleMessageReply({
       channel: "telegram",
       externalId: senderId,
       chatId,
@@ -29,6 +29,10 @@ export class TelegramGatewayAdapter implements TelegramGatewayHandler {
       messageId,
       attachments,
     });
+  }
+
+  async handleMenuCallback(action: string, value: string, chatId: string, senderId: string, senderName?: string): Promise<string | undefined> {
+    return this.gateway.handleMenuCallback(action, value, { channel: "telegram", externalId: senderId, chatId, displayName: senderName });
   }
 
   async handleApprovalCallback(

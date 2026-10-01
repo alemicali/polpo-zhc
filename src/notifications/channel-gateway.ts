@@ -68,7 +68,19 @@ interface InboundMessage {
 interface CommandResult {
   text: string;
   parseMode?: "HTML" | "Markdown";
+  buttons?: ReplyButton[][];
 }
+
+/** Inline button rendered under a reply; `data` comes back as a callback (e.g. "agent:backend"). */
+export interface ReplyButton { text: string; data: string }
+
+/** Reply with optional inline buttons, for channels that support them. */
+export interface GatewayReply { text: string; buttons?: ReplyButton[][] }
+
+/** Entry of the channel's command menu (Telegram setMyCommands). */
+export interface MenuCommand { command: string; description: string }
+
+const ORCHESTRATOR_CHOICE = "__polpo__";
 
 /** OpenAI-format content part, as accepted by the completions pipeline. */
 export type ChannelContentPart =
@@ -186,6 +198,16 @@ export class ChannelGateway {
    * Returns a response string to send back, or undefined to ignore.
    */
   async handleMessage(msg: InboundMessage): Promise<string | undefined> {
+    return (await this.handleMessageReply(msg))?.text;
+  }
+
+  /** Like handleMessage, keeping inline buttons for channels that can render them. */
+  async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
+    const reply = await this.routeMessage(msg);
+    return typeof reply === "string" ? { text: reply } : reply;
+  }
+
+  private async routeMessage(msg: InboundMessage): Promise<string | GatewayReply | undefined> {
     if (!this.gatewayConfig.enableInbound) return undefined;
 
     // Dedup: skip if we've already processed this exact message
@@ -235,7 +257,7 @@ export class ChannelGateway {
     // ── Slash commands ──
     if (msg.text.startsWith("/")) {
       const result = await this.handleCommand(msg, peerId);
-      if (result) return result.text;
+      if (result) return result.buttons ? { text: result.text, buttons: result.buttons } : result.text;
     }
 
     // ── Free-text chat → orchestrator completions ──
@@ -506,8 +528,15 @@ export class ChannelGateway {
     if (args.length === 0) {
       const current = await this.getActiveAgent(peerId);
       const names = agents.map(a => a.name).join(", ") || "none";
+      const choices: ReplyButton[] = [
+        { text: `🐙 Polpo${current ? "" : " ✓"}`, data: `agent:${ORCHESTRATOR_CHOICE}` },
+        ...agents.map(a => ({ text: `${a.name}${a.name === current ? " ✓" : ""}`, data: `agent:${a.name}`.slice(0, 64) })),
+      ];
+      const buttons: ReplyButton[][] = [];
+      for (let i = 0; i < choices.length; i += 2) buttons.push(choices.slice(i, i + 2));
       return {
-        text: `You are talking to ${current ?? "Polpo (orchestrator)"}.\n\nUsage: /agent NAME — switch to an agent\n/polpo — back to the orchestrator\n\nAgents: ${names}`,
+        text: `You are talking to ${current ?? "Polpo (orchestrator)"}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
+        buttons,
       };
     }
 
@@ -528,6 +557,23 @@ export class ChannelGateway {
     if (this.gatewayConfig.agent) return this.dedicatedMessage();
     await this.peerStore.clearSession(await this.activeAgentKey(peerId));
     return { text: "You are now talking to Polpo (orchestrator)." };
+  }
+
+  /** Inline-button selection ("agent:<name>"); same rules as /agent and /polpo. */
+  async handleMenuCallback(action: string, value: string, msg: Omit<InboundMessage, "text">): Promise<string | undefined> {
+    if (action !== "agent" || !this.gatewayConfig.enableInbound) return undefined;
+    const peerId = `${msg.channel}:${msg.externalId}`;
+    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) return undefined;
+    const result = value === ORCHESTRATOR_CHOICE ? await this.cmdPolpo(peerId) : await this.cmdAgent([value], peerId);
+    return result.text;
+  }
+
+  /** Commands for the channel menu; a dedicated bot only exposes what applies to it. */
+  menuCommands(): MenuCommand[] {
+    const pick = this.gatewayConfig.agent
+      ? ["/new", "/help"]
+      : ["/agent", "/polpo", "/new", "/status", "/tasks", "/missions", "/agents", "/approve", "/help"];
+    return pick.map(cmd => ({ command: cmd.slice(1), description: COMMANDS[cmd] }));
   }
 
   // ── Interlocutor and session resolution ────────────────────────────

@@ -271,6 +271,7 @@ export class TelegramCallbackPoller {
   private pendingRevise = new Map<string, string>(); // chatId → requestId (waiting for feedback text)
   private resolver?: ApprovalCallbackResolver;
   private gateway?: TelegramGatewayHandler;
+  private menuCommands?: { command: string; description: string }[];
 
   constructor(botToken: string, chatId: string) {
     this.botToken = botToken;
@@ -287,8 +288,24 @@ export class TelegramCallbackPoller {
     this.gateway = handler;
   }
 
+  /** Commands shown in the bot's menu; registered with setMyCommands when polling starts. */
+  setMenuCommands(commands: { command: string; description: string }[]): void {
+    this.menuCommands = commands;
+  }
+
+  private async registerMenuCommands(): Promise<void> {
+    if (!this.menuCommands) return;
+    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commands: this.menuCommands }),
+    }).catch((err) => { console.error(`[polpo/telegram] setMyCommands failed: ${err}`); return undefined; });
+    if (res && !res.ok) console.error(`[polpo/telegram] setMyCommands failed (${res.status})`);
+  }
+
   start(intervalMs = 2000): void {
     if (this.timer) return;
+    void this.registerMenuCommands();
     this.timer = setInterval(() => this.poll(), intervalMs);
   }
 
@@ -349,6 +366,13 @@ export class TelegramCallbackPoller {
     const senderId = String(query.from?.id ?? query.message?.chat?.id ?? this.chatId);
     const senderName = query.from?.first_name;
 
+    // Menu buttons (e.g. agent picker) are not approvals
+    if (action === "agent") {
+      const reply = await this.gateway?.handleMenuCallback?.(action, requestId, chatId, senderId, senderName);
+      if (reply) await this.sendReply(chatId, markdownToHtml(reply));
+      return;
+    }
+
     // If gateway is available, route through it for identity tracking
     if (this.gateway) {
       const response = await this.gateway.handleApprovalCallback(
@@ -402,7 +426,8 @@ export class TelegramCallbackPoller {
         const response = await this.gateway.handleInboundMessage(
           senderId, chatId, text ?? "", senderName, String(message.message_id), attachments,
         );
-        if (response) await this.sendReply(chatId, markdownToHtml(response));
+        if (typeof response === "string") await this.sendReply(chatId, markdownToHtml(response));
+        else if (response) await this.sendReply(chatId, markdownToHtml(response.text), response.buttons);
       } finally {
         clearInterval(typingInterval);
       }
@@ -476,7 +501,7 @@ export class TelegramCallbackPoller {
     }).catch(() => {});
   }
 
-  private async sendReply(chatId: string, text: string): Promise<void> {
+  private async sendReply(chatId: string, text: string, buttons?: { text: string; data: string }[][]): Promise<void> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
     await fetch(url, {
       method: "POST",
@@ -485,6 +510,7 @@ export class TelegramCallbackPoller {
         chat_id: chatId,
         text,
         parse_mode: "HTML",
+        ...(buttons ? { reply_markup: { inline_keyboard: buttons.map(row => row.map(b => ({ text: b.text, callback_data: b.data }))) } } : {}),
       }),
     }).catch(() => {});
   }
@@ -521,7 +547,10 @@ export interface TelegramGatewayHandler {
     senderName?: string,
     messageId?: string,
     attachments?: InboundAttachment[],
-  ): Promise<string | undefined>;
+  ): Promise<string | TelegramReply | undefined>;
+
+  /** Non-approval inline buttons (e.g. "agent:<name>"). */
+  handleMenuCallback?(action: string, value: string, chatId: string, senderId: string, senderName?: string): Promise<string | undefined>;
 
   handleApprovalCallback(
     action: string,
@@ -629,6 +658,10 @@ function resolveEnvVar(value: string): string {
   }
   return value;
 }
+
+// ─── Replies with inline buttons ───────────
+
+export interface TelegramReply { text: string; buttons?: { text: string; data: string }[][] }
 
 // ─── Inbound media ─────────────────────────
 

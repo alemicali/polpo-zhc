@@ -1558,6 +1558,7 @@ export class Orchestrator extends TypedEmitter {
         });
         gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
+        poller.setMenuCommands(gateway.menuCommands());
         this.channelGateways.set(key, gateway);
         if (isPrimary) this.channelGateway = gateway;
 
