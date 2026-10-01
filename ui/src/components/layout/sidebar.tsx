@@ -273,7 +273,7 @@ export function Sidebar() {
       )}
     >
       {/* Logo area */}
-      <div className="relative flex h-14 items-center border-b border-border/40 group">
+      <div className="relative flex h-14 shrink-0 items-center border-b border-border/40 group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
             <BrandMark branding={info?.branding} className="rounded-xl" />
@@ -305,10 +305,10 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
+      {/* Navigation — scrolls when the items exceed the viewport height */}
       <nav
         className={cn(
-          "flex-1 flex flex-col",
+          "flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
           collapsed ? "items-center py-3 gap-1" : "p-3 gap-1"
         )}
       >
@@ -337,7 +337,7 @@ export function Sidebar() {
       {/* Footer — project + connection */}
       <div
         className={cn(
-          "border-t border-border/40",
+          "shrink-0 border-t border-border/40",
           collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >
