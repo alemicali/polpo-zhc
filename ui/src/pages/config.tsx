@@ -101,6 +101,7 @@ import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
 import { useAgentNames } from "@/hooks/use-agent-names";
+import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -497,6 +498,40 @@ interface WhatsAppLoginSessionInfo {
   startedAt: string;
   updatedAt: string;
   expiresAt: string;
+}
+
+/** "Continue web chat · never expires" / "Separate · 60 min" */
+function describeSession(mode?: string, idleMinutes?: number): string {
+  const conversation = mode === "shared" ? "Continue web chat" : "Separate";
+  const idle = idleMinutes === 0 ? "never expires" : `${idleMinutes ?? 60} min`;
+  return `${conversation} · ${idle}`;
+}
+
+/** Bot, interlocutor, conversation and menu summary on a Telegram channel card. */
+function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChannelConfig }) {
+  const gateway = ch.gateway;
+  const info = useTelegramChannelInfo(api, name, gateway?.enableInbound ? gateway.agent : undefined);
+  const overrides = Object.entries(gateway?.agentSessions ?? {});
+  return (
+    <>
+      <Row label="Bot" value={info.botUsername ? `@${info.botUsername}` : "—"} mono />
+      {gateway?.enableInbound && (
+        <>
+          <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono />
+          <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} />
+          {overrides.map(([agent, s]) => (
+            <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} />
+          ))}
+          <Row
+            label="Menu"
+            value={gateway.agent
+              ? `${info.suggestionCount ?? "…"} suggestion${info.suggestionCount === 1 ? "" : "s"} + /new /help`
+              : "/agent /polpo /new /status … (9)"}
+          />
+        </>
+      )}
+    </>
+  );
 }
 
 function channelSupportsInbound(type: NotificationChannelType): boolean {
@@ -1201,6 +1236,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
             <>
               <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
               <Row label="Chat ID" value={ch.chatId || "not set"} mono />
+              <TelegramCardDetails name={name} ch={ch} />
             </>
           )}
           {ch.type === "slack" && (
