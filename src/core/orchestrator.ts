@@ -58,6 +58,7 @@ import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
+import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { ChannelGateway, type ChannelChatRunner } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
@@ -147,6 +148,8 @@ export class Orchestrator extends TypedEmitter {
   private dedicatedTelegramPollers: TelegramCallbackPoller[] = [];
   /** Gateways by channel name; the primary one is also exposed as channelGateway. */
   private channelGateways = new Map<string, ChannelGateway>();
+  /** Bots dedicated to one agent, refreshed (menu, photo, description) when that agent changes. */
+  private dedicatedTelegramBots = new Map<string, { agent: string; botToken: string; poller: TelegramCallbackPoller; gateway: ChannelGateway }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
@@ -1045,6 +1048,7 @@ export class Orchestrator extends TypedEmitter {
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
     await this.engine.addAgent(agent, teamName);
     await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
+    this.refreshDedicatedTelegramBots(agent.name);
   }
   async removeAgent(name: string): Promise<boolean> {
     const removed = await this.engine.removeAgent(name);
@@ -1054,6 +1058,7 @@ export class Orchestrator extends TypedEmitter {
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
     const agent = await this.engine.updateAgent(name, updates);
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
+    this.refreshDedicatedTelegramBots(agent.name);
     return agent;
   }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
@@ -1504,6 +1509,7 @@ export class Orchestrator extends TypedEmitter {
     }
     this.stopDedicatedTelegramPollers();
     this.channelGateways.clear();
+    this.dedicatedTelegramBots.clear();
 
     const channels = this.config.settings.notifications?.channels ?? {};
     const telegramKeys = Object.keys(channels).filter(k => channels[k]?.type === "telegram");
@@ -1558,7 +1564,8 @@ export class Orchestrator extends TypedEmitter {
         });
         gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
-        poller.setMenuCommands(gateway.menuCommands());
+        // Menu entries depend on the agent's suggestions (async); registered as soon as they resolve.
+        void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
         this.channelGateways.set(key, gateway);
         if (isPrimary) this.channelGateway = gateway;
 
@@ -1572,9 +1579,47 @@ export class Orchestrator extends TypedEmitter {
       poller.start(2000); // Poll every 2 seconds
       if (isPrimary) this.telegramPoller = poller;
       else this.dedicatedTelegramPollers.push(poller);
+
+      const dedicatedAgent = channelConfig?.gateway?.enableInbound ? channelConfig.gateway.agent : undefined;
+      const gateway = this.channelGateways.get(key);
+      if (dedicatedAgent && gateway) {
+        this.dedicatedTelegramBots.set(key, { agent: dedicatedAgent, botToken, poller, gateway });
+        void this.syncDedicatedBotProfile(key);
+      }
     }
 
     this.emit("log", { level: "info", message: `Telegram callback poller started (${usedTokens.size} bot${usedTokens.size === 1 ? "" : "s"})` });
+  }
+
+  /** Re-register menus and re-sync profiles of the bots dedicated to `agentName`. */
+  private refreshDedicatedTelegramBots(agentName: string): void {
+    for (const [key, bot] of this.dedicatedTelegramBots) {
+      if (bot.agent !== agentName) continue;
+      void bot.gateway.menuCommands().then(commands => bot.poller.setMenuCommands(commands)).catch(() => {});
+      void this.syncDedicatedBotProfile(key);
+    }
+  }
+
+  /** Mirror the agent's avatar and bio onto its dedicated bot (photo only re-uploaded when changed). */
+  private async syncDedicatedBotProfile(key: string): Promise<void> {
+    const bot = this.dedicatedTelegramBots.get(key);
+    if (!bot) return;
+    try {
+      const agent = (await this.getAgents()).find(a => a.name === bot.agent);
+      if (!agent) return;
+      const result = await syncTelegramBotProfile({
+        botToken: bot.botToken,
+        agent,
+        roots: [this.workDir, this.getAgentWorkDir()],
+        statePath: join(this.polpoDir, "telegram-bot-profiles.json"),
+      });
+      const level = result.error ? "warn" : "info";
+      const message = `[telegram] "${key}" profile for ${bot.agent}: photo ${result.photo}, description ${result.description}${result.error ? ` (${result.error})` : ""}`;
+      console.error(`[polpo/telegram] ${message.slice("[telegram] ".length)}`);
+      this.emit("log", { level, message });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `[telegram] "${key}" profile sync failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
 
   private stopDedicatedTelegramPollers(): void {

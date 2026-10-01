@@ -1,3 +1,4 @@
+import { markdownToTelegramHtml, splitMarkdown } from "../telegram-format.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
 import { basename } from "node:path";
@@ -291,6 +292,7 @@ export class TelegramCallbackPoller {
   /** Commands shown in the bot's menu; registered with setMyCommands when polling starts. */
   setMenuCommands(commands: { command: string; description: string }[]): void {
     this.menuCommands = commands;
+    if (this.timer) void this.registerMenuCommands(); // already polling: register now
   }
 
   private async registerMenuCommands(): Promise<void> {
@@ -369,7 +371,7 @@ export class TelegramCallbackPoller {
     // Menu buttons (e.g. agent picker) are not approvals
     if (action === "agent") {
       const reply = await this.gateway?.handleMenuCallback?.(action, requestId, chatId, senderId, senderName);
-      if (reply) await this.sendReply(chatId, markdownToHtml(reply));
+      if (reply) await this.sendMarkdown(chatId, reply);
       return;
     }
 
@@ -378,7 +380,7 @@ export class TelegramCallbackPoller {
       const response = await this.gateway.handleApprovalCallback(
         action, requestId, chatId, senderId, senderName,
       );
-      if (response) await this.sendReply(chatId, markdownToHtml(response));
+      if (response) await this.sendMarkdown(chatId, response);
       return;
     }
 
@@ -426,8 +428,8 @@ export class TelegramCallbackPoller {
         const response = await this.gateway.handleInboundMessage(
           senderId, chatId, text ?? "", senderName, String(message.message_id), attachments,
         );
-        if (typeof response === "string") await this.sendReply(chatId, markdownToHtml(response));
-        else if (response) await this.sendReply(chatId, markdownToHtml(response.text), response.buttons);
+        if (typeof response === "string") await this.sendMarkdown(chatId, response);
+        else if (response) await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply);
       } finally {
         clearInterval(typingInterval);
       }
@@ -489,7 +491,28 @@ export class TelegramCallbackPoller {
 
   /** Send a partial response as a separate message (for multi-turn tool loops). */
   async sendPartial(chatId: string, text: string): Promise<void> {
-    await this.sendReply(chatId, markdownToHtml(text));
+    await this.sendMarkdown(chatId, text);
+  }
+
+  /**
+   * Send Markdown as one or more HTML messages (Telegram's 4096-char limit).
+   * Markup (buttons / reply prompt) goes on the last message. If Telegram
+   * rejects the HTML, the chunk is resent as plain text instead of being lost.
+   */
+  async sendMarkdown(
+    chatId: string,
+    markdown: string,
+    buttons?: { text: string; data: string }[][],
+    forceReply?: { placeholder?: string },
+  ): Promise<void> {
+    const chunks = splitMarkdown(markdown);
+    for (let i = 0; i < chunks.length; i++) {
+      const last = i === chunks.length - 1;
+      const sent = await this.sendReply(chatId, markdownToTelegramHtml(chunks[i]), last ? buttons : undefined, last ? forceReply : undefined);
+      if (!sent) {
+        await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false);
+      }
+    }
   }
 
   private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing"): Promise<void> {
@@ -501,18 +524,36 @@ export class TelegramCallbackPoller {
     }).catch(() => {});
   }
 
-  private async sendReply(chatId: string, text: string, buttons?: { text: string; data: string }[][]): Promise<void> {
+  /** Send one message; returns false when Telegram rejects it (e.g. invalid HTML). */
+  private async sendReply(
+    chatId: string,
+    text: string,
+    buttons?: { text: string; data: string }[][],
+    forceReply?: { placeholder?: string },
+    html = true,
+  ): Promise<boolean> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-    await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
         text,
-        parse_mode: "HTML",
+        ...(html ? { parse_mode: "HTML" } : {}),
         ...(buttons ? { reply_markup: { inline_keyboard: buttons.map(row => row.map(b => ({ text: b.text, callback_data: b.data }))) } } : {}),
+        ...(forceReply ? { reply_markup: { force_reply: true, ...(forceReply.placeholder ? { input_field_placeholder: forceReply.placeholder } : {}) } } : {}),
       }),
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error(`[polpo/telegram] sendMessage failed: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    });
+    if (!res) return false;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { description?: string } | null;
+      console.error(`[polpo/telegram] sendMessage rejected (${res.status}): ${body?.description ?? ""}`);
+      return false;
+    }
+    return true;
   }
 
   /** Send a message with ForceReply — opens the reply input automatically in the Telegram client. */
@@ -639,17 +680,8 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * Convert standard Markdown formatting to Telegram HTML.
- */
-function markdownToHtml(text: string): string {
-  let html = escapeHtml(text);
-  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  html = html.replace(/\*(.+?)\*/g, "<i>$1</i>");
-  html = html.replace(/_(.+?)_/g, "<i>$1</i>");
-  html = html.replace(/`(.+?)`/g, "<code>$1</code>");
-  return html;
-}
+/** Convert Markdown to Telegram HTML (see telegram-format.ts). */
+const markdownToHtml = markdownToTelegramHtml;
 
 function resolveEnvVar(value: string): string {
   if (value.startsWith("${") && value.endsWith("}")) {
@@ -661,7 +693,11 @@ function resolveEnvVar(value: string): string {
 
 // ─── Replies with inline buttons ───────────
 
-export interface TelegramReply { text: string; buttons?: { text: string; data: string }[][] }
+export interface TelegramReply {
+  text: string;
+  buttons?: { text: string; data: string }[][];
+  forceReply?: { placeholder?: string };
+}
 
 // ─── Inbound media ─────────────────────────
 

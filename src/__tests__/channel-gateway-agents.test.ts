@@ -224,7 +224,7 @@ describe("ChannelGateway — direct agent chat", () => {
 
   it("truncates replies over the Telegram limit and reports runner errors", async () => {
     const runner = vi.fn<ChannelChatRunner>()
-      .mockResolvedValueOnce({ text: "x".repeat(5000) })
+      .mockResolvedValueOnce({ text: "x".repeat(20_000) })
       .mockRejectedValueOnce(new Error("model down"));
     const { send } = setup({ runner });
     await send("/agent backend");
@@ -557,11 +557,11 @@ describe("ChannelGateway — command menu and agent picker", () => {
     expect(await gateway.handleMenuCallback("agent", "backend", { channel: "telegram", externalId: "7", chatId: "chat-7" })).toBeUndefined();
   });
 
-  it("exposes the full menu on the main bot and a short one on dedicated bots", () => {
-    const main = setup().gateway.menuCommands().map(c => c.command);
+  it("exposes the full menu on the main bot and a short one on dedicated bots", async () => {
+    const main = (await setup().gateway.menuCommands()).map(c => c.command);
     expect(main).toEqual(["agent", "polpo", "new", "status", "tasks", "missions", "agents", "approve", "help"]);
-    expect(setup({ gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agent: "backend" } }).gateway.menuCommands().map(c => c.command)).toEqual(["new", "help"]);
-    for (const c of setup().gateway.menuCommands()) expect(c.description.length).toBeGreaterThan(0);
+    expect((await setup({ gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agent: "backend" } }).gateway.menuCommands()).map(c => c.command)).toEqual(["new", "help"]);
+    for (const c of await setup().gateway.menuCommands()) expect(c.description.length).toBeGreaterThan(0);
   });
 
   it("the Telegram adapter forwards replies with buttons and picker callbacks", async () => {
@@ -569,5 +569,86 @@ describe("ChannelGateway — command menu and agent picker", () => {
     const adapter = new TelegramGatewayAdapter(gateway);
     expect((await adapter.handleInboundMessage("7", "chat-7", "/agent"))?.buttons?.length).toBeGreaterThan(0);
     expect(await adapter.handleMenuCallback("agent", "backend", "chat-7", "7")).toContain("now talking to backend");
+  });
+});
+
+// ── Agent suggestions as commands ───────────────────────
+
+import { commandSlug, suggestionCommands } from "../notifications/channel-gateway.js";
+
+const COACH_SUGGESTIONS = [
+  { title: "Conferma giornata", prompt: "Ho finito la giornata, convertiamo il planned di oggi in actual" },
+  { title: "Logga pasto fuori piano", prompt: "Ho mangiato [descrivi], aggiungilo al food log di oggi" },
+  { title: "Domanda nutrizione/training", prompt: "[Domanda su integrazione, dieta o allenamento]" },
+];
+
+describe("suggestion commands", () => {
+  it("slugifies titles into Telegram command names", () => {
+    expect(commandSlug("Conferma giornata")).toBe("conferma_giornata");
+    expect(commandSlug("Domanda nutrizione/training")).toBe("domanda_nutrizione_training");
+    expect(commandSlug("Città & Più — 2026!")).toBe("citta_piu_2026");
+    expect(commandSlug("x".repeat(50))).toHaveLength(32);
+  });
+
+  it("detects the placeholder, dedupes names (also against reserved ones) and skips empty slugs", () => {
+    const cmds = suggestionCommands([...COACH_SUGGESTIONS, { title: "Conferma giornata", prompt: "altro" }, { title: "Help", prompt: "x" }, { title: "!!!", prompt: "x" }]);
+    expect(cmds.map(c => [c.command, c.placeholder])).toEqual([
+      ["conferma_giornata", undefined],
+      ["logga_pasto_fuori_piano", "descrivi"],
+      ["domanda_nutrizione_training", "Domanda su integrazione, dieta o allenamento"],
+      ["conferma_giornata_2", undefined],
+      ["help_2", undefined],
+    ]);
+  });
+});
+
+describe("ChannelGateway — dedicated bot suggestions", () => {
+  function coachSetup() {
+    const ctx = setup({ gatewayConfig: { enableInbound: true, dmPolicy: "pairing", agent: "backend" } });
+    (ctx.gateway as any).orchestrator.getAgents.mockResolvedValue([{ name: "backend", role: "Coach", suggestions: COACH_SUGGESTIONS }]);
+    return ctx;
+  }
+
+  it("lists suggestions first in the menu and in /help", async () => {
+    const { gateway, send } = coachSetup();
+    expect((await gateway.menuCommands()).map(c => c.command)).toEqual(["conferma_giornata", "logga_pasto_fuori_piano", "domanda_nutrizione_training", "new", "help"]);
+    expect(await send("/help")).toContain("/logga_pasto_fuori_piano — Logga pasto fuori piano");
+  });
+
+  it("sends a suggestion without placeholder straight to the agent", async () => {
+    const { send, runner } = coachSetup();
+    expect(await send("/conferma_giornata")).toBe("agent reply");
+    expect(runner!.mock.calls[0][0].messages.at(-1)).toEqual({ role: "user", content: "Ho finito la giornata, convertiamo il planned di oggi in actual" });
+  });
+
+  it("asks for the placeholder, then fills it with the next message", async () => {
+    const { gateway, send, runner } = coachSetup();
+    const ask = await gateway.handleMessageReply({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "/logga_pasto_fuori_piano@coach_bot" });
+    expect(ask?.forceReply).toEqual({ placeholder: "descrivi" });
+    expect(runner).not.toHaveBeenCalled();
+
+    await send("pizza margherita");
+    expect(runner!.mock.calls[0][0].messages.at(-1).content).toBe("Ho mangiato pizza margherita, aggiungilo al food log di oggi");
+  });
+
+  it("a whole-placeholder prompt becomes the user's text", async () => {
+    const { send, runner } = coachSetup();
+    await send("/domanda_nutrizione_training");
+    await send("Quanta creatina al giorno?");
+    expect(runner!.mock.calls[0][0].messages.at(-1).content).toBe("Quanta creatina al giorno?");
+  });
+
+  it("another command cancels a pending suggestion", async () => {
+    const { send, runner } = coachSetup();
+    await send("/logga_pasto_fuori_piano");
+    await send("/new");
+    await send("ciao");
+    expect(runner!.mock.calls[0][0].messages.at(-1).content).toBe("ciao");
+  });
+
+  it("suggestion commands do nothing on the main bot", async () => {
+    const { send, runner } = setup();
+    await send("/conferma_giornata");
+    expect(runner).not.toHaveBeenCalled();
   });
 });

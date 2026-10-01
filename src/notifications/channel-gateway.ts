@@ -74,8 +74,46 @@ interface CommandResult {
 /** Inline button rendered under a reply; `data` comes back as a callback (e.g. "agent:backend"). */
 export interface ReplyButton { text: string; data: string }
 
-/** Reply with optional inline buttons, for channels that support them. */
-export interface GatewayReply { text: string; buttons?: ReplyButton[][] }
+/** Reply with optional inline buttons or a reply prompt, for channels that support them. */
+export interface GatewayReply {
+  text: string;
+  buttons?: ReplyButton[][];
+  /** Ask the user to type an answer; the placeholder is shown in the input field. */
+  forceReply?: { placeholder?: string };
+}
+
+/** An agent suggestion exposed as a channel command. */
+export interface SuggestionCommand {
+  command: string;
+  title: string;
+  prompt: string;
+  /** First [placeholder] in the prompt, filled with the user's next message. */
+  placeholder?: string;
+}
+
+const PLACEHOLDER = /\[([^\]]+)\]/;
+const RESERVED_COMMANDS = new Set(Object.keys({ new: 1, help: 1, start: 1 }));
+
+/** Telegram command name: lowercase a-z, 0-9 and _, at most 32 characters. */
+export function commandSlug(title: string): string {
+  return title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32).replace(/_+$/, "");
+}
+
+/** Agent suggestions as unique commands (reserved names and empty slugs are skipped). */
+export function suggestionCommands(suggestions: { title?: string; prompt?: string }[] | undefined): SuggestionCommand[] {
+  const seen = new Set<string>(RESERVED_COMMANDS);
+  const out: SuggestionCommand[] = [];
+  for (const s of suggestions ?? []) {
+    if (!s.title || !s.prompt) continue;
+    let command = commandSlug(s.title);
+    if (!command) continue;
+    for (let n = 2; seen.has(command); n++) command = `${commandSlug(s.title).slice(0, 29)}_${n}`;
+    seen.add(command);
+    out.push({ command, title: s.title, prompt: s.prompt, placeholder: PLACEHOLDER.exec(s.prompt)?.[1] });
+  }
+  return out;
+}
 
 /** Entry of the channel's command menu (Telegram setMyCommands). */
 export interface MenuCommand { command: string; description: string }
@@ -113,6 +151,8 @@ export interface ChannelInvite {
 }
 
 const INVITE_TTL_MS = 15 * 60 * 1000;
+/** Replies longer than this are cut; channels split the rest into several messages. */
+const MAX_REPLY_CHARS = 16_000;
 /** Per-file limit of the chat attachment store (saveChatUserMessage). */
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const VISION_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -169,6 +209,7 @@ export class ChannelGateway {
   private onTyping?: (chatId: string) => Promise<void>;
   private onPartialResponse?: (chatId: string, text: string) => Promise<void>;
   private invites = new Map<string, ChannelInvite>(); // token → invite (in-memory, short-lived)
+  private pendingSuggestion = new Map<string, SuggestionCommand>(); // chatId → suggestion awaiting its placeholder
   private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
 
   constructor(opts: ChannelGatewayOptions) {
@@ -254,8 +295,20 @@ export class ChannelGateway {
         : `Error: ${result.error}`;
     }
 
+    // ── Suggestion waiting for its [placeholder] ──
+    const pendingSuggestion = this.pendingSuggestion.get(msg.chatId);
+    if (pendingSuggestion) {
+      this.pendingSuggestion.delete(msg.chatId);
+      if (!msg.text.startsWith("/")) {
+        const filled = pendingSuggestion.prompt.replace(PLACEHOLDER, msg.text.trim());
+        return this.handleChat({ ...msg, text: filled }, peerId);
+      }
+    }
+
     // ── Slash commands ──
     if (msg.text.startsWith("/")) {
+      const suggestion = await this.handleSuggestionCommand(msg, peerId);
+      if (suggestion) return suggestion;
       const result = await this.handleCommand(msg, peerId);
       if (result) return result.buttons ? { text: result.text, buttons: result.buttons } : result.text;
     }
@@ -375,7 +428,7 @@ export class ChannelGateway {
 
     switch (cmd) {
       case "/help":
-        return this.cmdHelp();
+        return await this.cmdHelp();
       case "/status":
         return this.cmdStatus();
       case "/tasks":
@@ -402,10 +455,40 @@ export class ChannelGateway {
     }
   }
 
-  private cmdHelp(): CommandResult {
+  private async cmdHelp(): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) {
+      const suggestions = await this.agentSuggestions();
+      const lines = [
+        ...suggestions.map(s => `/${s.command} — ${s.title}`),
+        `/new — ${COMMANDS["/new"]}`,
+      ];
+      return { text: `You are talking to ${this.gatewayConfig.agent}. Write freely, or use:\n\n${lines.join("\n")}` };
+    }
     const lines = Object.entries(COMMANDS)
       .map(([cmd, desc]) => `${cmd} — ${desc}`);
     return { text: `Available commands:\n\n${lines.join("\n")}` };
+  }
+
+  /** Suggestions of the dedicated agent, as commands. */
+  private async agentSuggestions(): Promise<SuggestionCommand[]> {
+    const name = this.gatewayConfig.agent;
+    if (!name) return [];
+    const agent = (await this.orchestrator.getAgents()).find(a => a.name === name);
+    return suggestionCommands((agent as { suggestions?: { title?: string; prompt?: string }[] } | undefined)?.suggestions);
+  }
+
+  /** /<suggestion> on a dedicated bot: send the prompt, or ask for its [placeholder] first. */
+  private async handleSuggestionCommand(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+    if (!this.gatewayConfig.agent) return undefined;
+    const name = msg.text.trim().split(/\s+/)[0].slice(1).replace(/@\S+$/, "").toLowerCase();
+    const suggestion = (await this.agentSuggestions()).find(s => s.command === name);
+    if (!suggestion) return undefined;
+    if (!suggestion.placeholder) return this.handleChat({ ...msg, text: suggestion.prompt }, peerId);
+    this.pendingSuggestion.set(msg.chatId, suggestion);
+    return {
+      text: `${suggestion.title}\n\n${suggestion.prompt.replace(PLACEHOLDER, `<${suggestion.placeholder}>`)}\n\nReply with: ${suggestion.placeholder}`,
+      forceReply: { placeholder: suggestion.placeholder.slice(0, 64) },
+    };
   }
 
   private async cmdStatus(): Promise<CommandResult> {
@@ -568,12 +651,13 @@ export class ChannelGateway {
     return result.text;
   }
 
-  /** Commands for the channel menu; a dedicated bot only exposes what applies to it. */
-  menuCommands(): MenuCommand[] {
+  /** Commands for the channel menu; a dedicated bot shows its agent's suggestions. */
+  async menuCommands(): Promise<MenuCommand[]> {
     const pick = this.gatewayConfig.agent
       ? ["/new", "/help"]
       : ["/agent", "/polpo", "/new", "/status", "/tasks", "/missions", "/agents", "/approve", "/help"];
-    return pick.map(cmd => ({ command: cmd.slice(1), description: COMMANDS[cmd] }));
+    const suggestions = (await this.agentSuggestions()).map(s => ({ command: s.command, description: s.title.slice(0, 256) }));
+    return [...suggestions, ...pick.map(cmd => ({ command: cmd.slice(1), description: COMMANDS[cmd] }))];
   }
 
   // ── Interlocutor and session resolution ────────────────────────────
@@ -782,9 +866,9 @@ export class ChannelGateway {
         await this.sessionStore.addMessage(sessionId, "assistant", finalText);
       }
 
-      // Telegram has a 4096 char limit
-      if (finalText.length > 4000) {
-        finalText = finalText.slice(0, 3990) + "\n\n... (truncated)";
+      // Channels split long replies into several messages; cap runaway output.
+      if (finalText.length > MAX_REPLY_CHARS) {
+        finalText = finalText.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)";
       }
 
       // If all text was already sent as partials, nothing left to return
@@ -823,6 +907,6 @@ export class ChannelGateway {
     const { text } = await runner({ agent, sessionId, messages });
 
     const reply = text.trim() || `${who} processed your request but has nothing to say.`;
-    return reply.length > 4000 ? reply.slice(0, 3990) + "\n\n... (truncated)" : reply;
+    return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)" : reply;
   }
 }
