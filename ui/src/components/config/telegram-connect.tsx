@@ -5,6 +5,8 @@
  * - TelegramConnect: creates a one-time invite link (t.me/<bot>?start=<token>),
  *   shows it as link + QR, and polls until someone opens it. The paired chat id
  *   is handed back so it can become the notification chat.
+ * - TelegramChatFinder: for a bot that is not active yet, waits for any message
+ *   to it and offers the sender's chat as the notification chat (with confirm).
  * - ChannelAccessPanel: pending pairing requests (approve / reject) and
  *   authorized peers (revoke), backed by /api/v1/peers.
  */
@@ -13,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, Copy, ExternalLink, Link2, Loader2, RefreshCw, ShieldCheck, UserCheck, UserX, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, MessageCircle, RefreshCw, ShieldCheck, UserCheck, UserX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface ApiResult { ok: boolean; data?: unknown; error?: string }
@@ -50,6 +52,124 @@ export function TelegramTokenCheck({ api, botToken, channel }: { api: PolpoApi; 
         <span className="flex items-center gap-1 text-[11px] text-emerald-600"><Check className="h-3 w-3" /> {state.text}</span>
       )}
       {state.status === "error" && <span className="text-[11px] text-destructive">{state.text}</span>}
+    </div>
+  );
+}
+
+// ── Chat finder (bot not active yet) ────────────────────
+
+interface DetectedChat { chatId: string; type: string; name: string; username?: string; fromId?: string; text?: string }
+
+const FINDER_TIMEOUT_MS = 3 * 60 * 1000;
+
+export function TelegramChatFinder({ api, botToken, currentChatId, onConfirm }: {
+  api: PolpoApi;
+  botToken?: string;
+  currentChatId?: string;
+  /** Called after the user confirms a chat; `authorized` is true when the sender was allowed to chat. */
+  onConfirm: (chat: DetectedChat, authorized: boolean) => void;
+}) {
+  const [state, setState] = useState<"idle" | "waiting" | "found" | "done">("idle");
+  const [chats, setChats] = useState<DetectedChat[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [authorize, setAuthorize] = useState(true);
+  const [botName, setBotName] = useState<string | null>(null);
+  const runRef = useRef(0);
+
+  // Stop waiting when the token changes or the component unmounts.
+  useEffect(() => () => { runRef.current++; }, [botToken]);
+
+  const start = async () => {
+    const run = ++runRef.current;
+    setState("waiting");
+    setError(null);
+    setChats([]);
+    const me = await api("/peers/telegram/verify", { method: "POST", body: JSON.stringify({ botToken }) });
+    if (run !== runRef.current) return;
+    if (!me.ok) { setError(me.error ?? "Invalid bot token"); setState("idle"); return; }
+    setBotName((me.data as { username: string }).username);
+
+    const deadline = Date.now() + FINDER_TIMEOUT_MS;
+    let offset: number | undefined;
+    while (run === runRef.current && Date.now() < deadline) {
+      const res = await api("/peers/telegram/detect-chat", { method: "POST", body: JSON.stringify({ botToken, offset, timeout: 20 }) });
+      if (run !== runRef.current) return;
+      if (!res.ok) { setError(res.error ?? "Could not read messages"); setState("idle"); return; }
+      const data = res.data as { chats: DetectedChat[]; nextOffset?: number };
+      offset = data.nextOffset;
+      if (data.chats.length > 0) { setChats(data.chats); setState("found"); return; }
+    }
+    if (run === runRef.current) { setError("No message received. Try again."); setState("idle"); }
+  };
+
+  const cancel = () => { runRef.current++; setState("idle"); };
+
+  const confirm = async (chat: DetectedChat) => {
+    let authorized = false;
+    if (authorize && chat.fromId) {
+      const res = await api("/peers/allowlist", { method: "POST", body: JSON.stringify({ peerId: `telegram:${chat.fromId}` }) });
+      authorized = res.ok;
+    }
+    onConfirm(chat, authorized);
+    setState("done");
+  };
+
+  return (
+    <div className="rounded-md border border-sky-500/25 bg-sky-500/5 px-2.5 py-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium flex items-center gap-1.5"><MessageCircle className="h-3 w-3" /> Find your chat</span>
+        {state === "waiting" ? (
+          <Button type="button" size="sm" variant="ghost" className="h-7 text-[11px] gap-1" onClick={cancel}><X className="h-3 w-3" /> Stop</Button>
+        ) : (
+          <Button type="button" size="sm" variant="secondary" className="h-7 text-[11px] gap-1.5" onClick={start} disabled={!botToken?.trim()}>
+            <MessageCircle className="h-3 w-3" /> {state === "idle" ? "Find my chat" : "Search again"}
+          </Button>
+        )}
+      </div>
+
+      {state === "idle" && !error && (
+        <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+          {currentChatId ? "Chat ID already set. " : ""}Press the button, then send any message to your bot on Telegram: the chat is detected automatically.
+        </p>
+      )}
+      {error && <p className="text-[11px] text-destructive">{error}</p>}
+
+      {state === "waiting" && (
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Waiting… open
+          {botName
+            ? <a href={`https://t.me/${botName}`} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">@{botName}</a>
+            : " your bot"}
+          and send any message (or press Start).
+        </p>
+      )}
+
+      {state === "found" && (
+        <div className="space-y-1.5">
+          {chats.map((chat) => (
+            <div key={chat.chatId} className="flex items-center gap-2 text-[11px]">
+              <span className="flex-1 min-w-0 truncate">
+                <span className="font-medium">{chat.name}</span>
+                <span className="text-muted-foreground"> · {chat.type} · </span>
+                <code className="font-mono text-[10px]">{chat.chatId}</code>
+                {chat.text && <span className="text-muted-foreground"> · “{chat.text}”</span>}
+              </span>
+              <Button type="button" size="sm" className="h-6 px-2 text-[10.5px] gap-1" onClick={() => confirm(chat)}>
+                <Check className="h-3 w-3" /> Use this chat
+              </Button>
+            </div>
+          ))}
+          <label className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+            <input type="checkbox" checked={authorize} onChange={(e) => setAuthorize(e.target.checked)} />
+            Also allow this person to chat with Polpo (no pairing code)
+          </label>
+        </div>
+      )}
+
+      {state === "done" && (
+        <p className="flex items-center gap-1.5 text-[11px] text-emerald-600"><Check className="h-3.5 w-3.5" /> Chat ID filled in. Save the channel to apply.</p>
+      )}
     </div>
   );
 }

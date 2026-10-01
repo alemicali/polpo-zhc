@@ -12,6 +12,7 @@
  * POST   /peers/invites?channel=NAME — create a one-time invite link (/start <token>)
  * GET    /peers/invites/:token?channel=NAME — poll an invite until it is redeemed
  * POST   /peers/telegram/verify?channel=NAME — check a Telegram bot token (getMe)
+ * POST   /peers/telegram/detect-chat — wait for a message to a not-yet-running bot and report its chat
  *
  * `channel` selects a Telegram channel by name (dedicated-agent bots); omitted = primary bot.
  * POST   /peers/link        — link two peer identities
@@ -195,6 +196,32 @@ const verifyTelegramRoute = createRoute({
   },
 });
 
+const detectChatRoute = createRoute({
+  method: "post",
+  path: "/telegram/detect-chat",
+  tags: ["Peers"],
+  summary: "Detect Telegram chat",
+  description: "Long-polls getUpdates (up to `timeout` seconds) on a bot that is not configured yet and returns the chats that wrote to it. Call again with `offset` to keep waiting.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            botToken: z.string().min(1),
+            offset: z.number().int().optional(),
+            timeout: z.number().int().min(0).max(50).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { content: { "application/json": { schema: SuccessResponse } }, description: "Chats seen and the next offset" },
+    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Telegram error" },
+    409: { content: { "application/json": { schema: ErrorResponse } }, description: "Bot already polled by a configured channel" },
+  },
+});
+
 /* ── Route handlers ────────────────────────────────────────────────── */
 
 /** Invite surface of the channel gateway (present only while inbound routing runs). */
@@ -220,10 +247,23 @@ export interface PeerRouteDeps {
   getGateway?: (channel?: string) => PeerInviteGateway | undefined;
   /** Bot token of the named Telegram channel (or the primary one), for getMe and deep links. */
   getTelegramBotToken?: (channel?: string) => string | undefined;
+  /** Tokens of every configured Telegram channel: their pollers own getUpdates. */
+  getConfiguredTelegramTokens?: () => string[];
   fetch?: typeof fetch;
 }
 
 interface TelegramBot { id: number; username: string; name: string }
+
+/** A chat that wrote to the bot, as reported by detect-chat. */
+export interface DetectedChat {
+  chatId: string;
+  type: string;
+  name: string;
+  username?: string;
+  /** Sender's user id (the peer to authorize); equals chatId in private chats. */
+  fromId?: string;
+  text?: string;
+}
 
 async function telegramGetMe(botToken: string, fetchImpl: typeof fetch): Promise<TelegramBot | { error: string }> {
   try {
@@ -352,6 +392,48 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
     const me = await telegramGetMe(botToken, fetchImpl);
     if ("error" in me) return c.json({ ok: false, error: me.error }, 400);
     return c.json({ ok: true, data: me }, 200);
+  });
+
+  // ── Detect the chat of a not-yet-configured bot ──
+  app.openapi(detectChatRoute, async (c) => {
+    const { getConfiguredTelegramTokens, fetch: fetchImpl = fetch } = getDeps();
+    const { botToken: rawToken, offset, timeout = 25 } = c.req.valid("json");
+    const botToken = rawToken.trim();
+    if (getConfiguredTelegramTokens?.().includes(botToken)) {
+      return c.json({ ok: false, error: "This bot is already active on a saved channel. Use \"Connect my Telegram\" on that channel instead." }, 409);
+    }
+
+    let body: any;
+    try {
+      const res = await fetchImpl(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/getUpdates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset, timeout, allowed_updates: ["message", "my_chat_member", "channel_post"] }),
+      });
+      body = await res.json().catch(() => null);
+    } catch (err) {
+      return c.json({ ok: false, error: `Telegram unreachable: ${err instanceof Error ? err.message : String(err)}` }, 400);
+    }
+    if (!body?.ok) return c.json({ ok: false, error: body?.description ?? "Telegram rejected the request" }, 400);
+
+    const updates: any[] = body.result ?? [];
+    const chats = new Map<string, DetectedChat>();
+    for (const update of updates) {
+      const msg = update.message ?? update.channel_post ?? update.my_chat_member;
+      const chat = msg?.chat;
+      if (!chat) continue;
+      const name = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.username;
+      chats.set(String(chat.id), {
+        chatId: String(chat.id),
+        type: chat.type,
+        name: name || String(chat.id),
+        username: chat.username,
+        fromId: msg.from?.id !== undefined ? String(msg.from.id) : undefined,
+        text: typeof msg.text === "string" ? msg.text.slice(0, 80) : undefined,
+      });
+    }
+    const nextOffset = updates.length > 0 ? Math.max(...updates.map((u) => u.update_id)) + 1 : offset;
+    return c.json({ ok: true, data: { chats: [...chats.values()], nextOffset } }, 200);
   });
 
   // ── Link peer identities ──

@@ -114,3 +114,48 @@ describe("peer routes — dedicated bots", () => {
     expect((await call({ getGateway }, "POST", "/invites?channel=missing")).status).toBe(404);
   });
 });
+
+describe("peer routes — detect chat", () => {
+  const updates = {
+    ok: true,
+    result: [
+      { update_id: 10, message: { chat: { id: 5062560138, type: "private", first_name: "Alessio" }, from: { id: 5062560138 }, text: "ciao" } },
+      { update_id: 11, message: { chat: { id: -100123, type: "supergroup", title: "Famiglia" }, from: { id: 42 }, text: "hey" } },
+      { update_id: 12, edited_message: { chat: { id: 1 } } },
+    ],
+  };
+
+  it("long-polls getUpdates and reports each chat once with the next offset", async () => {
+    const fetchImpl = telegramFetch(updates);
+    const res = await call({ fetch: fetchImpl }, "POST", "/telegram/detect-chat", { botToken: " 999:new " });
+    const { data } = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.chats).toEqual([
+      { chatId: "5062560138", type: "private", name: "Alessio", fromId: "5062560138", text: "ciao" },
+      { chatId: "-100123", type: "supergroup", name: "Famiglia", fromId: "42", text: "hey" },
+    ]);
+    expect(data.nextOffset).toBe(13);
+    const [url, init] = (fetchImpl as any).mock.calls[0];
+    expect(url).toBe("https://api.telegram.org/bot999%3Anew/getUpdates");
+    expect(JSON.parse(init.body)).toMatchObject({ timeout: 25 });
+  });
+
+  it("keeps the offset when nothing arrived", async () => {
+    const { data } = await (await call({ fetch: telegramFetch({ ok: true, result: [] }) }, "POST", "/telegram/detect-chat", { botToken: "999:new", offset: 7, timeout: 1 })).json();
+    expect(data).toEqual({ chats: [], nextOffset: 7 });
+  });
+
+  it("refuses bots already polled by a saved channel", async () => {
+    const fetchImpl = telegramFetch(updates);
+    const res = await call({ getConfiguredTelegramTokens: () => ["123:main"], fetch: fetchImpl }, "POST", "/telegram/detect-chat", { botToken: "123:main" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Connect my Telegram");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("surfaces Telegram errors (e.g. an active webhook)", async () => {
+    const res = await call({ fetch: telegramFetch({ ok: false, description: "Conflict: can't use getUpdates method while webhook is active" }, 409) }, "POST", "/telegram/detect-chat", { botToken: "999:new" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("webhook");
+  });
+});

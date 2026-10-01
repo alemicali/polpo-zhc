@@ -622,6 +622,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return {
       peerStore: o.getPeerStore(),
       getGateway: (channel?: string) => o.getChannelGateway(channel),
+      getConfiguredTelegramTokens: () => Object.values(channels)
+        .filter((ch) => ch?.type === "telegram" && ch.botToken)
+        .map((ch) => String(ch.botToken).trim()),
       getTelegramBotToken: (channel?: string) => {
         if (channel) return channels[channel]?.type === "telegram" ? channels[channel].botToken : undefined;
         // Primary bot: the first Telegram channel not dedicated to an agent (as in the orchestrator).

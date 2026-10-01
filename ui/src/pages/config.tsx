@@ -98,7 +98,7 @@ import { PALETTES, usePalette } from "@/lib/palette";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
-import { ChannelAccessPanel, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
+import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
 import { useAgentNames } from "@/hooks/use-agent-names";
 
@@ -543,9 +543,9 @@ function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
       <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5">
         <p className="text-xs font-medium">Telegram setup</p>
         <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
-          <span>1. Create a bot with @BotFather and paste the bot token.</span>
-          <span>2. Add the bot to the target chat or group and set the chat ID.</span>
-          <span>3. Enable inbound only if users should talk to Polpo from Telegram.</span>
+          <span>1. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">@BotFather</a>, send /newbot and paste the token below.</span>
+          <span>2. Press <b>Find my chat</b> and send any message to your bot — the chat ID fills in after you confirm.</span>
+          <span>3. To talk to Polpo from Telegram, turn on the inbound gateway. Save.</span>
         </div>
       </div>
     );
@@ -788,12 +788,15 @@ function WhatsAppProfileSetup({ config, onChange }: {
   );
 }
 
-function DeliveryFields({ config, onChange, gatewayRunning, channelName }: {
+function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBotToken }: {
   config: NotificationChannelConfig;
   onChange: (patch: Partial<NotificationChannelConfig>) => void;
   gatewayRunning: boolean;
   channelName?: string;
+  /** Bot token of the saved channel; while it is unchanged the bot is already polled by the server. */
+  savedBotToken?: string;
 }) {
+  const botActive = !!savedBotToken && savedBotToken.trim() === (config.botToken ?? "").trim();
   const set = onChange;
 
   return (
@@ -809,16 +812,25 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName }: {
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
           <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning ? channelName : undefined} />
-          <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications. Filled automatically when you connect your Telegram below.">
+          <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
-          <TelegramConnect
-            api={api}
-            channel={channelName}
-            gatewayRunning={gatewayRunning}
-            currentChatId={config.chatId}
-            onPaired={(chatId) => { if (!config.chatId) set({ chatId }); }}
-          />
+          {botActive ? (
+            <TelegramConnect
+              api={api}
+              channel={channelName}
+              gatewayRunning={gatewayRunning}
+              currentChatId={config.chatId}
+              onPaired={(chatId) => { if (!config.chatId) set({ chatId }); }}
+            />
+          ) : (
+            <TelegramChatFinder
+              api={api}
+              botToken={config.botToken}
+              currentChatId={config.chatId}
+              onConfirm={(chat) => set({ chatId: chat.chatId })}
+            />
+          )}
         </>
       )}
 
@@ -1077,12 +1089,13 @@ function InboundGatewayForm({ config, onChange }: {
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange, gatewayRunning, channelName }: {
+function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
   /** The saved version of this channel has inbound enabled. */
   gatewayRunning: boolean;
   channelName?: string;
+  savedBotToken?: string;
 }) {
   const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
@@ -1090,7 +1103,7 @@ function ChannelForm({ config, onChange, gatewayRunning, channelName }: {
     <div className="space-y-3">
       <ChannelConceptPanel type={config.type} />
       <ChannelSetupGuide type={config.type} />
-      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} />
+      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} />
       {channelSupportsInbound(config.type) && (
         <InboundGatewayForm config={config} onChange={onChange} />
       )}
@@ -1649,6 +1662,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
               onChange={setEditConfig}
               gatewayRunning={!isNew && channels[editName]?.gateway?.enableInbound === true}
               channelName={isNew ? undefined : editName}
+              savedBotToken={isNew ? undefined : channels[editName]?.botToken}
             />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>
