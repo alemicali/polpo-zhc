@@ -211,12 +211,16 @@ type SectionId = SectionIdBase;
 // ── Reusable display components ──
 
 /** Key-value row — label left, value right, dotted filler in between */
-function Row({ label, value, mono }: { label: React.ReactNode; value: React.ReactNode; mono?: boolean }) {
+function Row({ label, value, mono, wrap }: { label: React.ReactNode; value: React.ReactNode; mono?: boolean; wrap?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 py-1.5 min-w-0">
       <span className="text-xs text-muted-foreground shrink-0">{label}</span>
       <span className="flex-1 border-b border-dotted border-border/30 min-w-4 self-end mb-[3px]" />
-      <span className={cn("text-xs text-foreground shrink-0 text-right max-w-[60%] truncate", mono && "font-mono text-[11px]")}>{value}</span>
+      <span className={cn(
+        "text-xs text-foreground shrink-0 text-right max-w-[60%]",
+        wrap ? "break-words [overflow-wrap:anywhere]" : "truncate",
+        mono && "font-mono text-[11px]",
+      )}>{value}</span>
     </div>
   );
 }
@@ -514,19 +518,20 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
   const overrides = Object.entries(gateway?.agentSessions ?? {});
   return (
     <>
-      <Row label="Bot" value={info.botUsername ? `@${info.botUsername}` : "—"} mono />
+      <Row label="Bot" value={info.botUsername ? `@${info.botUsername}` : "—"} mono wrap />
       {gateway?.enableInbound && (
         <>
-          <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono />
-          <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} />
+          <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+          <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
           {overrides.map(([agent, s]) => (
-            <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} />
+            <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
           ))}
           <Row
             label="Menu"
             value={gateway.agent
               ? `${info.suggestionCount ?? "…"} suggestion${info.suggestionCount === 1 ? "" : "s"} + /new /help`
               : "/agent /polpo /new /status … (9)"}
+            wrap
           />
         </>
       )}
