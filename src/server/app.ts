@@ -1,3 +1,4 @@
+import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
@@ -475,19 +476,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     if (!response.ok) {
       throw new Error(payload?.error?.message ?? payload?.error ?? `Agent chat failed (${response.status})`);
     }
-    const choice = payload?.choices?.[0];
-    let text: string = choice?.message?.content ?? "";
-    const questions: any[] = choice?.ask_user?.questions ?? [];
-    // Channels have no structured ask_user controls: render the questions as
-    // text and let the user answer in their next message.
-    if (questions.length > 0) {
-      const asked = questions.map((q) => {
-        const options = (q?.options ?? []).map((o: any, i: number) => `  ${i + 1}. ${o?.label ?? o}`).join("\n");
-        return [`• ${q?.question ?? q?.header ?? ""}`, options].filter(Boolean).join("\n");
-      }).join("\n\n");
-      text = [text, asked, "Reply with your answer."].filter(Boolean).join("\n\n");
-    }
-    return { text };
+    // Only the agents' workspace is shareable — never the project root (.polpo holds config and tokens).
+    return interpretChannelCompletion(payload?.choices?.[0], [o.getAgentWorkDir()]);
   });
 
   authed.route("/counts", countsRoutes(() => ({

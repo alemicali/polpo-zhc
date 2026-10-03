@@ -429,7 +429,12 @@ export class TelegramCallbackPoller {
           senderId, chatId, text ?? "", senderName, String(message.message_id), attachments,
         );
         if (typeof response === "string") await this.sendMarkdown(chatId, response);
-        else if (response) await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply);
+        else if (response) {
+          if (response.text.trim() || response.buttons || response.forceReply) {
+            await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply);
+          }
+          for (const file of response.files ?? []) await this.sendDocument(chatId, file.path, file.filename);
+        }
       } finally {
         clearInterval(typingInterval);
       }
@@ -492,6 +497,29 @@ export class TelegramCallbackPoller {
   /** Send a partial response as a separate message (for multi-turn tool loops). */
   async sendPartial(chatId: string, text: string): Promise<void> {
     await this.sendMarkdown(chatId, text);
+  }
+
+  /** Upload a local file as a document; failures are reported to the chat instead of being lost. */
+  async sendDocument(chatId: string, path: string, filename: string): Promise<boolean> {
+    try {
+      const { readFile, stat } = await import("node:fs/promises");
+      const size = (await stat(path)).size;
+      if (size > TELEGRAM_MAX_UPLOAD_BYTES) {
+        await this.sendReply(chatId, `${escapeHtml(filename)} is too large to send on Telegram (max 50 MB).`);
+        return false;
+      }
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("document", new Blob([new Uint8Array(await readFile(path))]), filename);
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendDocument`, { method: "POST", body: form });
+      if (res.ok) return true;
+      const body = await res.json().catch(() => null) as { description?: string } | null;
+      console.error(`[polpo/telegram] sendDocument rejected (${res.status}): ${body?.description ?? ""}`);
+    } catch (err) {
+      console.error(`[polpo/telegram] sendDocument failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    await this.sendReply(chatId, `Could not send ${escapeHtml(filename)}.`);
+    return false;
   }
 
   /**
@@ -697,7 +725,12 @@ export interface TelegramReply {
   text: string;
   buttons?: { text: string; data: string }[][];
   forceReply?: { placeholder?: string };
+  /** Local files sent as documents after the text. */
+  files?: { path: string; filename: string }[];
 }
+
+/** Bot API sendDocument upload limit. */
+const TELEGRAM_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 // ─── Inbound media ─────────────────────────
 

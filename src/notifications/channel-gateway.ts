@@ -80,6 +80,8 @@ export interface GatewayReply {
   buttons?: ReplyButton[][];
   /** Ask the user to type an answer; the placeholder is shown in the input field. */
   forceReply?: { placeholder?: string };
+  /** Files to deliver after the text (channels send them as documents). */
+  files?: ChannelOutboundFile[];
 }
 
 /** An agent suggestion exposed as a channel command. */
@@ -135,8 +137,11 @@ export interface ChannelChatRequest {
   messages: { role: "user" | "assistant"; content: string | ChannelContentPart[] }[];
 }
 
-/** Runs one agent-direct chat turn and returns the reply. The host persists both messages. */
-export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string }>;
+/** A file the turn produced for the user (e.g. via open_file), already resolved and checked by the host. */
+export interface ChannelOutboundFile { path: string; filename: string }
+
+/** Runs one chat turn and returns the reply. The host persists both messages. */
+export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string; files?: ChannelOutboundFile[] }>;
 
 /** One-time link that pairs whoever opens it (e.g. t.me/<bot>?start=<token>). */
 export interface ChannelInvite {
@@ -745,7 +750,7 @@ export class ChannelGateway {
 
   // ── Chat handler (free-text → orchestrator completions) ───────────
 
-  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
+  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
     try {
       const agent = await this.getActiveAgent(peerId);
       const attachments = msg.attachments ?? [];
@@ -884,7 +889,7 @@ export class ChannelGateway {
    * Turn through the host's chat pipeline (agent-direct, or orchestrator when
    * agent is undefined). The pipeline persists both messages and attachments.
    */
-  private async handleRunnerChat(msg: InboundMessage, agent: string | undefined, sessionId: string): Promise<string> {
+  private async handleRunnerChat(msg: InboundMessage, agent: string | undefined, sessionId: string): Promise<string | GatewayReply> {
     const who = agent ?? "Polpo";
     const runner = this.getChatRunner();
     if (!runner) {
@@ -904,9 +909,11 @@ export class ChannelGateway {
     messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
 
     if (this.onTyping) await this.onTyping(msg.chatId);
-    const { text } = await runner({ agent, sessionId, messages });
+    const { text, files = [] } = await runner({ agent, sessionId, messages });
 
-    const reply = text.trim() || `${who} processed your request but has nothing to say.`;
-    return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)" : reply;
+    const body = text.trim();
+    const reply = body || (files.length > 0 ? "" : `${who} processed your request but has nothing to say.`);
+    const capped = reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)" : reply;
+    return files.length > 0 ? { text: capped, files } : capped;
   }
 }

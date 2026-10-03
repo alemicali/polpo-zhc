@@ -652,3 +652,20 @@ describe("ChannelGateway — dedicated bot suggestions", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 });
+
+describe("ChannelGateway — files from agents", () => {
+  it("returns files with the reply and no 'nothing to say' when only a file was produced", async () => {
+    const runner = vi.fn<ChannelChatRunner>().mockResolvedValue({ text: "", files: [{ path: "/w/plan.pdf", filename: "plan.pdf" }] });
+    const { gateway, send } = setup({ runner });
+    await send("/agent backend");
+    const reply = await gateway.handleMessageReply({ channel: "telegram", externalId: "7", chatId: "chat-7", text: "mandami il piano" });
+    expect(reply).toEqual({ text: "", files: [{ path: "/w/plan.pdf", filename: "plan.pdf" }] });
+  });
+
+  it("still says 'nothing to say' when there is neither text nor file", async () => {
+    const runner = vi.fn<ChannelChatRunner>().mockResolvedValue({ text: "" });
+    const { send } = setup({ runner });
+    await send("/agent backend");
+    expect(await send("?")).toContain("nothing to say");
+  });
+});
