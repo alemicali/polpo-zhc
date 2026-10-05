@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@polpo-ai/core": "^0.2.4",
-    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-agent-core": "^1.0.4",
     "@sinclair/typebox": "^0.34.0",
     "nanoid": "^5.0.0"
   },
