@@ -303,7 +303,13 @@ const ChannelGatewaySchema = z.object({
   dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional(),
   allowFrom: z.array(z.string()).optional(),
   enableInbound: z.boolean().optional(),
-  sessionIdleMinutes: z.number().int().min(1).optional(),
+  sessionIdleMinutes: z.number().int().min(0).optional(),
+  sessionMode: z.enum(["per-peer", "shared"]).optional(),
+  agentSessions: z.record(z.string(), z.object({
+    sessionMode: z.enum(["per-peer", "shared"]).optional(),
+    sessionIdleMinutes: z.number().int().min(0).optional(),
+  }).strict()).optional(),
+  agent: z.string().min(1).optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({
@@ -326,6 +332,7 @@ export const NotificationChannelConfigSchema = z.object({
   // Webhook
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  inboundSecret: z.string().min(16).optional(),
   // Push
   vapidPublicKey: z.string().optional(),
   vapidPrivateKey: z.string().optional(),

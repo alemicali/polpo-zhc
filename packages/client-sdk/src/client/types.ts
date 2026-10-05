@@ -539,6 +539,8 @@ export interface NotificationChannelConfig {
   profileDir?: string;
   url?: string;
   headers?: Record<string, string>;
+  /** Webhook: secret for POST /api/v1/channels/<name>/inbound (Authorization: Bearer <secret>). */
+  inboundSecret?: string;
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidSubject?: string;

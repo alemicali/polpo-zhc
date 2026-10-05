@@ -84,10 +84,14 @@ export function buildReachabilitySection(
   botUsernames: Map<string, string> = new Map(),
 ): string {
   const entries = Object.entries(channels);
-  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp") && ch.gateway?.enableInbound);
+  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "webhook") && ch.gateway?.enableInbound);
   const outboundOnly = entries.filter(([, ch]) => !inbound.some(([, i]) => i === ch));
 
   const describeInbound = ([name, ch]: [string, ReachabilityChannel]) => {
+    if (ch.type === "webhook") {
+      const target = ch.gateway?.agent ? `dedicated to agent ${ch.gateway.agent}` : "talks to you; /agent NAME switches to an agent";
+      return `- Webhook "${name}" (HTTP, e.g. iOS Shortcuts or scripts): \`POST /api/v1/channels/${name}/inbound\` with the channel secret; ${target}; the reply comes back in the HTTP response. Accepts text and files.`;
+    }
     const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
     const target = ch.gateway?.agent
       ? `dedicated to agent ${ch.gateway.agent} (every message goes to it)`

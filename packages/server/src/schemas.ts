@@ -388,6 +388,7 @@ export const NotificationChannelConfigSchema = z.object({
   // Webhook
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  inboundSecret: z.string().min(16).optional(),
   // Push
   vapidPublicKey: z.string().optional(),
   vapidPrivateKey: z.string().optional(),

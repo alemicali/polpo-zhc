@@ -41,6 +41,7 @@ import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
+import { webhookInboundRoutes } from "./routes/webhook-inbound.js";
 import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
@@ -140,6 +141,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // ── Public routes (no auth) ───────────────────────────────────────────
 
   app.route("/api/v1/health", healthRoutes());
+
+  // Inbound webhook channels authenticate with their own secret (e.g. iOS Shortcuts).
+  app.route("/api/v1/channels", webhookInboundRoutes({
+    isInitialized: () => !!orchestrator?.isInitialized,
+    getChannelConfig: (name) => orchestrator?.getConfig()?.settings?.notifications?.channels?.[name],
+    getAdapter: (name) => orchestrator?.getWebhookGateway(name),
+  }));
 
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {

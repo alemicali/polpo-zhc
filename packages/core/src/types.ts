@@ -866,7 +866,7 @@ export interface ApprovalRequest {
 // === Channel Gateway & Peer Identity ===
 
 /** Supported messaging channel types for inbound message routing. */
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat";
+export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook";
 
 /**
  * Peer identity — represents a person talking to the bot from a messaging channel.
@@ -1003,6 +1003,11 @@ export interface NotificationChannelConfig {
   url?: string;
   /** Webhook: custom headers. */
   headers?: Record<string, string>;
+  /**
+   * Webhook: shared secret for inbound messages (direct value or "${ENV_VAR}").
+   * Callers send it as "Authorization: Bearer <secret>" to POST /api/v1/channels/<name>/inbound.
+   */
+  inboundSecret?: string;
   /** Push: VAPID public key. Defaults to the generated project key. */
   vapidPublicKey?: string;
   /** Push: VAPID private key. Defaults to the generated project key. */

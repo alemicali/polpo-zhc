@@ -67,6 +67,7 @@ import {
   Download,
   EyeOff,
   Image as ImageIcon,
+  Copy,
   type LucideIcon,
 } from "lucide-react";
 import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
@@ -442,7 +443,7 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
   slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-green-500",   hue: "green",   description: "Post to a Slack channel via webhook" },
   whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-emerald-500", hue: "emerald", description: "Send notifications to a WhatsApp chat (unofficial)" },
   email:    { label: "Email",    icon: Mail,            color: "border-l-amber-500",   hue: "amber",   description: "Send email via Resend, SendGrid, or SMTP" },
-  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "POST JSON to any HTTP endpoint" },
+  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint" },
   push:     { label: "Push",     icon: Monitor,         color: "border-l-fuchsia-500", hue: "fuchsia", description: "Send PWA push notifications to subscribed browsers" },
 };
 
@@ -465,7 +466,7 @@ function defaultChannelConfig(type: NotificationChannelType): NotificationChanne
     case "whatsapp": return { type, chatId: "", profileDir: "default", gateway: { enableInbound: false, dmPolicy: "pairing" } };
     case "slack":    return { type, webhookUrl: "" };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
-    case "webhook":  return { type, url: "" };
+    case "webhook":  return { type, gateway: { enableInbound: false, dmPolicy: "open" } };
     case "push":     return { type, vapidSubject: "mailto:hello@polpo.ai", ttl: 3600, urgency: "normal" };
     default:         return { type };
   }
@@ -540,7 +541,74 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
 }
 
 function channelSupportsInbound(type: NotificationChannelType): boolean {
-  return type === "telegram" || type === "whatsapp";
+  return type === "telegram" || type === "whatsapp" || type === "webhook";
+}
+
+/** Random secret for inbound webhooks (64 hex chars). */
+function generateInboundSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function webhookInboundUrl(channelName: string): string {
+  return new URL(apiUrl(`/api/v1/channels/${encodeURIComponent(channelName)}/inbound`), window.location.origin).toString();
+}
+
+/** Endpoint, secret and a ready-to-copy example for an inbound webhook channel. */
+function WebhookInboundSetup({ config, onChange, channelName }: {
+  config: NotificationChannelConfig;
+  onChange: (config: NotificationChannelConfig) => void;
+  channelName?: string;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = (label: string, value: string) => {
+    void navigator.clipboard?.writeText(value).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
+  const url = channelName ? webhookInboundUrl(channelName) : "";
+  const secret = config.inboundSecret ?? "";
+  const example = `curl -X POST '${url || "<url>"}' \\\n  -H 'Authorization: Bearer ${secret ? "<secret>" : "<generate a secret>"}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"sender":"my-iphone","text":"Hi!"}'`;
+
+  return (
+    <div className="space-y-2 rounded-md border border-violet-500/20 bg-violet-500/5 px-2.5 py-2.5">
+      <Field label="Endpoint" hint={channelName ? "POST messages here. The reply comes back in the response." : "Save the channel to get its URL."}>
+        <div className="flex gap-1.5">
+          <Input readOnly className="h-8 text-xs font-mono" value={url || "available after saving"} />
+          {url && (
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("url", url)}>
+              <Copy className="h-3 w-3" /> {copied === "url" ? "Copied" : "Copy"}
+            </Button>
+          )}
+        </div>
+      </Field>
+      <Field label="Secret" hint="Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel.">
+        <div className="flex gap-1.5">
+          <Input className="h-8 text-xs font-mono" placeholder="Generate one" value={secret}
+            onChange={(e) => onChange({ ...config, inboundSecret: e.target.value || undefined })} />
+          {secret && (
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("secret", secret)}>
+              <Copy className="h-3 w-3" /> {copied === "secret" ? "Copied" : "Copy"}
+            </Button>
+          )}
+          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]"
+            onClick={() => onChange({ ...config, inboundSecret: generateInboundSecret() })}>
+            <RefreshCw className="h-3 w-3" /> {secret ? "New" : "Generate"}
+          </Button>
+        </div>
+      </Field>
+      <div className="grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+        <span className="font-medium text-foreground">iOS Shortcuts</span>
+        <span>1. Ask for Input (text or dictation).</span>
+        <span>2. Get Contents of URL: the endpoint above with <code>?format=text</code>, method POST, header <code>Authorization</code> = <code>Bearer &lt;secret&gt;</code>, request body JSON with <code>text</code> = the input and <code>sender</code> = a name for your device. Use Form with a file field to send photos or documents.</span>
+        <span>3. Show Result or Speak Text.</span>
+        <span>Commands work as on Telegram: /agent NAME, /polpo, /new, /help and the agent's suggestions. Without <code>?format=text</code> the response is JSON with messages, buttons and files (base64).</span>
+      </div>
+      <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-[10px] font-mono leading-relaxed">{example}</pre>
+    </div>
+  );
 }
 
 function splitList(value: string): string[] {
@@ -937,8 +1005,8 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
 
       {config.type === "webhook" && (
         <>
-          <Field label="URL" hint="JSON POST endpoint">
-            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value })} />
+          <Field label="Notification URL" hint="Optional: Polpo POSTs notifications here as JSON. Leave empty for an inbound-only webhook.">
+            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
           </Field>
           <Field label="Headers" hint="key:value pairs, one per line">
             <textarea
@@ -990,23 +1058,29 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
   );
 }
 
-function InboundGatewayForm({ config, onChange }: {
+function InboundGatewayForm({ config, onChange, channelName }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
+  channelName?: string;
 }) {
   const agentNames = useAgentNames(api);
   const gateway = config.gateway ?? {};
   const enabled = gateway.enableInbound === true;
-  const policy = gateway.dmPolicy ?? "pairing";
+  const isWebhook = config.type === "webhook";
+  // A webhook is authenticated by its secret, so it defaults to open.
+  const defaultPolicy: GatewayPolicy = isWebhook ? "open" : "pairing";
+  const policy = gateway.dmPolicy ?? defaultPolicy;
   const updateGateway = (patch: Partial<GatewayConfig>) => {
-    onChange({
+    const next: NotificationChannelConfig = {
       ...config,
       gateway: {
-        dmPolicy: "pairing",
+        dmPolicy: defaultPolicy,
         ...gateway,
         ...patch,
       },
-    });
+    };
+    if (isWebhook && patch.enableInbound && !next.inboundSecret) next.inboundSecret = generateInboundSecret();
+    onChange(next);
   };
 
   return (
@@ -1035,6 +1109,7 @@ function InboundGatewayForm({ config, onChange }: {
 
       {enabled ? (
         <>
+          {isWebhook && <WebhookInboundSetup config={config} onChange={onChange} channelName={channelName} />}
           <div className="grid grid-cols-2 gap-2">
             <Field label="DM Policy" hint="Controls who can start a Polpo session.">
               <Select value={policy} onValueChange={(v) => updateGateway({ dmPolicy: v as GatewayPolicy })}>
@@ -1060,8 +1135,10 @@ function InboundGatewayForm({ config, onChange }: {
               />
             </Field>
           </div>
-          {config.type === "telegram" && (
-            <Field label="Dedicated agent" hint="Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot.">
+          {(config.type === "telegram" || isWebhook) && (
+            <Field label="Dedicated agent" hint={isWebhook
+              ? "Send every message to one agent, without /agent. Leave on Polpo to talk to the orchestrator and switch with /agent."
+              : "Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot."}>
               <Select value={gateway.agent ?? "__polpo__"} onValueChange={(v) => updateGateway({ agent: v === "__polpo__" ? undefined : v })}>
                 <SelectTrigger className="h-8 text-xs w-full">
                   <SelectValue />
@@ -1104,7 +1181,7 @@ function InboundGatewayForm({ config, onChange }: {
           >
             <Input
               className="h-8 text-xs font-mono"
-              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : "123456789, -1001234567890"}
+              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : isWebhook ? "my-iphone, office-script" : "123456789, -1001234567890"}
               value={(gateway.allowFrom ?? []).join(", ")}
               onChange={(e) => {
                 const allowFrom = splitList(e.target.value);
@@ -1115,7 +1192,9 @@ function InboundGatewayForm({ config, onChange }: {
           <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
             {policy === "pairing" && "Unknown people receive a pairing code. Approve them from the channel card, or send them an invite link that pairs them automatically."}
             {policy === "allowlist" && "Allowlist accepts only configured IDs. Use this for production channels with known operators."}
-            {policy === "open" && "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints."}
+            {policy === "open" && (isWebhook
+              ? "Open accepts any caller that knows the secret. Use Allowlist to also restrict the sender names."
+              : "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints.")}
             {policy === "disabled" && "Disabled keeps the gateway block configured but rejects inbound messages."}
           </div>
         </>
@@ -1145,7 +1224,7 @@ function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotTo
       <ChannelSetupGuide type={config.type} />
       <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} />
       {channelSupportsInbound(config.type) && (
-        <InboundGatewayForm config={config} onChange={onChange} />
+        <InboundGatewayForm config={config} onChange={onChange} channelName={channelName} />
       )}
     </div>
   );
@@ -1268,7 +1347,17 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           )}
           {ch.type === "webhook" && (
             <>
-              <Row label="URL" value={ch.url || "not set"} mono />
+              <Row label="Notifications" value={ch.url || "off"} mono />
+              {gateway?.enableInbound && (
+                <>
+                  <Row label="Inbound" value={`/api/v1/channels/${name}/inbound${ch.inboundSecret ? "" : " · no secret"}`} mono wrap />
+                  <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+                  <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
+                  {Object.entries(gateway.agentSessions ?? {}).map(([agent, s]) => (
+                    <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
+                  ))}
+                </>
+              )}
               {ch.headers && Object.keys(ch.headers).length > 0 && (
                 <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
               )}

@@ -62,6 +62,7 @@ import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { ChannelGateway, type ChannelChatRunner } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
@@ -152,6 +153,8 @@ export class Orchestrator extends TypedEmitter {
   private telegramBotUsernames = new Map<string, string>();
   /** Bots dedicated to one agent, refreshed (menu, photo, description) when that agent changes. */
   private dedicatedTelegramBots = new Map<string, { agent: string; botToken: string; poller: TelegramCallbackPoller; gateway: ChannelGateway }>();
+  /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
+  private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
@@ -187,7 +190,13 @@ export class Orchestrator extends TypedEmitter {
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
   /** Primary gateway, or the gateway of a specific channel by name. */
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
-    return channelName ? this.channelGateways.get(channelName) : this.channelGateway;
+    return channelName
+      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway
+      : this.channelGateway;
+  }
+  /** Inbound adapter of a webhook channel with gateway.enableInbound. */
+  getWebhookGateway(channelName: string): WebhookGatewayAdapter | undefined {
+    return this.webhookGateways.get(channelName)?.adapter;
   }
   getTelegramBotUsernames(): Map<string, string> { return this.telegramBotUsernames; }
   /** Agent-direct chat for messaging channels, provided by the server host. */
@@ -677,6 +686,8 @@ export class Orchestrator extends TypedEmitter {
     if (this.notificationRouter && this.hasWhatsAppConfigured()) {
       this.startWhatsAppBridge();
     }
+
+    this.startWebhookGateways();
 
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
@@ -1429,6 +1440,8 @@ export class Orchestrator extends TypedEmitter {
       this.startWhatsAppBridge();
     }
 
+    this.startWebhookGateways();
+
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
       this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
@@ -1524,17 +1537,7 @@ export class Orchestrator extends TypedEmitter {
     const primaryKey = telegramKeys.find(k => !channels[k]?.gateway?.agent) ?? telegramKeys[0];
     const ordered = [primaryKey, ...telegramKeys.filter(k => k !== primaryKey)];
 
-    const approvalMgr = this.approvalMgr;
-    const resolver: ApprovalCallbackResolver | undefined = approvalMgr ? {
-      approve: async (requestId, resolvedBy) => {
-        const result = await approvalMgr.approve(requestId, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-      },
-      reject: async (requestId, feedback, resolvedBy) => {
-        const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
-        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
-      },
-    } : undefined;
+    const resolver = this.createApprovalResolver();
 
     const usedTokens = new Set<string>();
     for (const key of ordered) {
@@ -1601,6 +1604,21 @@ export class Orchestrator extends TypedEmitter {
     this.emit("log", { level: "info", message: `Telegram callback poller started (${usedTokens.size} bot${usedTokens.size === 1 ? "" : "s"})` });
   }
 
+  /** Approve/reject through the approval manager, for channel commands and buttons. */
+  private createApprovalResolver(): ApprovalCallbackResolver | undefined {
+    const approvalMgr = this.approvalMgr;
+    return approvalMgr ? {
+      approve: async (requestId, resolvedBy) => {
+        const result = await approvalMgr.approve(requestId, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+      },
+      reject: async (requestId, feedback, resolvedBy) => {
+        const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+      },
+    } : undefined;
+  }
+
   /** Re-register menus and re-sync profiles of the bots dedicated to `agentName`. */
   private refreshDedicatedTelegramBots(agentName: string): void {
     for (const [key, bot] of this.dedicatedTelegramBots) {
@@ -1664,6 +1682,31 @@ export class Orchestrator extends TypedEmitter {
   private stopDedicatedTelegramPollers(): void {
     for (const poller of this.dedicatedTelegramPollers) poller.stop();
     this.dedicatedTelegramPollers = [];
+  }
+
+  // ── Inbound webhooks ──
+
+  /**
+   * One gateway per webhook channel with gateway.enableInbound. The shared secret
+   * authenticates callers, so the DM policy defaults to "open" (still overridable).
+   */
+  private startWebhookGateways(): void {
+    this.webhookGateways.clear();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "webhook" || !channelConfig.gateway?.enableInbound) continue;
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: { dmPolicy: "open", ...channelConfig.gateway } },
+        approvalResolver: this.createApprovalResolver(),
+      });
+      this.webhookGateways.set(key, { gateway, adapter: new WebhookGatewayAdapter(gateway) });
+      const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+      this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
+    }
   }
 
   // ── WhatsApp Bridge ──
