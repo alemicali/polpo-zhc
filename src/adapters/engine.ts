@@ -710,9 +710,16 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       // The initial prompt set in `new Agent(...)` had no mailbox section
       // because vault is async-only here; the agent hasn't yet consumed the
       // prompt, so overwriting state.systemPrompt before .prompt() is safe.
+      // pi-agent-core 1.0: systemPrompt is read from the transcript, so the leading
+      // system message is replaced (nothing has been sent yet).
       const mailboxes = vault.listMailboxes();
       if (mailboxes.length > 0) {
-        agent.state.systemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths, mailboxes);
+        const prompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths, mailboxes);
+        const [head, ...rest] = agent.state.messages;
+        agent.state.messages =
+          head && head.role === "system"
+            ? [{ ...head, content: prompt }, ...rest]
+            : [{ role: "system", content: prompt, timestamp: Date.now() } as AgentMessage, ...agent.state.messages];
       }
 
       if (ctx?.continuation) {

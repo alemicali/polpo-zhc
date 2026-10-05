@@ -7,11 +7,13 @@ import {
 import { normalizeLoginPrompt } from "../auth/oauth-manager.js";
 
 describe("pi OAuth runtime compatibility", () => {
-  it("discovers every OAuth provider exposed by pi-ai 0.84", () => {
+  it("discovers every OAuth provider exposed by pi-ai 1.0", () => {
     expect(listPiOAuthProviders().map((provider) => provider.id)).toEqual([
       "anthropic",
       "github-copilot",
       "kimi-coding",
+      "meta",
+      "openai",
       "openai-codex",
       "openrouter",
       "radius",

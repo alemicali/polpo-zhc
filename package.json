@@ -79,8 +79,8 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-agent-core": "^1.0.4",
+    "@earendil-works/pi-ai": "^1.0.4",
     "@polpo-ai/core": "workspace:*",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",

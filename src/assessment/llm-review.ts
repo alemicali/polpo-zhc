@@ -152,7 +152,9 @@ const NUDGE_AT_TURN = 15;
 
 /** Convert pi-ai Message[] to serializable ReviewerMessage[] */
 function serializeMessages(messages: Message[]): ReviewerMessage[] {
-  return messages.map(msg => {
+  // pi-ai 1.0 adds system messages to Message; the reviewer transcript has none of its own
+  type ChatMessage = Exclude<Message, { role: "system" }>;
+  return messages.filter((m): m is ChatMessage => m.role !== "system").map(msg => {
     if (msg.role === "user") {
       return {
         role: "user" as const,
