@@ -58,6 +58,7 @@ import { registerSkillsCommands } from "./commands/skills.js";
 import { registerAuthCommands } from "./commands/auth.js";
 import { registerModelsCommands } from "./commands/models.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { registerMigrateCommand } from "./commands/migrate.js";
 import { registerBrowserCommands } from "./commands/browser-profile.js";
 import { registerScheduleCommands } from "./commands/schedule.js";
 import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
@@ -251,6 +252,20 @@ const serveAction = async (opts: any) => {
       corsOrigins,
       autoStart: hasConfig,
     });
+
+    // Graceful shutdown: without this Node exits immediately on SIGTERM,
+    // skipping CodeServerManager.close() — the spawned code-server children
+    // would otherwise survive as orphans (re-parented to init), keep their
+    // ports bound, and accumulate across polpo restarts.
+    let stopping = false;
+    const gracefulStop = async (signal: string) => {
+      if (stopping) return;
+      stopping = true;
+      try { await server.stop(); } catch (err) { console.error("Shutdown error:", err); }
+      process.exit(signal === "SIGINT" ? 130 : 0);
+    };
+    process.on("SIGINT", () => { void gracefulStop("SIGINT"); });
+    process.on("SIGTERM", () => { void gracefulStop("SIGTERM"); });
 
     await server.start();
 
@@ -597,6 +612,7 @@ registerSkillsCommands(program);
 registerAuthCommands(program);
 registerModelsCommands(program);
 registerSetupCommand(program);
+registerMigrateCommand(program);
 registerBrowserCommands(program);
 registerScheduleCommands(program);
 registerAgentOnboardCommands(program);

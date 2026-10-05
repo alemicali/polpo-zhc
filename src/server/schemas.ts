@@ -216,7 +216,12 @@ const ModelConfigSchema = z.object({
 export const UpdateSettingsSchema = z.object({
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
-  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  branding: z.object({
+    productName: z.string().trim().max(80).optional(),
+    tagline: z.string().trim().max(120).optional(),
+    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo")]).optional(),
+  }).optional(),
 });
 
 // ── Agent schemas ─────────────────────────────────────────────────────
@@ -241,6 +246,70 @@ const AgentIdentitySchema = z.object({
   socials: z.record(z.string(), z.string()).optional(),
 });
 
+const AgentSuggestionObjectSchema = z.object({
+  title: z.string().min(1),
+  prompt: z.string().optional(),
+  description: z.string().optional(),
+});
+const AgentSuggestionSchema = z.union([z.string().min(1), AgentSuggestionObjectSchema]);
+
+const LoopConditionSchema = z.object({
+  expression: z.string().min(1),
+});
+
+const LoopOutputSchema = z.object({
+  schema: z.unknown().optional(),
+});
+
+const LoopConfigSchema = z.object({
+  name: z.string().min(1).optional(),
+  systemPrompt: z.string().optional(),
+  tools: z.array(z.string().min(1)).optional(),
+  model: z.string().min(1).optional(),
+  reasoning: z.string().min(1).optional(),
+  maxTurns: z.number().int().positive().optional(),
+  stopWhen: LoopConditionSchema.optional(),
+  output: LoopOutputSchema.optional(),
+});
+
+const PipelineStepSchema: z.ZodType<any> = z.lazy(() => z.union([
+  z.object({
+    loop: z.string().min(1),
+    when: z.string().min(1).optional(),
+  }),
+  z.object({
+    parallel: z.array(PipelineStepSchema).min(1),
+    join: z.union([z.literal("all"), z.literal("any"), z.number().int().positive()]).optional(),
+    when: z.string().min(1).optional(),
+  }),
+  z.object({
+    switch: z.object({
+      cases: z.array(z.object({
+        when: z.string().min(1),
+        steps: z.array(PipelineStepSchema).min(1),
+      })).min(1),
+      default: z.object({
+        steps: z.array(PipelineStepSchema).min(1),
+      }).optional(),
+    }),
+    when: z.string().min(1).optional(),
+  }),
+  z.object({
+    human: z.string().min(1),
+    output: LoopOutputSchema.optional(),
+    notify: z.array(z.string().min(1)).optional(),
+    when: z.string().min(1).optional(),
+  }),
+]));
+
+const PipelineSchema = z.object({
+  mode: z.enum(["sequential", "parallel"]).optional(),
+  context: z.literal("shared").optional(),
+  steps: z.array(PipelineStepSchema).min(1),
+});
+
+const AgentLoopsSchema = z.record(z.string().min(1), LoopConfigSchema);
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
@@ -248,7 +317,11 @@ export const AddAgentSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
+  suggestions: z.array(AgentSuggestionSchema).optional(),
   maxTurns: z.number().int().positive().optional(),
+  runtime: z.string().min(1).optional(),
+  loops: AgentLoopsSchema.optional(),
+  pipeline: PipelineSchema.optional(),
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
@@ -263,11 +336,15 @@ export const UpdateAgentSchema = z.object({
   allowedPaths: z.array(z.string()).optional(),
   systemPrompt: z.string().optional(),
   skills: z.array(z.string()).optional(),
+  suggestions: z.array(AgentSuggestionSchema).optional(),
   maxTurns: z.number().int().positive().optional(),
   maxConcurrency: z.number().int().positive().optional(),
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
   reasoning: z.string().optional(),
+  runtime: z.string().min(1).optional(),
+  loops: AgentLoopsSchema.optional(),
+  pipeline: PipelineSchema.optional(),
   browserProfile: z.string().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
@@ -289,11 +366,22 @@ const ChannelGatewaySchema = z.object({
   dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional(),
   allowFrom: z.array(z.string()).optional(),
   enableInbound: z.boolean().optional(),
-  sessionIdleMinutes: z.number().int().min(1).optional(),
+  sessionIdleMinutes: z.number().int().min(0).optional(),
+  sessionMode: z.enum(["per-peer", "shared"]).optional(),
+  agentSessions: z.record(z.string(), z.object({
+    sessionMode: z.enum(["per-peer", "shared"]).optional(),
+    sessionIdleMinutes: z.number().int().min(0).optional(),
+  }).strict()).optional(),
+  agent: z.string().min(1).optional(),
+  replyTo: z.object({
+    channel: z.string().min(1),
+    chatId: z.string().optional(),
+    echoInbound: z.boolean().optional(),
+  }).strict().optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
   // Slack
   webhookUrl: z.string().url().optional(),
   // Email
@@ -312,6 +400,13 @@ export const NotificationChannelConfigSchema = z.object({
   // Webhook
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  inboundSecret: z.string().min(16).optional(),
+  // Push
+  vapidPublicKey: z.string().optional(),
+  vapidPrivateKey: z.string().optional(),
+  vapidSubject: z.string().optional(),
+  ttl: z.number().int().min(0).optional(),
+  urgency: z.enum(["very-low", "low", "normal", "high"]).optional(),
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });

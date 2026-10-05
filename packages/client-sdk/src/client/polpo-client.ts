@@ -11,6 +11,8 @@ import type {
   PolpoConfig,
   HealthResponse,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   CreateTaskRequest,
   UpdateTaskRequest,
   CreateMissionRequest,
@@ -35,6 +37,8 @@ import type {
   ExecuteMissionResult,
   ResumeMissionResult,
   ApiResult,
+  TaskSlim,
+  MissionSlim,
   LogSession,
   LogEntry,
   ChatSession,
@@ -48,6 +52,10 @@ import type {
   OpenFilePayload,
   NavigateToPayload,
   OpenTabPayload,
+  SetDesignPayload,
+  WidgetRenderPayload,
+  WhatsAppPreviewPayload,
+  EmailPreviewPayload,
   RunActivityEntry,
   SkillInfo,
   LoadedSkill,
@@ -65,6 +73,9 @@ import type {
   PlaybookInfo,
   PlaybookDefinition,
   PlaybookRunResult,
+  TaskDirection,
+  SendTaskDirectionRequest,
+  SendTaskDirectionResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -85,6 +96,15 @@ export interface PolpoClientConfig {
 export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> {
   /** Session ID assigned by the server. Available after the first `next()` call. */
   sessionId: string | null = null;
+  userMessageId: string | null = null;
+
+  /**
+   * Turn ID assigned by the server (`x-turn-id` header). Identifies this
+   * specific in-flight completion turn so a disconnected client can come
+   * back and resume from where it left off via /chat/completions/resume/:turnId.
+   * Available after the first `next()` call.
+   */
+  turnId: string | null = null;
 
   /** If the stream ended with finish_reason "ask_user", this contains the questions. */
   askUser: AskUserPayload | null = null;
@@ -103,6 +123,18 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
   /** If the stream ended with finish_reason "open_tab", this contains the URL to open. */
   openTab: OpenTabPayload | null = null;
+
+  /** If the stream ended with finish_reason "set_design", this contains appearance overrides. */
+  setDesign: SetDesignPayload | null = null;
+
+  /** If the stream ended with finish_reason "widget_render", this contains the inline widget. */
+  widgetRender: WidgetRenderPayload | null = null;
+
+  /** If the stream ended with finish_reason "whatsapp_preview", this contains the proposed WhatsApp message. */
+  whatsappPreview: WhatsAppPreviewPayload | null = null;
+
+  /** If the stream ended with finish_reason "email_preview", this contains the proposed email. */
+  emailPreview: EmailPreviewPayload | null = null;
 
   /** Whether abort() has been called. */
   aborted = false;
@@ -158,6 +190,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       headers,
       body: JSON.stringify({ ...body, stream: true }),
       signal: this.abortController.signal,
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -168,8 +201,10 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
       );
     }
 
-    // Capture session ID from response header
+    // Capture session/turn IDs from response headers
     this.sessionId = res.headers.get("x-session-id");
+    this.userMessageId = res.headers.get("x-user-message-id");
+    this.turnId = res.headers.get("x-turn-id");
 
     this.reader = res.body?.getReader() ?? null;
     if (!this.reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
@@ -195,6 +230,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
           if (data === "[DONE]") return;
           try {
             const chunk = JSON.parse(data) as ChatCompletionChunk;
+            if ((chunk as any).error) throw new Error((chunk as any).error.message || "Stream failed");
             // Capture ask_user payload from the chunk
             const choice = chunk.choices[0];
             if (choice?.finish_reason === "ask_user" && choice.ask_user) {
@@ -220,9 +256,26 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
             if (choice?.finish_reason === "open_tab" && choice.open_tab) {
               this.openTab = choice.open_tab;
             }
+            // Capture set_design payload from the chunk
+            if (choice?.finish_reason === "set_design" && choice.set_design) {
+              this.setDesign = choice.set_design;
+            }
+            // Capture widget_render payload from the chunk
+            if (choice?.finish_reason === "widget_render" && choice.widget_render) {
+              this.widgetRender = choice.widget_render;
+            }
+            // Capture whatsapp_preview payload from the chunk
+            if (choice?.finish_reason === "whatsapp_preview" && choice.whatsapp_preview) {
+              this.whatsappPreview = choice.whatsapp_preview;
+            }
+            // Capture email_preview payload from the chunk
+            if (choice?.finish_reason === "email_preview" && choice.email_preview) {
+              this.emailPreview = choice.email_preview;
+            }
             yield chunk;
-          } catch {
-            // skip malformed chunks
+          } catch (error) {
+            // A server error is terminal; only malformed JSON is ignorable.
+            if (!(error instanceof SyntaxError)) throw error;
           }
         }
       }
@@ -276,6 +329,7 @@ export class PolpoClient {
       method,
       headers: { ...this.headers, "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "include",
     });
     const json = (await res.json()) as ApiResult<T>;
     if (!json.ok) {
@@ -322,8 +376,47 @@ export class PolpoClient {
     return this.get<Task[]>(`/tasks${qs ? `?${qs}` : ""}`);
   }
 
+  /**
+   * Slim variant of {@link getTasks}. Same filters, but the server returns
+   * only the fields the list rows render (~70-90% smaller payload). Use
+   * this for the Tasks page, Dashboard, and any list view. Fall back to
+   * `getTask(id)` for the full record on detail screens.
+   */
+  getTasksSlim(filters?: TaskFilters): Promise<TaskSlim[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.group) params.set("group", filters.group);
+    if (filters?.assignTo) params.set("assignTo", filters.assignTo);
+    params.set("slim", "true");
+    return this.get<TaskSlim[]>(`/tasks?${params.toString()}`);
+  }
+
   getTask(taskId: string): Promise<Task> {
     return this.get<Task>(`/tasks/${taskId}`);
+  }
+
+  /**
+   * Cursor-paginated task list with optional full-text search.
+   *
+   * Triggers the paginated response envelope (`{ tasks, nextCursor, hasMore }`)
+   * on the server side. Pass `cursor` from a previous page's `nextCursor`
+   * to fetch the next page. Pass `q` to switch the server into FTS5
+   * ranked-search mode (cursor is ignored in that mode).
+   *
+   * Backed by the SQLite FTS5 virtual table when the server uses SQLite
+   * (default). PostgreSQL / file-backed stores fall back to in-memory
+   * filtering — same shape, slower under load.
+   */
+  getTasksPage(opts?: TasksPageRequest): Promise<TasksPageResponse> {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts?.limit ?? 50));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    if (opts?.q) params.set("q", opts.q);
+    if (opts?.status) params.set("status", String(opts.status));
+    if (opts?.group) params.set("group", opts.group);
+    if (opts?.assignTo) params.set("assignTo", opts.assignTo);
+    if (opts?.slim) params.set("slim", "true");
+    return this.get<TasksPageResponse>(`/tasks?${params.toString()}`);
   }
 
   createTask(req: CreateTaskRequest): Promise<Task> {
@@ -346,6 +439,14 @@ export class PolpoClient {
     return this.post<{ killed: boolean }>(`/tasks/${taskId}/kill`);
   }
 
+  sendTaskDirection(taskId: string, req: SendTaskDirectionRequest): Promise<SendTaskDirectionResult> {
+    return this.post<SendTaskDirectionResult>(`/tasks/${taskId}/directions`, req);
+  }
+
+  getTaskDirections(taskId: string): Promise<TaskDirection[]> {
+    return this.get<TaskDirection[]>(`/tasks/${taskId}/directions`);
+  }
+
   reassessTask(taskId: string): Promise<{ reassessed: boolean }> {
     return this.post<{ reassessed: boolean }>(`/tasks/${taskId}/reassess`);
   }
@@ -358,6 +459,15 @@ export class PolpoClient {
 
   getMissions(): Promise<Mission[]> {
     return this.get<Mission[]>("/missions");
+  }
+
+  /**
+   * Slim variant of {@link getMissions}. Drops the `data` blob and the
+   * full `prompt` (often 2-10× smaller). Adds `taskCount`. Use for the
+   * Missions list page, Dashboard, and any list view.
+   */
+  getMissionsSlim(): Promise<MissionSlim[]> {
+    return this.get<MissionSlim[]>("/missions?slim=true");
   }
 
   getResumableMissions(): Promise<Mission[]> {
@@ -480,6 +590,10 @@ export class PolpoClient {
     service: string;
     type: "smtp" | "imap" | "oauth" | "api_key" | "login" | "custom";
     label?: string;
+    /** Logical mailbox account (groups SMTP+IMAP of the same mailbox). */
+    account?: string;
+    /** Other agent names allowed to use this credential (shared). */
+    allowedAgents?: string[];
     credentials: Record<string, string>;
   }): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.post<{ agent: string; service: string; type: string; keys: string[] }>("/vault/entries", req);
@@ -492,7 +606,7 @@ export class PolpoClient {
   patchVaultEntry(
     agent: string,
     service: string,
-    patch: { type?: string; label?: string; credentials?: Record<string, string> },
+    patch: { type?: string; label?: string; account?: string; allowedAgents?: string[]; credentials?: Record<string, string> },
   ): Promise<{ agent: string; service: string; type: string; keys: string[] }> {
     return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
       `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,
@@ -607,8 +721,8 @@ export class PolpoClient {
     return this.del<PolpoConfig>(`/config/channels/${encodeURIComponent(name)}`);
   }
 
-  testChannel(name: string): Promise<{ success: boolean }> {
-    return this.post<{ success: boolean }>(`/config/channels/${encodeURIComponent(name)}/test`);
+  testChannel(name: string): Promise<{ success: boolean; error?: string }> {
+    return this.post<{ success: boolean; error?: string }>(`/config/channels/${encodeURIComponent(name)}/test`);
   }
 
   getMemory(): Promise<{ exists: boolean; content: string }> {
@@ -706,6 +820,7 @@ export class PolpoClient {
       method: "POST",
       headers,
       body: JSON.stringify({ ...body, stream: false }),
+      credentials: "include",
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -739,6 +854,11 @@ export class PolpoClient {
 
   renameSession(sessionId: string, title: string): Promise<{ renamed: boolean }> {
     return this.patch<{ renamed: boolean }>(`/chat/sessions/${sessionId}`, { title });
+  }
+
+  /** Star or unstar a session. Mirrors PATCH /chat/sessions/:id with { starred } payload. */
+  setSessionStarred(sessionId: string, starred: boolean): Promise<{ starred: boolean }> {
+    return this.patch<{ starred: boolean }>(`/chat/sessions/${sessionId}`, { starred });
   }
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {

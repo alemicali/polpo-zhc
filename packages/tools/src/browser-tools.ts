@@ -17,7 +17,7 @@
 import { execSync, spawn as spawnChild } from "node:child_process";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const MAX_OUTPUT_BYTES = 50_000;
 const DEFAULT_TIMEOUT = 30_000;
@@ -489,6 +489,22 @@ function createBrowserReloadTool(session: string, profileDir?: string): AgentToo
   };
 }
 
+const BrowserUserAgentSchema = Type.Object({
+  userAgent: Type.String({ minLength: 1, maxLength: 512, description: "Exact User-Agent string to apply to the current browser session" }),
+});
+
+function createBrowserSetUserAgentTool(session: string, profileDir?: string): AgentTool<typeof BrowserUserAgentSchema> {
+  return {
+    name: "browser_set_user_agent",
+    label: "Set Browser User-Agent",
+    description: "Override the browser User-Agent for the current session and reload the active page. Use this to test mobile, desktop, crawler, or custom client behavior.",
+    parameters: BrowserUserAgentSchema,
+    async execute(_id, params, signal) {
+      return browserResult(await execBrowserAsync(["--user-agent", params.userAgent, "reload"], { session, profileDir, signal }));
+    },
+  };
+}
+
 // ─── Tool: browser_tabs ───
 
 const BrowserTabsSchema = Type.Object({
@@ -538,14 +554,14 @@ export type BrowserToolName =
   | "browser_type" | "browser_press" | "browser_screenshot" | "browser_get"
   | "browser_select" | "browser_hover" | "browser_scroll" | "browser_wait"
   | "browser_eval" | "browser_close" | "browser_back" | "browser_forward"
-  | "browser_reload" | "browser_tabs";
+  | "browser_reload" | "browser_tabs" | "browser_set_user_agent";
 
 export const ALL_BROWSER_TOOL_NAMES: BrowserToolName[] = [
   "browser_navigate", "browser_snapshot", "browser_click", "browser_fill",
   "browser_type", "browser_press", "browser_screenshot", "browser_get",
   "browser_select", "browser_hover", "browser_scroll", "browser_wait",
   "browser_eval", "browser_close", "browser_back", "browser_forward",
-  "browser_reload", "browser_tabs",
+  "browser_reload", "browser_tabs", "browser_set_user_agent",
 ];
 
 /**
@@ -583,6 +599,7 @@ export function createBrowserTools(
     browser_forward: () => createBrowserForwardTool(session, profileDir),
     browser_reload: () => createBrowserReloadTool(session, profileDir),
     browser_tabs: () => createBrowserTabsTool(session, profileDir),
+    browser_set_user_agent: () => createBrowserSetUserAgentTool(session, profileDir),
   };
 
   const names = allowedTools

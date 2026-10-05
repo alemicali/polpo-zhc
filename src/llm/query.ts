@@ -4,7 +4,7 @@
  * Backend: pi-ai (multi-provider, works with any LLM).
  */
 
-import type { Usage, Model, Api } from "@mariozechner/pi-ai";
+import type { Usage, Model, Api } from "@earendil-works/pi-ai";
 import type { ModelConfig } from "../core/types.js";
 import { withRetry } from "./retry.js";
 import { queryText, queryTextWithFallback, resolveModelSpec } from "./pi-client.js";
@@ -40,7 +40,7 @@ export async function queryOrchestratorText(
   if (model && typeof model === "object" && model.fallbacks && model.fallbacks.length > 0) {
     return withRetry(async () => {
       const result = await queryTextWithFallback(prompt, model);
-      const { calculateCost } = await import("@mariozechner/pi-ai");
+      const { calculateCost } = await import("@earendil-works/pi-ai");
       let costUsd: number | undefined;
       if (result.usage) {
         try {
@@ -62,7 +62,7 @@ export async function queryOrchestratorText(
   const spec = resolveModelSpec(model);
   return withRetry(async () => {
     const result = await queryText(prompt, spec);
-    const { calculateCost } = await import("@mariozechner/pi-ai");
+    const { calculateCost } = await import("@earendil-works/pi-ai");
     let costUsd: number | undefined;
     if (result.usage) {
       try {

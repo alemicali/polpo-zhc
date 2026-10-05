@@ -104,6 +104,7 @@ export function authRoutes(getDeps: () => {
     for (const name of Object.keys(configProviders)) allProviderNames.add(name);
     for (const name of Object.keys(PROVIDER_ENV_MAP)) allProviderNames.add(name);
     for (const name of profilesByProvider.keys()) allProviderNames.add(name);
+    for (const provider of OAUTH_PROVIDERS) allProviderNames.add(provider.id);
 
     type ProfileStatus = "active" | "cooldown" | "billing_disabled" | "expired";
     type ProfileType = "oauth" | "api_key";

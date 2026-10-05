@@ -1,6 +1,6 @@
 import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
+import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson } from "../utils.js";
 
 type AnyTable = any;
@@ -21,6 +21,7 @@ export class DrizzleSessionStore implements SessionStore {
       updatedAt: row.updatedAt,
       messageCount,
       ...(row.agent ? { agent: row.agent } : {}),
+      ...(row.starred ? { starred: true } : {}),
     };
   }
 
@@ -31,6 +32,7 @@ export class DrizzleSessionStore implements SessionStore {
       content: row.content,
       ts: row.ts,
       toolCalls: deserializeJson<ToolCallInfo[] | undefined>(row.toolCalls, undefined, this.dialect),
+      segments: deserializeJson<MessageSegment[] | undefined>(row.segments, undefined, this.dialect),
     };
   }
 
@@ -47,30 +49,41 @@ export class DrizzleSessionStore implements SessionStore {
     return id;
   }
 
-  async addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message> {
+  async addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message> {
     const id = nanoid();
     const ts = new Date().toISOString();
+    const tcValue = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
+    const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
     await this.db.insert(this.messages).values({
       id,
       sessionId,
       role,
       content,
       ts,
-      toolCalls: null,
+      toolCalls: tcValue,
+      segments: segmentsValue,
     });
     await this.db.update(this.sessions)
       .set({ updatedAt: ts })
       .where(eq(this.sessions.id, sessionId));
 
-    return { id, role, content, ts };
+    return {
+      id,
+      role,
+      content,
+      ts,
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
+      ...(segments && segments.length > 0 ? { segments } : {}),
+    };
   }
 
-  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean> {
+  async updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<boolean> {
     const now = new Date().toISOString();
-    const tcValue = toolCalls ? JSON.stringify(toolCalls) : null;
+    const tcValue = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
+    const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
 
     const result = await this.db.update(this.messages)
-      .set({ content, toolCalls: tcValue })
+      .set({ content, toolCalls: tcValue, segments: segmentsValue })
       .where(eq(this.messages.id, messageId));
 
     const changed = (result?.rowCount ?? result?.changes ?? 0) > 0;
@@ -105,6 +118,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -123,6 +137,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -141,6 +156,7 @@ export class DrizzleSessionStore implements SessionStore {
         agent: this.sessions.agent,
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
+        starred: this.sessions.starred,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -168,6 +184,16 @@ export class DrizzleSessionStore implements SessionStore {
     const now = new Date().toISOString();
     const result = await this.db.update(this.sessions)
       .set({ title, updatedAt: now })
+      .where(eq(this.sessions.id, sessionId));
+    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+  }
+
+  async setStarred(sessionId: string, starred: boolean): Promise<boolean> {
+    // CRITICAL: do NOT update updatedAt. Starring must not reshuffle the
+    // sidebar — "recent" ordering keys off updatedAt and users expect
+    // pinning a chat to leave its chronological position untouched.
+    const result = await this.db.update(this.sessions)
+      .set({ starred })
       .where(eq(this.sessions.id, sessionId));
     return (result?.rowCount ?? result?.changes ?? 0) > 0;
   }

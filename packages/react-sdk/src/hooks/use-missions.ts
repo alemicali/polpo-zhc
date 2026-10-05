@@ -2,11 +2,13 @@ import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { selectMissions } from "@polpo-ai/sdk";
 import { useMutation } from "./use-mutation.js";
+import { readCached, writeCached } from "./use-swr-cache.js";
 import type { Mission, CreateMissionRequest, UpdateMissionRequest, ExecuteMissionResult, ResumeMissionResult } from "@polpo-ai/sdk";
 
 export interface UseMissionsReturn {
   missions: Mission[];
   isLoading: boolean;
+  isRefreshing: boolean;
   error: Error | null;
   createMission: (req: CreateMissionRequest) => Promise<Mission>;
   isCreating: boolean;
@@ -27,6 +29,19 @@ export interface UseMissionsReturn {
 export function useMissions(): UseMissionsReturn {
   const { client, store } = usePolpoContext();
 
+  // SWR hydrate — same pattern as use-tasks. Done BEFORE useSyncExternalStore
+  // so the very first render sees the stale data. Cold-loading /missions is
+  // the worst single page (full payload includes the `data` JSON blob); the
+  // pre-paint from cache is a big perceived-latency win.
+  const hydratedRef = useRef(false);
+  if (!hydratedRef.current && store.getSnapshot().missions.size === 0) {
+    const cached = readCached<Mission[]>("missions");
+    if (cached?.data && cached.data.length > 0) {
+      store.setMissions(cached.data);
+    }
+    hydratedRef.current = true;
+  }
+
   const missions = useSyncExternalStore(
     store.subscribe,
     () => selectMissions(store.getSnapshot()),
@@ -39,21 +54,30 @@ export function useMissions(): UseMissionsReturn {
     () => false,
   );
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(missions.length === 0);
+  const [isRefreshing, setIsRefreshing] = useState(missions.length > 0);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchMissions = useCallback(async () => {
     try {
       const m = await client.getMissions();
       store.setMissions(m);
+      writeCached("missions", m);
     } catch (err) {
       setError(err as Error);
     }
   }, [client, store]);
 
   useEffect(() => {
-    setIsLoading(true);
-    fetchMissions().finally(() => setIsLoading(false));
+    const hasStale = missions.length > 0;
+    if (hasStale) setIsRefreshing(true);
+    else setIsLoading(true);
+    fetchMissions().finally(() => {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    });
+    // missions.length intentionally captured on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchMissions]);
 
   // Auto-refetch when missions are marked stale by SSE events.
@@ -112,6 +136,7 @@ export function useMissions(): UseMissionsReturn {
   return {
     missions,
     isLoading,
+    isRefreshing,
     error,
     createMission,
     isCreating,

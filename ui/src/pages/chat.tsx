@@ -1,13 +1,24 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { ChatAttachments } from "@/components/chat-attachments";
+import {
+  lazy,
+  Suspense,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   Copy,
   Check,
   Trash2,
   Zap,
+  History,
   ListChecks,
   Target,
   MessageSquare,
-  MessageCircle,
   Plus,
 
   ChevronsLeft,
@@ -19,6 +30,10 @@ import {
   ArrowDown,
   Mic,
   MicOff,
+  Volume2,
+  Pause,
+  Loader2,
+  Maximize2,
   X,
   Play,
   Save,
@@ -39,8 +54,18 @@ import {
   PauseCircle,
   Timer,
   BarChart3,
-  AtSign,
   Compass,
+  Palette,
+  List,
+  ListPlus,
+  Pencil,
+  Star,
+  StarOff,
+  MoreHorizontal,
+  ClockArrowUp,
+  AppWindow,
+  Database,
+  Table2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +84,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Virtuoso, type VirtuosoHandle, type StateSnapshot } from "react-virtuoso";
 import {
   Message,
   MessageContent,
@@ -67,6 +106,11 @@ import {
   MessageActions,
   MessageAction,
 } from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import {
   PromptInput,
   PromptInputTextarea,
@@ -76,17 +120,39 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction } from "@/hooks/use-polpo";
+import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
+import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
+import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
+import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
-import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile } from "@/components/ai-elements/mention-popover";
+import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
+import { Queue } from "@/components/ai-elements/queue";
+import { BackgroundWaits } from "@/components/ai-elements/background-waits";
+import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
+import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { useAgents, useTasks, useMissions, useSkills, usePlaybooks } from "@polpo-ai/react";
+import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
+import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
+import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
+import {
+  clearAppPreviewContext,
+  formatAppPreviewContext,
+  setAppPreviewContext,
+  useAppPreviewContext,
+} from "@/hooks/use-app-preview-context";
+import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
+
+const MissionPreviewDialog = lazy(() =>
+  import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
+);
 
 /** Like formatDistanceToNow but returns "just now" for < 30 s */
 function chatTimeAgo(date: Date): string {
@@ -94,6 +160,29 @@ function chatTimeAgo(date: Date): string {
   if (diffMs < 30_000) return "just now";
   return formatDistanceToNow(date, { addSuffix: true });
 }
+
+// ── Per-session UI-state caches (browser-tab semantics) ────────────────
+//
+// The chat tab strip lets the user freely jump between open conversations
+// without "losing context" — same expectation as desktop browsers. Two
+// pieces of UI-local state would otherwise be wiped on each switch:
+//
+//   1) Virtuoso scroll position (item index + measurements). Stored as
+//      `StateSnapshot` per session id; captured before the Virtuoso
+//      instance unmounts on session change, replayed via Virtuoso's
+//      `restoreStateFrom` prop on the next mount.
+//   2) The composer textarea draft. The PromptInputTextarea is uncontrolled
+//      and the surrounding form auto-resets after submit, so we snapshot
+//      the live `value` per session id and rehydrate after each switch.
+//
+// Module-level Maps are intentional: they survive React strict-mode double
+// renders and any local re-mounts of the consuming components, but they
+// are lost on a hard refresh — which is the desired "browser tab" semantic
+// (a closed-and-reopened browser doesn't restore unsubmitted drafts).
+const chatScrollStates: Map<string, StateSnapshot> = new Map();
+const chatInputDrafts: Map<string, string> = new Map();
+/** Sentinel session-id used for the unsaved "new session" placeholder. */
+const NEW_SESSION_DRAFT_KEY = "__new__";
 
 // ── Speech-to-text hook (Web Speech API) ──
 
@@ -206,14 +295,20 @@ function useSpeechRecognition(opts?: { lang?: string; onResult?: (text: string) 
 function MicButton({
   onTranscript,
   disabled,
+  onListeningChange,
 }: {
   onTranscript: (text: string) => void;
   disabled?: boolean;
+  onListeningChange?: (listening: boolean) => void;
 }) {
   const { isListening, isSupported, toggle } = useSpeechRecognition({
     lang: "it-IT",
     onResult: onTranscript,
   });
+
+  useEffect(() => {
+    onListeningChange?.(isListening);
+  }, [isListening, onListeningChange]);
 
   if (!isSupported) return null;
 
@@ -225,7 +320,7 @@ function MicButton({
           variant="ghost"
           size="icon"
           className={cn(
-            "h-8 w-8 rounded-full transition-all",
+            "h-8 w-8 rounded-[calc(var(--radius)+999px)] transition-all",
             isListening
               ? "bg-red-500/15 text-red-400 hover:bg-red-500/25 ring-2 ring-red-500/30 animate-pulse"
               : "text-muted-foreground hover:text-foreground hover:bg-accent",
@@ -249,8 +344,9 @@ function MicButton({
 
 // ── Attachment preview strip (lives inside PromptInput) ──
 
-function AttachmentPreview() {
+function AttachmentPreview({ onCount }: { onCount?: (count: number) => void }) {
   const { files, remove } = usePromptInputAttachments();
+  useEffect(() => { onCount?.(files.length); return () => onCount?.(0); }, [files.length, onCount]);
   if (files.length === 0) return null;
 
   return (
@@ -295,7 +391,7 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
+          className="h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
           onClick={openFileDialog}
           disabled={disabled}
         >
@@ -309,30 +405,14 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
   );
 }
 
-// ── Mention @ button (lives inside PromptInput) ──
-
-function MentionButton({ disabled, onOpen }: { disabled?: boolean; onOpen: () => void }) {
+function ChatInputHint({ trigger, label }: { trigger: "@" | "/"; label: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
-          onMouseDown={(e) => {
-            e.preventDefault(); // Prevent stealing focus from textarea
-            onOpen();
-          }}
-          disabled={disabled}
-        >
-          <AtSign className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">
-        Mention agent, task, or mission
-      </TooltipContent>
-    </Tooltip>
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <span className="font-mono text-[10px] font-semibold text-foreground">
+        {trigger}
+      </span>
+      <span className="hidden sm:inline">for {label}</span>
+    </span>
   );
 }
 
@@ -405,6 +485,7 @@ function MissionPreviewCard({
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expandedTasks, setExpandedTasks] = useState<Set<number>>(new Set());
+  const [fullViewOpen, setFullViewOpen] = useState(false);
 
   const mission = preview.data as MissionDataShape;
   const tasks = mission?.tasks ?? [];
@@ -455,10 +536,10 @@ function MissionPreviewCard({
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.03] overflow-hidden">
+    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.03]">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-primary/10 bg-primary/[0.02]">
-        <Target className="h-4 w-4 text-primary shrink-0" />
+      <div className="flex items-center gap-2 border-b border-primary/10 bg-primary/[0.02] px-3 py-2 sm:px-4 sm:py-3">
+        <Target className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{preview.name || mission?.name || "Mission"}</p>
           <p className="text-[11px] text-muted-foreground">
@@ -468,13 +549,38 @@ function MissionPreviewCard({
             )}
           </p>
         </div>
-        <Badge variant="outline" className="text-[10px] shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
+              onClick={() => setFullViewOpen(true)}
+              aria-label="Open full mission view"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Open full view</TooltipContent>
+        </Tooltip>
+        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex">
           Preview
         </Badge>
       </div>
 
+      {fullViewOpen ? (
+        <Suspense fallback={null}>
+          <MissionPreviewDialog
+            preview={preview}
+            open
+            onOpenChange={setFullViewOpen}
+          />
+        </Suspense>
+      ) : null}
+
       {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
-      <div className="px-4 py-3 space-y-1 max-h-80 overflow-y-auto">
+      <div className="max-h-56 space-y-0.5 overflow-y-auto px-3 py-2 sm:max-h-80 sm:space-y-1 sm:px-4 sm:py-3">
         {(() => {
           // Build a title→index map for positioning flow-control elements
           const titleIndex = new Map<string, number>();
@@ -535,11 +641,11 @@ function MissionPreviewCard({
             if (item.kind === "checkpoint") {
               const cp = item.data;
               return (
-                <div key={key} className="flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2 ml-6">
-                  <PauseCircle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
+                  <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{cp.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <p className="min-w-0 text-sm font-medium leading-snug">{cp.name}</p>
                       <span className="text-[9px] font-medium uppercase tracking-wider text-amber-500">Checkpoint</span>
                     </div>
                     {cp.message && <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>}
@@ -555,11 +661,11 @@ function MissionPreviewCard({
             if (item.kind === "delay") {
               const dl = item.data;
               return (
-                <div key={key} className="flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-3 py-2 ml-6">
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
                   <Timer className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{dl.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <p className="min-w-0 text-sm font-medium leading-snug">{dl.name}</p>
                       <span className="text-[9px] font-medium uppercase tracking-wider text-blue-500">Delay</span>
                     </div>
                     {dl.message && <p className="text-[11px] text-muted-foreground mt-0.5">{dl.message}</p>}
@@ -575,11 +681,11 @@ function MissionPreviewCard({
             // gate
             const qg = item.data as MissionQualityGateShape;
             return (
-              <div key={key} className="flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-3 py-2 ml-6">
+              <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
                 <BarChart3 className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{qg.name}</p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <p className="min-w-0 text-sm font-medium leading-snug">{qg.name}</p>
                     <span className="text-[9px] font-medium uppercase tracking-wider text-violet-500">Quality Gate</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
@@ -628,7 +734,7 @@ function MissionPreviewCard({
               <div key={`task-${idx}`} className="rounded-lg transition-colors hover:bg-primary/[0.03]">
                 <button
                   type="button"
-                  className="flex items-start gap-2 py-2 px-1.5 w-full text-left"
+                  className="flex w-full items-start gap-2 px-1 py-1.5 text-left sm:px-1.5 sm:py-2"
                   onClick={() => toggleTask(idx)}
                 >
                   <span className="text-[11px] font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
@@ -636,7 +742,7 @@ function MissionPreviewCard({
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm leading-snug">{task.title}</p>
-                    <div className="flex items-center gap-3 mt-0.5">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                         <User className="h-3 w-3" />
                         {task.assignTo}
@@ -722,11 +828,11 @@ function MissionPreviewCard({
 
       {/* Refine feedback input */}
       {refineMode && (
-        <div className="px-4 pb-3 border-t border-primary/10">
+        <div className="border-t border-primary/10 px-3 pb-3 sm:px-4">
           <p className="text-xs text-muted-foreground mt-2 mb-1.5">What would you like to change?</p>
           <Textarea
             placeholder="e.g., Add a task for writing tests, change the agent assignment..."
-            className="text-sm min-h-[60px] bg-background/60"
+            className="min-h-[60px] bg-background/60 text-base sm:text-sm"
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             onKeyDown={(e) => {
@@ -765,24 +871,24 @@ function MissionPreviewCard({
 
       {/* Action buttons — Cancel left, actions right */}
       {!refineMode && (
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-primary/10 bg-primary/[0.02]">
+        <div className="grid grid-cols-2 gap-2 border-t border-primary/10 bg-primary/[0.02] px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
           <Button
             variant="ghost"
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("cancel")}
-            className="gap-1.5 text-muted-foreground hover:text-destructive"
+            className="w-full gap-1.5 text-muted-foreground hover:text-destructive sm:w-auto"
           >
             <Ban className="h-3.5 w-3.5" />
             Cancel
           </Button>
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
           <Button
             variant="outline"
             size="sm"
             disabled={disabled || submitting}
             onClick={() => setRefineMode(true)}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refine
@@ -792,16 +898,17 @@ function MissionPreviewCard({
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("draft")}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             <Save className="h-3.5 w-3.5" />
-            Save Draft
+            <span className="sm:hidden">Draft</span>
+            <span className="hidden sm:inline">Save Draft</span>
           </Button>
           <Button
             size="sm"
             disabled={disabled || submitting}
             onClick={() => handleAction("execute")}
-            className="gap-1.5"
+            className="w-full gap-1.5 sm:w-auto"
           >
             {submitting ? (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -950,6 +1057,215 @@ function VaultPreviewCard({
   );
 }
 
+// ── Design Preview Card ──
+
+type DesignMode = "light" | "dark";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value);
+}
+
+function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
+  const nested = preview[mode];
+  if (nested && isRecord(nested)) return nested;
+
+  const patch: Record<string, unknown> = {};
+  for (const key of ["primary", "secondary", "text", "radius", "fontFamily"] as const) {
+    if (preview[key] !== undefined) patch[key] = preview[key];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function applyThemePatch(
+  base: AppearanceThemeSettings,
+  patch: Record<string, unknown> | null,
+  label: string,
+): { theme: AppearanceThemeSettings; changed: string[]; error?: string } {
+  const next = { ...base };
+  const changed: string[] = [];
+  if (!patch) return { theme: next, changed };
+
+  for (const key of ["primary", "secondary", "text"] as const) {
+    if (patch[key] === undefined) continue;
+    if (typeof patch[key] !== "string" || !isHexColor(patch[key])) {
+      return { theme: next, changed, error: `${label} ${key} must be a 6-digit hex color` };
+    }
+    next[key] = patch[key];
+    changed.push(`${label} ${key} ${patch[key]}`);
+  }
+
+  if (patch.radius !== undefined) {
+    if (typeof patch.radius !== "number" || !Number.isFinite(patch.radius)) {
+      return { theme: next, changed, error: `${label} radius must be a number` };
+    }
+    next.radius = Math.min(24, Math.max(0, patch.radius));
+    changed.push(`${label} radius ${next.radius}px`);
+  }
+
+  if (patch.fontFamily !== undefined) {
+    if (typeof patch.fontFamily !== "string" || !patch.fontFamily.trim()) {
+      return { theme: next, changed, error: `${label} fontFamily cannot be empty` };
+    }
+    next.fontFamily = patch.fontFamily.trim();
+    changed.push(`${label} font`);
+  }
+
+  return { theme: next, changed };
+}
+
+function buildAppearancePreview(preview: SetDesignData, current: AppearanceSettings) {
+  if (preview.enabled === false) {
+    return {
+      next: { ...current, enabled: false },
+      changed: ["overrides off"],
+    };
+  }
+
+  const light = applyThemePatch(current.light, themePatchFromPreview(preview, "light"), "light");
+  if (light.error) return { error: light.error };
+  const dark = applyThemePatch(current.dark, themePatchFromPreview(preview, "dark"), "dark");
+  if (dark.error) return { error: dark.error };
+
+  const changed = ["overrides on", ...light.changed, ...dark.changed];
+  return {
+    next: {
+      ...current,
+      enabled: true,
+      light: light.theme,
+      dark: dark.theme,
+    },
+    changed,
+  };
+}
+
+function hasAppearancePreview(
+  value: ReturnType<typeof buildAppearancePreview>,
+): value is { next: AppearanceSettings; changed: string[] } {
+  return "next" in value;
+}
+
+function ThemeSwatch({ label, theme }: { label: string; theme: AppearanceThemeSettings }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/70 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold">{label}</p>
+        <span className="text-[10px] text-muted-foreground">{theme.radius}px radius</span>
+      </div>
+      <div className="mb-2 flex h-8 overflow-hidden rounded-md border border-border/30">
+        <span className="flex-1" style={{ background: theme.primary }} />
+        <span className="flex-1" style={{ background: theme.secondary }} />
+        <span className="flex-1" style={{ background: theme.text }} />
+      </div>
+      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
+        <span className="text-muted-foreground">Primary</span>
+        <code className="truncate">{theme.primary}</code>
+        <span className="text-muted-foreground">Secondary</span>
+        <code className="truncate">{theme.secondary}</code>
+        <span className="text-muted-foreground">Text</span>
+        <code className="truncate">{theme.text}</code>
+        <span className="text-muted-foreground">Font</span>
+        <code className="truncate">{theme.fontFamily}</code>
+      </div>
+    </div>
+  );
+}
+
+function DesignPreviewCard({
+  preview,
+  onRespond,
+  disabled,
+}: {
+  preview: SetDesignData;
+  onRespond: (result?: { applied: boolean; description: string }) => void;
+  disabled?: boolean;
+}) {
+  const { appearance, setAppearance } = useAppearance();
+  const [submitting, setSubmitting] = useState(false);
+  const computed = useMemo(() => buildAppearancePreview(preview, appearance), [appearance, preview]);
+  const canApply = hasAppearancePreview(computed);
+  const nextAppearance = canApply ? computed.next : appearance;
+
+  const apply = () => {
+    if (!hasAppearancePreview(computed)) {
+      toast.error("Design preview is invalid", { description: computed.error });
+      return;
+    }
+    setSubmitting(true);
+    setAppearance(computed.next);
+    onRespond({ applied: true, description: computed.changed.join(", ") });
+    toast.success("Design updated");
+    setSubmitting(false);
+  };
+
+  const cancel = () => {
+    onRespond({ applied: false, description: "user declined preview" });
+  };
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.03]">
+      <div className="flex items-center gap-2 border-b border-primary/10 bg-primary/[0.02] px-4 py-3">
+        <Palette className="h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">Design preview</p>
+          <p className="text-[11px] text-muted-foreground">
+            {preview.enabled === false ? "Appearance overrides will be disabled" : "Review the proposed light and dark theme before applying"}
+          </p>
+        </div>
+        <Badge variant="outline" className="shrink-0 text-[10px]">Preview</Badge>
+      </div>
+
+      <div className="space-y-3 px-4 py-3">
+        {preview.enabled === false ? (
+          <div className="rounded-lg border border-border/40 bg-background/70 p-3 text-xs text-muted-foreground">
+            The selected palette and default theme variables will be restored.
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ThemeSwatch label="Light" theme={nextAppearance.light} />
+            <ThemeSwatch label="Dark" theme={nextAppearance.dark} />
+          </div>
+        )}
+        {!canApply && (
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{computed.error}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-primary/10 bg-primary/[0.02] px-4 py-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled || submitting}
+          onClick={cancel}
+          className="gap-1.5 text-muted-foreground hover:text-destructive"
+        >
+          <Ban className="h-3.5 w-3.5" />
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          disabled={disabled || submitting || !canApply}
+          onClick={apply}
+          className="gap-1.5"
+        >
+          {submitting ? (
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          Apply design
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Copy button ──
 
 function CopyAction({ text }: { text: string }) {
@@ -967,6 +1283,102 @@ function CopyAction({ text }: { text: string }) {
         <Check className="h-3.5 w-3.5 text-emerald-500" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
+      )}
+    </MessageAction>
+  );
+}
+
+// ── Speak button (TTS via /api/v1/audio/speak — edge-tts under the hood) ──
+
+// Singleton: only one message can play at a time. Clicking another stops the previous.
+let currentTtsAudio: HTMLAudioElement | null = null;
+let currentTtsStop: (() => void) | null = null;
+
+function SpeakAction({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    if (currentTtsAudio === audioRef.current) currentTtsAudio = null;
+    if (currentTtsStop === stop) currentTtsStop = null;
+    setState("idle");
+  }, []);
+
+  const play = useCallback(async () => {
+    if (state === "loading") return;
+    if (state === "playing") { stop(); return; }
+
+    // Stop any other speak action that's currently active
+    if (currentTtsStop && currentTtsStop !== stop) currentTtsStop();
+
+    setState("loading");
+    try {
+      const base = config.baseUrl || "";
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+      const language = (navigator.language || "en").split("-")[0];
+      // Giuseppe (it-IT) is multilingual — handles IT + EN + FR + ES well in one voice.
+      const voice = "it-IT-GiuseppeMultilingualNeural";
+      const res = await fetch(`${base}/api/v1/audio/speak`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text, language, voice }),
+      });
+      if (!res.ok) {
+        let msg = `TTS failed (${res.status})`;
+        try {
+          const j = await res.json();
+          if (j?.error) msg = j.error;
+        } catch { /* ignore */ }
+        console.warn("[TTS]", msg);
+        setState("idle");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      currentTtsAudio = audio;
+      currentTtsStop = stop;
+      audio.onended = stop;
+      audio.onerror = stop;
+      await audio.play();
+      setState("playing");
+    } catch (err) {
+      console.warn("[TTS] play error:", err);
+      setState("idle");
+    }
+  }, [state, text, stop]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) audioRef.current.pause();
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
+
+  const tooltip = state === "playing" ? "Stop" : state === "loading" ? "Generating…" : "Read aloud";
+
+  return (
+    <MessageAction tooltip={tooltip} onClick={play}>
+      {state === "loading" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : state === "playing" ? (
+        <Pause className="h-3.5 w-3.5 text-emerald-500" />
+      ) : (
+        <Volume2 className="h-3.5 w-3.5" />
       )}
     </MessageAction>
   );
@@ -1466,7 +1878,7 @@ function AskUserCards({
 
 // ── Suggestions for empty state ──
 
-const suggestions = [
+const orchestratorSuggestions = [
   {
     icon: Zap,
     title: "What's the current status?",
@@ -1478,50 +1890,68 @@ const suggestions = [
     description: "Tasks that need attention",
   },
   {
-    icon: Target,
-    title: "Create a mission to refactor the auth module",
-    description: "Generate a multi-task execution mission",
-  },
-  {
     icon: MessageSquare,
-    title: "List all active agents",
-    description: "See which agents are configured",
+    title: "Create a new agent",
+    description: "Add a specialist agent to the team",
   },
 ];
 
-// ── Session ID copy button ──
+const MAX_AGENT_SUGGESTIONS = 4;
 
-function SessionIdCopy({ sessionId }: { sessionId: string }) {
-  const [copied, setCopied] = useState(false);
+type AgentStarterSuggestion = string | {
+  title: string;
+  prompt?: string;
+  description?: string;
+};
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(sessionId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [sessionId]);
+interface LazyMentionData {
+  tasks: Task[];
+  missions: Mission[];
+  skills: SkillWithAssignment[];
+  playbooks: PlaybookInfo[];
+  files: MentionFile[];
+}
 
-  return (
-    <span
-      className="inline-flex items-center gap-1 cursor-pointer group"
-      onClick={handleCopy}
-      title="Click to copy session ID"
-    >
-      {copied ? (
-        <>
-          <Check className="inline h-2.5 w-2.5 text-emerald-500" />
-          <span className="text-emerald-500">Copied!</span>
-        </>
-      ) : (
-        <>
-          {" Session "}
-          <code className="font-mono hover:text-foreground transition-colors">
-            {sessionId.slice(0, 8)}
-          </code>
-          <Copy className="inline h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-        </>
-      )}
-    </span>
-  );
+function parseMissionAgents(data: string): string[] {
+  try {
+    const parsed = JSON.parse(data) as {
+      tasks?: Array<{ assignTo?: string }>;
+      team?: Array<{ name?: string }>;
+    };
+    const agents = new Set<string>();
+
+    if (Array.isArray(parsed.tasks)) {
+      for (const task of parsed.tasks) {
+        if (task.assignTo) agents.add(task.assignTo);
+      }
+    }
+
+    if (Array.isArray(parsed.team)) {
+      for (const agent of parsed.team) {
+        if (agent.name) agents.add(agent.name);
+      }
+    }
+
+    return Array.from(agents);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeMentionPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.?\//, "").replace(/\/+$/, "");
+}
+
+function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean {
+  const allowedPaths = agent?.allowedPaths;
+  if (!allowedPaths || allowedPaths.length === 0) return true;
+
+  const filePath = normalizeMentionPath(file.path);
+  return allowedPaths.some((allowedPath) => {
+    const normalizedAllowed = normalizeMentionPath(allowedPath);
+    if (!normalizedAllowed || normalizedAllowed === ".") return true;
+    return filePath === normalizedAllowed || filePath.startsWith(`${normalizedAllowed}/`);
+  });
 }
 
 // ── Session sidebar (two-level: agent groups → session list) ──
@@ -1529,17 +1959,45 @@ function SessionIdCopy({ sessionId }: { sessionId: string }) {
 /** Key used for orchestrator (non-agent) sessions in the group map */
 const ORCHESTRATOR_KEY = "__orchestrator__";
 const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
+const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
+const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
+const SESSION_SIDEBAR_MIN_WIDTH = 320;
+const SESSION_SIDEBAR_MAX_WIDTH = 520;
 
-type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
+type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean };
 type SidebarView = "drill" | "flat";
 
-/** Shared session row — used by both drill-down and flat views */
+const clampSessionSidebarWidth = (value: number) => {
+  const viewportCap = typeof window === "undefined"
+    ? SESSION_SIDEBAR_MAX_WIDTH
+    : Math.max(SESSION_SIDEBAR_MIN_WIDTH, Math.min(SESSION_SIDEBAR_MAX_WIDTH, window.innerWidth - 560));
+  return Math.min(Math.max(value, SESSION_SIDEBAR_MIN_WIDTH), viewportCap);
+};
+
+const readStoredSessionSidebarWidth = () => {
+  if (typeof window === "undefined") return SESSION_SIDEBAR_DEFAULT_WIDTH;
+  const parsed = Number(localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
+};
+
+/** Shared session row — used by both drill-down and flat views.
+ *
+ *  Wraps the row in a <ContextMenu> so a right-click anywhere on the row
+ *  exposes Rename / Star|Unstar / Delete. The trailing kebab dropdown
+ *  exposes the same actions for users who don't expect right-click on the
+ *  web. Both surfaces call the same callbacks — single source of truth.
+ *
+ *  A small amber star (lucide Star, filled) appears next to the title when
+ *  `session.starred` is truthy.
+ */
 function SessionRow({
   session,
   isActive,
   isStreaming,
   onSelect,
   onDelete,
+  onRename,
+  onToggleStar,
 }: {
   session: SessionItem;
   isActive: boolean;
@@ -1547,86 +2005,206 @@ function SessionRow({
   isStreaming?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isStarred = !!session.starred;
+  const title = session.title || "Untitled";
+
+  const handleRename = () => onRename(session.id, title);
+  const handleToggleStar = () => onToggleStar(session.id, !isStarred);
+  const handleDelete = () => onDelete(session.id);
+
   return (
-    <div
-      className={cn(
-        "group flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
-        isActive
-          ? "bg-accent/80 text-accent-foreground"
-          : "hover:bg-accent/30 text-muted-foreground"
-      )}
-      onClick={() => onSelect(session.id)}
-    >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <p className={cn(
-            "text-[13px] font-medium truncate",
-            isActive ? "text-accent-foreground" : "text-foreground"
-          )}>
-            {session.title || "Untitled"}
-          </p>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {isStreaming && (
-              <span className="flex items-center gap-1 text-[10px] text-primary font-medium">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                </span>
-              </span>
-            )}
-            <span className="text-[10px] text-muted-foreground">
-              {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}
-            </span>
-          </div>
-        </div>
-        <p className="text-[10px] opacity-50 mt-0.5">
-          {isStreaming ? (
-            <span className="text-primary/70">Streaming...</span>
-          ) : (
-            <>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+            isActive
+              ? "bg-accent/80 text-accent-foreground"
+              : "hover:bg-accent/30 text-muted-foreground"
           )}
-        </p>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive -mr-1"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(session.id);
-        }}
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
-    </div>
+          onClick={() => onSelect(session.id)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isStarred && (
+                <Star
+                  className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+                  aria-label="Starred"
+                />
+              )}
+              <p className={cn(
+                "whitespace-normal break-words text-[13px] font-medium leading-snug min-w-0",
+                isActive ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {title}
+              </p>
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+              {isStreaming ? (
+                <span className="flex items-center gap-1 font-medium text-primary/70">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                  </span>
+                  Streaming...
+                </span>
+              ) : (
+                <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+              )}
+              <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+            </div>
+          </div>
+          {/* Kebab dropdown — visible on hover/focus, or while open so it
+              doesn't vanish under the cursor. Mirrors the context menu. */}
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Session actions"
+                className={cn(
+                  "-mr-1 h-5 w-5 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
+                  menuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onSelect={handleRename}>
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleToggleStar}>
+                {isStarred ? (
+                  <>
+                    <StarOff className="mr-2 h-3.5 w-3.5" />
+                    Unstar
+                  </>
+                ) : (
+                  <>
+                    <Star className="mr-2 h-3.5 w-3.5" />
+                    Star
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={handleDelete}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={handleRename}>
+          <Pencil className="mr-2 h-3.5 w-3.5" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={handleToggleStar}>
+          {isStarred ? (
+            <>
+              <StarOff className="mr-2 h-3.5 w-3.5" />
+              Unstar
+            </>
+          ) : (
+            <>
+              <Star className="mr-2 h-3.5 w-3.5" />
+              Star
+            </>
+          )}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={handleDelete}
+          className="text-destructive focus:text-destructive"
+        >
+          <Trash2 className="mr-2 h-3.5 w-3.5" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
 function SessionSidebar({
   sessions,
   activeSessionId,
-  streamingSessionId,
+  streamingSessionIds,
   onSelect,
   onNew,
   onDelete,
+  onRename,
+  onToggleStar,
   onBack,
   fullWidth,
+  mobileFullWidth,
+  mobileOnlyBack,
 }: {
   sessions: SessionItem[];
   activeSessionId: string | null;
-  /** Session ID currently receiving a streaming response (null if idle) */
-  streamingSessionId: string | null;
+  /** Session IDs currently receiving a streaming response. */
+  streamingSessionIds: string[];
   onSelect: (id: string) => void;
   onNew: (agent?: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
   /** Callback to close the sidebar (used in compact/overlay mode) */
   onBack?: () => void;
   /** When true, sidebar takes full width instead of fixed w-72 */
   fullWidth?: boolean;
+  /** Full width on mobile, resizable fixed width on desktop. */
+  mobileFullWidth?: boolean;
+  /** Show the close/back control only while the mobile overlay layout applies. */
+  mobileOnlyBack?: boolean;
 }) {
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSessionSidebarWidth);
+
+  useEffect(() => {
+    if (!fullWidth) {
+      localStorage.setItem(SESSION_SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    }
+  }, [fullWidth, sidebarWidth]);
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (fullWidth) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampSessionSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }, [fullWidth, sidebarWidth]);
 
   // ── View toggle (drill-down vs flat/accordion) ──
   const [view, setView] = useState<SidebarView>(() => {
@@ -1643,13 +2221,16 @@ function SessionSidebar({
 
   // ── Drill-down state ──
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const lastAutoDrilledSessionRef = useRef<string | null>(null);
 
   // Auto-drill into the group that contains the active session
   useEffect(() => {
     if (view !== "drill" || !activeSessionId) return;
+    if (lastAutoDrilledSessionRef.current === activeSessionId) return;
     const session = sessions.find((s) => s.id === activeSessionId);
     if (session) {
       setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
+      lastAutoDrilledSessionRef.current = activeSessionId;
     }
   }, [activeSessionId, sessions, view]);
 
@@ -1664,6 +2245,19 @@ function SessionSidebar({
   });
   const toggleGroup = useCallback((key: string) => {
     setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // ── Within-group "show more": which groups have all sessions visible ──
+  // Per-group cap so an agent with 30 sessions doesn't flood the sidebar.
+  const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
+  const SESSIONS_PER_GROUP_PREVIEW = 4;
+  const toggleShowAll = useCallback((key: string) => {
+    setShowAllGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -1709,7 +2303,7 @@ function SessionSidebar({
       const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
       const name = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
       return (
-        <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
+        <div className="px-3 py-2.5 border-b border-border/40 flex items-start gap-2 shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -1718,13 +2312,19 @@ function SessionSidebar({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
             {agent ? (
-              <AgentAvatar avatar={agent.identity?.avatar} name={name} size="sm" />
+              <AgentAvatar
+                avatar={agent.identity?.avatar}
+                name={name}
+                size="sm"
+                fallbackVariant="circle"
+                shape="circle"
+              />
             ) : (
               <span className="text-sm leading-none">🐙</span>
             )}
-            <span className="text-sm font-medium truncate">{name}</span>
+            <span className="whitespace-normal break-words text-sm font-medium leading-snug">{name}</span>
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1738,60 +2338,58 @@ function SessionSidebar({
       );
     }
 
-    // Top-level header (both views when no drill-down is active)
+    // Top-level header (both views when no drill-down is active).
+    // Sidebar toggle now lives on the RIGHT (using Columns2 to evoke
+    // "show/hide a column"). The "+ new session" button used to live there;
+    // it's been removed because each group already exposes a "+" inline,
+    // and orchestrator new-session is reachable via that group's header.
     return (
       <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
-        {onBack && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onBack}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-        )}
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
-          Agent Chats
+          History
         </span>
-        {/* View toggle */}
+        {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "h-6 w-6 flex items-center justify-center rounded transition-colors",
-                  view === "drill"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setView("drill")}
-              >
-                <Compass className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Drill-down</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "h-6 w-6 flex items-center justify-center rounded transition-colors",
-                  view === "flat"
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setView("flat")}
-              >
-                <ListChecks className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">All chats</TooltipContent>
-          </Tooltip>
+          <button
+            className={cn(
+              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
+              view === "drill"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => setView("drill")}
+          >
+            By agent
+          </button>
+          <button
+            className={cn(
+              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
+              view === "flat"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => setView("flat")}
+          >
+            All
+          </button>
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onNew()}>
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-        </Tooltip>
+        {/* Sidebar close button — pure close (the open action lives elsewhere) */}
+        {onBack && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7 shrink-0", mobileOnlyBack && "lg:hidden")}
+                onClick={onBack}
+                aria-label="Close chat sidebar"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">Close</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     );
   };
@@ -1809,9 +2407,11 @@ function SessionSidebar({
           key={s.id}
           session={s}
           isActive={activeSessionId === s.id}
-          isStreaming={streamingSessionId === s.id}
+          isStreaming={streamingSessionIds.includes(s.id)}
           onSelect={onSelect}
           onDelete={onDelete}
+          onRename={onRename}
+          onToggleStar={onToggleStar}
         />
       ))}
     </div>
@@ -1831,7 +2431,7 @@ function SessionSidebar({
           <div
             key={key}
             className={cn(
-              "group flex items-center gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
+              "group flex items-start gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
               hasActive
                 ? "bg-accent/60 text-accent-foreground"
                 : "hover:bg-accent/30 text-muted-foreground"
@@ -1844,6 +2444,8 @@ function SessionSidebar({
                   avatar={agent.identity?.avatar}
                   name={displayName}
                   size="md"
+                  fallbackVariant="circle"
+                  shape="circle"
                 />
               ) : (
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-base">
@@ -1852,21 +2454,15 @@ function SessionSidebar({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-baseline justify-between gap-2">
-                <p className={cn(
-                  "text-[13px] font-semibold truncate",
-                  hasActive ? "text-accent-foreground" : "text-foreground"
-                )}>
-                  {displayName}
-                </p>
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[11px] opacity-60">
-                  {count} chat{count !== 1 ? "s" : ""}
-                </span>
+              <p className={cn(
+                "whitespace-normal break-words text-[13px] font-semibold leading-snug",
+                hasActive ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {displayName}
+              </p>
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+                <span>{count} chat{count !== 1 ? "s" : ""}</span>
+                <span>{formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}</span>
               </div>
             </div>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
@@ -1891,7 +2487,7 @@ function SessionSidebar({
             {/* Group header — click to expand/collapse */}
             <div
               className={cn(
-                "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-pointer transition-colors",
+                "flex items-start gap-2.5 rounded-lg px-3 py-2 cursor-pointer transition-colors",
                 hasActive
                   ? "bg-accent/40"
                   : "hover:bg-accent/20"
@@ -1904,6 +2500,8 @@ function SessionSidebar({
                     avatar={agent.identity?.avatar}
                     name={displayName}
                     size="sm"
+                    fallbackVariant="circle"
+                    shape="circle"
                   />
                 ) : (
                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs">
@@ -1911,12 +2509,17 @@ function SessionSidebar({
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0 flex items-center gap-2">
-                <span className="text-[12px] font-semibold truncate text-foreground">
-                  {displayName}
-                </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <span className="whitespace-normal break-words text-[12.5px] font-bold tracking-tight text-foreground leading-tight">
+                    {displayName}
+                  </span>
+                  <span className="shrink-0 text-[8px] font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
+                    {agent ? "Agent" : "Orchestrator"}
+                  </span>
+                </div>
                 <span className="text-[10px] text-muted-foreground/60">
-                  {count}
+                  {count} chat{count !== 1 ? "s" : ""}
                 </span>
               </div>
               <Button
@@ -1936,21 +2539,47 @@ function SessionSidebar({
                 <ChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               )}
             </div>
-            {/* Collapsible session list */}
-            {isExpanded && (
-              <div className="pl-4 pr-1 pb-1 space-y-0.5 mt-0.5">
-                {groupSessions.map((s) => (
-                  <SessionRow
-                    key={s.id}
-                    session={s}
-                    isActive={activeSessionId === s.id}
-                    isStreaming={streamingSessionId === s.id}
-                    onSelect={onSelect}
-                    onDelete={onDelete}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Collapsible session list — capped to N most-recent unless "show more" clicked.
+                groupSessions is already sorted most-recent-first upstream. */}
+            {isExpanded && (() => {
+              const showAll = showAllGroups.has(key);
+              // Always show the active session even if outside the cap, so the
+              // visible row never disappears just because the user clicks an
+              // older one in another view.
+              const activeIdx = groupSessions.findIndex((s) => s.id === activeSessionId);
+              const cap = showAll
+                ? groupSessions.length
+                : Math.max(SESSIONS_PER_GROUP_PREVIEW, activeIdx + 1);
+              const visible = groupSessions.slice(0, cap);
+              const hidden = groupSessions.length - visible.length;
+              return (
+                <div className="pl-4 pr-1 pb-1 space-y-0.5 mt-0.5">
+                  {visible.map((s) => (
+                    <SessionRow
+                      key={s.id}
+                      session={s}
+                      isActive={activeSessionId === s.id}
+                      isStreaming={streamingSessionIds.includes(s.id)}
+                      onSelect={onSelect}
+                      onDelete={onDelete}
+                      onRename={onRename}
+                      onToggleStar={onToggleStar}
+                    />
+                  ))}
+                  {(hidden > 0 || showAll) && (
+                    <button
+                      type="button"
+                      onClick={() => toggleShowAll(key)}
+                      className="w-full text-left text-[10.5px] font-medium text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/30 transition-colors"
+                    >
+                      {showAll
+                        ? "Show less"
+                        : `Show ${hidden} more`}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
@@ -1962,11 +2591,75 @@ function SessionSidebar({
     ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
     : [];
 
+  // ── Starred sessions — surfaced above the main list in every view ──
+  // Order: most-recently-updated first (consistent with the grouped lists
+  // below). The section is conditionally rendered: zero starred → nothing.
+  // Keys are namespaced with a "starred-" prefix so React doesn't collide
+  // with the same SessionRow reappearing in its group below.
+  const starredSessions = useMemo(
+    () => sessions
+      .filter((s) => s.starred)
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [sessions],
+  );
+
+  const renderStarred = () => {
+    if (starredSessions.length === 0) return null;
+    return (
+      <div className="p-1.5 pb-2 border-b border-border/30">
+        <div className="px-3 pt-1.5 pb-1 flex items-center gap-1.5">
+          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Starred
+          </span>
+        </div>
+        <div className="space-y-0.5">
+          {starredSessions.map((s) => (
+            <SessionRow
+              key={`starred-${s.id}`}
+              session={s}
+              isActive={activeSessionId === s.id}
+              isStreaming={streamingSessionIds.includes(s.id)}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onRename={onRename}
+              onToggleStar={onToggleStar}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const sidebarStyle = fullWidth
+    ? undefined
+    : ({ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties);
+
   return (
     <div className={cn(
-      "border-r border-border/30 flex flex-col bg-card/40 h-full",
-      fullWidth ? "w-full" : "w-72"
-    )}>
+      "relative border-r border-border/30 flex flex-col bg-card/40 h-full",
+      fullWidth
+        ? "w-full"
+        : mobileFullWidth
+          ? "w-full lg:w-[var(--session-sidebar-width)] lg:shrink-0"
+          : "w-[var(--session-sidebar-width)] shrink-0"
+    )}
+    style={sidebarStyle}
+    >
+      {!fullWidth && (
+        <button
+          type="button"
+          aria-label="Resize Agent Chats sidebar"
+          onPointerDown={startResize}
+          className={cn(
+            "absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
+            mobileFullWidth && "hidden lg:block"
+          )}
+        >
+          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+        </button>
+      )}
       {renderHeader()}
       <div className="flex-1 overflow-y-auto min-h-0">
         {sessions.length === 0 ? (
@@ -1977,12 +2670,17 @@ function SessionSidebar({
               between both interfaces.
             </p>
           </div>
-        ) : view === "flat" ? (
-          renderFlat()
-        ) : activeGroup ? (
-          renderSessionList(activeGroupSessions)
         ) : (
-          renderGroups()
+          <>
+            {/* Starred section — sits above the normal list in every view.
+                Auto-hides when the user has zero starred sessions. */}
+            {renderStarred()}
+            {view === "flat"
+              ? renderFlat()
+              : activeGroup
+                ? renderSessionList(activeGroupSessions)
+                : renderGroups()}
+          </>
         )}
       </div>
     </div>
@@ -2042,84 +2740,88 @@ function ChatToolbar({
   // Resolve agent for the current session
   const sessionAgent = selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
   const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
+  const sessionTitle = sessionId
+    ? sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"
+    : "New session";
 
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 bg-background/80 backdrop-blur-md shrink-0">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onToggleSidebar}
-          >
-            {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {sidebarOpen ? "Hide threads" : "Threads"}
-        </TooltipContent>
-      </Tooltip>
-      {/* New session — only when sidebar is closed (or in compact mode) */}
-      {(!sidebarOpen || compact) && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={newSession}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            New session
-          </TooltipContent>
-        </Tooltip>
-      )}
-      {/* Left: agent avatar + name */}
-      {agentConfig ? (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <AgentAvatar
-            avatar={agentConfig.identity?.avatar}
-            name={agentConfig.identity?.displayName ?? agentConfig.name}
-            size="xs"
-          />
-          <span className="text-sm font-medium text-foreground">
-            {agentConfig.identity?.displayName ?? agentConfig.name}
-          </span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-sm leading-none">🐙</span>
-          <span className="text-sm font-medium text-foreground">Polpo</span>
-        </div>
-      )}
-      {/* Session title — flex-1 pushes right-side actions to the edge */}
-      <div className="flex-1 min-w-0">
-        {sessionId ? (
-          <span className="text-xs text-muted-foreground truncate block">
-            {sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">New session</span>
-        )}
-      </div>
-      {/* Right: message count + actions */}
-      {messages.length > 0 && (
-        <>
-          <Badge variant="secondary" className="text-[10px]">
-            {messages.length} messages
-          </Badge>
-          {!isLoading && (
+  if (compact) {
+    return (
+      <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md">
+        <div className="flex shrink-0 items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  onClick={onToggleSidebar}
+                  aria-label={sidebarOpen ? "Hide threads" : "Show threads"}
+                >
+                  {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                {sidebarOpen ? "Hide threads" : "Threads"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  onClick={newSession}
+                  aria-label="New session"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                New session
+              </TooltipContent>
+            </Tooltip>
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {agentConfig ? (
+              <>
+                <AgentAvatar
+                  avatar={agentConfig.identity?.avatar}
+                  name={agentConfig.identity?.displayName ?? agentConfig.name}
+                  size="xs"
+                />
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">
+                  {agentConfig.identity?.displayName ?? agentConfig.name}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="shrink-0 text-sm leading-none">🐙</span>
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+              </>
+            )}
+          </div>
+          <span className="block whitespace-normal break-words text-xs leading-4 text-muted-foreground" title={sessionTitle}>
+            {sessionTitle}
+          </span>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-1">
+          {messages.length > 0 && (
+            <span className="hidden rounded-full bg-muted/70 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
+              {messages.length}
+            </span>
+          )}
+          {!isLoading && messages.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   onClick={clear}
+                  aria-label="Clear session"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -2129,8 +2831,100 @@ function ChatToolbar({
               </TooltipContent>
             </Tooltip>
           )}
-        </>
-      )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md sm:px-3">
+      <div className="flex shrink-0 items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              onClick={onToggleSidebar}
+              aria-label={sidebarOpen ? "Hide threads" : "Show threads"}
+            >
+              {sidebarOpen ? <ChevronsLeft className="h-4 w-4" /> : <History className="h-4 w-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {sidebarOpen ? "Hide threads" : "Threads"}
+          </TooltipContent>
+        </Tooltip>
+        {!sidebarOpen && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                onClick={newSession}
+                aria-label="New session"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              New session
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {agentConfig ? (
+            <>
+              <AgentAvatar
+                avatar={agentConfig.identity?.avatar}
+                name={agentConfig.identity?.displayName ?? agentConfig.name}
+                size="xs"
+              />
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">
+                {agentConfig.identity?.displayName ?? agentConfig.name}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="shrink-0 text-sm leading-none">🐙</span>
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+            </>
+          )}
+        </div>
+        <span className="block whitespace-normal break-words text-xs leading-4 text-muted-foreground" title={sessionTitle}>
+          {sessionTitle}
+        </span>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-1">
+        {messages.length > 0 && (
+          <Badge variant="secondary" className="hidden shrink-0 text-[10px] md:inline-flex">
+            {messages.length} messages
+          </Badge>
+        )}
+        {!isLoading && messages.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={clear}
+                aria-label="Clear session"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Clear session
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
 }
@@ -2141,84 +2935,160 @@ function ChatEmptyState() {
   const { send, setSelectedAgent } = useChatActions();
   const { selectedAgent } = useChatState();
   const { agents } = useAgents();
+  const { skills } = useSkills();
   const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
   const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
+  const agentSuggestions = useMemo(() => {
+    if (!agentConfig) return [];
+
+    const configuredSuggestions =
+      ((agentConfig as typeof agentConfig & { suggestions?: AgentStarterSuggestion[] }).suggestions ?? []);
+    const configured = configuredSuggestions.map((suggestion: AgentStarterSuggestion) => {
+      const title = typeof suggestion === "string" ? suggestion : suggestion.title;
+      return {
+        icon: MessageSquare,
+        title,
+        description: typeof suggestion === "string"
+          ? "Agent starter prompt"
+          : suggestion.description ?? "Agent starter prompt",
+        prompt: typeof suggestion === "string" ? suggestion : suggestion.prompt ?? suggestion.title,
+      };
+    });
+
+    const configuredTitles = new Set(configured.map((s: { title: string }) => s.title.toLowerCase()));
+    const assignedSkills = (skills ?? [])
+      .filter((skill) =>
+        skill.assignedTo?.includes(agentConfig.name) ||
+        agentConfig.skills?.includes(skill.name)
+      )
+      .filter((skill) => !configuredTitles.has(skill.name.toLowerCase()))
+      .slice(0, Math.max(0, MAX_AGENT_SUGGESTIONS - configured.length))
+      .map((skill) => ({
+        icon: FileCode,
+        title: skill.name,
+        description: skill.description || "Use this agent skill",
+        prompt: skill.name,
+      }));
+
+    return [...configured, ...assignedSkills].slice(0, MAX_AGENT_SUGGESTIONS);
+  }, [agentConfig, skills]);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full">
-      {/* Agent selector — text-only dropdown above the avatar */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 text-sm transition-colors mb-3 focus-visible:outline-none"
-          >
-            <span className="font-semibold text-foreground">{name}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="w-52">
-          <DropdownMenuItem
-            onClick={() => setSelectedAgent(null)}
-            className="gap-2"
-          >
-            <span className="text-xs leading-none">🐙</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Polpo</p>
-              <p className="text-[11px] text-muted-foreground">Orchestrator</p>
-            </div>
-            {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-          </DropdownMenuItem>
-          {agents && agents.length > 0 && <DropdownMenuSeparator />}
-          {agents?.map((a) => (
-            <DropdownMenuItem
-              key={a.name}
-              onClick={() => setSelectedAgent(a.name)}
-              className="gap-2"
-            >
-              <AgentAvatar
-                avatar={a.identity?.avatar}
-                name={a.identity?.displayName ?? a.name}
-                size="xs"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
-                {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
-              </div>
-              {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <div className="flex h-full flex-col items-center justify-center px-4 py-8">
       {/* Avatar */}
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
         {agentConfig ? (
           <AgentAvatar avatar={agentConfig.identity?.avatar} name={name} size="xl" />
         ) : (
           <>🐙</>
         )}
       </div>
-      <h2 className="text-2xl font-semibold mb-2">Chat with {name}</h2>
-      <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
+      <h2 className="mb-2 flex flex-wrap items-center justify-center gap-2 text-2xl font-semibold">
+        <span>Chat with</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex min-w-0 items-center gap-1 rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-1 text-2xl font-semibold transition-colors hover:border-primary/35 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
+              <span className="truncate">{name}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" className="max-h-80 w-72 overflow-y-auto">
+            <DropdownMenuItem
+              onClick={() => setSelectedAgent(null)}
+              className="gap-2"
+            >
+              <span className="text-xs leading-none">🐙</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Polpo</p>
+                <p className="text-[11px] text-muted-foreground">Orchestrator</p>
+              </div>
+              {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </DropdownMenuItem>
+            {agents && agents.length > 0 && <DropdownMenuSeparator />}
+            {agents?.map((a) => (
+              <DropdownMenuItem
+                key={a.name}
+                onClick={() => setSelectedAgent(a.name)}
+                className="gap-2"
+              >
+                <AgentAvatar
+                  avatar={a.identity?.avatar}
+                  name={a.identity?.displayName ?? a.name}
+                  size="xs"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
+                  {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
+                </div>
+                {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </h2>
+      <p className="text-sm text-muted-foreground mb-5 max-w-md text-center">
         {agentConfig?.role ?? "Orchestrator"}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full px-4">
-        {suggestions.map((s) => (
+      <div className="mb-5 w-full max-w-3xl">
+        <ChatInput embedded />
+      </div>
+      {agentConfig ? (
+        agentSuggestions.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full">
+            {agentSuggestions.map((s) => (
+              <button
+                key={s.title}
+                type="button"
+                onClick={() => send(s.prompt)}
+                className="flex min-w-0 items-start gap-2.5 rounded-lg border border-border/40 p-2.5 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+              >
+                <s.icon className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium">{s.title}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {s.description}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl w-full">
           <button
-            key={s.title}
-            onClick={() => send(s.title)}
-            className="flex items-start gap-3 rounded-xl border border-border/40 p-4 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+            type="button"
+            onClick={() => send("Create a mission")}
+            className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all hover:bg-primary/10 hover:border-primary/35"
           >
-            <s.icon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+            <Target className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium">{s.title}</p>
+              <p className="text-xs font-medium">Create a mission</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {s.description}
+                Polpo will ask what to build
               </p>
             </div>
           </button>
-        ))}
-      </div>
+          {orchestratorSuggestions.map((s) => (
+            <button
+              key={s.title}
+              type="button"
+              onClick={() => send(s.title)}
+              className="flex items-start gap-2.5 rounded-lg border border-border/40 p-3 text-left transition-all hover:bg-accent/30 hover:border-primary/20"
+            >
+              <s.icon className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium">{s.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {s.description}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2226,8 +3096,8 @@ function ChatEmptyState() {
 // ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
 
 function ChatMessages() {
-  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, selectedAgent, sessions, sessionId } = useChatState();
-  const { answerQuestions, respondToMission, respondToVault } = useChatActions();
+  const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
+  const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign } = useChatActions();
 
   // Resolve agent config for agent-direct sessions
   const { agents } = useAgents();
@@ -2240,6 +3110,23 @@ function ChatMessages() {
 
   const [atBottom, setAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // ── Per-session scroll-state preservation ──────────────────────────
+  // Tab strip is browser-tab-style: switching tabs must NOT scroll back to
+  // bottom. We continuously snapshot the Virtuoso state into a per-session
+  // map (`chatScrollStates`) and hand the latest snapshot to the next
+  // mounted Virtuoso via `restoreStateFrom` when the user returns. Capture
+  // is done on `isScrolling=false` (scroll settled) and on `rangeChanged`
+  // (item-size measurements grew) — both cheap, both synchronous.
+  const sessionKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
+  const restoredState = chatScrollStates.get(sessionKey);
+  const captureScrollState = useCallback(() => {
+    const handle = virtuosoRef.current;
+    if (!handle) return;
+    handle.getState((snapshot) => {
+      chatScrollStates.set(sessionKey, snapshot);
+    });
+  }, [sessionKey]);
 
   // File preview for inline open_file indicators (re-open on click)
   const { previewState, openPreview, closePreview } = useFilePreview();
@@ -2256,13 +3143,23 @@ function ChatMessages() {
         <ChatEmptyState />
       ) : (
         <Virtuoso
+          // Re-mount on session change so each session gets a clean Virtuoso
+          // with its own item-size measurements; restoreStateFrom seeds the
+          // new instance with the previously captured scroll position.
+          key={sessionKey}
           ref={virtuosoRef}
           data={messages}
           followOutput="smooth"
           initialTopMostItemIndex={messages.length - 1}
+          restoreStateFrom={restoredState}
           atBottomStateChange={setAtBottom}
           atBottomThreshold={80}
           increaseViewportBy={600}
+          // Snapshot scroll state on settle and on item-range changes; the
+          // latest snapshot for this session id is what we replay when the
+          // user comes back to this tab.
+          isScrolling={(scrolling) => { if (!scrolling) captureScrollState(); }}
+          rangeChanged={captureScrollState}
           itemContent={(i, msg) => {
             const isStreaming = isLoading && i === messages.length - 1;
 
@@ -2272,9 +3169,10 @@ function ChatMessages() {
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
                       <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        <ChatAttachments attachments={msg.attachments} />
+                        <CollapsibleUserMessage key={msg.id} text={msg.content}>
                           <MentionText text={msg.content} variant="inverted" />
-                        </p>
+                        </CollapsibleUserMessage>
                       </div>
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
@@ -2313,47 +3211,131 @@ function ChatMessages() {
                             </span>
                           )}
                         </div>
-                        {/* Render segments chronologically, grouping consecutive tools */}
+                        {/* Render segments chronologically, grouping consecutive tools and reasoning chunks */}
                         {msg.segments && msg.segments.length > 0 ? (
                           (() => {
-                            const groups: Array<{ type: "text"; content: string } | { type: "tools"; tools: ToolCallInfo[] }> = [];
+                            // Mappa N-esimo render_widget segment → N-esimo
+                            // widget in msg.widgets. Garantisce che il widget
+                            // (sia preview live, sia finale) appaia nello
+                            // stesso punto cronologico del flusso, NON in
+                            // fondo al messaggio.
+                            const groups: Array<
+                              | { type: "text"; content: string }
+                              | { type: "thinking"; content: string }
+                              | { type: "tools"; tools: ToolCallInfo[] }
+                              | { type: "widget"; widget: WidgetRenderData; key: string }
+                              | { type: "widget-pending"; tool: ToolCallInfo }
+                            > = [];
+                            const widgetsArr = msg.widgets ?? [];
+                            let widgetCounter = 0;
                             for (const seg of msg.segments as MessageSegment[]) {
                               if (seg.type === "text") {
                                 groups.push({ type: "text", content: seg.content });
-                              } else {
+                              } else if (seg.type === "thinking") {
                                 const last = groups[groups.length - 1];
-                                if (last && last.type === "tools") {
-                                  last.tools.push(seg.tool);
+                                if (last && last.type === "thinking") {
+                                  last.content += seg.content;
                                 } else {
-                                  groups.push({ type: "tools", tools: [seg.tool] });
+                                  groups.push({ type: "thinking", content: seg.content });
+                                }
+                              } else if (seg.type === "tool") {
+                                if (seg.tool.name === "render_widget") {
+                                  // Inline widget: trova il widget corrispondente
+                                  // in widgets[] (per-occorrenza) e renderizzalo
+                                  // qui, NON in fondo al messaggio. Se non c'è
+                                  // ancora un widget (caso "preparing" senza
+                                  // ancora abbastanza html), mostra un placeholder
+                                  // pending — sennò la struttura del messaggio
+                                  // "salta" quando arriva il primo batch.
+                                  const w = widgetsArr[widgetCounter];
+                                  if (w) {
+                                    groups.push({ type: "widget", widget: w, key: seg.tool.id });
+                                  } else if (seg.tool.state === "error") {
+                                    // Errore di validation backend → mostra la tool
+                                    // card normale per dare feedback (con il messaggio
+                                    // di errore visibile).
+                                    const last = groups[groups.length - 1];
+                                    if (last && last.type === "tools") last.tools.push(seg.tool);
+                                    else groups.push({ type: "tools", tools: [seg.tool] });
+                                  } else {
+                                    groups.push({ type: "widget-pending", tool: seg.tool });
+                                  }
+                                  widgetCounter += 1;
+                                } else {
+                                  const last = groups[groups.length - 1];
+                                  if (last && last.type === "tools") last.tools.push(seg.tool);
+                                  else groups.push({ type: "tools", tools: [seg.tool] });
                                 }
                               }
                             }
-                            return groups.map((g, gi) =>
-                              g.type === "text" ? (
-                                <MessageContent key={`g-${gi}`}>
-                                  <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
-                                </MessageContent>
-                              ) : g.tools.length === 1 ? (
+                            return groups.map((g, gi) => {
+                              if (g.type === "text") {
+                                return (
+                                  <MessageContent key={`g-${gi}`}>
+                                    <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
+                                  </MessageContent>
+                                );
+                              }
+                              if (g.type === "thinking") {
+                                return (
+                                  <Reasoning key={`r-${gi}`} isStreaming={isStreaming}>
+                                    <ReasoningTrigger />
+                                    <ReasoningContent>{g.content}</ReasoningContent>
+                                  </Reasoning>
+                                );
+                              }
+                              if (g.type === "widget") {
+                                return <WidgetCard key={`w-${g.key}`} widget={g.widget} />;
+                              }
+                              if (g.type === "widget-pending") {
+                                // Loader skeleton dedicato — il modello
+                                // sta scrivendo gli args del render_widget
+                                // ma il campo `html` non è ancora arrivato
+                                // (es. emette title/chrome prima). Niente
+                                // iframe, niente FOUC: un placeholder
+                                // statico finché il primo chunk html
+                                // parziale arriva e swappa al WidgetCard.
+                                return (
+                                  <WidgetPendingCard
+                                    key={`wp-${g.tool.id}`}
+                                    argsBytes={g.tool.argumentsText?.length}
+                                  />
+                                );
+                              }
+                              return g.tools.length === 1 ? (
                                 <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
                               ) : (
                                 <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
-                              )
-                            );
+                              );
+                            });
                           })()
                         ) : (
                           <>
-                            {msg.toolCalls && msg.toolCalls.length > 0 && (
-                              <ToolCallList tools={msg.toolCalls} />
+                            {msg.thinkingText && (
+                              <Reasoning isStreaming={isStreaming}>
+                                <ReasoningTrigger />
+                                <ReasoningContent>{msg.thinkingText}</ReasoningContent>
+                              </Reasoning>
                             )}
+                            {(() => {
+                              // Stesso filtro del segments path: nascondiamo
+                              // i tool render_widget interrupted/completed
+                              // perché sotto c'è già la WidgetCard.
+                              const visibleTools = (msg.toolCalls ?? []).filter((tc) => !(
+                                tc.name === "render_widget" &&
+                                (tc.state === "interrupted" || tc.state === "completed")
+                              ));
+                              return visibleTools.length > 0 ? <ToolCallList tools={visibleTools} /> : null;
+                            })()}
                             <MessageContent>
                               <MessageResponse mode={isStreaming ? "streaming" : "static"}>{msg.content}</MessageResponse>
                             </MessageContent>
                           </>
                         )}
-                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && (
+                        {!isStreaming && !msg.askUserQuestions?.length && !msg.missionPreview && !msg.vaultPreview && !msg.whatsappPreview && !msg.emailPreview && !msg.setDesign && (
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
+                            {msg.content.trim() && <SpeakAction text={msg.content} />}
                           </MessageActions>
                         )}
                         {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
@@ -2375,6 +3357,30 @@ function ChatMessages() {
                             preview={msg.vaultPreview}
                             onRespond={respondToVault}
                             disabled={isLoading || !pendingVault}
+                          />
+                        )}
+                        {msg.whatsappPreview && (
+                          <WhatsAppPreviewCard
+                            preview={msg.whatsappPreview}
+                            onRespond={respondToWhatsApp}
+                            disabled={isLoading || !pendingWhatsApp}
+                          />
+                        )}
+                        {msg.emailPreview && (
+                          <EmailPreviewCard
+                            preview={msg.emailPreview}
+                            onRespond={respondToEmail}
+                            disabled={isLoading || !pendingEmail}
+                          />
+                        )}
+                        {/* I widget sono renderizzati INLINE nei segments
+                            (vedi map sopra), nel loro punto cronologico —
+                            non più in fondo al messaggio. */}
+                        {msg.setDesign && (
+                          <DesignPreviewCard
+                            preview={msg.setDesign}
+                            onRespond={consumeSetDesign}
+                            disabled={isLoading || !pendingSetDesign}
                           />
                         )}
                         {msg.openFile && (
@@ -2402,13 +3408,13 @@ function ChatMessages() {
               <div className="w-full py-2 px-4">
                 <div className="mx-auto max-w-3xl">
                   <div className="flex items-center gap-2.5 pl-10 py-1.5">
-                    <div className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                    </div>
-                    <span className="text-[11px] text-muted-foreground animate-pulse">
-                      {assistantName} is thinking...
+                    <span className="relative flex h-4 w-4 items-center justify-center">
+                      <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
+                      <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Agent is working
                     </span>
                   </div>
                 </div>
@@ -2438,43 +3444,174 @@ function ChatMessages() {
 
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
-function ChatInput() {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, sessionId, selectedAgent } = useChatState();
+function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
+  const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
   const { send, stop } = useChatActions();
-  const inputDisabled = useChatInputDisabled();
+  const inputDisabled = useChatInputDisabled({ includeLoading: false });
+  const { client } = usePolpo();
+  const previewContext = useAppPreviewContext();
+  const activePreviewContext = previewContext?.sessionId === sessionId ? previewContext : null;
+  const dataContext = useDataPromptContext();
+  const activeDataContext = dataContext?.sessionId === sessionId ? dataContext : null;
+  const [expandedPreviewImage, setExpandedPreviewImage] = useState<{ url: string; label: string } | null>(null);
+
+  const removePreviewSelection = useCallback((index: number) => {
+    if (!activePreviewContext) return;
+    const selections = (activePreviewContext.selections ?? []).filter((_, selectionIndex) => selectionIndex !== index);
+    if (selections.length === 0 && !activePreviewContext.screenshotDataUrl) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, selections: selections.length > 0 ? selections : undefined });
+  }, [activePreviewContext]);
+
+  const removePreviewScreenshot = useCallback(() => {
+    if (!activePreviewContext) return;
+    if (!activePreviewContext.selections?.length) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, screenshotDataUrl: undefined });
+  }, [activePreviewContext]);
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
+  const attachmentCountRef = useRef(0);
+  const setAttachmentCount = useCallback((count: number) => { attachmentCountRef.current = count; }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  // Tracks whether the composer textarea currently has a non-empty draft.
+  // Drives the streaming-time CTA swap: with a draft we show the queue
+  // action (Enter enqueues); empty, we show Stop (Enter is a no-op).
+  const [hasDraft, setHasDraft] = useState(false);
+  const historyIndexRef = useRef<number | null>(null);
+  const historyDraftRef = useRef("");
+  const applyingHistoryRef = useRef(false);
+
+  const promptHistory = useMemo(
+    () => messages
+      .filter((message) => message.role === "user" && message.content.trim().length > 0)
+      .map((message) => message.content),
+    [messages],
+  );
+
+  // Per-session prompt queue. Keyed by sessionId (or the new-session
+  // sentinel until the server assigns one). The Queue panel renders
+  // above the composer; the auto-send effect below dequeues the head
+  // when a stream ends.
+  const queue = useChatQueue(sessionId ?? NEW_SESSION_QUEUE_KEY);
+  // Single source of truth for queue panel visibility. Defaults to OPEN
+  // when the persisted queue already has items (so user sees their stash
+  // on reload), CLOSED otherwise. The user can always close via the X in
+  // the panel header — items survive the close (re-open via ListPlus).
+  const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
+  const backgroundWaits = useBackgroundWaits(sessionId);
+  const [backgroundWaitsOpen, setBackgroundWaitsOpen] = useState(false);
+  // Clear confirmation modal (avoid accidental wipes of queued prompts).
+  const [queueClearConfirm, setQueueClearConfirm] = useState(false);
+  const copySessionId = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      toast.success("Session ID copied");
+    } catch {
+      toast.error("Could not copy session ID");
+    }
+  }, [sessionId]);
 
   // Mention autocomplete data
   const { agents } = useAgents();
-  const { tasks } = useTasks();
-  const { missions } = useMissions();
-  const { skills } = useSkills();
-  const { playbooks } = usePlaybooks();
+  const [mentionData, setMentionData] = useState<LazyMentionData>({
+    tasks: [],
+    missions: [],
+    skills: [],
+    playbooks: [],
+    files: [],
+  });
+  const mentionLoadedRef = useRef<Record<MentionTrigger, boolean>>({ "@": false, "/": false });
+  const mentionLoadingRef = useRef<Record<MentionTrigger, boolean>>({ "@": false, "/": false });
 
-  // Files for @mention autocomplete — fetch once on mount
-  const [mentionFiles, setMentionFiles] = useState<MentionFile[]>([]);
-  useEffect(() => {
-    const base = config.baseUrl || "";
-    fetch(`${base}/api/v1/files/search?limit=200`)
-      .then(r => r.json())
-      .then(json => { if (json.ok) setMentionFiles(json.data.files); })
-      .catch(() => {});
-  }, []);
+  const ensureMentionData = useCallback(async (trigger: MentionTrigger) => {
+    if (mentionLoadedRef.current[trigger] || mentionLoadingRef.current[trigger]) return;
+
+    mentionLoadingRef.current[trigger] = true;
+    try {
+      if (trigger === "@") {
+        const base = config.baseUrl || "";
+        const [tasks, missions, filesJson] = await Promise.all([
+          client.getTasks(),
+          client.getMissions(),
+          fetch(`${base}/api/v1/files/search?limit=200`)
+            .then((r) => r.json())
+            .catch(() => ({ ok: false })),
+        ]);
+
+        setMentionData((prev) => ({
+          ...prev,
+          tasks,
+          missions,
+          files: filesJson.ok ? filesJson.data.files : prev.files,
+        }));
+      } else {
+        const [skills, playbooks] = await Promise.all([
+          client.getSkills(),
+          client.getPlaybooks(),
+        ]);
+
+        setMentionData((prev) => ({
+          ...prev,
+          skills,
+          playbooks,
+        }));
+      }
+
+      mentionLoadedRef.current[trigger] = true;
+    } catch (error) {
+      toast.error(`Could not load ${trigger === "@" ? "mentions" : "commands"}`);
+      console.error(error);
+    } finally {
+      mentionLoadingRef.current[trigger] = false;
+    }
+  }, [client]);
 
   const handleSubmit = useCallback(
-    async (message: PromptInputMessage) => {
-      if (!message.text.trim() || isLoading) return;
+    async (message: PromptInputMessage, _event: unknown, acknowledge: () => void) => {
+      if (isLoading) {
+        throw new Error("Cannot submit while a response is streaming.");
+      }
+      if (!message.text.trim() && !message.files.length) return;
       // Resolve display mentions → wire mentions
       const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
       const images = message.files
-        .filter((f) => f.url && f.mediaType?.startsWith("image/"))
-        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
-      await send(resolvedText, images.length > 0 ? images : undefined);
+        .filter((f) => f.url)
+        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "application/octet-stream", filename: f.filename }));
+      if (images.some(f => !f.url.startsWith("data:"))) throw new Error("Could not read an attachment. Please select it again.");
+      const previewImages = [
+        activePreviewContext?.screenshotDataUrl,
+        ...(activePreviewContext?.selections?.map((selection) => selection.screenshotDataUrl) ?? []),
+      ].filter((url): url is string => Boolean(url));
+      for (const url of previewImages) {
+        if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png", filename: undefined });
+      }
+      const context = [
+        activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
+        activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
+      ].filter(Boolean).join("\n\n");
+      await send(
+        resolvedText,
+        images.length > 0 ? images : undefined,
+        context || undefined,
+        { onAccepted: () => {
+          const key = sessionId ?? NEW_SESSION_DRAFT_KEY;
+          // A switched-away draft may have been edited independently.
+          if (chatInputDrafts.get(key) === message.text) chatInputDrafts.delete(key);
+          acknowledge();
+        } },
+      );
+      if (activePreviewContext) clearAppPreviewContext();
+      if (activeDataContext) clearDataPromptContext();
     },
-    [isLoading, send]
+    [activeDataContext, activePreviewContext, isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -2484,61 +3621,620 @@ function ChatInput() {
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     nativeSetter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    setHasDraft(text.trim().length > 0);
   }, []);
 
+  const applyHistoryValue = useCallback((textarea: HTMLTextAreaElement, text: string) => {
+    applyingHistoryRef.current = true;
+    setTextareaValue(text);
+    applyingHistoryRef.current = false;
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    });
+  }, [setTextareaValue]);
+
+  const handlePromptHistoryKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.defaultPrevented || e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+    const textarea = e.currentTarget;
+    if (e.key === "ArrowUp") {
+      if (promptHistory.length === 0) return;
+      const selectionStart = textarea.selectionStart ?? 0;
+      const selectionEnd = textarea.selectionEnd ?? selectionStart;
+      const cursorIsOnFirstLine = !textarea.value.slice(0, selectionStart).includes("\n");
+      if (selectionStart !== selectionEnd || !cursorIsOnFirstLine) return;
+
+      e.preventDefault();
+      if (historyIndexRef.current === null) {
+        historyDraftRef.current = textarea.value;
+        historyIndexRef.current = promptHistory.length - 1;
+      } else {
+        historyIndexRef.current = Math.max(0, historyIndexRef.current - 1);
+      }
+      applyHistoryValue(textarea, promptHistory[historyIndexRef.current]);
+      return;
+    }
+
+    if (historyIndexRef.current === null) return;
+    e.preventDefault();
+    const nextIndex = historyIndexRef.current + 1;
+    if (nextIndex >= promptHistory.length) {
+      historyIndexRef.current = null;
+      applyHistoryValue(textarea, historyDraftRef.current);
+      historyDraftRef.current = "";
+      return;
+    }
+    historyIndexRef.current = nextIndex;
+    applyHistoryValue(textarea, promptHistory[nextIndex]);
+  }, [applyHistoryValue, promptHistory]);
+
+  // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
+
+  // Queue button click handler:
+  //  • If there's a non-empty draft, stash it (enqueue) and OPEN the
+  //    panel so the user immediately sees their queued item.
+  //  • If the draft is empty, TOGGLE the panel — gives the user access
+  //    to the manager (Auto-send switch, edit/delete existing items)
+  //    even on an empty queue without forcing them to type first.
+  const enqueueCurrentDraft = useCallback(() => {
+    if (attachmentCountRef.current > 0) {
+      toast.info("Attachments stay in this draft. Send it when the current response finishes.");
+      return;
+    }
+    const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+    const raw = textarea?.value ?? "";
+    const text = raw.trim();
+    if (!text) {
+      // No draft → use the button as a toggle for the panel.
+      setQueueOpen((v) => !v);
+      return;
+    }
+    // Resolve display mentions → wire mentions, same as a real submit, so
+    // the queued copy is what the agent will eventually receive.
+    const resolved = mentionRef.current?.resolveMessage(text) ?? text;
+    const added = queue.add(resolved);
+    if (!added) return;
+    // Clear the composer (mirrors PromptInput.form.reset post-submit).
+    setTextareaValue("");
+    chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+    setHasDraft(false);
+    setQueueOpen(true); // ensure manager is visible right after enqueueing
+    textarea?.focus();
+  }, [queue, sessionId, setTextareaValue]);
+
+  // Manual per-item send: pulls the prompt out of the queue and dispatches
+  // it through the same `send` path used by the composer + auto-send.
+  // Guarded by inputDisabled + isLoading so the user can't double-fire
+  // while a stream is already in flight.
+  const handleManualSend = useCallback((id: string) => {
+    if (isLoading || inputDisabled) return;
+    const item = queue.items.find((i) => i.id === id);
+    if (!item) return;
+    queue.remove(id);
+    void send(item.text).catch((err) => {
+      console.warn("[queue] manual send failed:", err);
+      toast.error("Failed to send queued prompt");
+    });
+  }, [queue, isLoading, inputDisabled, send]);
+
+  // Migrate the `__new__` queue to the real sessionId once the server
+  // assigns one (first stream completes). Until then the queue lives
+  // under the sentinel; after, it lives under the real id so it survives
+  // tab switches.
+  useEffect(() => {
+    if (!sessionId) return;
+    migrateNewSessionQueue(sessionId);
+  }, [sessionId]);
+
+  // Auto-send the head of the queue when a stream finishes.
+  //
+  // Why a ref-tracked previous: `isLoading` flips during the SSE stream;
+  // we only want to react to the falling edge (true → false). Without the
+  // ref we'd dequeue on initial mount when isLoading is already false.
+  //
+  // Why the small delay: gives the server a beat to release the session
+  // (e.g. mark its turn complete) before we shove the next request in;
+  // a flush-during-cleanup race was observed in dev otherwise.
+  const prevLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    const prev = prevLoadingRef.current;
+    prevLoadingRef.current = isLoading;
+    // Falling edge only — and gate every other precondition the manual
+    // path checks (input enabled, autoSend on, queue non-empty).
+    if (!(prev === true && isLoading === false)) return;
+    if (!queue.autoSend) return;
+    if (queue.items.length === 0) return;
+    if (inputDisabled) return; // pending askUser / mission / vault / etc.
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      // Re-check guards at flush time — user may have toggled autoSend
+      // off or cleared the queue during the wait.
+      if (!queue.autoSend || queue.items.length === 0 || inputDisabled) return;
+      const isLastQueuedItem = queue.items.length === 1;
+      const next = queue.shift();
+      if (!next) return;
+      if (isLastQueuedItem) setQueueOpen(false);
+      void send(next.text).catch((err) => {
+        // Re-queue at the head on failure so the user doesn't silently
+        // lose work, and surface a toast.
+        console.warn("[queue] auto-send failed:", err);
+        toast.error("Queued prompt failed to send");
+      });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isLoading, queue, inputDisabled, send]);
+
+  // ── Per-session draft preservation ─────────────────────────────────
+  // The composer is uncontrolled. When the user switches tabs we need to
+  // (a) snapshot the current draft under the OUTGOING session id, and
+  // (b) hydrate the textarea with the INCOMING session id's draft (if any).
+  // PromptInput clears only the acknowledged draft, before new-session
+  // migration; handleSubmit keeps the cached draft aligned. Cleanup saves on
+  // unmount (e.g. compact-mode sidebar takeover).
+  const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
+  const prevDraftKeyRef = useRef<string>(draftKey);
+  useEffect(() => {
+    const prevKey = prevDraftKeyRef.current;
+    historyIndexRef.current = null;
+    historyDraftRef.current = "";
+    const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+    if (textarea && prevKey !== draftKey) {
+      // Save outgoing draft (only if non-empty — keeps the map small)
+      const outgoing = textarea.value;
+      if (outgoing) chatInputDrafts.set(prevKey, outgoing);
+      else chatInputDrafts.delete(prevKey);
+      // Hydrate incoming draft. Use the native setter so React's synthetic
+      // event tracking is bypassed — same trick as the speech-to-text path.
+      const incoming = chatInputDrafts.get(draftKey) ?? "";
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeSetter?.call(textarea, incoming);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      setHasDraft(incoming.trim().length > 0);
+    }
+    prevDraftKeyRef.current = draftKey;
+    return () => {
+      const ta = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+      if (!ta) return;
+      const v = ta.value;
+      if (v) chatInputDrafts.set(draftKey, v);
+      else chatInputDrafts.delete(draftKey);
+    };
+  }, [draftKey]);
+
   // Resolve selected agent config for display
-  const selectedAgentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
+  const currentAgentName =
+    selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
+  const isOrchestratorChat = !currentAgentName || currentAgentName === "orchestrator";
+  const selectedAgentConfig = currentAgentName && agents ? agents.find((a) => a.name === currentAgentName) : undefined;
   const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? "Polpo";
 
+  const mentionAgents = useMemo(
+    () => (isOrchestratorChat ? agents : []),
+    [agents, isOrchestratorChat],
+  );
+  const mentionTasks = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.tasks
+      : mentionData.tasks.filter((task) => task.assignTo === currentAgentName),
+    [currentAgentName, isOrchestratorChat, mentionData.tasks],
+  );
+  const mentionMissions = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.missions
+      : mentionData.missions.filter((mission) => parseMissionAgents(mission.data).includes(currentAgentName ?? "")),
+    [currentAgentName, isOrchestratorChat, mentionData.missions],
+  );
+  const mentionSkills = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.skills
+      : mentionData.skills.filter((skill) =>
+          skill.assignedTo?.includes(currentAgentName ?? "") ||
+          selectedAgentConfig?.skills?.includes(skill.name),
+        ),
+    [currentAgentName, isOrchestratorChat, mentionData.skills, selectedAgentConfig?.skills],
+  );
+  const mentionPlaybooks = useMemo(
+    () => (isOrchestratorChat ? mentionData.playbooks : []),
+    [isOrchestratorChat, mentionData.playbooks],
+  );
+  const mentionFiles = useMemo(
+    () => isOrchestratorChat
+      ? mentionData.files
+      : mentionData.files.filter((file) => isFileAllowedForAgent(file, selectedAgentConfig)),
+    [isOrchestratorChat, mentionData.files, selectedAgentConfig],
+  );
+
   return (
-    <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0" ref={inputWrapperRef}>
+    <div
+      className={cn(
+        "shrink-0",
+        embedded
+          ? "bg-transparent px-0 pt-0 pb-0"
+          // /chat hides the BottomNav, so we only need the iOS home-indicator
+          // safe area at the bottom — no nav-height reservation. Add a small
+          // `pb-2` on top of the safe-area so the composer is not glued to
+          // the bezel on phones without a home indicator.
+          : "bg-background/80 backdrop-blur-md px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] lg:pb-1.5",
+      )}
+      ref={inputWrapperRef}
+    >
       <div className="mx-auto max-w-3xl">
-        <MentionPopover ref={mentionRef} textareaRef={textareaRef} agents={agents} tasks={tasks} missions={missions} skills={skills} templates={playbooks} files={mentionFiles}>
+        {backgroundWaitsOpen && (
+          <div className="mb-2">
+            <BackgroundWaits
+              waits={backgroundWaits.waits}
+              loading={backgroundWaits.loading}
+              currentSessionId={sessionId}
+              onCancel={async (id) => {
+                try {
+                  await backgroundWaits.cancel(id);
+                  toast.success("Background wait cancelled");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not cancel wait");
+                }
+              }}
+              onClose={() => setBackgroundWaitsOpen(false)}
+            />
+          </div>
+        )}
+        {/* Prompt queue panel — `queueOpen` is the single source of truth.
+            User opens via ListPlus button (auto-opens when enqueueing a
+            draft); closes via the X in the header. Items survive close —
+            re-open to see them again. */}
+        {queueOpen && (
+          <div className="mb-2">
+            <Queue
+              items={queue.items}
+              autoSend={queue.autoSend}
+              onUpdate={(id, text) => { queue.update(id, text); }}
+              onRemove={(id) => { queue.remove(id); }}
+              onSend={handleManualSend}
+              sendDisabled={isLoading || inputDisabled}
+              onClear={() => setQueueClearConfirm(true)}
+              onAutoSendChange={queue.setAutoSend}
+              onReorder={queue.reorder}
+              onClose={() => setQueueOpen(false)}
+            />
+          </div>
+        )}
+        <ConfirmDialog
+          open={queueClearConfirm}
+          onOpenChange={setQueueClearConfirm}
+          title="Clear queue?"
+          description={`This will remove ${queue.items.length} queued prompt${queue.items.length === 1 ? "" : "s"} for this session. This action cannot be undone.`}
+          confirmLabel="Clear all"
+          destructive
+          onConfirm={() => {
+            queue.clear();
+            setQueueClearConfirm(false);
+          }}
+        />
+        {activePreviewContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <AppWindow className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">App Preview</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{activePreviewContext.url}</span>
+              <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+                {activePreviewContext.viewport.width} × {activePreviewContext.viewport.height}
+              </span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearAppPreviewContext} aria-label="Remove all App Preview context" title="Remove all">
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activePreviewContext.selections?.map((selection, index) => (
+                <div key={`${selection.node.selector}-${index}`} className="flex h-9 min-w-0 max-w-[260px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  {selection.screenshotDataUrl ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                          onClick={() => setExpandedPreviewImage({ url: selection.screenshotDataUrl!, label: selection.node.selector })}
+                          aria-label={`Enlarge ${selection.node.selector} screenshot`}
+                        >
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element" className="h-full w-full object-cover" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" sideOffset={8} className="w-[420px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                        <div className="flex min-h-24 items-center overflow-auto border border-border/50 bg-muted/40 p-2">
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element preview" className="mx-auto max-h-72 max-w-none object-contain" />
+                        </div>
+                        <p className="mt-1.5 truncate px-1 font-mono text-[10px] text-muted-foreground">{selection.node.selector}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <div className="h-7 w-9 shrink-0 animate-pulse bg-muted" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={selection.node.selector}>{selection.node.selector}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePreviewSelection(index)} aria-label={`Remove ${selection.node.selector}`}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              {activePreviewContext.screenshotDataUrl && (
+                <div className="flex h-9 min-w-0 max-w-[220px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                        onClick={() => setExpandedPreviewImage({ url: activePreviewContext.screenshotDataUrl!, label: "App Preview screenshot" })}
+                        aria-label="Enlarge App Preview screenshot"
+                      >
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot" className="h-full w-full object-cover" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" sideOffset={8} className="w-[520px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                      <div className="flex min-h-32 items-center justify-center border border-border/50 bg-muted/40 p-2">
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot preview" className="max-h-80 max-w-full object-contain" />
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                  <span className="min-w-0 flex-1 truncate text-[10px]">Screenshot</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={removePreviewScreenshot} aria-label="Remove App Preview screenshot">
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {activeDataContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <Database className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">Data context</span>
+              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{activeDataContext.items.length} selected reference{activeDataContext.items.length === 1 ? "" : "s"}</span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearDataPromptContext} aria-label="Remove all data context"><X className="h-3 w-3" /></Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activeDataContext.items.map((item, index) => (
+                <div key={`${item.sourceId}-${item.dataset}-${index}`} className="flex h-8 min-w-0 max-w-[280px] items-center gap-1.5 border border-border/60 bg-background pl-2">
+                  <Table2 className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1 truncate text-[10px]" title={`${item.sourceId}/${item.dataset}`}>{item.label}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeDataPromptItem(index)} aria-label={`Remove ${item.label}`}><X className="h-3 w-3" /></Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <Dialog open={Boolean(expandedPreviewImage)} onOpenChange={(open) => { if (!open) setExpandedPreviewImage(null); }}>
+          <DialogContent className="flex h-[86vh] w-[92vw] max-w-[1280px] flex-col gap-0 overflow-hidden p-0">
+            <div className="flex h-11 shrink-0 items-center border-b border-border px-3 pr-12">
+              <DialogTitle className="truncate text-sm">{expandedPreviewImage?.label ?? "App Preview screenshot"}</DialogTitle>
+            </div>
+            <div className="min-h-0 flex-1 bg-muted/40 p-4">
+              {expandedPreviewImage && (
+                <img src={expandedPreviewImage.url} alt="Enlarged App Preview context" className="h-full w-full bg-background object-contain shadow-lg" />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+        <MentionPopover
+          ref={mentionRef}
+          textareaRef={textareaRef}
+          agents={mentionAgents}
+          tasks={mentionTasks}
+          missions={mentionMissions}
+          skills={mentionSkills}
+          templates={mentionPlaybooks}
+          files={mentionFiles}
+          onTriggerOpen={(trigger) => { void ensureMentionData(trigger); }}
+        >
           <PromptInput
             onSubmit={handleSubmit}
-            accept="image/*"
+            submissionKey={draftKey}
+            accept="*/*"
             multiple
             globalDrop
             maxFiles={5}
             maxFileSize={10 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
-            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
-            <AttachmentPreview />
+            <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
-              placeholder={isLoading ? `${recipientName} is working...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : `Message ${recipientName}...`}
+              ref={textareaRef}
+              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
-              onKeyDown={(e) => mentionRef.current?.handleTextareaKeyDown(e)}
+              onKeyDown={(e) => {
+                mentionRef.current?.handleTextareaKeyDown(e);
+                handlePromptHistoryKeyDown(e);
+                if (
+                  !e.defaultPrevented &&
+                  isLoading &&
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  // During streaming Enter never goes to the form: with a
+                  // draft it enqueues (same as the queue CTA); empty, it's a
+                  // no-op so the user can't accidentally hit Stop with the
+                  // keyboard — Stop only fires from an explicit click.
+                  e.preventDefault();
+                  if (e.currentTarget.value.trim().length > 0) {
+                    enqueueCurrentDraft();
+                  }
+                }
+              }}
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
                 mentionRef.current?.handleInput();
+                if (!applyingHistoryRef.current) {
+                  historyIndexRef.current = null;
+                  historyDraftRef.current = "";
+                }
+                setHasDraft(e.currentTarget.value.trim().length > 0);
               }}
             />
             <PromptInputFooter>
-              <div className="flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1">
                 <AttachButton disabled={inputDisabled} />
-                <MentionButton
+                {/* Mobile-only mention/skill quick triggers — replace the
+                    "@ for mentions · / for skills" hint that we hide on
+                    mobile. Tapping opens the same popover. */}
+                <button
+                  type="button"
+                  onClick={() => mentionRef.current?.toggle("@")}
                   disabled={inputDisabled}
-                  onOpen={() => mentionRef.current?.toggle()}
-                />
+                  aria-label="Insert mention"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                >
+                  <span className="font-mono text-sm font-semibold">@</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => mentionRef.current?.toggle("/")}
+                  disabled={inputDisabled}
+                  aria-label="Insert skill"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                >
+                  <span className="font-mono text-sm font-semibold">/</span>
+                </button>
               </div>
-              <div className="flex items-center gap-1">
-                <MicButton onTranscript={setTextareaValue} disabled={inputDisabled} />
-                <PromptInputSubmit
-                  status={isLoading ? "streaming" : undefined}
-                  disabled={isLoading ? false : inputDisabled}
-                  onStop={stop}
+              <div className="flex min-w-0 items-center gap-1">
+                <MicButton
+                  onTranscript={setTextareaValue}
+                  disabled={inputDisabled}
+                  onListeningChange={setIsRecording}
                 />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => setBackgroundWaitsOpen((value) => !value)}
+                      aria-label="Background waits"
+                    >
+                      <ClockArrowUp className="h-4 w-4" />
+                      {backgroundWaits.activeCount > 0 && (
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white">
+                          {backgroundWaits.activeCount}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    Background waits ({backgroundWaits.activeCount} active)
+                  </TooltipContent>
+                </Tooltip>
+                {/* Queue button — stash current draft instead of sending.
+                    Disabled while a stream is in progress would defeat the
+                    point (the whole reason to queue is to pile up sends
+                    while busy), so we only honour `inputDisabled` (which
+                    excludes the loading flag here).
+
+                    Icon = bare `List` (manager/toggle role). The streaming
+                    CTA uses `ListPlus` (action role: add). Keeping the two
+                    icons distinct prevents confusion when both render side
+                    by side during a streamed reply with a pending draft. */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
+                      onClick={enqueueCurrentDraft}
+                      disabled={inputDisabled}
+                      aria-label="Add to queue"
+                    >
+                      <List className="h-4 w-4" />
+                      {queue.items.length > 0 && (
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold leading-none text-primary-foreground">
+                          {queue.items.length}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    {queue.items.length === 0
+                      ? (queueOpen ? "Close queue manager" : "Open queue manager (or type a prompt and click to queue)")
+                      : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
+                  </TooltipContent>
+                </Tooltip>
+                {/* ml-2 here adds breathing room ONLY between the Queue
+                    button and the Send/Stop action — Mic↔Queue stays at
+                    the tight gap-1 of the parent container. */}
+                <div className="ml-2 flex items-center">
+                  {isRecording ? (
+                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                      </span>
+                      Recording
+                    </div>
+                  ) : isLoading && hasDraft ? (
+                    // Streaming + draft non vuoto: il CTA principale diventa
+                    // "enqueue" (stesso effetto del bottone Queue + Enter).
+                    // Stop resta accessibile svuotando il textarea — lo
+                    // switch avviene automaticamente.
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="icon"
+                          className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
+                          onClick={enqueueCurrentDraft}
+                          aria-label="Add to queue"
+                        >
+                          <ListPlus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        Add to queue (Enter)
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <PromptInputSubmit
+                      status={isLoading ? "streaming" : undefined}
+                      disabled={isLoading ? false : inputDisabled}
+                      onStop={stop}
+                    />
+                  )}
+                </div>
               </div>
             </PromptInputFooter>
           </PromptInput>
         </MentionPopover>
-        <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-          @ to mention · Enter to send · Shift+Enter for new line.
+        {/* Hint row — desktop only. On mobile the @/ buttons inside the
+            footer take over and the session id is hidden as not actionable. */}
+        <div className="mt-1 hidden lg:flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+          <ChatInputHint trigger="@" label="mentions" />
+          <span aria-hidden="true">·</span>
+          <ChatInputHint trigger="/" label="skills" />
           {sessionId && (
-            <SessionIdCopy sessionId={sessionId} />
+            <>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={copySessionId}
+                className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Copy session ID"
+              >
+                <span className="truncate">session:{sessionId.slice(0, 8)}</span>
+                <Copy className="h-2.5 w-2.5 shrink-0" />
+              </button>
+            </>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );
@@ -2570,16 +4266,18 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
         {/* Disabled prompt input */}
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
           <div className="mx-auto max-w-3xl">
-            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
+            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
               <PromptInputTextarea placeholder="Message Polpo..." disabled />
               <PromptInputFooter>
                 <div className="flex items-center gap-1" />
                 <PromptInputSubmit disabled />
               </PromptInputFooter>
             </PromptInput>
-            <p className="text-[10px] text-muted-foreground text-center mt-0.5">
-              @ to mention · Enter to send · Shift+Enter for new line.
-            </p>
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+              <ChatInputHint trigger="@" label="mentions" />
+              <span aria-hidden="true">·</span>
+              <ChatInputHint trigger="/" label="skills" />
+            </div>
           </div>
         </div>
       </div>
@@ -2590,36 +4288,56 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 // ── ChatPage — full-page composition with session sidebar ──
 
 export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: boolean } = {}) {
-  const { sessions, sessionsLoading, sessionId, isLoading } = useChatState();
-  const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
+  const { sessions, sessionsLoading, sessionId, streamingSessionIds, messages, messagesLoading } = useChatState();
+  const { loadSession, newSession, deleteSession, renameSession, setStarred, setSelectedAgent } = useChatActions();
 
   // In embedded mode, session sidebar is controlled externally
   const externalSessionsOpen = useChatFirstSessionsOpen();
-  const [internalSidebarOpen, setInternalSidebarOpen] = useState(false);
-  const sidebarOpen = embedded ? externalSessionsOpen : internalSidebarOpen;
+  const pageSessionsOpen = useChatPageSessionsOpen();
+  const [compactSidebarOpen, setCompactSidebarOpen] = useState(false);
+  const sidebarOpen = embedded ? externalSessionsOpen : compact ? compactSidebarOpen : pageSessionsOpen;
   const setSidebarOpen = embedded
     ? setChatFirstSessionsOpen
-    : setInternalSidebarOpen;
+    : compact
+      ? setCompactSidebarOpen
+      : setChatPageSessionsOpen;
+
+  // Rename dialog state — when non-null, the dialog is open, prepopulated
+  // with `title`. Submitting calls renameSession; closing clears the target.
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const openRename = useCallback((id: string, currentTitle: string) => {
+    setRenameTarget({ id, title: currentTitle });
+  }, []);
+
+  // Toggle handler — fire-and-forget. Errors are swallowed by useChat's
+  // silent catch; the optimistic update keeps the UI snappy.
+  const handleToggleStar = useCallback((id: string, starred: boolean) => {
+    void setStarred(id, starred);
+  }, [setStarred]);
 
   // Filter out empty/orphan sessions
   const visibleSessions = sessions.filter(
     (s: { messageCount: number; title?: string }) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
   );
+  const isEmptyThread = messages.length === 0 && !messagesLoading;
 
-  // Streaming indicator: only the active session can stream
-  const streamingSessionId = isLoading ? sessionId : null;
+  const shouldCloseSidebarAfterMobileAction = useCallback(() => {
+    if (compact) return true;
+    if (embedded || typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 1023px)").matches;
+  }, [compact, embedded]);
 
   // All hooks MUST be above the early return to satisfy Rules of Hooks
   const handleSelectSession = useCallback((id: string) => {
     loadSession(id);
-    if (compact) setSidebarOpen(false);
-  }, [loadSession, compact, setSidebarOpen]);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [loadSession, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   const handleNewSession = useCallback((agent?: string) => {
     newSession();
     setSelectedAgent(agent ?? null);
-    if (compact) setSidebarOpen(false);
-  }, [newSession, setSelectedAgent, compact, setSidebarOpen]);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [newSession, setSelectedAgent, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   if (sessionsLoading) {
     return <ChatLoadingSkeleton compact={compact} />;
@@ -2627,7 +4345,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   return (
     <div className={cn(
-      "flex flex-1 min-h-0",
+      "relative flex flex-1 min-h-0",
       !compact && !embedded && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
     )}>
       {/* Compact mode: sidebar replaces the entire chat area */}
@@ -2635,10 +4353,12 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
         <SessionSidebar
           sessions={visibleSessions}
           activeSessionId={sessionId}
-          streamingSessionId={streamingSessionId}
+          streamingSessionIds={streamingSessionIds}
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onDelete={deleteSession}
+          onRename={openRename}
+          onToggleStar={handleToggleStar}
           onBack={() => setSidebarOpen(false)}
           fullWidth
         />
@@ -2646,22 +4366,30 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
         <>
           {/* Session sidebar panel — full-page or embedded mode */}
           {!compact && sidebarOpen && (
-            <div className={embedded ? "flex" : "hidden lg:flex"}>
+            <div className={cn(
+              embedded
+                ? "flex"
+                : "absolute inset-0 z-40 flex bg-background lg:static lg:inset-auto lg:z-auto lg:bg-transparent"
+            )}>
               <SessionSidebar
                 sessions={visibleSessions}
                 activeSessionId={sessionId}
-                streamingSessionId={streamingSessionId}
+                streamingSessionIds={streamingSessionIds}
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
                 onDelete={deleteSession}
-                onBack={embedded ? () => setSidebarOpen(false) : undefined}
+                onRename={openRename}
+                onToggleStar={handleToggleStar}
+                onBack={embedded || !compact ? () => setSidebarOpen(false) : undefined}
+                mobileFullWidth={!embedded && !compact}
+                mobileOnlyBack={!embedded && !compact}
               />
             </div>
           )}
 
           {/* Main chat area */}
           <div className="flex-1 flex flex-col min-w-0 h-full">
-            {!embedded && (
+            {!embedded && compact && (
               <ChatToolbar
                 sidebarOpen={sidebarOpen}
                 onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -2669,10 +4397,102 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
               />
             )}
             <ChatMessages />
-            <ChatInput />
+            {!isEmptyThread && <ChatInput />}
           </div>
         </>
       )}
+      {/* Rename dialog — controlled by `renameTarget`. Lives at the page
+          root (outside the sidebar) so it survives sidebar close/open
+          transitions and remains anchored to the viewport. */}
+      <RenameSessionDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={async (id, title) => {
+          await renameSession(id, title);
+        }}
+      />
     </div>
+  );
+}
+
+// ── RenameSessionDialog ──
+//
+// Controlled by a `{id, title} | null` target prop. Pre-populates the input
+// with the existing title, Enter submits, Escape (or Cancel) closes without
+// saving. We early-out when the trimmed value is empty or unchanged so the
+// user never wastes a round-trip on a no-op rename.
+function RenameSessionDialog({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { id: string; title: string } | null;
+  onClose: () => void;
+  onSubmit: (id: string, title: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset the input whenever a new target opens — so reopening on a
+  // different session doesn't leak the previous draft.
+  useEffect(() => {
+    if (target) setValue(target.title);
+  }, [target]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!target || submitting) return;
+    const next = value.trim();
+    if (!next || next === target.title.trim()) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(target.id, next);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [onClose, onSubmit, submitting, target, value]);
+
+  const open = target !== null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !submitting) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Rename session</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleSubmit();
+            } else if (e.key === "Escape") {
+              if (!submitting) onClose();
+            }
+          }}
+          placeholder="Session title"
+          disabled={submitting}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSubmit()} disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

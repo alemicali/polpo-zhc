@@ -46,7 +46,19 @@ export class EncryptedVaultStore implements VaultStore {
   }
 
   async getAllForAgent(agent: string): Promise<Record<string, VaultEntry>> {
-    return this.data[agent] ?? {};
+    // Owner entries (this agent's own), then merge-in entries from OTHER
+    // agents whose `allowedAgents` includes this agent. Conflict policy:
+    // per-agent wins over shared (already in result before merge).
+    const result: Record<string, VaultEntry> = { ...(this.data[agent] ?? {}) };
+    for (const [owner, ownerEntries] of Object.entries(this.data)) {
+      if (owner === agent) continue;
+      for (const [service, entry] of Object.entries(ownerEntries)) {
+        if (!entry.allowedAgents || !entry.allowedAgents.includes(agent)) continue;
+        if (result[service]) continue; // owned by current agent → wins
+        result[service] = entry;
+      }
+    }
+    return result;
   }
 
   async set(agent: string, service: string, entry: VaultEntry): Promise<void> {
@@ -58,7 +70,7 @@ export class EncryptedVaultStore implements VaultStore {
   async patch(
     agent: string,
     service: string,
-    partial: { type?: VaultEntry["type"]; label?: string; credentials?: Record<string, string> },
+    partial: { type?: VaultEntry["type"]; label?: string; account?: string; allowedAgents?: string[]; credentials?: Record<string, string> },
   ): Promise<string[]> {
     const existing = await this.get(agent, service);
     if (!existing && !partial.type) {
@@ -67,6 +79,8 @@ export class EncryptedVaultStore implements VaultStore {
     const merged: VaultEntry = {
       type: partial.type ?? existing?.type ?? "custom",
       ...(partial.label !== undefined ? { label: partial.label } : existing?.label ? { label: existing.label } : {}),
+      ...(partial.account !== undefined ? { account: partial.account } : existing?.account ? { account: existing.account } : {}),
+      ...(partial.allowedAgents !== undefined ? { allowedAgents: partial.allowedAgents } : existing?.allowedAgents ? { allowedAgents: existing.allowedAgents } : {}),
       credentials: { ...(existing?.credentials ?? {}), ...(partial.credentials ?? {}) },
     };
     await this.set(agent, service, merged);
@@ -83,15 +97,49 @@ export class EncryptedVaultStore implements VaultStore {
     return true;
   }
 
-  async list(agent: string): Promise<Array<{ service: string; type: VaultEntry["type"]; label?: string; keys: string[] }>> {
-    const entries = this.data[agent];
-    if (!entries) return [];
-    return Object.entries(entries).map(([service, entry]) => ({
-      service,
-      type: entry.type,
-      label: entry.label,
-      keys: Object.keys(entry.credentials),
-    }));
+  async list(agent: string): Promise<Array<{
+    service: string;
+    type: VaultEntry["type"];
+    label?: string;
+    account?: string;
+    allowedAgents?: string[];
+    sharedFrom?: string;
+    readOnly?: boolean;
+    keys: string[];
+  }>> {
+    // Owned entries first (no sharedFrom). Then inherited shared from
+    // other agents. Conflict policy: owned wins.
+    const out: Array<any> = [];
+    const seen = new Set<string>();
+    for (const [service, entry] of Object.entries(this.data[agent] ?? {})) {
+      out.push({
+        service,
+        type: entry.type,
+        label: entry.label,
+        account: entry.account,
+        ...(entry.allowedAgents && entry.allowedAgents.length > 0 ? { allowedAgents: entry.allowedAgents } : {}),
+        keys: Object.keys(entry.credentials),
+      });
+      seen.add(service);
+    }
+    for (const [owner, ownerEntries] of Object.entries(this.data)) {
+      if (owner === agent) continue;
+      for (const [service, entry] of Object.entries(ownerEntries)) {
+        if (!entry.allowedAgents || !entry.allowedAgents.includes(agent)) continue;
+        if (seen.has(service)) continue;
+        out.push({
+          service,
+          type: entry.type,
+          label: entry.label,
+          account: entry.account,
+          allowedAgents: entry.allowedAgents,
+          sharedFrom: owner,
+          readOnly: true,
+          keys: Object.keys(entry.credentials),
+        });
+      }
+    }
+    return out;
   }
 
   async hasEntries(agent: string): Promise<boolean> {
@@ -122,16 +170,45 @@ export class EncryptedVaultStore implements VaultStore {
   }
 
   async renameAgent(oldName: string, newName: string): Promise<void> {
-    if (!this.data[oldName]) return;
-    this.data[newName] = this.data[oldName];
-    delete this.data[oldName];
-    this.persist();
+    let dirty = false;
+    if (this.data[oldName]) {
+      this.data[newName] = this.data[oldName];
+      delete this.data[oldName];
+      dirty = true;
+    }
+    // Cascade: rewrite oldName → newName inside any allowedAgents list of
+    // other agents' shared entries.
+    for (const [owner, ownerEntries] of Object.entries(this.data)) {
+      if (owner === newName) continue;
+      for (const entry of Object.values(ownerEntries)) {
+        if (!entry.allowedAgents) continue;
+        const idx = entry.allowedAgents.indexOf(oldName);
+        if (idx < 0) continue;
+        entry.allowedAgents = entry.allowedAgents.slice();
+        entry.allowedAgents[idx] = newName;
+        dirty = true;
+      }
+    }
+    if (dirty) this.persist();
   }
 
   async removeAgent(agent: string): Promise<void> {
-    if (!this.data[agent]) return;
-    delete this.data[agent];
-    this.persist();
+    let dirty = false;
+    if (this.data[agent]) {
+      delete this.data[agent];
+      dirty = true;
+    }
+    // Cascade: scrub the deleted agent's name from any allowedAgents list.
+    for (const ownerEntries of Object.values(this.data)) {
+      for (const entry of Object.values(ownerEntries)) {
+        if (!entry.allowedAgents) continue;
+        const filtered = entry.allowedAgents.filter(n => n !== agent);
+        if (filtered.length === entry.allowedAgents.length) continue;
+        entry.allowedAgents = filtered.length > 0 ? filtered : undefined;
+        dirty = true;
+      }
+    }
+    if (dirty) this.persist();
   }
 
   // ── Internal ──

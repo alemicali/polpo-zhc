@@ -14,12 +14,21 @@ import {
   Workflow,
   Settings2,
   FolderOpen,
+  Terminal,
+  Code2,
+  AppWindow,
+  Boxes,
   Store,
   ExternalLink,
+  Database,
+  ChartNoAxesCombined,
+  BrainCircuit,
 } from "lucide-react";
-import { usePolpo } from "@polpo-ai/react";
+import { useEvents, usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "@/components/shared/brand-mark";
+import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import {
   Tooltip,
   TooltipContent,
@@ -52,6 +61,7 @@ const nav: NavSection[] = [
       { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
+      { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
       { to: "https://polpo.sh/ink", icon: Store, label: "Polpo Ink Hub", external: true },
     ],
   },
@@ -59,6 +69,12 @@ const nav: NavSection[] = [
     section: "System",
     items: [
       { to: "/files", icon: FolderOpen, label: "Files" },
+      { to: "/apps", icon: Boxes, label: "Apps" },
+      { to: "/data", icon: Database, label: "Data" },
+      { to: "/views", icon: ChartNoAxesCombined, label: "Views" },
+      { to: "/coding", icon: Code2, label: "Coding" },
+      { to: "/terminal", icon: Terminal, label: "Terminal" },
+      { to: "/browser", icon: AppWindow, label: "App Preview" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
       { to: "/config", icon: Settings2, label: "Configuration" },
     ],
@@ -97,10 +113,11 @@ const STORAGE_KEY = "polpo-sidebar-collapsed";
 
 /** Lightweight pending-approval counter — fetches directly from client to avoid
  *  the useApprovals → useEvents → useSyncExternalStore re-render loop. */
-const POLL_INTERVAL = 15_000;
+const APPROVAL_EVENTS = ["approval:requested", "approval:resolved", "approval:rejected", "approval:timeout"];
 
 const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: boolean }) {
   const { client, connectionStatus } = usePolpo();
+  const { events } = useEvents(APPROVAL_EVENTS, 1);
   const [count, setCount] = useState(0);
 
   const fetchCount = useCallback(() => {
@@ -113,9 +130,21 @@ const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: bool
   useEffect(() => {
     if (connectionStatus !== "connected") return;
     fetchCount();
-    const id = setInterval(fetchCount, POLL_INTERVAL);
-    return () => clearInterval(id);
+    const recover = () => {
+      if (document.visibilityState === "visible") fetchCount();
+    };
+    const id = window.setInterval(recover, 120_000);
+    document.addEventListener("visibilitychange", recover);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", recover);
+    };
   }, [connectionStatus, fetchCount]);
+
+  const latestEventId = events.at(-1)?.id;
+  useEffect(() => {
+    if (latestEventId) fetchCount();
+  }, [fetchCount, latestEventId]);
 
   if (count === 0) return null;
 
@@ -142,7 +171,7 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
               href={to}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center h-10 w-10 rounded-lg transition-all duration-200 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-accent/40 hover:text-foreground"
             >
               <Icon className="h-[18px] w-[18px]" />
             </a>
@@ -157,10 +186,10 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
 
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
-      "flex items-center rounded-lg transition-all duration-200 group/link relative",
-      "justify-center h-10 w-10",
+      "flex items-center rounded-lg transition-colors duration-200 group/link relative",
+      "justify-center h-10 w-10 mx-auto",
       isActive
-        ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
+        ? "bg-primary/8 text-primary"
         : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
     );
 
@@ -169,15 +198,8 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
       <TooltipTrigger asChild>
         <div>
           <NavLink to={to} className={linkClasses}>
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
-                )}
-                <Icon className="h-[18px] w-[18px]" />
-                {to === "/approvals" && <PendingBadge collapsed />}
-              </>
-            )}
+            <Icon className="h-[18px] w-[18px]" />
+            {to === "/approvals" && <PendingBadge collapsed />}
           </NavLink>
         </div>
       </TooltipTrigger>
@@ -206,25 +228,18 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
 
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
-      "flex items-center rounded-lg transition-all duration-200 group/link relative",
+      "flex items-center rounded-lg transition-colors duration-200 group/link relative",
       "gap-3 px-3 py-2.5 text-[13px] font-medium",
       isActive
-        ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
+        ? "bg-primary/8 text-primary"
         : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
     );
 
   return (
     <NavLink to={to} className={linkClasses}>
-      {({ isActive }) => (
-        <>
-          {isActive && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
-          )}
-          <Icon className="h-[18px] w-[18px] shrink-0" />
-          <span className="truncate">{label}</span>
-          {to === "/approvals" && <PendingBadge collapsed={false} />}
-        </>
-      )}
+      <Icon className="h-[18px] w-[18px] shrink-0" />
+      <span className="truncate">{label}</span>
+      {to === "/approvals" && <PendingBadge collapsed={false} />}
     </NavLink>
   );
 }
@@ -258,12 +273,10 @@ export function Sidebar() {
       )}
     >
       {/* Logo area */}
-      <div className="relative flex h-14 items-center border-b border-border/40 group">
+      <div className="relative flex h-14 shrink-0 items-center border-b border-border/40 group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg">
-              🐙
-            </div>
+            <BrandMark branding={info?.branding} className="rounded-xl" />
             <button
               onClick={() => setCollapsed(false)}
               className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-muted/90 backdrop-blur-sm cursor-pointer"
@@ -275,12 +288,10 @@ export function Sidebar() {
         ) : (
           <div className="flex w-full items-center justify-between px-5">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg shrink-0">
-                🐙
-              </div>
+              <BrandMark branding={info?.branding} className="rounded-xl" />
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-foreground">Polpo</h1>
-                <p className="text-[10px] tracking-wide uppercase text-muted-foreground/70">Agent Wrangler</p>
+                <h1 className="max-w-36 truncate text-sm font-bold tracking-tight text-foreground">{info?.branding?.productName || DEFAULT_PRODUCT_NAME}</h1>
+                <p className="max-w-36 truncate text-[10px] uppercase text-muted-foreground/70">{info?.branding?.tagline || DEFAULT_PRODUCT_TAGLINE}</p>
               </div>
             </div>
             <button
@@ -294,10 +305,10 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
+      {/* Navigation — scrolls when the items exceed the viewport height */}
       <nav
         className={cn(
-          "flex-1 flex flex-col",
+          "flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
           collapsed ? "items-center py-3 gap-1" : "p-3 gap-1"
         )}
       >
@@ -323,10 +334,10 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer — connection + project */}
+      {/* Footer — project + connection */}
       <div
         className={cn(
-          "border-t border-border/40 space-y-2",
+          "shrink-0 border-t border-border/40",
           collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >
@@ -344,38 +355,39 @@ export function Sidebar() {
               </div>
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
-              <p className="font-medium">{status.label}</p>
-              {info?.project && (
-                <p className="text-muted-foreground mt-0.5">{info.project}</p>
-              )}
+              <div className="flex items-center gap-1.5">
+                <span className={cn("h-1.5 w-1.5 rounded-full", status.color, status.pulse && "bio-pulse")} />
+                <span>{status.label}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="font-semibold text-foreground">{info?.project ?? "Polpo"}</span>
+              </div>
               {info?.version && (
                 <p className="text-muted-foreground/60 mt-0.5 font-mono">v{info.version}</p>
               )}
             </TooltipContent>
           </Tooltip>
         ) : (
-          <>
-            {info?.project && (
-              <div className="text-[10px] text-muted-foreground/60 truncate font-mono tracking-wider uppercase">
-                {info.project}
-              </div>
-            )}
-            <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  status.color,
-                  status.pulse && "bio-pulse"
-                )}
-              />
-              <span className="font-medium">{status.label}</span>
-              {info?.version && (
-                <span className="ml-auto text-[10px] font-mono text-muted-foreground/50">
-                  v{info.version}
-                </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                status.color,
+                status.pulse && "bio-pulse"
               )}
+            />
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              {status.label}
+            </span>
+            <div className="h-4 w-px shrink-0 bg-border/60" />
+            <span className="min-w-0 truncate text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
+              {info?.project ?? "Polpo"}
+            </span>
+            {info?.version && (
+              <span className="ml-auto shrink-0 text-[10px] font-mono text-muted-foreground/50">
+                v{info.version}
+              </span>
+            )}
             </div>
-          </>
         )}
       </div>
     </aside>

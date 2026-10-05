@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, existsSync } from "node:fs";
 import { Orchestrator, buildRetryPrompt } from "../core/orchestrator.js";
+import { executeOrchestratorTool } from "../llm/orchestrator-tools.js";
 import { analyzeBlockedTasks } from "../core/deadlock-resolver.js";
-import { InMemoryTaskStore, InMemoryRunStore, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
+import { InMemoryTaskStore, InMemoryRunStore, InMemoryTaskControlStore, createTestTask, createTestAgent, createTestActivity } from "./fixtures.js";
 import type { TaskResult } from "../core/types.js";
 import type { RunRecord } from "../core/run-store.js";
 
@@ -27,6 +28,7 @@ function createTestRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
 describe("Orchestrator", () => {
   let store: InMemoryTaskStore;
   let runStore: InMemoryRunStore;
+  let taskControlStore: InMemoryTaskControlStore;
   let orchestrator: Orchestrator;
 
   afterEach(() => {
@@ -37,11 +39,13 @@ describe("Orchestrator", () => {
   beforeEach(async () => {
     store = new InMemoryTaskStore();
     runStore = new InMemoryRunStore();
+    taskControlStore = new InMemoryTaskControlStore();
 
     orchestrator = new Orchestrator({
       workDir: TEST_WORK_DIR,
       store,
       runStore,
+      taskControlStore,
       assessFn: async () => ({
         passed: true,
         checks: [],
@@ -160,6 +164,68 @@ describe("Orchestrator", () => {
   });
 
   describe("collectResults via RunStore", () => {
+    it("lets a queued human continuation supersede the old terminal result", async () => {
+      const task = await orchestrator.addTask({
+        title: "Continue wins",
+        description: "Do not assess the killed run after a human continues it",
+        assignTo: "agent-1",
+      });
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await runStore.upsertRun(createTestRunRecord({
+        id: "run-before-continue",
+        taskId: task.id,
+        status: "killed",
+        result: { exitCode: 1, stdout: "partial", stderr: "killed", duration: 50 },
+      }));
+      await taskControlStore.enqueueDirection({
+        taskId: task.id,
+        mode: "continue",
+        message: "Resume from the checkpoint",
+      });
+      await store.unsafeSetStatus(task.id, "pending", "test continuation");
+
+      const collected: TaskResult[] = [];
+      await (orchestrator as any).runner.collectResults((_id: string, result: TaskResult) => collected.push(result));
+
+      expect(collected).toEqual([]);
+      expect(await runStore.getRun("run-before-continue")).toBeUndefined();
+      expect((await store.getTask(task.id))?.status).toBe("pending");
+    });
+
+    it("requeues a continuation claimed by a runner that died before applying it", async () => {
+      const task = await orchestrator.addTask({
+        title: "Recover claimed continuation",
+        description: "Preserve the human direction across a runner crash",
+        assignTo: "agent-1",
+      });
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+      await runStore.upsertRun(createTestRunRecord({
+        id: "crashed-continuation-run",
+        taskId: task.id,
+        status: "failed",
+        result: { exitCode: 1, stdout: "", stderr: "runner crashed", duration: 10 },
+      }));
+      const direction = await taskControlStore.enqueueDirection({
+        taskId: task.id,
+        mode: "continue",
+        message: "Do not lose this direction",
+      });
+      await taskControlStore.claimDirections(task.id, "crashed-continuation-run");
+
+      const collected: TaskResult[] = [];
+      await (orchestrator as any).runner.collectResults((_id: string, result: TaskResult) => collected.push(result));
+
+      expect(collected).toEqual([]);
+      expect((await taskControlStore.listDirections(task.id))[0]).toMatchObject({
+        id: direction.id,
+        status: "queued",
+        runId: undefined,
+      });
+      expect((await store.getTask(task.id))?.status).toBe("pending");
+    });
+
     it("processes terminal runs and transitions tasks", async () => {
       const task = await orchestrator.addTask({
         title: "Collect me",
@@ -236,6 +302,23 @@ describe("Orchestrator", () => {
 
     it("removeAgent returns false for nonexistent", async () => {
       expect(await orchestrator.removeAgent("nope")).toBe(false);
+    });
+
+    it("creates a team and moves an agent through hot orchestrator tools", async () => {
+      const events: any[] = [];
+      orchestrator.on("agent:updated", event => events.push(event));
+      await orchestrator.addAgent(createTestAgent({ name: "move-me" }));
+
+      await expect(executeOrchestratorTool("add_team", { name: "backend" }, orchestrator))
+        .resolves.toBe('Team "backend" created.');
+      await expect(executeOrchestratorTool("update_agent", { name: "move-me", team: "backend" }, orchestrator))
+        .resolves.toContain("team");
+
+      expect((await orchestrator.findAgentTeam("move-me"))?.name).toBe("backend");
+      expect((await orchestrator.getTeam("test-team"))?.agents.some(agent => agent.name === "move-me")).toBe(false);
+      expect((await orchestrator.getTeam("backend"))?.agents.some(agent => agent.name === "move-me")).toBe(true);
+      expect(events.at(-1)?.teams.find((team: any) => team.name === "backend")?.agents)
+        .toEqual(expect.arrayContaining([expect.objectContaining({ name: "move-me" })]));
     });
   });
 

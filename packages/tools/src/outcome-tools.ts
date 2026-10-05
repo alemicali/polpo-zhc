@@ -14,7 +14,7 @@
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 
 // ─── Tool: register_outcome ───

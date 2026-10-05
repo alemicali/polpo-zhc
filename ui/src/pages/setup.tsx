@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +30,7 @@ import {
   ArrowRight,
   Pencil,
   Search,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthStep } from "@/components/shared/provider-auth";
@@ -44,6 +46,10 @@ interface SetupStatus {
   detectedProviders: Provider[];
   workDir: string;
   orgName: string;
+  auth?: {
+    enabled: boolean;
+    configured: boolean;
+  };
 }
 
 // ── API helpers ──
@@ -55,6 +61,7 @@ const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${config.baseUrl}/api/v1${path}`, {
       ...init,
       headers,
+      credentials: "include",
     });
     const data = await res.json();
     return data;
@@ -443,6 +450,46 @@ function ProjectStep({
   );
 }
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function AccessStep({
+  adminEmail,
+  onChangeEmail,
+}: {
+  adminEmail: string;
+  onChangeEmail: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Admin access</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          This email will receive magic links for this Polpo instance.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Admin email
+        </label>
+        <Input
+          value={adminEmail}
+          onChange={(e) => onChangeEmail(e.target.value)}
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+        />
+        <p className="text-xs text-muted-foreground">
+          Saved in <code className="bg-muted px-1 py-0.5 rounded">.polpo/auth.json</code>. Login links are sent with Resend.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // Step 2: Model selection — uses shared ModelPicker
 function ModelStep({
   onSelect,
@@ -525,6 +572,7 @@ function AgentStep({
 // ── Main setup wizard ──
 
 export function SetupPage() {
+  const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -536,13 +584,30 @@ export function SetupPage() {
   const [oauthActive, setOauthActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [alreadyInitialized, setAlreadyInitialized] = useState(false);
+  const [authBootstrapOnly, setAuthBootstrapOnly] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
 
   const STEPS = [
-    { icon: FolderOpen, label: "Project" },
-    { icon: KeyRound, label: "Provider" },
-    { icon: Cpu, label: "Model" },
-    { icon: Sparkles, label: "Agent" },
+    ...(authBootstrapOnly ? [] : [{ id: "project", icon: FolderOpen, label: "Project" }]),
+    ...(authEnabled || authBootstrapOnly ? [{ id: "access", icon: Mail, label: "Access" }] : []),
+    ...(authBootstrapOnly ? [] : [
+      { id: "provider", icon: KeyRound, label: "Provider" },
+      { id: "model", icon: Cpu, label: "Model" },
+      { id: "agent", icon: Sparkles, label: "Agent" },
+    ]),
   ];
+  const currentStep = STEPS[step]?.id ?? "agent";
+  const hasConfiguredProvider = providers.some((p) => p.hasKey);
+  const canGoNext =
+    (currentStep !== "project" || !!workDir) &&
+    (currentStep !== "access" || isValidEmail(adminEmail)) &&
+    (currentStep !== "provider" || hasConfiguredProvider);
+  const canComplete = !completing && (
+    authBootstrapOnly
+      ? isValidEmail(adminEmail)
+      : hasConfiguredProvider && (!authEnabled || isValidEmail(adminEmail))
+  );
 
   // Load status on mount
   useEffect(() => {
@@ -551,11 +616,19 @@ export function SetupPage() {
         if (r.ok) {
           const status = r.data as SetupStatus;
           if (status.initialized) {
-            setAlreadyInitialized(true);
+            if (status.auth?.enabled && !status.auth.configured) {
+              setWorkDir(status.workDir);
+              setOrgName(status.orgName);
+              setAuthEnabled(true);
+              setAuthBootstrapOnly(true);
+            } else {
+              setAlreadyInitialized(true);
+            }
           } else {
             setWorkDir(status.workDir);
             setOrgName(status.orgName);
             setProviders(status.detectedProviders);
+            setAuthEnabled(!!status.auth?.enabled);
           }
         }
       })
@@ -593,6 +666,20 @@ export function SetupPage() {
     setCompleting(true);
     setSetupError(null);
     try {
+      if (authBootstrapOnly) {
+        const result = await api("/auth/instance/setup", {
+          method: "POST",
+          body: JSON.stringify({ email: adminEmail.trim() }),
+        });
+        if (result.ok) {
+          navigate("/login?next=%2Fchat", { replace: true });
+        } else {
+          setSetupError(result.error || "Could not configure instance access.");
+          setCompleting(false);
+        }
+        return;
+      }
+
       const result = await api("/config/initialize", {
         method: "POST",
         body: JSON.stringify({
@@ -601,11 +688,11 @@ export function SetupPage() {
           model: selectedModel || undefined,
           agentName: agentName || "agent-1",
           agentRole: agentRole || "founder",
+          adminEmail: authEnabled ? adminEmail.trim() : undefined,
         }),
       });
       if (result.ok) {
-        // Full reload to re-check setup status — works for both file:// (HashRouter) and http (BrowserRouter)
-        window.location.href = window.location.pathname + window.location.search + "#/";
+        navigate(authEnabled ? "/login?next=%2Fchat" : "/chat", { replace: true });
       } else {
         setSetupError(result.error || "Setup failed. Check server logs.");
         setCompleting(false);
@@ -643,10 +730,10 @@ export function SetupPage() {
             </div>
             <h2 className="text-xl font-semibold">Already configured</h2>
             <p className="text-sm text-muted-foreground">
-              Polpo is already set up and running. To change providers, models, or other settings, use the configuration page.
+              Polpo is already set up and running.
             </p>
-            <Button onClick={() => { window.location.href = window.location.pathname + window.location.search + "#/config"; }} className="gap-1.5">
-              Go to Configuration <ArrowRight className="h-4 w-4" />
+            <Button onClick={() => navigate("/chat", { replace: true })} className="gap-1.5">
+              Let's go <ArrowRight className="h-4 w-4" />
             </Button>
           </CardContent>
         </Card>
@@ -682,7 +769,7 @@ export function SetupPage() {
           <Card className="border-border/60 shadow-lg shadow-black/[0.03]">
             <CardContent className="pt-6 pb-6 px-6 min-h-[320px] flex flex-col">
               <div className="flex-1">
-                {step === 0 && (
+                {currentStep === "project" && (
                   <ProjectStep
                     workDir={workDir}
                     orgName={orgName}
@@ -690,7 +777,13 @@ export function SetupPage() {
                     onChangeOrg={setOrgName}
                   />
                 )}
-                {step === 1 && (
+                {currentStep === "access" && (
+                  <AccessStep
+                    adminEmail={adminEmail}
+                    onChangeEmail={setAdminEmail}
+                  />
+                )}
+                {currentStep === "provider" && (
                   <AuthStep
                     providers={providers}
                     onKeySave={handleSaveKey}
@@ -700,7 +793,7 @@ export function SetupPage() {
                     apiFetch={api}
                   />
                 )}
-                {step === 2 && (
+                {currentStep === "model" && (
                   <ModelStep
                     onSelect={setSelectedModel}
                     configuredProviders={providers.filter((p) => p.hasKey).map((p) => p.name)}
@@ -709,7 +802,7 @@ export function SetupPage() {
                     )}
                   />
                 )}
-                {step === 3 && (
+                {currentStep === "agent" && (
                   <AgentStep
                     agentName={agentName}
                     agentRole={agentRole}
@@ -739,10 +832,7 @@ export function SetupPage() {
                   <Button
                     size="sm"
                     onClick={() => setStep(step + 1)}
-                    disabled={
-                      (step === 0 && !workDir) ||
-                      (step === 1 && !providers.some((p) => p.hasKey))
-                    }
+                    disabled={!canGoNext}
                     className="gap-1"
                   >
                     Next <ChevronRight className="h-4 w-4" />
@@ -755,7 +845,7 @@ export function SetupPage() {
                     <Button
                       size="sm"
                       onClick={handleComplete}
-                      disabled={completing || !providers.some((p) => p.hasKey)}
+                      disabled={!canComplete}
                       className="gap-1.5"
                     >
                       {completing ? (

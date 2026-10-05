@@ -8,6 +8,8 @@ export type { MutationState } from "./hooks/use-mutation.js";
 export { usePolpo } from "./hooks/use-polpo.js";
 export { useTasks } from "./hooks/use-tasks.js";
 export type { UseTasksReturn } from "./hooks/use-tasks.js";
+export { useTasksInfinite } from "./hooks/use-tasks-infinite.js";
+export type { UseTasksInfiniteOpts, UseTasksInfiniteReturn } from "./hooks/use-tasks-infinite.js";
 export { useTask } from "./hooks/use-task.js";
 export { useMissions } from "./hooks/use-missions.js";
 export type { UseMissionsReturn } from "./hooks/use-missions.js";
@@ -23,6 +25,8 @@ export { useMemory, useAgentMemory } from "./hooks/use-memory.js";
 export { useLogs } from "./hooks/use-logs.js";
 export { useSessions } from "./hooks/use-sessions.js";
 export { useTaskActivity } from "./hooks/use-task-activity.js";
+export { useTaskDirections } from "./hooks/use-task-directions.js";
+export type { UseTaskDirectionsReturn } from "./hooks/use-task-directions.js";
 export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useNotifications } from "./hooks/use-notifications.js";
@@ -61,6 +65,7 @@ export type {
   ConnectionStatus,
   EventSourceConfig,
   Task,
+  TaskSlim,
   TaskStatus,
   TaskResult,
   TaskExpectation,
@@ -69,6 +74,7 @@ export type {
   ExpectedOutcome,
   OutcomeType,
   Mission,
+  MissionSlim,
   MissionStatus,
   MissionReport,
   MissionDelay,
@@ -91,6 +97,7 @@ export type {
   PolpoState,
   PolpoConfig,
   PolpoSettings,
+  BrandingConfig,
   ReasoningLevel,
   ModelConfig,
   ModelAllowlistEntry,
@@ -100,6 +107,11 @@ export type {
   ActiveDelay,
   CreateTaskRequest,
   UpdateTaskRequest,
+  TaskDirection,
+  TaskDirectionMode,
+  TaskDirectionStatus,
+  SendTaskDirectionRequest,
+  SendTaskDirectionResult,
   CreateMissionRequest,
   UpdateMissionRequest,
   AddMissionTaskRequest,
@@ -121,6 +133,8 @@ export type {
   UpdateSettingsRequest,
   AddTeamRequest,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   LogSession,
   LogEntry,
   RunActivityEntry,

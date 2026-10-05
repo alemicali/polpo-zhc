@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolpo } from "./use-polpo.js";
+import { useEvents } from "./use-events.js";
 import { useStableValue } from "./use-stable-value.js";
 import type {
   NotificationRecord,
@@ -29,6 +30,7 @@ export function useNotifications(opts?: {
   channel?: string;
 }): UseNotificationsReturn {
   const { client } = usePolpo();
+  const { events } = useEvents(["notification:sent", "notification:failed"], 1);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [stats, setStats] = useState<NotificationStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,14 @@ export function useNotifications(opts?: {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  const latestEventId = events.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
+  useEffect(() => {
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    refetch();
+  }, [latestEventId, refetch]);
 
   const sendNotification = useCallback(
     async (req: SendNotificationRequest) => {

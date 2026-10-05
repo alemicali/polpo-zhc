@@ -13,6 +13,7 @@ import {
   Play,
   RotateCcw,
   XCircle,
+  X,
   Loader2,
   AlertTriangle,
   CheckCircle2,
@@ -45,6 +46,7 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  Panel,
   Handle,
   Position,
   MarkerType,
@@ -57,14 +59,18 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMission, useTasks, useSchedules, useActiveDelays } from "@polpo-ai/react";
-import type { MissionReport, TaskStatus, Task, ActiveDelay } from "@polpo-ai/react";
+import type { MissionReport, TaskStatus, Task, ActiveDelay, Mission, ScheduleEntry } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles } from "@/lib/mission-status";
 import { JsonBlock } from "@/components/json-block";
-import { Calendar, Repeat } from "lucide-react";
+import { Calendar, Repeat, Bell } from "lucide-react";
+import { useConfig } from "@/hooks/use-polpo";
+import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
+import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
+import { useLocalState } from "./coding/use-local-state";
 
 // ── Copyable ID ──
 
@@ -317,12 +323,23 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
           )}
           {score != null && (
             <Badge
-              variant={score >= 0.7 ? "default" : "destructive"}
+              variant={score >= 3.5 ? "default" : "destructive"}
               className="text-[8px] px-1 py-0 ml-auto"
             >
               <Star className="h-2 w-2 mr-0.5" />
-              {Math.round(score * 100)}%
+              {score.toFixed(1)}/5
             </Badge>
+          )}
+          {expanded && liveTask && (
+            <button
+              type="button"
+              className="ml-auto inline-flex h-6 items-center gap-0.5 px-1.5 text-[9px] font-medium text-primary hover:bg-primary/10"
+              onClick={(event) => { event.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
+              title="View task detail"
+            >
+              Open
+              <ChevronRight className="h-3 w-3" />
+            </button>
           )}
         </div>
 
@@ -482,20 +499,6 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
               </div>
             )}
 
-            {/* View task detail — only when selected and a live task exists */}
-            {selected && liveTask && (
-              <div className="pt-2 border-t border-border/30">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-full text-[11px] font-medium gap-1 text-primary"
-                  onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
-                >
-                  View task detail
-                  <ChevronRight className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1084,20 +1087,16 @@ export function MissionGraphInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useLocalState<"floating" | "inline">("polpo:missionGraphPreviewMode", "floating");
 
   // Sync when live task status changes
   useEffect(() => {
     const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays);
-    // Preserve expanded state across syncs
-    setNodes((prev: Node[]) =>
-      n.map((node: Node) => {
-        const existing = prev.find((p: Node) => p.id === node.id);
-        if (existing?.data.expanded) {
-          return { ...node, data: { ...node.data, expanded: true } };
-        }
-        return node;
-      }),
-    );
+    setNodes((previous: Node[]) => n.map((node: Node) => {
+      const existing = previous.find((candidate) => candidate.id === node.id);
+      return existing?.data.expanded ? { ...node, data: { ...node.data, expanded: true } } : node;
+    }));
     setEdges(e);
   }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, setNodes, setEdges]);
 
@@ -1106,21 +1105,29 @@ export function MissionGraphInner({
     return () => clearTimeout(t);
   }, [fitView, nodes.length]);
 
-  // Toggle expanded on node click (only for task nodes)
+  const previewNode = previewMode === "floating" && previewNodeId
+    ? nodes.find((node) => node.id === previewNodeId && node.type === "taskNode") as Node<TaskNodeData> | undefined
+    : undefined;
+
+  // Keep the graph geometry stable and show task details in a fixed panel.
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.type !== "taskNode") return;
-      setNodes((prev: Node[]) =>
-        prev.map((n: Node) =>
-          n.id === node.id
-            ? { ...n, data: { ...n.data, expanded: !n.data.expanded } }
-            : n.data.expanded
-              ? { ...n, data: { ...n.data, expanded: false } }
-              : n,
-        ),
-      );
+      if (previewMode === "floating") {
+        setPreviewNodeId((current) => current === node.id ? null : node.id);
+        setNodes((current: Node[]) => current.map((candidate) => candidate.data.expanded
+          ? { ...candidate, data: { ...candidate.data, expanded: false } }
+          : candidate));
+        return;
+      }
+      setPreviewNodeId(null);
+      setNodes((current: Node[]) => current.map((candidate) => candidate.id === node.id
+        ? { ...candidate, data: { ...candidate.data, expanded: !candidate.data.expanded } }
+        : candidate.data.expanded
+          ? { ...candidate, data: { ...candidate.data, expanded: false } }
+          : candidate));
     },
-    [setNodes],
+    [previewMode, setNodes],
   );
 
   return (
@@ -1130,6 +1137,14 @@ export function MissionGraphInner({
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={handleNodeClick}
+      onPaneClick={() => {
+        setPreviewNodeId(null);
+        if (previewMode === "inline") {
+          setNodes((current: Node[]) => current.map((node) => node.data.expanded
+            ? { ...node, data: { ...node.data, expanded: false } }
+            : node));
+        }
+      }}
       nodeTypes={nodeTypes}
       fitView
       fitViewOptions={{ padding: 0.2 }}
@@ -1142,7 +1157,95 @@ export function MissionGraphInner({
     >
       <Background gap={20} size={1} className="!bg-background" />
       <Controls showInteractive={false} className="!bg-card !border-border !shadow-md [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
+      <Panel position="top-left" className="m-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 bg-background px-2 text-[10px] shadow-sm"
+          onClick={() => {
+            setPreviewNodeId(null);
+            setNodes((current: Node[]) => current.map((node) => node.data.expanded
+              ? { ...node, data: { ...node.data, expanded: false } }
+              : node));
+            setPreviewMode((current) => current === "floating" ? "inline" : "floating");
+          }}
+          title="Switch task detail presentation"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          {previewMode === "floating" ? "Floating details" : "Inline details"}
+        </Button>
+      </Panel>
+      {previewNode && (
+        <Panel position="top-right" className="!bottom-3 !right-3 !top-3 !m-0">
+          <GraphTaskPreview node={previewNode} onClose={() => setPreviewNodeId(null)} />
+        </Panel>
+      )}
     </ReactFlow>
+  );
+}
+
+function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { taskDef, liveTask, index } = node.data;
+  const status = liveTask ? taskStatusConfig[liveTask.status] : undefined;
+  const StatusIcon = status?.icon ?? Clock;
+
+  return (
+    <aside className="nodrag nopan nowheel flex h-full w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden border border-border bg-background shadow-xl">
+      <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span className="font-mono">#{index + 1}</span>
+            <StatusIcon className={cn("h-3 w-3", status?.color, liveTask?.status === "in_progress" && "animate-spin")} />
+            <span>{status?.label ?? "Task definition"}</span>
+          </div>
+          <h3 className="mt-1 text-sm font-semibold leading-snug">{taskDef.title}</h3>
+        </div>
+        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose} aria-label="Close task preview">
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 p-3">
+          {taskDef.description && (
+            <div className="prose prose-sm max-w-none break-words text-xs leading-relaxed text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap">
+              <Markdown>{taskDef.description}</Markdown>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-[9px]"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
+            {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
+            {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
+          </div>
+          {(taskDef.expectations?.length ?? 0) > 0 && (
+            <div className="space-y-1.5 border-t border-border pt-3">
+              <p className="text-[9px] font-semibold uppercase text-muted-foreground">Expectations</p>
+              {taskDef.expectations!.map((expectation, expectationIndex) => {
+                const check = liveTask?.result?.assessment?.checks?.[expectationIndex];
+                return (
+                  <div key={expectationIndex} className="flex items-start gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                    {check?.passed === true
+                      ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                      : check?.passed === false
+                        ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                        : <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full border border-border" />}
+                    <span>{expectation.criteria ?? expectation.command ?? expectation.paths?.join(", ") ?? expectation.type}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+      {liveTask && (
+        <div className="relative z-10 shrink-0 border-t border-border bg-background p-2">
+          <Button type="button" variant="outline" size="sm" className="h-8 w-full text-xs" onClick={() => navigate(`/tasks/${liveTask.id}`)}>
+            View task detail
+          </Button>
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -1252,14 +1355,14 @@ export function TaskStepCard({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {/* Score ring */}
+                {/* Score ring (0-5 scale) */}
                 {score != null && (
                   <div className={cn(
                     "flex flex-col items-center justify-center h-10 w-10 rounded-full border-2",
-                    score >= 0.7 ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-400",
+                    score >= 3.5 ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-400",
                   )}>
-                    <span className="text-xs font-bold leading-none">{Math.round(score * 100)}</span>
-                    <span className="text-[7px] text-muted-foreground leading-none">%</span>
+                    <span className="text-xs font-bold leading-none tabular-nums">{score.toFixed(1)}</span>
+                    <span className="text-[7px] text-muted-foreground leading-none">/ 5</span>
                   </div>
                 )}
                 <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
@@ -1603,22 +1706,43 @@ function RunsTimeline({
 
 // ── Main page ──
 
-export function MissionDetailPage() {
-  const { missionId } = useParams<{ missionId: string }>();
-  const navigate = useNavigate();
-  const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
-  const { tasks: allTasks } = useTasks();
-  const { schedules } = useSchedules();
-  const { activeDelays: liveDelays } = useActiveDelays();
+/**
+ * Pure mission detail view — used by both the standalone page and the
+ * preview dialog (when intercepting a mission from chat). All API
+ * fetching is done by the caller; this component only renders.
+ *
+ * variant="page": back button + Execute/Resume/Abort actions
+ * variant="dialog": no back button, no API actions (Dialog has its own X
+ *   and the parent card carries Execute/Refine/Cancel)
+ */
+export interface MissionDetailViewProps {
+  mission: Mission;
+  report?: MissionReport;
+  groupTasks: Task[];
+  liveDelays: ActiveDelay[];
+  scheduleEntry?: ScheduleEntry;
+  variant?: "page" | "dialog";
+  navigate: (path: string) => void;
+  onBack?: () => void;
+  onExecute?: () => Promise<unknown>;
+  onResume?: () => Promise<unknown>;
+  onAbort?: () => Promise<unknown>;
+}
 
-  const parsed = useMemo(() => mission ? parseMissionData(mission.data) : null, [mission]);
-
-  // Match live tasks to this mission's group
-  const missionGroup = mission?.name;
-  const groupTasks = useMemo(
-    () => missionGroup ? allTasks.filter(t => t.group === missionGroup) : [],
-    [allTasks, missionGroup]
-  );
+export function MissionDetailView({
+  mission,
+  report,
+  groupTasks,
+  liveDelays,
+  scheduleEntry,
+  variant = "page",
+  navigate,
+  onBack,
+  onExecute,
+  onResume,
+  onAbort,
+}: MissionDetailViewProps) {
+  const parsed = useMemo(() => parseMissionData(mission.data), [mission.data]);
 
   const findLiveTask = useCallback(
     (title: string) => groupTasks.find(t => t.title === title),
@@ -1631,33 +1755,26 @@ export function MissionDetailPage() {
   const totalCount = parsed?.tasks.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
-  const isRecurring = mission?.status === "recurring";
-  const isScheduled = mission?.status === "scheduled";
+  const isRecurring = mission.status === "recurring";
+  const isScheduled = mission.status === "scheduled";
   /** Blueprint mode: scheduled/recurring missions show task definitions as templates, not live instances */
   const isBlueprint = isRecurring || isScheduled;
 
   const findBlueprintTask = useCallback(() => undefined, []);
 
-  // Build active delay map and expired set for the current mission group
   const activeDelayMap = useMemo(() => {
-    if (!missionGroup) return new Map<string, ActiveDelay>();
     const map = new Map<string, ActiveDelay>();
     for (const d of liveDelays) {
-      if (d.group === missionGroup) map.set(d.delayName, d);
+      if (d.group === mission.name) map.set(d.delayName, d);
     }
     return map;
-  }, [liveDelays, missionGroup]);
+  }, [liveDelays, mission.name]);
 
-  // Expired delays: tasks in blocksTasks that are already running/done indicate the delay expired.
-  // We detect this from groupTasks — if ALL blocksTasks of a delay are no longer "pending"/"assigned", it expired.
   const expiredDelays = useMemo(() => {
     const set = new Set<string>();
-    if (!parsed?.delays || !missionGroup) return set;
+    if (!parsed?.delays) return set;
     for (const dl of parsed.delays) {
-      // If it's currently active, it hasn't expired yet
       if (activeDelayMap.has(dl.name)) continue;
-      // If any afterTask is done, the delay was at least triggered.
-      // If all afterTasks are done/failed and it's NOT in activeDelayMap, it must have expired.
       const allAfterDone = dl.afterTasks.every(t => {
         const live = groupTasks.find(gt => gt.title === t);
         return live && (live.status === "done" || live.status === "failed");
@@ -1665,13 +1782,9 @@ export function MissionDetailPage() {
       if (allAfterDone) set.add(dl.name);
     }
     return set;
-  }, [parsed?.delays, missionGroup, activeDelayMap, groupTasks]);
+  }, [parsed?.delays, activeDelayMap, groupTasks]);
 
-  const scheduleEntry = useMemo(
-    () => missionId ? schedules.find((s: { missionId: string }) => s.missionId === missionId) : undefined,
-    [schedules, missionId],
-  );
-  const hasScheduleInfo = !!(mission?.schedule || mission?.deadline || mission?.endDate || mission?.qualityThreshold != null || scheduleEntry);
+  const hasScheduleInfo = !!(mission.schedule || mission.deadline || mission.endDate || mission.qualityThreshold != null || scheduleEntry);
 
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
@@ -1687,38 +1800,20 @@ export function MissionDetailPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error || !mission) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-        <AlertTriangle className="h-10 w-10 opacity-40" />
-        <p className="text-sm">Mission not found</p>
-        <Button variant="outline" size="sm" onClick={() => navigate("/missions")}>
-          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
-          Back to Missions
-        </Button>
-      </div>
-    );
-  }
-
   const style = missionStatusStyles[mission.status];
   const StatusIcon = style.icon;
+  const isPage = variant === "page";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back + title bar */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/missions")} className="shrink-0">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+          {isPage && onBack && (
+            <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", style.bg)}>
             <StatusIcon className={cn("h-4 w-4", style.color, mission.status === "active" && "animate-spin")} />
           </div>
@@ -1750,18 +1845,18 @@ export function MissionDetailPage() {
               )}
             </div>
           )}
-          {mission.status === "draft" && (
-            <Button size="sm" disabled={!!actionPending} onClick={() => handleAction(executeMission, "Mission executed")}>
+          {mission.status === "draft" && onExecute && (
+            <Button size="sm" disabled={!!actionPending} onClick={() => handleAction(onExecute, "Mission executed")}>
               {actionPending === "Mission executed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />} Execute
             </Button>
           )}
-          {(mission.status === "active" || mission.status === "failed") && (
-            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(() => resumeMission(), "Mission resumed")}>
+          {(mission.status === "active" || mission.status === "failed") && onResume && (
+            <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(onResume, "Mission resumed")}>
               {actionPending === "Mission resumed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Resume
             </Button>
           )}
-          {mission.status === "active" && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(abortMission, "Mission aborted")}>
+          {mission.status === "active" && onAbort && (
+            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(onAbort, "Mission aborted")}>
               {actionPending === "Mission aborted" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Abort
             </Button>
           )}
@@ -1865,6 +1960,10 @@ export function MissionDetailPage() {
               Runs
             </TabsTrigger>
           )}
+          <TabsTrigger value="notifications">
+            <Bell className="h-3.5 w-3.5 mr-1.5" />
+            Rules
+          </TabsTrigger>
           <TabsTrigger value="raw">Raw JSON</TabsTrigger>
           {report && (
             <TabsTrigger value="report">
@@ -1966,6 +2065,19 @@ export function MissionDetailPage() {
             </ScrollArea>
           </TabsContent>
         )}
+
+        {/* Notifications tab — applied rule preview */}
+        <TabsContent value="notifications" className="mt-4 flex-1 min-h-0">
+          <ScrollArea className="h-full">
+            <div className="pr-4 space-y-3 max-w-3xl">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                These are the notification rules that would fire for this mission, resolved by scope.
+                Mission-scoped rules replace global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+              </p>
+              <MissionAppliedRules mission={mission} />
+            </div>
+          </ScrollArea>
+        </TabsContent>
 
         {/* Raw JSON tab — full width code block with copy */}
         <TabsContent value="raw" className="mt-4 flex-1 min-h-0">
@@ -2105,5 +2217,83 @@ export function MissionDetailPage() {
         )}
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Render applied notification rules for a mission. Lives outside
+ * MissionDetailView so the view stays a pure presentation component
+ * (no data-fetching coupling for an optional tab).
+ */
+function MissionAppliedRules({ mission }: { mission: Mission }) {
+  const { config } = useConfig();
+  const globalRules = ((config?.settings?.notifications as { rules?: AnyRule[] } | undefined)?.rules) ?? [];
+  const missionScoped: ScopedRules | undefined = (mission as Mission & { notifications?: ScopedRules }).notifications;
+  return (
+    <AppliedRulesPanel
+      variant="mission"
+      missionScoped={missionScoped}
+      globalRules={globalRules}
+    />
+  );
+}
+
+/**
+ * Standalone page wrapper — fetches mission state via API and renders
+ * the shared MissionDetailView with full action handlers.
+ */
+export function MissionDetailPage() {
+  const { missionId } = useParams<{ missionId: string }>();
+  const navigate = useNavigate();
+  const { mission, report, isLoading, error, executeMission, resumeMission, abortMission } = useMission(missionId ?? "");
+  const { tasks: allTasks } = useTasks();
+  const { schedules } = useSchedules();
+  const { activeDelays: liveDelays } = useActiveDelays();
+
+  const groupTasks = useMemo(
+    () => mission ? allTasks.filter(t => t.group === mission.name) : [],
+    [allTasks, mission],
+  );
+
+  const scheduleEntry = useMemo(
+    () => missionId ? schedules.find((s: ScheduleEntry) => s.missionId === missionId) : undefined,
+    [schedules, missionId],
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || !mission) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <AlertTriangle className="h-10 w-10 opacity-40" />
+        <p className="text-sm">Mission not found</p>
+        <Button variant="outline" size="sm" onClick={() => navigate("/missions")}>
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
+          Back to Missions
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <MissionDetailView
+      mission={mission}
+      report={report}
+      groupTasks={groupTasks}
+      liveDelays={liveDelays}
+      scheduleEntry={scheduleEntry}
+      variant="page"
+      navigate={navigate}
+      onBack={() => navigate("/missions")}
+      onExecute={executeMission}
+      onResume={() => resumeMission()}
+      onAbort={abortMission}
+    />
   );
 }

@@ -44,6 +44,7 @@ export function PolpoProvider({
 
     let pendingEvents: SSEEvent[] = [];
     let batchScheduled = false;
+    let hasConnected = false;
 
     const flushBatch = () => {
       if (pendingEvents.length > 0) {
@@ -65,15 +66,20 @@ export function PolpoProvider({
       onStatusChange: (status) => {
         store.setConnectionStatus(status);
         if (status === "connected") {
-          // Re-fetch all resources to fill any SSE gaps
-          Promise.all([
-            client.getTasks().then((t) => store.setTasks(t)),
-            client.getMissions().then((m) => store.setMissions(m)),
-            client.getAgents().then((a) => store.setAgents(a)),
-            client.getProcesses().then((p) => store.setProcesses(p)),
-          ]).catch(() => {
-            /* individual errors handled by hooks */
-          });
+          if (hasConnected) {
+            // Re-fetch after reconnect to fill SSE gaps. On the first
+            // connection the resource hooks already issue these requests;
+            // repeating all four here doubled cold-start network traffic.
+            Promise.all([
+              client.getTasks().then((t) => store.setTasks(t)),
+              client.getMissions().then((m) => store.setMissions(m)),
+              client.getAgents().then((a) => store.setAgents(a)),
+              client.getProcesses().then((p) => store.setProcesses(p)),
+            ]).catch(() => {
+              /* individual errors handled by hooks */
+            });
+          }
+          hasConnected = true;
         }
       },
     });

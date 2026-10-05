@@ -1,24 +1,45 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
+import { useEvents } from "./use-events.js";
+import { readCached, writeCached } from "./use-swr-cache.js";
 import type { ChatSession, ChatMessage } from "@polpo-ai/sdk";
 
 export interface UseSessionsReturn {
   sessions: ChatSession[];
+  /** True when there is no cached or fetched data yet. */
   isLoading: boolean;
+  /** True when we already have data (stale or fresh) but a background fetch is in flight. */
+  isRefreshing: boolean;
   error: Error | null;
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
   getMessages: (sessionId: string) => Promise<ChatMessage[]>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  /** Sync update of the local cached title — used when the server has
+   *  already renamed (e.g. set_session_title tool emitted a SSE chunk)
+   *  and we just need to mirror the change client-side without firing
+   *  another PATCH. No-op if the session is unknown locally. */
+  updateLocalTitle: (sessionId: string, title: string) => void;
+  setStarred: (sessionId: string, starred: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   refetch: () => Promise<void>;
 }
 
 export function useSessions(): UseSessionsReturn {
   const { client } = usePolpoContext();
+  const { events } = useEvents(["session:created", "session:updated", "session:deleted", "message:added"], 1);
 
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Synchronous SWR seed: read stale snapshot on the very first render so
+  // the sidebar paints instantly. The background fetch below replaces it
+  // as soon as the network responds (often a 304 thanks to the ETag).
+  const initial = (() => {
+    const cached = readCached<ChatSession[]>("sessions");
+    return cached?.data ?? null;
+  })();
+
+  const [sessions, setSessions] = useState<ChatSession[]>(initial ?? []);
+  const [isLoading, setIsLoading] = useState(initial === null);
+  const [isRefreshing, setIsRefreshing] = useState(initial !== null);
   const [error, setError] = useState<Error | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
@@ -26,15 +47,33 @@ export function useSessions(): UseSessionsReturn {
     try {
       const data = await client.getSessions();
       setSessions(data.sessions);
+      // Persist for next cold load. We don't have the ETag here because
+      // PolpoClient.get() doesn't surface response headers — Fix 2's ETag
+      // still wins on the SERVER round-trip via the browser's HTTP cache.
+      writeCached("sessions", data.sessions);
     } catch (err) {
       setError(err as Error);
     }
   }, [client]);
 
   useEffect(() => {
-    setIsLoading(true);
-    refetch().finally(() => setIsLoading(false));
+    if (initial === null) setIsLoading(true);
+    setIsRefreshing(true);
+    refetch().finally(() => {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    });
+    // initial is captured at mount; refetch is stable per client.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetch]);
+
+  const latestEventId = events.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
+  useEffect(() => {
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    void refetch();
+  }, [latestEventId, refetch]);
 
   const getMessages = useCallback(
     async (sessionId: string) => {
@@ -54,6 +93,18 @@ export function useSessions(): UseSessionsReturn {
     [client],
   );
 
+  const setStarred = useCallback(
+    async (sessionId: string, starred: boolean) => {
+      await client.setSessionStarred(sessionId, starred);
+      // Optimistic local update — mirror of renameSession. Note: we deliberately
+      // do NOT touch updatedAt so the sidebar "recent" ordering stays put.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, starred } : s)),
+      );
+    },
+    [client],
+  );
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       await client.deleteSession(sessionId);
@@ -65,14 +116,23 @@ export function useSessions(): UseSessionsReturn {
     [client, activeSessionId],
   );
 
+  const updateLocalTitle = useCallback((sessionId: string, title: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, title } : s)),
+    );
+  }, []);
+
   return {
     sessions,
     isLoading,
+    isRefreshing,
     error,
     activeSessionId,
     setActiveSessionId,
     getMessages,
     renameSession,
+    updateLocalTitle,
+    setStarred,
     deleteSession,
     refetch,
   };

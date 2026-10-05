@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { resolve, join } from "node:path";
 import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
@@ -6,10 +7,13 @@ import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./co
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
+import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import type { SessionStore } from "./session-store.js";
+import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
+import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
@@ -19,10 +23,13 @@ import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
 import { TypedEmitter } from "./events.js";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
+import type { BackgroundWaitStore, TaskControlStore } from "./task-control-store.js";
 import type {
   PolpoConfig,
   AgentConfig,
+  AgentUpdate,
   Task,
+  TaskStatus,
   TaskResult,
   TaskExpectation,
   ExpectedOutcome,
@@ -52,9 +59,11 @@ import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
+import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
+import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
@@ -69,7 +78,8 @@ import { SLAMonitor } from "../quality/sla-monitor.js";
 import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
-import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
+import { BackgroundWaitManager, type BackgroundWaitContinuation } from "./background-wait-manager.js";
+import type { ApprovalRequest, ApprovalStatus, ChannelReplyTarget, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
 import type { PlaybookStore } from "./playbook-store.js";
@@ -85,13 +95,28 @@ export interface OrchestratorOptions {
   workDir?: string;
   store?: TaskStore;
   runStore?: RunStore;
+  taskControlStore?: TaskControlStore;
   assessFn?: AssessFn;
   spawner?: Spawner;
+}
+
+function supportsBackgroundWaits(store: TaskControlStore): store is TaskControlStore & BackgroundWaitStore {
+  return typeof store.createBackgroundWait === "function"
+    && typeof store.getBackgroundWait === "function"
+    && typeof store.listBackgroundWaits === "function"
+    && typeof store.markBackgroundWaitReady === "function"
+    && typeof store.claimBackgroundWait === "function"
+    && typeof store.completeBackgroundWait === "function"
+    && typeof store.failBackgroundWait === "function"
+    && typeof store.requeueBackgroundWait === "function"
+    && typeof store.cancelBackgroundWait === "function"
+    && typeof store.recoverBackgroundWaits === "function";
 }
 
 export class Orchestrator extends TypedEmitter {
   private registry!: TaskStore;
   private runStore!: RunStore;
+  private taskControlStore!: TaskControlStore;
   private config!: PolpoConfig;
   private polpoDir: string;
   private workDir: string;
@@ -101,11 +126,14 @@ export class Orchestrator extends TypedEmitter {
   private stopped = false;
   private assessFn: AssessFn;
   private spawner: Spawner;
+  private ownsSpawner = true;
   private injectedStore?: TaskStore;
   private injectedRunStore?: RunStore;
+  private injectedTaskControlStore?: TaskControlStore;
   private memoryStore!: MemoryStore;
   private logStore!: LogStore;
   private sessionStore!: SessionStore;
+  private codingSessionStore!: CodingSessionStore;
   private notificationServer?: Server;
   private hookRegistry = new HookRegistry();
   private approvalMgr?: ApprovalManager;
@@ -115,17 +143,33 @@ export class Orchestrator extends TypedEmitter {
   private qualityController?: QualityController;
   private scheduler?: Scheduler;
   private watcherMgr?: TaskWatcherManager;
+  private backgroundWaitMgr?: BackgroundWaitManager;
+  private backgroundWaitContinuation?: BackgroundWaitContinuation;
   private telegramPoller?: TelegramCallbackPoller;
+  /** Pollers of dedicated-agent bots (extra Telegram channels with gateway.agent). */
+  private dedicatedTelegramPollers: TelegramCallbackPoller[] = [];
+  /** Gateways by channel name; the primary one is also exposed as channelGateway. */
+  private channelGateways = new Map<string, ChannelGateway>();
+  /** @usernames of running Telegram bots by channel name (getMe at start), for the chat prompt. */
+  private telegramBotUsernames = new Map<string, string>();
+  /** Bots dedicated to one agent, refreshed (menu, photo, description) when that agent changes. */
+  private dedicatedTelegramBots = new Map<string, { agent: string; botToken: string; poller: TelegramCallbackPoller; gateway: ChannelGateway }>();
+  /** Running Telegram pollers by channel name, for replies routed from other channels. */
+  private telegramPollersByChannel = new Map<string, TelegramCallbackPoller>();
+  /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
+  private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppStore;
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
+  private channelChatRunner?: ChannelChatRunner;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
   private playbookStore!: PlaybookStore;
+  private eventingTaskStores = new WeakMap<TaskStore, TaskStore>();
 
   // Managers
   private agentMgr!: AgentManager;
@@ -147,11 +191,29 @@ export class Orchestrator extends TypedEmitter {
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
-  getChannelGateway(): ChannelGateway | undefined { return this.channelGateway; }
+  /** Primary gateway, or the gateway of a specific channel by name. */
+  getChannelGateway(channelName?: string): ChannelGateway | undefined {
+    return channelName
+      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway
+      : this.channelGateway;
+  }
+  /** Inbound adapter of a webhook channel with gateway.enableInbound. */
+  getWebhookGateway(channelName: string): WebhookGatewayAdapter | undefined {
+    return this.webhookGateways.get(channelName)?.adapter;
+  }
+  getTelegramBotUsernames(): Map<string, string> { return this.telegramBotUsernames; }
+  /** Agent-direct chat for messaging channels, provided by the server host. */
+  getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
+  setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
   getWatcherManager(): TaskWatcherManager | undefined { return this.watcherMgr; }
+  getBackgroundWaitManager(): BackgroundWaitManager | undefined { return this.backgroundWaitMgr; }
+  setBackgroundWaitContinuation(handler: BackgroundWaitContinuation): void {
+    this.backgroundWaitContinuation = handler;
+    this.backgroundWaitMgr?.setContinuation(handler);
+  }
   getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
@@ -160,6 +222,9 @@ export class Orchestrator extends TypedEmitter {
     this.workDir = resolve(newWorkDir);
     this.polpoDir = getPolpoDir(this.workDir);
     this.cachedAgentWorkDir = null;
+    if (this.ownsSpawner) {
+      this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+    }
   }
 
   constructor(workDirOrOptions?: string | OrchestratorOptions) {
@@ -177,16 +242,83 @@ export class Orchestrator extends TypedEmitter {
       this.assessFn = opts.assessFn ?? assessTask;
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
+      this.injectedTaskControlStore = opts.taskControlStore;
       this.spawner = opts.spawner ?? new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
+      this.ownsSpawner = !opts.spawner;
     }
   }
 
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
+  /** Raw Drizzle DB handle — used by file→sqlite migration after init. */
+  private drizzleDb?: any;
+  /** Sqlite-flavoured schema bundle, kept around so the migration can re-use it. */
+  private drizzleSchema?: typeof import("@polpo-ai/drizzle")["sqliteSchema"];
+  /** Effective storage backend selected at init time. Mirror of
+   *  `config.settings.storage` after parseSettings has applied defaults —
+   *  kept private because the source of truth is `config.settings.storage`. */
+  private resolvedStorage: "file" | "sqlite" | "postgres" = "file";
+
+  /**
+   * Decorate task status changes with task:transition events.
+   *
+   * Watchers, SSE, notification rules, and CLI status output all depend on this
+   * event. Keeping it at the store boundary prevents missed events when callers
+   * use registry.transition(...) directly.
+   */
+  private withTaskTransitionEvents(store: TaskStore): TaskStore {
+    const cached = this.eventingTaskStores.get(store);
+    if (cached) return cached;
+
+    const orchestrator = this;
+    const wrapped = new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "__emitsTaskTransitionEvents") return true;
+
+        if (prop === "transition") {
+          return async (taskId: string, newStatus: TaskStatus) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.transition(taskId, newStatus);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        if (prop === "unsafeSetStatus") {
+          return async (taskId: string, newStatus: TaskStatus, reason: string) => {
+            const before = await target.getTask(taskId);
+            const updated = await target.unsafeSetStatus(taskId, newStatus, reason);
+            if (before && before.status !== updated.status) {
+              orchestrator.emit("task:transition", {
+                taskId,
+                from: before.status,
+                to: updated.status,
+                task: updated,
+              });
+            }
+            return updated;
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as TaskStore;
+
+    this.eventingTaskStores.set(store, wrapped);
+    return wrapped;
+  }
 
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
-    task: TaskStore; run: RunStore;
+    task: TaskStore; run: RunStore; taskControlStore: TaskControlStore;
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
     if (storage === "postgres") {
@@ -202,13 +334,15 @@ export class Orchestrator extends TypedEmitter {
       return {
         task: this.drizzleStores.taskStore,
         run: this.drizzleStores.runStore,
+        taskControlStore: this.drizzleStores.taskControlStore,
         logStore: this.drizzleStores.logStore,
         sessionStore: this.drizzleStores.sessionStore,
         memoryStore: this.drizzleStores.memoryStore,
       };
     }
     if (storage === "sqlite") {
-      const { createSqliteStores } = await import("@polpo-ai/drizzle");
+      const drizzleMod = await import("@polpo-ai/drizzle");
+      const { createSqliteStores, sqliteSchema } = drizzleMod;
       const { createRequire } = await import("node:module");
       const req = createRequire(import.meta.url);
       const Database = req("better-sqlite3");
@@ -222,18 +356,54 @@ export class Orchestrator extends TypedEmitter {
       const { drizzle } = await import("drizzle-orm/better-sqlite3");
       const db = drizzle(sqlite);
       this.drizzleStores = createSqliteStores(db);
+      this.drizzleDb = db;
+      this.drizzleSchema = sqliteSchema;
+      this.resolvedStorage = "sqlite";
       return {
         task: this.drizzleStores.taskStore,
         run: this.drizzleStores.runStore,
+        taskControlStore: this.drizzleStores.taskControlStore,
         logStore: this.drizzleStores.logStore,
         sessionStore: this.drizzleStores.sessionStore,
         memoryStore: this.drizzleStores.memoryStore,
       };
     }
+    this.resolvedStorage = "file";
     return {
       task: new FileTaskStore(this.polpoDir),
       run: new FileRunStore(this.polpoDir),
+      taskControlStore: new FileTaskControlStore(this.polpoDir),
     };
+  }
+
+  /**
+   * Auto-migrate `.polpo/*.json` legacy files into the SQLite database the
+   * first time a project boots after switching to `storage: "sqlite"`.
+   *
+   * Safe to call on every init — the migration short-circuits when the DB
+   * already has data. Failures are logged but do not abort startup; the
+   * legacy files remain on disk so the user can roll back manually.
+   */
+  private async maybeAutoMigrateToSqlite(): Promise<void> {
+    if (this.resolvedStorage !== "sqlite") return;
+    if (!this.drizzleDb || !this.drizzleSchema) return;
+    // Only attempt the migration when legacy `tasks/` exists — a strong
+    // signal that this project pre-dates the SQLite default.
+    const tasksDir = join(this.polpoDir, "tasks");
+    if (!existsSync(tasksDir)) return;
+    try {
+      const { migrateFileToSqlite } = await import("../migrations/file-to-sqlite.js");
+      this.emit("log", { level: "info", message: "Detected legacy file store — migrating to SQLite (files preserved at .polpo/)." });
+      const result = await migrateFileToSqlite(this.polpoDir, this.drizzleDb, this.drizzleSchema, {
+        log: (msg) => this.emit("log", { level: "info", message: `[migrate] ${msg}` }),
+      });
+      if (!result.ok) {
+        this.emit("log", { level: "warn", message: `[migrate] completed with errors — see logs above. Files at .polpo/ remain intact.` });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit("log", { level: "warn", message: `[migrate] auto-migration failed: ${msg}. Files at .polpo/ remain intact.` });
+    }
   }
 
   async init(): Promise<void> {
@@ -250,10 +420,21 @@ export class Orchestrator extends TypedEmitter {
     }
 
     const stores = this.injectedStore
-      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      ? {
+          task: this.injectedStore,
+          run: this.injectedRunStore!,
+          taskControlStore: this.injectedTaskControlStore ?? new FileTaskControlStore(this.polpoDir),
+        }
       : await this.createStores(this.config.settings.storage, this.config.settings.databaseUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
+    this.taskControlStore = stores.taskControlStore;
+
+    // NOTE: file→sqlite migration is MANUAL only (run `polpo migrate`
+    // from the CLI). Auto-trigger at boot was removed by user request —
+    // a fresh-install SQLite DB ships empty until the user explicitly
+    // migrates, so legacy file-based projects keep using files until
+    // the user runs the migration command.
 
     // When storage is "postgres", Drizzle provides all stores; otherwise use file-based defaults
     if ("logStore" in stores && stores.logStore) {
@@ -268,6 +449,8 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = (this.drizzleStores?.codingSessionStore as CodingSessionStore | undefined)
+      ?? new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -290,10 +473,21 @@ export class Orchestrator extends TypedEmitter {
 
   /**
    * Populate stores from the teams array passed to initInteractive().
-   * Idempotent — skips teams/agents that already exist in the store.
+   *
+   * First-run only: if the TeamStore already has ANY row, we skip seeding
+   * entirely. This prevents the boot path from resurrecting teams/agents
+   * that the user has explicitly deleted (e.g. `default` / `dev-1`).
+   * The previous "idempotent per-name" behaviour was a footgun — once a
+   * named team had been deleted, the next boot would re-create it because
+   * `seed()` only checked existence by name.
    */
   private async populateStores(teams: Team[]): Promise<void> {
     if (!teams || teams.length === 0) return;
+
+    // If the user has touched the stores at all (even leaving one team),
+    // treat the project as initialised and DO NOT re-seed legacy defaults.
+    const existingTeams = await this.teamStore.getTeams();
+    if (existingTeams.length > 0) return;
 
     await this.teamStore.seed(teams);
 
@@ -365,6 +559,7 @@ export class Orchestrator extends TypedEmitter {
       emitter: this,
       registry: this.registry,
       runStore: this.runStore,
+      taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
       logStore: this.logStore,
       sessionStore: this.sessionStore,
@@ -495,6 +690,8 @@ export class Orchestrator extends TypedEmitter {
       this.startWhatsAppBridge();
     }
 
+    this.startWebhookGateways();
+
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
       this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
@@ -540,6 +737,14 @@ export class Orchestrator extends TypedEmitter {
     this.watcherMgr = new TaskWatcherManager(this);
     this.watcherMgr.setActionExecutor(actionExecutor);
     this.watcherMgr.start();
+
+    if (supportsBackgroundWaits(this.taskControlStore)) {
+      this.backgroundWaitMgr = new BackgroundWaitManager(this, this.registry, this.taskControlStore);
+      await this.backgroundWaitMgr.start();
+      if (this.backgroundWaitContinuation) {
+        this.backgroundWaitMgr.setContinuation(this.backgroundWaitContinuation);
+      }
+    }
 
     // Build the deadlock resolver port (wraps the shell's deadlock-resolver module)
     const deadlockResolver: DeadlockResolverPort = {
@@ -636,10 +841,17 @@ export class Orchestrator extends TypedEmitter {
     const storageBackend = settings.storage as "file" | "sqlite" | "postgres" | undefined;
     const dbUrl = (settings as any).databaseUrl ?? process.env.DATABASE_URL;
     const stores = this.injectedStore
-      ? { task: this.injectedStore, run: this.injectedRunStore! }
+      ? {
+          task: this.injectedStore,
+          run: this.injectedRunStore!,
+          taskControlStore: this.injectedTaskControlStore ?? new FileTaskControlStore(this.polpoDir),
+        }
       : await this.createStores(storageBackend, dbUrl);
-    this.registry = stores.task;
+    this.registry = this.withTaskTransitionEvents(stores.task);
     this.runStore = stores.run;
+    this.taskControlStore = stores.taskControlStore;
+
+    await this.maybeAutoMigrateToSqlite();
 
     // Use Drizzle-provided stores when available, otherwise fall back to file-based
     if ("logStore" in stores && stores.logStore) {
@@ -654,6 +866,8 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initSessionStore();
     }
+    this.codingSessionStore = (this.drizzleStores?.codingSessionStore as CodingSessionStore | undefined)
+      ?? new FileCodingSessionStore(this.polpoDir);
     this.memoryStore = ("memoryStore" in stores && stores.memoryStore)
       ? stores.memoryStore
       : new FileMemoryStore(this.polpoDir);
@@ -744,6 +958,23 @@ export class Orchestrator extends TypedEmitter {
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.engine.updateTaskExpectations(taskId, expectations); }
   async retryTask(taskId: string): Promise<void> { return this.engine.retryTask(taskId); }
+  async sendDirection(
+    taskId: string,
+    message: string,
+    opts?: { mode?: "auto" | "steer" | "follow_up" | "continue"; confirmSideEffects?: boolean },
+  ) { return this.engine.sendDirection(taskId, message, opts); }
+  async listDirections(taskId: string) { return this.engine.listDirections(taskId); }
+  async createBackgroundWait(input: { taskId: string; sessionId: string; targetStatus?: string }) {
+    if (!this.backgroundWaitMgr) throw new Error("Background waits are not initialized");
+    return this.backgroundWaitMgr.create(input);
+  }
+  async listBackgroundWaits(sessionId?: string) {
+    if (!this.backgroundWaitMgr) return [];
+    return this.backgroundWaitMgr.list(sessionId);
+  }
+  async cancelBackgroundWait(id: string): Promise<boolean> {
+    return (await this.backgroundWaitMgr?.cancel(id)) ?? false;
+  }
   reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
@@ -776,22 +1007,35 @@ export class Orchestrator extends TypedEmitter {
 
   getStore(): TaskStore { return this.registry; }
   getRunStore(): RunStore { return this.runStore; }
+  getTaskControlStore(): TaskControlStore { return this.taskControlStore; }
   getPolpoDir(): string { return this.polpoDir; }
   getMemoryStore(): MemoryStore { return this.memoryStore; }
   getVaultStore(): VaultStore | undefined { return this.vaultStore; }
   getPlaybookStore(): PlaybookStore { return this.playbookStore; }
+  getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
+  /** Drizzle-backed AttachmentStore when storage is sqlite/postgres, undefined for file mode. */
+  getAttachmentStore(): import("@polpo-ai/core/attachment-store").AttachmentStore | undefined {
+    return this.drizzleStores?.attachmentStore;
+  }
 
   /**
    * Initialize the vault store.
-   * When storage is "sqlite" or "postgres", uses DrizzleVaultStore (AES-256-GCM encrypted in DB).
-   * Otherwise falls back to EncryptedVaultStore (file-based, .polpo/vault.enc).
+   * ALWAYS uses EncryptedVaultStore (file-based, .polpo/vault.enc) regardless
+   * of storage mode. Rationale: vault crypto operations are sensitive — keeping
+   * the file-based store as the single source of truth avoids any risk of
+   * key-resolution drift or migration-time data loss when storage flips to
+   * SQLite. The DrizzleVaultStore implementation exists (and the `vault` table
+   * is still created in the schema) but is intentionally NOT wired here.
+   * If/when we want full DB consolidation, do it via an explicit
+   * `polpo vault migrate` command that round-trips through resolveKey()
+   * — not by silently flipping the wiring.
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
@@ -805,15 +1049,47 @@ export class Orchestrator extends TypedEmitter {
   async getTeam(name?: string): Promise<Team | undefined> { return this.engine.getTeam(name); }
   getConfig(): PolpoConfig | null { return this.config; }
   get isInitialized(): boolean { return this.interactive; }
-  async addTeam(team: Team): Promise<void> { return this.engine.addTeam(team); }
-  async removeTeam(name: string): Promise<boolean> { return this.engine.removeTeam(name); }
-  async renameTeam(oldName: string, newName: string): Promise<void> { return this.engine.renameTeam(oldName, newName); }
-  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> { return this.engine.addAgent(agent, teamName); }
-  async removeAgent(name: string): Promise<boolean> { return this.engine.removeAgent(name); }
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> { return this.engine.updateAgent(name, updates); }
+  async addTeam(team: Team): Promise<void> {
+    await this.engine.addTeam(team);
+    await this.emitTeamSnapshot("team:created", { teamName: team.name });
+  }
+  async removeTeam(name: string): Promise<boolean> {
+    const removed = await this.engine.removeTeam(name);
+    if (removed) await this.emitTeamSnapshot("team:removed", { teamName: name });
+    return removed;
+  }
+  async renameTeam(oldName: string, newName: string): Promise<void> {
+    await this.engine.renameTeam(oldName, newName);
+    await this.emitTeamSnapshot("team:updated", { oldName, teamName: newName });
+  }
+  async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    await this.engine.addAgent(agent, teamName);
+    await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
+    this.refreshDedicatedTelegramBots(agent.name);
+  }
+  async removeAgent(name: string): Promise<boolean> {
+    const removed = await this.engine.removeAgent(name);
+    if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    return removed;
+  }
+  async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    const agent = await this.engine.updateAgent(name, updates);
+    await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
+    this.refreshDedicatedTelegramBots(agent.name);
+    return agent;
+  }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
+
+  private async emitTeamSnapshot(event: string, data: Record<string, unknown>): Promise<void> {
+    this.emit(event, {
+      ...data,
+      agents: await this.getAgents(),
+      teams: await this.getTeams(),
+      timestamp: new Date().toISOString(),
+    });
+  }
 
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
@@ -967,6 +1243,7 @@ export class Orchestrator extends TypedEmitter {
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
     this.stopped = true;
+    this.backgroundWaitMgr?.dispose();
     this.engine?.stop();
   }
 
@@ -977,6 +1254,7 @@ export class Orchestrator extends TypedEmitter {
   async gracefulStop(timeoutMs = 5000): Promise<void> {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
+    this.backgroundWaitMgr?.dispose();
     const activeRuns = await this.runStore.getActiveRuns();
 
     if (activeRuns.length > 0) {
@@ -1028,6 +1306,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
+    this.stopDedicatedTelegramPollers();
     this.whatsappBridge?.stop();
     this.whatsappStore?.close();
     this.whatsappStore = undefined;
@@ -1038,6 +1317,7 @@ export class Orchestrator extends TypedEmitter {
     this.slaMonitor?.dispose();
     this.qualityController?.dispose();
     this.scheduler?.dispose();
+    this.backgroundWaitMgr?.dispose();
     await this.registry.close?.();
     await this.runStore.close();
     this.emit("orchestrator:shutdown", {});
@@ -1069,6 +1349,7 @@ export class Orchestrator extends TypedEmitter {
     // 1. Dispose optional subsystems (scheduler is handled separately to preserve state)
     this.telegramPoller?.stop();
     this.telegramPoller = undefined;
+    this.stopDedicatedTelegramPollers();
     this.whatsappBridge?.stop();
     this.whatsappBridge = undefined;
     this.whatsappStore?.close();
@@ -1162,6 +1443,8 @@ export class Orchestrator extends TypedEmitter {
       this.startWhatsAppBridge();
     }
 
+    this.startWebhookGateways();
+
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
       this.escalationMgr = new EscalationManager(ctx, this.approvalMgr);
@@ -1238,76 +1521,262 @@ export class Orchestrator extends TypedEmitter {
   private startTelegramApprovalPoller(): void {
     if (!this.notificationRouter) return;
 
-    // Stop any existing poller to prevent duplicate polling
+    // Stop any existing pollers to prevent duplicate polling
     if (this.telegramPoller) {
       this.telegramPoller.stop();
       this.telegramPoller = undefined;
     }
+    this.stopDedicatedTelegramPollers();
+    this.channelGateways.clear();
+    this.telegramPollersByChannel.clear();
+    this.dedicatedTelegramBots.clear();
+    this.telegramBotUsernames.clear();
 
-    // Find the Telegram channel instance from notification config
-    const telegramConfigKey = Object.keys(this.config.settings.notifications?.channels ?? {})
-      .find(k => this.config.settings.notifications?.channels[k]?.type === "telegram");
-    if (!telegramConfigKey) return;
+    const channels = this.config.settings.notifications?.channels ?? {};
+    const telegramKeys = Object.keys(channels).filter(k => channels[k]?.type === "telegram");
+    if (telegramKeys.length === 0) return;
 
-    const ch = this.notificationRouter!.getChannel(telegramConfigKey);
-    if (!ch || ch.type !== "telegram") return;
-    const telegramChannel = ch as import("../notifications/channels/telegram.js").TelegramChannel;
+    // The primary bot talks to the orchestrator (and to agents via /agent); it keeps
+    // the approval chat. Extra bots with gateway.agent are dedicated to one agent.
+    const primaryKey = telegramKeys.find(k => !channels[k]?.gateway?.agent) ?? telegramKeys[0];
+    const ordered = [primaryKey, ...telegramKeys.filter(k => k !== primaryKey)];
 
-    const botToken = telegramChannel.getBotToken();
-    const chatId = telegramChannel.getChatId();
+    const resolver = this.createApprovalResolver();
 
-    const poller = new TelegramCallbackPoller(botToken, chatId);
+    const usedTokens = new Set<string>();
+    for (const key of ordered) {
+      const ch = this.notificationRouter!.getChannel(key);
+      if (!ch || ch.type !== "telegram") continue;
+      const telegramChannel = ch as import("../notifications/channels/telegram.js").TelegramChannel;
+      const botToken = telegramChannel.getBotToken();
 
-    // Build approval resolver (if approval manager is available)
-    const approvalMgr = this.approvalMgr;
-    let resolver: ApprovalCallbackResolver | undefined;
-    if (approvalMgr) {
-      resolver = {
-        approve: async (requestId, resolvedBy) => {
-          const result = await approvalMgr.approve(requestId, resolvedBy);
-          return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
-        },
-        reject: async (requestId, feedback, resolvedBy) => {
-          const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
-          return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
-        },
-      };
-      poller.setResolver(resolver);
+      // Two pollers on one token steal each other's updates (Telegram 409).
+      if (usedTokens.has(botToken)) {
+        this.emit("log", { level: "warn", message: `[telegram] Channel "${key}" reuses another channel's bot token — skipped` });
+        continue;
+      }
+      usedTokens.add(botToken);
+
+      const isPrimary = key === primaryKey;
+      const poller = new TelegramCallbackPoller(botToken, telegramChannel.getChatId());
+      if (resolver) poller.setResolver(resolver);
+
+      const channelConfig = channels[key];
+      if (channelConfig?.gateway?.enableInbound) {
+        this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+
+        const gateway = new ChannelGateway({
+          orchestrator: this,
+          peerStore: this.peerStore!,
+          sessionStore: this.sessionStore,
+          channelConfig,
+          approvalResolver: resolver,
+          onTyping: (chatId) => poller.sendTyping(chatId),
+        });
+        gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+        gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+        poller.setGateway(new TelegramGatewayAdapter(gateway));
+        // The main bot's menu is static; dedicated bots get theirs (agent suggestions) once agents are loaded.
+        if (!channelConfig.gateway.agent) {
+          void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
+        }
+        this.channelGateways.set(key, gateway);
+        if (isPrimary) this.channelGateway = gateway;
+
+        const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+        this.emit("log", {
+          level: "info",
+          message: `Telegram channel gateway "${key}" started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, ${target})`,
+        });
+      }
+
+      poller.start(2000); // Poll every 2 seconds
+      this.telegramPollersByChannel.set(key, poller);
+      void fetch(`https://api.telegram.org/bot${botToken}/getMe`)
+        .then(r => r.json() as Promise<{ ok?: boolean; result?: { username?: string } }>)
+        .then(me => { if (me.ok && me.result?.username) this.telegramBotUsernames.set(key, me.result.username); })
+        .catch(() => {});
+      if (isPrimary) this.telegramPoller = poller;
+      else this.dedicatedTelegramPollers.push(poller);
+
+      const dedicatedAgent = channelConfig?.gateway?.enableInbound ? channelConfig.gateway.agent : undefined;
+      const gateway = this.channelGateways.get(key);
+      if (dedicatedAgent && gateway) {
+        this.dedicatedTelegramBots.set(key, { agent: dedicatedAgent, botToken, poller, gateway });
+        this.scheduleDedicatedBotRefresh(key);
+      }
     }
 
-    // Check if inbound gateway is enabled for this Telegram channel
-    const channelConfig = this.config.settings.notifications?.channels[telegramConfigKey];
-    if (channelConfig?.gateway?.enableInbound) {
-      // Initialize peer store
-      this.peerStore = this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+    this.emit("log", { level: "info", message: `Telegram callback poller started (${usedTokens.size} bot${usedTokens.size === 1 ? "" : "s"})` });
+  }
 
-      // Create ChannelGateway with typing indicator support
-      this.channelGateway = new ChannelGateway({
+  /** Approve/reject through the approval manager, for channel commands and buttons. */
+  private createApprovalResolver(): ApprovalCallbackResolver | undefined {
+    const approvalMgr = this.approvalMgr;
+    return approvalMgr ? {
+      approve: async (requestId, resolvedBy) => {
+        const result = await approvalMgr.approve(requestId, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found or already resolved" };
+      },
+      reject: async (requestId, feedback, resolvedBy) => {
+        const result = await approvalMgr.reject(requestId, feedback, resolvedBy);
+        return result ? { ok: true } : { ok: false, error: "Not found, already resolved, or max rejections reached" };
+      },
+    } : undefined;
+  }
+
+  /** Re-register menus and re-sync profiles of the bots dedicated to `agentName`. */
+  private refreshDedicatedTelegramBots(agentName: string): void {
+    for (const [key, bot] of this.dedicatedTelegramBots) {
+      if (bot.agent === agentName) void this.refreshDedicatedBot(key);
+    }
+  }
+
+  /**
+   * Telegram pollers start during init, possibly before agents are loaded:
+   * retry until the dedicated agent is visible (0s, 5s, 15s, 30s, 60s).
+   */
+  private scheduleDedicatedBotRefresh(key: string, delays = [0, 5_000, 15_000, 30_000, 60_000]): void {
+    const [delay, ...rest] = delays;
+    setTimeout(() => {
+      void this.refreshDedicatedBot(key).then(done => {
+        if (done || !this.dedicatedTelegramBots.has(key)) return;
+        if (rest.length > 0) this.scheduleDedicatedBotRefresh(key, rest);
+        else console.error(`[polpo/telegram] "${key}": agent "${this.dedicatedTelegramBots.get(key)?.agent}" not found — menu and profile not synced`);
+      });
+    }, delay).unref?.();
+  }
+
+  /** Menu (agent suggestions) + profile of one dedicated bot. Returns false if the agent is not loaded yet. */
+  private async refreshDedicatedBot(key: string): Promise<boolean> {
+    const bot = this.dedicatedTelegramBots.get(key);
+    if (!bot) return true;
+    try {
+      const agents = await this.getAgents();
+      if (!agents.some(a => a.name === bot.agent)) return false;
+      bot.poller.setMenuCommands(await bot.gateway.menuCommands());
+      await this.syncDedicatedBotProfile(key);
+      return true;
+    } catch (err) {
+      console.error(`[polpo/telegram] "${key}" refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /** Mirror the agent's avatar and bio onto its dedicated bot (photo only re-uploaded when changed). */
+  private async syncDedicatedBotProfile(key: string): Promise<void> {
+    const bot = this.dedicatedTelegramBots.get(key);
+    if (!bot) return;
+    try {
+      const agent = (await this.getAgents()).find(a => a.name === bot.agent);
+      if (!agent) return;
+      const result = await syncTelegramBotProfile({
+        botToken: bot.botToken,
+        agent,
+        roots: [this.workDir, this.getAgentWorkDir()],
+        statePath: join(this.polpoDir, "telegram-bot-profiles.json"),
+      });
+      const level = result.error ? "warn" : "info";
+      const message = `[telegram] "${key}" profile for ${bot.agent}: photo ${result.photo}, description ${result.description}${result.error ? ` (${result.error})` : ""}`;
+      console.error(`[polpo/telegram] ${message.slice("[telegram] ".length)}`);
+      this.emit("log", { level, message });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `[telegram] "${key}" profile sync failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  private stopDedicatedTelegramPollers(): void {
+    for (const poller of this.dedicatedTelegramPollers) poller.stop();
+    this.dedicatedTelegramPollers = [];
+  }
+
+  // ── Conversation pipe ──
+
+  /**
+   * Deliver a chat turn through another channel (gateway.replyTo). Telegram gets the
+   * whole conversation (echo, partials, reply with buttons and files); other channels
+   * get the final reply as a notification.
+   */
+  private async routeChannelReply(target: ChannelReplyTarget, event: ReplyRouteEvent): Promise<void> {
+    const config = this.config.settings.notifications?.channels?.[target.channel];
+    if (!config) throw new Error(`Unknown channel "${target.channel}"`);
+
+    if (config.type === "telegram") {
+      const poller = this.telegramPollersByChannel.get(target.channel);
+      if (!poller) throw new Error(`Telegram channel "${target.channel}" is not running`);
+      const chatId = target.chatId || config.chatId || await this.onlyPairedTelegramChat();
+      if (!chatId) throw new Error(`No chat for "${target.channel}": set replyTo.chatId or the channel's chat ID`);
+      if (event.kind === "echo") {
+        await poller.sendMarkdown(chatId, `_↪ ${event.from} · ${event.via}_\n${event.text}`);
+      } else if (event.kind === "partial") {
+        await poller.sendPartial(chatId, event.text);
+      } else {
+        const { reply } = event;
+        if (reply.text.trim() || reply.buttons || reply.forceReply) {
+          await poller.sendMarkdown(chatId, reply.text, reply.buttons, reply.forceReply);
+        }
+        for (const file of reply.files ?? []) await poller.sendDocument(chatId, file.path, file.filename);
+      }
+      return;
+    }
+
+    if (event.kind !== "reply") return;
+    const channel = this.notificationRouter?.getChannel(target.channel);
+    if (!channel) throw new Error(`Channel "${target.channel}" is not running`);
+    const notification = {
+      id: nanoid(),
+      channel: target.channel,
+      title: "Polpo reply",
+      body: event.reply.text,
+      severity: "info" as const,
+      sourceEvent: "channel:reply",
+      sourceData: { chatId: target.chatId },
+      ruleId: "conversation-pipe",
+      timestamp: new Date().toISOString(),
+    };
+    const files = event.reply.files ?? [];
+    if (files.length > 0 && channel.sendWithAttachments) {
+      const { readFile } = await import("node:fs/promises");
+      const attachments = await Promise.all(files.map(async (f) => {
+        const content = await readFile(f.path);
+        return { label: f.filename, type: "file" as const, filePath: f.path, size: content.length, content };
+      }));
+      await channel.sendWithAttachments(notification, attachments);
+    } else {
+      await channel.send(notification);
+    }
+  }
+
+  /** Private chat of the only person allowed on Telegram (chat id = user id), if exactly one. */
+  private async onlyPairedTelegramChat(): Promise<string | undefined> {
+    const allowed = (await this.peerStore?.getAllowlist() ?? []).filter(id => id.startsWith("telegram:"));
+    return allowed.length === 1 ? allowed[0].slice("telegram:".length) : undefined;
+  }
+
+  // ── Inbound webhooks ──
+
+  /**
+   * One gateway per webhook channel with gateway.enableInbound. The shared secret
+   * authenticates callers, so the DM policy defaults to "open" (still overridable).
+   */
+  private startWebhookGateways(): void {
+    this.webhookGateways.clear();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "webhook" || !channelConfig.gateway?.enableInbound) continue;
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const gateway = new ChannelGateway({
         orchestrator: this,
         peerStore: this.peerStore!,
         sessionStore: this.sessionStore,
-        channelConfig,
-        approvalResolver: resolver,
-        onTyping: (chatId) => poller.sendTyping(chatId),
+        channelConfig: { ...channelConfig, gateway: { dmPolicy: "open", ...channelConfig.gateway } },
+        approvalResolver: this.createApprovalResolver(),
       });
-
-      // Send partial responses as separate Telegram messages during multi-turn tool loops
-      this.channelGateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
-
-      // Attach gateway adapter to poller
-      const adapter = new TelegramGatewayAdapter(this.channelGateway);
-      poller.setGateway(adapter);
-
-      this.emit("log", {
-        level: "info",
-        message: `Telegram channel gateway started (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "allowlist"}, inbound: enabled)`,
-      });
+      gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+      this.webhookGateways.set(key, { gateway, adapter: new WebhookGatewayAdapter(gateway) });
+      const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+      this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
     }
-
-    poller.start(2000); // Poll every 2 seconds
-    this.telegramPoller = poller;
-
-    this.emit("log", { level: "info", message: "Telegram callback poller started" });
   }
 
   // ── WhatsApp Bridge ──
@@ -1393,6 +1862,7 @@ export class Orchestrator extends TypedEmitter {
       this.channelGateway.setPartialResponseHandler((chatId, text) =>
         waChannel.sendText(chatId, text),
       );
+      this.channelGateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
 
       // Attach gateway adapter to bridge
       const adapter = new WhatsAppGatewayAdapter(this.channelGateway);
@@ -1478,4 +1948,3 @@ export class Orchestrator extends TypedEmitter {
   /** Access the pure orchestration engine (for advanced use / testing). */
   getEngine(): OrchestratorEngine { return this.engine; }
 }
-

@@ -8,6 +8,7 @@ import {
   AddMissionTeamMemberSchema, UpdateMissionTeamMemberSchema,
   UpdateMissionNotificationsSchema,
 } from "../schemas.js";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -16,10 +17,23 @@ const listMissionsRoute = createRoute({
   path: "/",
   tags: ["Missions"],
   summary: "List missions",
+  request: {
+    query: z.object({
+      summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients.",
+      }),
+      slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview).",
+      }),
+    }),
+  },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
       description: "List of missions",
+    },
+    304: {
+      description: "Not modified — client has the current list per ETag",
     },
   },
 });
@@ -388,7 +402,46 @@ export function missionRoutes(getDeps: () => {
   // GET /missions — list all missions
   app.openapi(listMissionsRoute, async (c) => {
     const deps = getDeps();
-    return c.json({ ok: true, data: await deps.getAllMissions() });
+    const all = await deps.getAllMissions();
+    const { summary, slim } = c.req.valid("query");
+    const wantSlim = summary === "true" || slim === "true";
+
+    // Slim projection: drops `data` (stringified JSON of all tasks — the
+    // single biggest field per mission, regularly multi-KB) and the full
+    // `prompt`. Adds derived `taskCount` so list-row UIs can render the
+    // "N tasks" badge without parsing `data` themselves.
+    if (wantSlim) {
+      const slim = all.map((m: any) => {
+        let taskCount: number | undefined;
+        if (typeof m.data === "string" && m.data.length > 0) {
+          try {
+            const parsed = JSON.parse(m.data);
+            if (Array.isArray(parsed?.tasks)) taskCount = parsed.tasks.length;
+          } catch { /* malformed — leave taskCount undefined */ }
+        }
+        const promptStr = typeof m.prompt === "string" ? m.prompt : "";
+        return {
+          id: m.id,
+          name: m.name,
+          status: m.status,
+          schedule: m.schedule,
+          deadline: m.deadline,
+          endDate: m.endDate,
+          qualityThreshold: m.qualityThreshold,
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt,
+          ...(taskCount != null ? { taskCount } : {}),
+          ...(promptStr ? { promptPreview: promptStr.length > 200 ? promptStr.slice(0, 200) : promptStr } : {}),
+        };
+      });
+      const etag = buildETag(quickFingerprint(slim));
+      if (handleConditional(c, etag)) return c.body(null, 304);
+      return c.json({ ok: true, data: slim });
+    }
+
+    const etag = buildETag(quickFingerprint(all));
+    if (handleConditional(c, etag)) return c.body(null, 304);
+    return c.json({ ok: true, data: all });
   });
 
   // GET /missions/resumable — list resumable missions

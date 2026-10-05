@@ -1,6 +1,6 @@
 "use client";
 
-import type { HTMLAttributes } from "react";
+import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -15,6 +15,10 @@ import {
   previewCategory,
 } from "@/components/shared/file-preview";
 import { cn } from "@/lib/utils";
+import { apiUrl, config } from "@/lib/config";
+import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 import {
   Loader2,
   CheckCircle2,
@@ -22,6 +26,7 @@ import {
   ChevronRight,
   Wrench,
   FileText,
+  PictureInPicture2,
 } from "lucide-react";
 
 // ── Types ──
@@ -31,8 +36,15 @@ export type ToolState = "preparing" | "calling" | "completed" | "error" | "inter
 export interface ToolCallInfo {
   id: string;
   name: string;
+  argumentsText?: string;
   arguments?: Record<string, unknown>;
   result?: string;
+  progress?: {
+    message: string;
+    taskId?: string;
+    status?: string;
+    elapsedMs?: number;
+  };
   state: ToolState;
 }
 
@@ -66,6 +78,7 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   update_vault_credentials: "Updating vault credentials…",
   navigate_to: "Navigating…",
   open_tab: "Opening tab…",
+  set_design: "Updating design…",
 };
 
 /** Convert tool_name to "Tool Name" */
@@ -73,6 +86,13 @@ function formatToolName(name: string): string {
   return name
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatProgress(progress: NonNullable<ToolCallInfo["progress"]>): string {
+  const elapsed = typeof progress.elapsedMs === "number"
+    ? ` · ${Math.max(0, Math.floor(progress.elapsedMs / 1000))}s`
+    : "";
+  return `${progress.status ?? progress.message}${elapsed}`;
 }
 
 function getStateIcon(state: ToolState) {
@@ -138,9 +158,25 @@ export function ToolInvocation({
   className,
   ...props
 }: ToolInvocationProps) {
-  const isOpen = defaultOpen ?? tool.state === "error";
+  const shouldOpenForStreamingInput = tool.state === "preparing" && !!tool.argumentsText;
+  const [open, setOpen] = useState(defaultOpen ?? (tool.state === "error" || shouldOpenForStreamingInput));
+  const [movingToBackground, setMovingToBackground] = useState(false);
+  const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
   const { previewState, openPreview, closePreview } = useFilePreview();
+
+  useEffect(() => {
+    if (shouldOpenForStreamingInput || tool.state === "error") {
+      setOpen(true);
+    } else if (tool.state === "completed" || tool.state === "interrupted") {
+      setOpen(false);
+    }
+  }, [shouldOpenForStreamingInput, tool.state]);
+
+  useEffect(() => {
+    if (!open || !tool.argumentsText || !draftRef.current) return;
+    draftRef.current.scrollTop = draftRef.current.scrollHeight;
+  }, [open, tool.argumentsText]);
 
   const handleFileClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't toggle the collapsible
@@ -153,11 +189,36 @@ export function ToolInvocation({
     });
   };
 
+  const moveToBackground = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMovingToBackground(true);
+    try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+      const response = await fetch(apiUrl("/api/v1/background-waits/from-active"), {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: JSON.stringify({ toolCallId: tool.id }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error ?? "Could not move wait to background");
+      window.dispatchEvent(new Event("polpo:background-waits-changed"));
+      toast.success("Wait moved to background");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not move wait to background");
+      setMovingToBackground(false);
+    }
+  };
+
   // Interactive / client-side tools: show a minimal inline label while
-  // preparing, then hide completely once executed (completed/error/etc.)
+  // preparing with no input yet, then hide completely once executed
+  // (completed/error/etc.). When argument deltas arrive, fall through to
+  // the regular tool card so the generated payload can be previewed.
   const interactiveLabel = INTERACTIVE_LABELS[tool.name];
   if (interactiveLabel) {
-    if (tool.state === "preparing") {
+    if (tool.state === "preparing" && !tool.argumentsText && !tool.arguments) {
       return (
         <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -165,13 +226,15 @@ export function ToolInvocation({
         </div>
       );
     }
-    // Already executed — don't render anything
-    return null;
+    if (tool.state !== "preparing") {
+      // Already executed — don't render anything
+      return null;
+    }
   }
 
   return (
     <>
-      <Collapsible defaultOpen={isOpen} {...props}>
+      <Collapsible open={open} onOpenChange={setOpen} {...props}>
         <div
           className={cn(
             "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
@@ -186,6 +249,11 @@ export function ToolInvocation({
             <span className="text-xs font-medium truncate">
               {formatToolName(tool.name)}
             </span>
+            {tool.state === "calling" && tool.progress && (
+              <span className="text-[11px] text-muted-foreground truncate" title={tool.progress.message}>
+                {formatProgress(tool.progress)}
+              </span>
+            )}
             {/* File path for write/edit/read tools — shown in all states */}
             {filePath && (
               <button
@@ -204,6 +272,24 @@ export function ToolInvocation({
               </button>
             )}
             <span className="flex-1" />
+            {tool.name === "wait_for_task" && tool.state === "calling" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    onClick={moveToBackground}
+                    disabled={movingToBackground}
+                    aria-label="Move wait to background"
+                  >
+                    {movingToBackground
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <PictureInPicture2 className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">Move wait to background</TooltipContent>
+              </Tooltip>
+            )}
             {getStateIcon(tool.state)}
             {getStateBadge(tool.state)}
             <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
@@ -223,6 +309,20 @@ export function ToolInvocation({
                 </div>
               )}
 
+              {!tool.arguments && tool.argumentsText && (
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    Input draft
+                  </p>
+                  <pre
+                    ref={draftRef}
+                    className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono"
+                  >
+                    {tool.argumentsText}
+                  </pre>
+                </div>
+              )}
+
               {/* Result */}
               {tool.result && (
                 <div>
@@ -239,6 +339,7 @@ export function ToolInvocation({
                   >
                     <MessageResponse>{tool.result}</MessageResponse>
                   </div>
+                  {tool.state !== "error" && <ToolResultArtifacts result={tool.result} className="mt-2" />}
                 </div>
               )}
             </div>
@@ -276,6 +377,16 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
 
   // Only non-interactive tools for the group card
   const cardTools = visibleTools.filter((t) => !(t.name in INTERACTIVE_LABELS));
+  const shouldOpenForStreamingInput = cardTools.some((t) => t.state === "preparing" && !!t.argumentsText);
+  const [open, setOpen] = useState(hasError || shouldOpenForStreamingInput);
+
+  useEffect(() => {
+    if (hasError || shouldOpenForStreamingInput) {
+      setOpen(true);
+    } else if (!isCalling) {
+      setOpen(false);
+    }
+  }, [hasError, isCalling, shouldOpenForStreamingInput]);
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -298,7 +409,7 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
 
       {/* Non-interactive tools — grouped card (skip if none left) */}
       {cardTools.length > 0 && (
-        <Collapsible defaultOpen={hasError} {...props}>
+        <Collapsible open={open} onOpenChange={setOpen} {...props}>
           <div
             className={cn(
               "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",

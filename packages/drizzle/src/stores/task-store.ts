@@ -1,4 +1,4 @@
-import { eq, desc, asc } from "drizzle-orm";
+import { eq, desc, asc, lt, and, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { TaskStore } from "@polpo-ai/core/task-store";
 import type {
@@ -9,6 +9,37 @@ import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTable = any;
+
+/**
+ * Sanitize a user-provided string for an FTS5 MATCH query.
+ *
+ * FTS5 query syntax treats `"`, `*`, `+`, `-`, `^`, `(`, `)`, and `:` as
+ * operators. The simplest safe contract for autocomplete-style search is:
+ *
+ *  1. Strip everything that isn't alphanumeric, whitespace, or underscore.
+ *  2. Collapse multiple spaces.
+ *  3. Wrap the final token in `"..."*` so it becomes a prefix match.
+ *
+ * Returns an empty string when input has no usable tokens — callers should
+ * treat that as "no search" (fall back to cursor pagination).
+ */
+function sanitizeFtsQuery(raw: string): string {
+  // Replace every non-word, non-space character with a space — this removes
+  // ", *, :, (, ), +, -, etc. without breaking on unicode letters.
+  const cleaned = raw
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}_\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  // Split into tokens. Wrap each in double quotes for safety, append `*`
+  // to the LAST token so the user gets prefix-match autocomplete behaviour.
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length === 0) return "";
+  return tokens
+    .map((tok, i) => i === tokens.length - 1 ? `"${tok}"*` : `"${tok}"`)
+    .join(" ");
+}
 
 export interface TaskStoreSchema {
   tasks: AnyTable;
@@ -234,6 +265,146 @@ export class DrizzleTaskStore implements TaskStore {
     const rows: any[] = await this.db.select().from(this.schema.tasks)
       .orderBy(asc(this.schema.tasks.createdAt));
     return rows.map((r) => this.rowToTask(r));
+  }
+
+  /**
+   * Cursor-paginated task list, optionally filtered + full-text searched.
+   *
+   * - When `q` is set, results come from the FTS5 virtual table
+   *   `tasks_fts` (ranked by relevance). Cursor is ignored because rank
+   *   ordering and updated_at ordering are incompatible.
+   * - When `q` is empty, results are ordered by `updated_at DESC` and the
+   *   cursor is the `updated_at` of the last item from the previous page.
+   * - status / group / assignTo filters are AND-combined with both modes.
+   * - `hasMore` is determined by fetching `limit + 1` rows.
+   *
+   * Only implemented for SQLite — Postgres falls back to `getAllTasks()`
+   * + in-memory filtering at the route level.
+   */
+  async getTasksPage(opts: {
+    limit?: number;
+    cursor?: string | null;
+    q?: string | null;
+    status?: string | null;
+    group?: string | null;
+    assignTo?: string | null;
+  }): Promise<{ tasks: Task[]; nextCursor: string | null; hasMore: boolean }> {
+    const limit = Math.min(Math.max(1, opts.limit ?? 50), 200);
+    const fetchLimit = limit + 1;
+    const t = this.schema.tasks;
+
+    const filters: SQL[] = [];
+    if (opts.status) filters.push(eq(t.status, opts.status));
+    if (opts.group) filters.push(eq(t.group, opts.group));
+    if (opts.assignTo) filters.push(eq(t.assignTo, opts.assignTo));
+
+    let rows: any[];
+
+    if (opts.q && opts.q.trim().length > 0 && this.dialect === "sqlite") {
+      // FTS5 path. We sanitize + append `*` for prefix matching before
+      // calling drizzle (see sanitizeFtsQuery() in stores/index helpers).
+      const ftsQuery = sanitizeFtsQuery(opts.q);
+      // Raw SQL is safer here than mixing the `MATCH` operator with the
+      // Drizzle query builder — better-sqlite3 binds `?` parameters
+      // positionally and FTS5 needs the raw match string.
+      const filterClauses: string[] = [];
+      const params: any[] = [ftsQuery];
+      if (opts.status) { filterClauses.push(`t.status = ?`); params.push(opts.status); }
+      if (opts.group)  { filterClauses.push(`t."group" = ?`); params.push(opts.group); }
+      if (opts.assignTo) { filterClauses.push(`t.assign_to = ?`); params.push(opts.assignTo); }
+      params.push(fetchLimit);
+      const filterSql = filterClauses.length > 0 ? `AND ${filterClauses.join(" AND ")}` : "";
+      const stmt = `
+        SELECT t.* FROM tasks t
+        JOIN tasks_fts f ON t.rowid = f.rowid
+        WHERE tasks_fts MATCH ? ${filterSql}
+        ORDER BY rank
+        LIMIT ?
+      `;
+      try {
+        // better-sqlite3 exposes the underlying client on `db.$client`.
+        // Fallback: use the raw `db.session.client` (drizzle internals).
+        const client = (this.db as any).$client ?? (this.db as any).session?.client;
+        if (!client?.prepare) throw new Error("no raw sqlite client");
+        const raw = client.prepare(stmt).all(...params);
+        rows = raw.map((r: any) => this.mapSnakeRow(r));
+      } catch (err) {
+        // FTS5 missing or any other error: fall back to LIKE-based search
+        // so the endpoint still returns *something* useful.
+        const like = `%${opts.q.trim()}%`;
+        const allRows: any[] = await this.db.select().from(t)
+          .orderBy(desc(t.updatedAt));
+        rows = allRows.filter((r: any) => {
+          if (opts.status && r.status !== opts.status) return false;
+          if (opts.group && r.group !== opts.group) return false;
+          if (opts.assignTo && r.assignTo !== opts.assignTo) return false;
+          const title = (r.title ?? "").toString();
+          const desc = (r.description ?? "").toString();
+          return title.includes(opts.q!) || desc.includes(opts.q!) ||
+                 title.toLowerCase().includes(opts.q!.toLowerCase()) ||
+                 desc.toLowerCase().includes(opts.q!.toLowerCase());
+        }).slice(0, fetchLimit);
+        void like;
+        void err;
+      }
+    } else {
+      // Cursor path.
+      const where = [...filters];
+      if (opts.cursor) where.push(lt(t.updatedAt, opts.cursor));
+      const whereClause = where.length === 0 ? undefined
+        : where.length === 1 ? where[0] : and(...where);
+
+      const query = this.db.select().from(t)
+        .orderBy(desc(t.updatedAt))
+        .limit(fetchLimit);
+      const finalQuery = whereClause ? query.where(whereClause) : query;
+      rows = await finalQuery;
+    }
+
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    const tasks = data.map((r) => this.rowToTask(r));
+    const nextCursor = hasMore && tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : null;
+    return { tasks, nextCursor, hasMore };
+  }
+
+  /**
+   * Map a snake_case row (from raw SQLite query) onto the camelCase shape
+   * that `rowToTask` expects. Drizzle does this automatically; raw queries
+   * don't.
+   */
+  private mapSnakeRow(r: any): any {
+    return {
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      assignTo: r.assign_to,
+      group: r.group,
+      missionId: r.mission_id,
+      dependsOn: r.depends_on,
+      status: r.status,
+      retries: r.retries,
+      maxRetries: r.max_retries,
+      maxDuration: r.max_duration,
+      retryPolicy: r.retry_policy,
+      expectations: r.expectations,
+      metrics: r.metrics,
+      result: r.result,
+      phase: r.phase,
+      fixAttempts: r.fix_attempts,
+      resolutionAttempts: r.resolution_attempts,
+      originalDescription: r.original_description,
+      sessionId: r.session_id,
+      notifications: r.notifications,
+      outcomes: r.outcomes,
+      expectedOutcomes: r.expected_outcomes,
+      deadline: r.deadline,
+      priority: r.priority,
+      sideEffects: r.side_effects,
+      revisionCount: r.revision_count,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
   }
 
   async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "status">>): Promise<Task> {

@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
+import { CANONICAL_HOOK_EVENT_NAMES } from "@polpo-ai/core";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -10,6 +11,9 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
+import { PushChannel } from "./channels/push.js";
+import { ExpoPushChannel } from "./channels/expo-push.js";
+import { FileExpoTokenStore } from "../stores/file-expo-token-store.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
@@ -28,6 +32,7 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
  */
 export class NotificationRouter {
   private channels = new Map<string, NotificationChannel>();
+  private channelConfigs = new Map<string, NotificationChannelConfig>();
   private rules: NotificationRule[] = [];
   private cooldowns = new Map<string, number>(); // ruleId → last dispatch timestamp
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
@@ -92,6 +97,7 @@ export class NotificationRouter {
       try {
         const channel = this.createChannel(channelConfig);
         this.channels.set(id, channel);
+        this.channelConfigs.set(id, channelConfig);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.emitter.emit("log", {
@@ -392,6 +398,94 @@ export class NotificationRouter {
   }
 
   /**
+   * Test one configured channel and preserve the failure reason.
+   */
+  async testChannel(channelId: string): Promise<{ success: boolean; error?: string }> {
+    const channel = this.channels.get(channelId);
+    if (!channel) return { success: false, error: `Channel "${channelId}" not found` };
+
+    try {
+      const success = await channel.test();
+      if (!success) {
+        return { success: false, error: `${channel.type} channel test returned false` };
+      }
+      await channel.sendTest?.();
+      return { success: true };
+    } catch (err) {
+      const config = this.channelConfigs.get(channelId)
+        ?? ({ type: channel.type } as NotificationChannelConfig);
+      return { success: false, error: sanitizeChannelError(err, config) };
+    }
+  }
+
+  /**
+   * Test an ephemeral channel config without persisting it.
+   * Constructs an in-memory channel from the given config, attempts a test
+   * (which for most channels also performs a real send), and returns the result.
+   *
+   * Errors are sanitized — no stack traces or token leaks.
+   *
+   * @param config The candidate channel configuration to validate.
+   * @param timeoutMs Maximum time to wait before aborting (default 10s).
+   */
+  async testChannelConfig(
+    config: NotificationChannelConfig,
+    timeoutMs = 10_000,
+  ): Promise<{ ok: boolean; error?: string }> {
+    let channel: NotificationChannel;
+    try {
+      channel = this.createChannel(config);
+    } catch (err) {
+      return { ok: false, error: sanitizeChannelError(err, config) };
+    }
+
+    const testNotification: Notification = {
+      id: nanoid(),
+      channel: "test-config",
+      title: "Polpo connection test",
+      body: "This is a test notification from Polpo to verify your channel configuration.",
+      severity: "info",
+      sourceEvent: "channel:test-config",
+      sourceData: { test: true },
+      ruleId: "test-config",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Race the test/send against a timeout
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<{ ok: false; error: string; timedOut: true }>((resolve) => {
+      timer = setTimeout(() => resolve({
+        ok: false,
+        error: "Connection timed out, network or auth issue?",
+        timedOut: true,
+      }), timeoutMs);
+    });
+
+    // Run channel.test() first (cheap validation), then a real send when test() returns true.
+    const attempt = (async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const reachable = await channel.test();
+        if (!reachable) {
+          return { ok: false, error: "Channel rejected the test handshake — check credentials and target." };
+        }
+        // For channels where test() only validates URL shape (e.g. Slack), a real send
+        // gives us actual confirmation. Failures throw, which we catch below.
+        await channel.send(testNotification);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: sanitizeChannelError(err, config) };
+      }
+    })();
+
+    try {
+      const result = await Promise.race([attempt, timeout]);
+      return { ok: result.ok, error: result.error };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Register a custom channel programmatically.
    */
   registerChannel(id: string, channel: NotificationChannel): void {
@@ -642,6 +736,12 @@ export class NotificationRouter {
         return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
+      case "push":
+        if (!this.polpoDir) throw new Error("Push channel requires polpoDir (pass it via init())");
+        return new PushChannel(config, this.polpoDir);
+      case "expo-push":
+        if (!this.polpoDir) throw new Error("Expo push channel requires polpoDir (pass it via init())");
+        return new ExpoPushChannel(new FileExpoTokenStore(this.polpoDir));
       default:
         throw new Error(`Unknown channel type: ${config.type}`);
     }
@@ -680,52 +780,13 @@ function matchGlob(pattern: string, event: string): boolean {
 /**
  * Get all known event names from the PolpoEventMap.
  * Used to subscribe to concrete events matching glob patterns.
+ *
+ * The canonical list lives in `@polpo-ai/core/hook-events`
+ * (CANONICAL_HOOK_EVENT_NAMES). We just append the "log" channel,
+ * which the router also wants to dispatch on.
  */
 function getAllEventNames(): string[] {
-  return [
-    // Task lifecycle
-    "task:created", "task:transition", "task:updated", "task:removed",
-    // Agent lifecycle
-    "agent:spawned", "agent:finished", "agent:activity",
-    // Assessment
-    "assessment:started", "assessment:progress", "assessment:complete", "assessment:corrected",
-    // Orchestrator lifecycle
-    "orchestrator:started", "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown",
-    // Retry & Fix
-    "task:retry", "task:fix", "task:maxRetries",
-    // Question detection
-    "task:question", "task:answered",
-    // Deadlock resolution
-    "deadlock:detected", "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable",
-    // Resilience
-    "task:timeout", "agent:stale",
-    // Recovery
-    "task:recovered",
-    // Missions
-    "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
-    // Chat sessions
-    "session:created", "message:added",
-    // Approval gates
-    "approval:requested", "approval:resolved", "approval:timeout",
-    // Escalation
-    "escalation:triggered", "escalation:resolved", "escalation:human",
-    // SLA & Deadlines
-    "sla:warning", "sla:violated", "sla:met",
-    // Quality gates (mission-level)
-    "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
-    // Checkpoints
-    "checkpoint:reached", "checkpoint:resumed",
-    // Scheduling
-    "schedule:triggered", "schedule:created", "schedule:completed", "schedule:expired",
-    // Notifications
-    "notification:sent", "notification:failed",
-    // Task watchers
-    "watcher:created", "watcher:fired", "watcher:removed",
-    // Notification rule actions
-    "action:triggered",
-    // General
-    "log",
-  ];
+  return [...CANONICAL_HOOK_EVENT_NAMES, "log"];
 }
 
 /**
@@ -830,6 +891,36 @@ function evaluateCondition(condition: NotificationCondition, data: unknown): boo
     default:
       return false;
   }
+}
+
+/**
+ * Sanitize an error from a channel test/send into a user-friendly message.
+ * Strips stack traces, redacts tokens/keys/URLs that match secret patterns,
+ * and trims output to a single line of reasonable length.
+ */
+function sanitizeChannelError(err: unknown, config: NotificationChannelConfig): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  // Strip newlines / collapse whitespace
+  let msg = raw.replace(/\s+/g, " ").trim();
+
+  // Redact known secret values present in the config
+  const secrets = [config.apiKey, config.botToken, config.webhookUrl, config.url, config.vapidPrivateKey]
+    .filter((v): v is string => typeof v === "string" && v.length > 6);
+  for (const secret of secrets) {
+    if (msg.includes(secret)) {
+      msg = msg.split(secret).join("***");
+    }
+  }
+  // Generic bearer-token / xox(b|p) / re_ patterns
+  msg = msg
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/g, "Bearer ***")
+    .replace(/\bxox[abprs]-[A-Za-z0-9-]+/g, "xox***")
+    .replace(/\bre_[A-Za-z0-9_]+/g, "re_***")
+    .replace(/\b[0-9]{6,}:AA[A-Za-z0-9_\-]+/g, "***:***"); // telegram bot token
+
+  // Cap length
+  if (msg.length > 280) msg = `${msg.slice(0, 277)}...`;
+  return msg || "Channel test failed";
 }
 
 /** Resolve a dotted property path (e.g. "task.status") on the data object. */

@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useMemo, useState, memo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -52,28 +53,147 @@ import {
   MessageSquare,
   AlertCircle,
   FolderOpen,
+  Bell,
+  Send,
+  History,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   FilePreviewDialog,
   fileReadUrl,
-  filePreviewUrl,
   previewCategory,
-  type FilePreviewState,
+  useFilePreview,
 } from "@/components/shared/file-preview";
+import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTask, useTasks, useProcesses, useTaskActivity, useAssessmentProgress, useAgents } from "@polpo-ai/react";
-import type { TaskStatus, TaskOutcome, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry } from "@polpo-ai/react";
-import { useAsyncAction } from "@/hooks/use-polpo";
+import { useTask, useTasks, useProcesses, useTaskActivity, useTaskDirections, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
+import type { TaskStatus, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
+import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
+import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
+import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+
+// ── Heavy-content helpers ──
+//
+// Detail tab can carry tens-of-KB stdout/stderr/description blobs. Streamdown
+// markdown + Shiki highlighting on every render of these freezes the main
+// thread, especially when a parent state change re-mounts the subtree.
+// These helpers memoize the markdown parse and gate large content behind
+// a "Show full" dialog so the page stays responsive.
+
+const LARGE_TEXT_THRESHOLD = 4000; // chars
+const LARGE_TEXT_PREVIEW_LINES = 80;
+
+/**
+ * Memoized markdown — re-renders only when the string content changes.
+ * Prevents Streamdown from re-parsing on parent re-renders that don't
+ * actually touch the body.
+ */
+const MemoMarkdown = memo(function MemoMarkdown({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
+  return (
+    <MessageResponse mode="static" className={className}>
+      {children}
+    </MessageResponse>
+  );
+});
+
+/**
+ * Renders potentially-large output. Small payloads inline (memoized).
+ * Large payloads: tail preview in a plain <pre>, with "Open full" dialog
+ * that shows the full content as <pre> (no markdown parse, no Shiki).
+ */
+const LargeTextBlock = memo(function LargeTextBlock({
+  content,
+  label,
+  tone = "default",
+}: {
+  content: string;
+  label: string;
+  tone?: "default" | "error";
+}) {
+  const isLarge = content.length > LARGE_TEXT_THRESHOLD;
+  const lineCount = useMemo(() => content.split("\n").length, [content]);
+
+  const tail = useMemo(() => {
+    if (!isLarge) return content;
+    const lines = content.split("\n");
+    const tailLines = lines.slice(Math.max(0, lines.length - LARGE_TEXT_PREVIEW_LINES));
+    return tailLines.join("\n");
+  }, [content, isLarge]);
+
+  const preCls = tone === "error"
+    ? "text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed"
+    : "text-xs bg-muted/30 px-4 py-3 whitespace-pre-wrap font-mono text-foreground/90 leading-relaxed";
+
+  if (!isLarge) {
+    if (tone === "error") {
+      return <pre className={preCls}>{content}</pre>;
+    }
+    return (
+      <div className="rounded-md border border-border/30 px-4 py-3 bg-muted/20">
+        <MemoMarkdown className="text-sm">{content}</MemoMarkdown>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border/30 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/30 text-[10px]">
+        <span className="text-muted-foreground">
+          Showing last {Math.min(LARGE_TEXT_PREVIEW_LINES, lineCount)} of {lineCount.toLocaleString()} lines
+          ({(content.length / 1024).toFixed(1)} KB)
+        </span>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1">
+              <Eye className="h-3 w-3" /> Open full
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="!max-w-none w-[96vw] h-[92dvh] p-0 flex flex-col gap-0">
+            <DialogTitle className="px-5 pt-4 pb-2 text-sm font-semibold flex items-center gap-2">
+              <Terminal className="h-4 w-4" /> {label}
+              <span className="ml-auto text-[10px] text-muted-foreground font-normal">
+                {lineCount.toLocaleString()} lines · {(content.length / 1024).toFixed(1)} KB
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[10px] gap-1 mr-7"
+                onClick={() => { navigator.clipboard.writeText(content); toast.success(`${label} copied`); }}
+              >
+                <Copy className="h-3 w-3" /> Copy all
+              </Button>
+            </DialogTitle>
+            <div className="flex-1 min-h-0 overflow-auto m-0">
+              <pre className={cn(preCls, "h-full m-0 rounded-none")}>{content}</pre>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <pre className={preCls}>{tail}</pre>
+    </div>
+  );
+});
 
 // ── Status config ──
 
@@ -277,6 +397,8 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const hasPayload = expandContent != null && expandContent.length > 0;
 
   const getStyle = () => {
+    if (entry.event === "direction:applied") return { icon: MessageSquare, color: "text-sky-400", dot: "bg-sky-500" };
+    if (entry.event === "checkpoint") return { icon: History, color: "text-emerald-400", dot: "bg-emerald-500" };
     if (entry.event === "activity") return { icon: Activity, color: "text-blue-400", dot: "bg-blue-500" };
     if (entry.event === "spawning" || entry.event === "spawned") return { icon: Loader2, color: "text-emerald-400", dot: "bg-emerald-500" };
     if (entry.event === "done") return { icon: CheckCircle2, color: "text-zinc-400", dot: "bg-zinc-500" };
@@ -359,6 +481,9 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
             )}>
               {expandContent}
             </pre>
+            {isToolResult && !entry.isError && expandContent && (
+              <ToolResultArtifacts result={expandContent} className="mt-2" />
+            )}
           </div>
         </CollapsibleContent>
       )}
@@ -367,6 +492,85 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
 }
 
 type ActivityFilter = "all" | "conversation" | "tools" | "lifecycle";
+
+interface ActivityRunGroup {
+  header?: RunActivityEntry;
+  entries: RunActivityEntry[];
+  attempt: number;
+}
+
+function groupActivityRuns(entries: RunActivityEntry[]): ActivityRunGroup[] {
+  const groups: Array<Omit<ActivityRunGroup, "attempt">> = [];
+  let current: Omit<ActivityRunGroup, "attempt"> | undefined;
+
+  for (const entry of entries) {
+    if (entry._run) {
+      if (current && (current.header || current.entries.length > 0)) groups.push(current);
+      current = { header: entry, entries: [] };
+      continue;
+    }
+    if (!current) current = { entries: [] };
+    current.entries.push(entry);
+  }
+  if (current && (current.header || current.entries.length > 0)) groups.push(current);
+
+  return groups.map((group, index) => ({ ...group, attempt: index + 1 }));
+}
+
+function activityMatchesFilter(entry: RunActivityEntry, filter: ActivityFilter): boolean {
+  if (entry.event === "activity") return false;
+  if (filter === "all") return true;
+  if (filter === "conversation") {
+    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result"
+      || entry.type === "error" || entry.type === "result" || entry.event === "error" || entry.event === "direction:applied";
+  }
+  if (filter === "tools") return entry.type === "tool_use" || entry.type === "tool_result";
+  return entry.event === "spawning" || entry.event === "spawned" || entry.event === "done"
+    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint";
+}
+
+function ActivityRunHeader({
+  run,
+  totalRuns,
+  isActive,
+}: {
+  run: ActivityRunGroup;
+  totalRuns: number;
+  isActive?: boolean;
+}) {
+  const isLatest = run.attempt === totalRuns;
+  const done = [...run.entries].reverse().find((entry) => entry.event === "done");
+  const doneData = done?.data && typeof done.data === "object"
+    ? done.data as { status?: string }
+    : undefined;
+  const status = isLatest && isActive ? "running" : doneData?.status;
+  const startedAt = run.header?.startedAt;
+
+  return (
+    <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-y border-border bg-background/95 px-3 py-2 backdrop-blur-sm">
+      <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="text-xs font-semibold text-foreground">Run {run.attempt}</span>
+      {isLatest && totalRuns > 1 && (
+        <span className="text-[10px] font-medium uppercase text-primary">Latest</span>
+      )}
+      {status && (
+        <span className="flex items-center gap-1 text-[10px] capitalize text-muted-foreground">
+          <span className={cn(
+            "h-1.5 w-1.5 rounded-full",
+            status === "running" ? "bg-emerald-500 animate-pulse"
+              : status === "completed" ? "bg-emerald-500"
+                : status === "failed" || status === "killed" ? "bg-red-500" : "bg-muted-foreground",
+          )} />
+          {status}
+        </span>
+      )}
+      <span className="ml-auto truncate text-[10px] text-muted-foreground">
+        {run.header?.agentName && <span className="mr-2">{run.header.agentName}</span>}
+        {startedAt ? format(new Date(startedAt), "MMM d, yyyy HH:mm:ss") : run.header?.runId?.slice(0, 8)}
+      </span>
+    </div>
+  );
+}
 
 function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
@@ -382,31 +586,16 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
     if (e.type === "assistant") acc.assistant++;
     if (e.type === "tool_use") acc.tools++;
     if (e.type === "tool_result") acc.results++;
+    if (e.event === "direction:applied") acc.directions++;
     if (e.event === "error" || e.type === "error") acc.errors++;
-    if (e.event === "spawning" || e.event === "spawned" || e.event === "done" || e.event === "sigterm") acc.lifecycle++;
+    if (e.event === "spawning" || e.event === "spawned" || e.event === "done" || e.event === "sigterm" || e.event === "checkpoint") acc.lifecycle++;
     return acc;
-  }, { snapshots: 0, assistant: 0, tools: 0, results: 0, errors: 0, lifecycle: 0 });
+  }, { snapshots: 0, assistant: 0, tools: 0, results: 0, directions: 0, errors: 0, lifecycle: 0 });
 
-  // Filter entries based on the active filter
-  // Activity snapshots (event: "activity") are always hidden — they're internal telemetry
-  // already visible in the Overview tab (filesCreated, toolCalls, totalTokens, etc.)
-  const filteredEntries = entries.filter((e) => {
-    if (e._run) return false; // always hide header
-    if (e.event === "activity") return false; // always hide activity snapshots
-    if (filter === "all") return true;
-    if (filter === "conversation") {
-      return e.type === "assistant" || e.type === "tool_use" || e.type === "tool_result"
-        || e.type === "error" || e.type === "result" || e.event === "error";
-    }
-    if (filter === "tools") {
-      return e.type === "tool_use" || e.type === "tool_result";
-    }
-    if (filter === "lifecycle") {
-      return e.event === "spawning" || e.event === "spawned" || e.event === "done"
-        || e.event === "sigterm" || e.event === "error";
-    }
-    return true;
-  });
+  const activityRuns = groupActivityRuns(entries);
+  const filteredRuns = activityRuns
+    .map((run) => ({ ...run, entries: run.entries.filter((entry) => activityMatchesFilter(entry, filter)) }))
+    .filter((run) => run.entries.length > 0);
 
   if (isLoading) {
     return (
@@ -433,7 +622,7 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
           {(
             [
               { key: "all", label: "All", icon: Hash, count: entries.filter(e => !e._run && e.event !== "activity").length },
-              { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results },
+              { key: "conversation", label: "Conversation", icon: Bot, count: stats.assistant + stats.tools + stats.results + stats.directions },
               { key: "tools", label: "Tools", icon: Wrench, count: stats.tools },
               { key: "lifecycle", label: "Lifecycle", icon: Activity, count: stats.lifecycle },
             ] as const
@@ -461,9 +650,19 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
         </Button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-        <div className="space-y-0.5">
-          {[...filteredEntries].reverse().map((entry, i) => (
-            <ActivityEntry key={`${entry.ts}-${entry.type ?? entry.event}-${i}`} entry={entry} />
+        <div className="space-y-3">
+          {[...filteredRuns].reverse().map((run) => (
+            <section key={run.header?.runId ?? `legacy-${run.attempt}`} aria-label={`Run ${run.attempt}`}>
+              <ActivityRunHeader run={run} totalRuns={activityRuns.length} isActive={isActive} />
+              <div className="space-y-0.5 py-1">
+                {[...run.entries].reverse().map((entry, index) => (
+                  <ActivityEntry
+                    key={`${run.header?.runId ?? run.attempt}-${entry.ts}-${entry.type ?? entry.event}-${index}`}
+                    entry={entry}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       </div>
@@ -538,6 +737,116 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
   );
 }
 
+const directionStatusStyle: Record<TaskDirection["status"], string> = {
+  queued: "bg-amber-400",
+  delivered: "bg-sky-400",
+  applied: "bg-emerald-400",
+  failed: "bg-red-400",
+};
+
+function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentProcess }) {
+  const [message, setMessage] = useState("");
+  const [confirmSideEffects, setConfirmSideEffects] = useState(false);
+  const isLive = !!process && (task.status === "assigned" || task.status === "in_progress");
+  const isStopping = !!process && (task.status === "failed" || task.status === "done");
+  const isAvailable = task.status !== "draft" && task.status !== "awaiting_approval" && task.status !== "review";
+  const { directions, isSending, sendDirection } = useTaskDirections(isAvailable ? task.id : null, {
+    pollIntervalMs: isAvailable ? 1_000 : 0,
+  });
+
+  if (!isAvailable) return null;
+
+  const needsConfirmation = !isLive && !!task.sideEffects;
+  const canSend = message.trim().length > 0
+    && !isSending
+    && !isStopping
+    && (!needsConfirmation || confirmSideEffects);
+  const actionLabel = isLive
+    ? "Send direction"
+    : task.status === "pending"
+      ? "Add direction"
+      : "Continue task";
+
+  const submit = async () => {
+    if (!canSend) return;
+    try {
+      const result = await sendDirection({
+        message: message.trim(),
+        mode: "auto",
+        confirmSideEffects: needsConfirmation ? confirmSideEffects : undefined,
+      });
+      setMessage("");
+      setConfirmSideEffects(false);
+      toast.success(result.action === "continue" ? "Continuation queued" : "Direction queued");
+    } catch (cause) {
+      toast.error((cause as Error).message);
+    }
+  };
+
+  const recentDirections = directions.slice(-3).reverse();
+
+  return (
+    <section className="shrink-0 border-y border-border/50 bg-muted/10 px-3 py-3" aria-label="Task direction">
+      <div className="flex items-start gap-3">
+        <MessageSquare className="mt-2 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <Textarea
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder={isLive ? "Steer the current run..." : "Continue with a new direction..."}
+            className="min-h-10 max-h-28 resize-y bg-background/50 text-sm"
+            maxLength={8_000}
+            disabled={isStopping}
+          />
+          <div className="mt-2 flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
+            {needsConfirmation && (
+              <label className="flex items-center gap-2 text-xs text-amber-500">
+                <input
+                  type="checkbox"
+                  checked={confirmSideEffects}
+                  onChange={(event) => setConfirmSideEffects(event.target.checked)}
+                  className="h-3.5 w-3.5 accent-amber-500"
+                />
+                External actions may repeat
+              </label>
+            )}
+            {isStopping && (
+              <span className="text-xs text-muted-foreground">Waiting for the runner to stop</span>
+            )}
+            <Button
+              size="sm"
+              className="ml-auto h-7 gap-1.5 px-2.5 text-xs"
+              disabled={!canSend}
+              onClick={() => void submit()}
+            >
+              {isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {actionLabel}
+            </Button>
+          </div>
+        </div>
+      </div>
+      {recentDirections.length > 0 && (
+        <div className="mt-2 ml-7 flex flex-col gap-1 border-t border-border/40 pt-2">
+          {recentDirections.map((direction) => (
+            <div key={direction.id} className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", directionStatusStyle[direction.status])} />
+              <span className="shrink-0 font-medium uppercase text-foreground/60">{direction.mode.replace("_", " ")}</span>
+              <span className="truncate">{direction.message}</span>
+              <span className="ml-auto shrink-0 capitalize">{direction.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Main page ──
 
 export function TaskDetailPage() {
@@ -576,56 +885,7 @@ export function TaskDetailPage() {
   };
 
   // ── File preview state ──
-  const [previewState, setPreviewState] = useState<FilePreviewState | null>(null);
-
-  const openPreview = useCallback(async (o: TaskOutcome) => {
-    const item = { label: o.label, path: o.path, url: o.url, mimeType: o.mimeType, size: o.size, text: o.text, data: o.data, type: o.type };
-    const category = previewCategory(o.mimeType);
-    // For binary-served types (image, audio, video, pdf) no content fetch needed
-    if (["image", "audio", "video", "pdf"].includes(category)) {
-      setPreviewState({ item, loading: false });
-      return;
-    }
-    // Inline text content
-    if (o.text) {
-      setPreviewState({ item, content: o.text, loading: false });
-      return;
-    }
-    // Inline JSON data
-    if (o.type === "json" && o.data !== undefined) {
-      setPreviewState({ item, content: JSON.stringify(o.data, null, 2), loading: false });
-      return;
-    }
-    // External URL — open in dialog (iframe or link)
-    if (!o.path && o.url) {
-      setPreviewState({ item, loading: false });
-      return;
-    }
-    // Fetch content from the preview API
-    if (!o.path) {
-      setPreviewState({ item, loading: false, error: "No file path available" });
-      return;
-    }
-    setPreviewState({ item, loading: true });
-    try {
-      // For HTML files, fetch full content from /read (not /preview which truncates at 500 lines)
-      const isHtml = o.mimeType === "text/html" || /\.html?$/i.test(o.path);
-      if (isHtml) {
-        const res = await fetch(fileReadUrl(o.path));
-        if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
-        const text = await res.text();
-        setPreviewState({ item, content: text, loading: false });
-      } else {
-        const res = await fetch(filePreviewUrl(o.path));
-        if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error ?? "Preview failed");
-        setPreviewState({ item, content: json.data.content ?? "", loading: false });
-      }
-    } catch (e) {
-      setPreviewState({ item, loading: false, error: (e as Error).message });
-    }
-  }, []);
+  const { previewState, openPreview, closePreview } = useFilePreview();
 
   if (isLoading) {
     return (
@@ -664,8 +924,8 @@ export function TaskDetailPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Back + title bar */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-start justify-between gap-2 shrink-0">
+        <div className="flex min-w-0 flex-1 items-start gap-2 sm:items-center sm:gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate("/tasks")} className="shrink-0">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -673,8 +933,8 @@ export function TaskDetailPage() {
             <StatusIcon className={cn("h-4 w-4", cfg.color, task.status === "in_progress" && "animate-spin")} />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold truncate">{task.title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="w-full truncate text-base font-semibold sm:w-auto sm:text-lg">{task.title}</h1>
               <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)}>{cfg.label}</Badge>
               {phase && (
                 <Badge variant="outline" className={cn("text-xs gap-1 shrink-0", phase.color)}>
@@ -683,7 +943,7 @@ export function TaskDetailPage() {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mt-0.5">
               <CopyableId id={task.id} label="Task ID" />
               <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
@@ -695,17 +955,17 @@ export function TaskDetailPage() {
                 </span>
               </Link>
               {task.group && (
-                <Link to={`/missions`} className="flex items-center gap-1 hover:text-foreground transition-colors">
+                <Link to={`/missions`} className="hidden items-center gap-1 hover:text-foreground transition-colors md:flex">
                   <Target className="h-3 w-3" /> {task.group}
                 </Link>
               )}
               {task.sessionId && (
-                <span className="flex items-center gap-1 font-mono text-[10px]">
+                <span className="hidden items-center gap-1 font-mono text-[10px] lg:flex">
                   session: {task.sessionId.slice(0, 8)}
                 </span>
               )}
-              <span>Created {format(new Date(task.createdAt), "MMM d, HH:mm")}</span>
-              <span>Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
+              <span className="hidden xl:inline">Created {format(new Date(task.createdAt), "MMM d, HH:mm")}</span>
+              <span className="hidden xl:inline">Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
             </div>
           </div>
         </div>
@@ -757,12 +1017,15 @@ export function TaskDetailPage() {
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}
 
+      <TaskDirectionComposer task={task} process={process} />
+
       {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
       <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0 w-fit">
           {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
           <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
           <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Activity</TabsTrigger>
+          <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
         {/* ── Assessment tab (conditional) ── */}
@@ -1267,13 +1530,24 @@ export function TaskDetailPage() {
                 </Card>
               )}
 
-              {/* ── Output (stdout/stderr — collapsible, open by default) ── */}
-              {task.result && (task.result.stdout || task.result.stderr) && (
-                <Collapsible defaultOpen>
+              {/* ── Output (stdout/stderr — collapsible) ──
+                  Auto-collapsed when content is large to keep render light;
+                  large blocks expose a "Open full" dialog with plain <pre>. */}
+              {task.result && (task.result.stdout || task.result.stderr) && (() => {
+                const stdoutLen = task.result.stdout?.length ?? 0;
+                const stderrLen = task.result.stderr?.length ?? 0;
+                const hasLarge = stdoutLen > LARGE_TEXT_THRESHOLD || stderrLen > LARGE_TEXT_THRESHOLD;
+                return (
+                <Collapsible defaultOpen={!hasLarge}>
                   <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
                     <CardContent className="pt-4 space-y-3">
                       <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
                         <Terminal className="h-3 w-3" /> Output
+                        {hasLarge && (
+                          <span className="text-[9px] text-amber-400/80 font-normal normal-case tracking-normal">
+                            (large — click to expand)
+                          </span>
+                        )}
                         <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
                       </CollapsibleTrigger>
                       <CollapsibleContent>
@@ -1292,9 +1566,7 @@ export function TaskDetailPage() {
                                   </Button>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-border/30 px-4 py-3 bg-muted/20">
-                                <MessageResponse mode="static" className="text-sm">{task.result.stdout}</MessageResponse>
-                              </div>
+                              <LargeTextBlock content={task.result.stdout} label="stdout" />
                             </div>
                           )}
                           {task.result.stderr && (
@@ -1311,11 +1583,7 @@ export function TaskDetailPage() {
                                   </Button>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-red-500/20">
-                                <pre className="text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed">
-                                  {task.result.stderr}
-                                </pre>
-                              </div>
+                              <LargeTextBlock content={task.result.stderr} label="stderr" tone="error" />
                             </div>
                           )}
                         </div>
@@ -1323,7 +1591,8 @@ export function TaskDetailPage() {
                     </CardContent>
                   </Card>
                 </Collapsible>
-              )}
+                );
+              })()}
 
               {/* ── Description (collapsible, open by default) ── */}
               <Collapsible defaultOpen>
@@ -1336,7 +1605,7 @@ export function TaskDetailPage() {
                   <CollapsibleContent>
                     <div className="space-y-4 pt-1">
                       <div className="rounded-md bg-muted/30 px-4 py-3 text-sm">
-                        <MessageResponse>{task.description}</MessageResponse>
+                        <MemoMarkdown>{task.description}</MemoMarkdown>
                       </div>
                       {task.originalDescription && task.originalDescription !== task.description && (
                         <Collapsible>
@@ -1346,7 +1615,7 @@ export function TaskDetailPage() {
                           </CollapsibleTrigger>
                           <CollapsibleContent>
                             <div className="rounded-md bg-muted/20 px-4 py-3 text-sm opacity-70 mt-2">
-                              <MessageResponse>{task.originalDescription}</MessageResponse>
+                              <MemoMarkdown>{task.originalDescription}</MemoMarkdown>
                             </div>
                           </CollapsibleContent>
                         </Collapsible>
@@ -1407,9 +1676,9 @@ export function TaskDetailPage() {
                             )}
                           </div>
                           {exp.command && (
-                            <MessageResponse mode="static" className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
+                            <MemoMarkdown className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
                               {`\`\`\`bash\n${exp.command}\n\`\`\``}
-                            </MessageResponse>
+                            </MemoMarkdown>
                           )}
                           {exp.paths && exp.paths.length > 0 && (
                             <div className="flex flex-wrap gap-1">
@@ -1499,7 +1768,7 @@ export function TaskDetailPage() {
                         const isImage = o.mimeType?.startsWith("image/");
                         const isAudio = o.mimeType?.startsWith("audio/");
                         const isVideo = o.mimeType?.startsWith("video/");
-                        const category = previewCategory(o.mimeType);
+                        const category = previewCategory(o.mimeType, o.path ?? o.label);
                         const canPreview =
                           (o.path && category !== "binary") || // file on disk (non-binary)
                           !!o.text ||                          // inline text content
@@ -1624,16 +1893,16 @@ export function TaskDetailPage() {
                             {/* Inline text content — rendered as markdown */}
                             {o.text && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <MessageResponse mode="static" className="text-sm">{o.text}</MessageResponse>
+                                <MemoMarkdown className="text-sm">{o.text}</MemoMarkdown>
                               </div>
                             )}
 
                             {/* JSON data — formatted code block */}
                             {o.type === "json" && o.data !== undefined && (
                               <div className="border-t border-border/30 px-3 py-2">
-                                <MessageResponse mode="static" className="text-sm">
+                                <MemoMarkdown className="text-sm">
                                   {"```json\n" + JSON.stringify(o.data, null, 2) + "\n```"}
-                                </MessageResponse>
+                                </MemoMarkdown>
                               </div>
                             )}
 
@@ -1823,10 +2092,49 @@ export function TaskDetailPage() {
         <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
           <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
         </TabsContent>
+
+        {/* Rules tab — applied notification rules for this task */}
+        <TabsContent value="rules" className="mt-4 flex-1 min-h-0">
+          <ScrollArea className="h-full">
+            <div className="pr-4 space-y-3 max-w-3xl">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                These are the notification rules that would fire for this task, resolved by scope.
+                Task-scoped rules replace mission and global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+              </p>
+              <TaskAppliedRules task={task} missionGroup={task.group} />
+            </div>
+          </ScrollArea>
+        </TabsContent>
       </Tabs>
 
       {/* File preview dialog */}
-      <FilePreviewDialog preview={previewState} onClose={() => setPreviewState(null)} />
+      <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </div>
+  );
+}
+
+/**
+ * Render applied notification rules for a task. Lives outside the
+ * TaskDetailPage so the resolution is colocated with the wrapper that
+ * fetches global + mission scope, keeping the main page lean.
+ */
+function TaskAppliedRules({ task, missionGroup }: { task: Task; missionGroup?: string }) {
+  const { config } = useConfig();
+  const { missions } = useMissions();
+  const globalRules = ((config?.settings?.notifications as { rules?: AnyRule[] } | undefined)?.rules) ?? [];
+  const taskScoped: ScopedRules | undefined = (task as Task & { notifications?: ScopedRules }).notifications;
+  const parentMission = missionGroup
+    ? missions.find(m => m.name === missionGroup)
+    : undefined;
+  const missionScoped: ScopedRules | undefined = parentMission
+    ? (parentMission as typeof parentMission & { notifications?: ScopedRules }).notifications
+    : undefined;
+  return (
+    <AppliedRulesPanel
+      variant="task"
+      taskScoped={taskScoped}
+      missionScoped={missionScoped}
+      globalRules={globalRules}
+    />
   );
 }

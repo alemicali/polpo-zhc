@@ -1,3 +1,4 @@
+import { markdownToTelegramHtml, splitMarkdown } from "../telegram-format.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
 import { basename } from "node:path";
@@ -271,6 +272,7 @@ export class TelegramCallbackPoller {
   private pendingRevise = new Map<string, string>(); // chatId → requestId (waiting for feedback text)
   private resolver?: ApprovalCallbackResolver;
   private gateway?: TelegramGatewayHandler;
+  private menuCommands?: { command: string; description: string }[];
 
   constructor(botToken: string, chatId: string) {
     this.botToken = botToken;
@@ -287,8 +289,25 @@ export class TelegramCallbackPoller {
     this.gateway = handler;
   }
 
+  /** Commands shown in the bot's menu; registered with setMyCommands when polling starts. */
+  setMenuCommands(commands: { command: string; description: string }[]): void {
+    this.menuCommands = commands;
+    if (this.timer) void this.registerMenuCommands(); // already polling: register now
+  }
+
+  private async registerMenuCommands(): Promise<void> {
+    if (!this.menuCommands) return;
+    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commands: this.menuCommands }),
+    }).catch((err) => { console.error(`[polpo/telegram] setMyCommands failed: ${err}`); return undefined; });
+    if (res && !res.ok) console.error(`[polpo/telegram] setMyCommands failed (${res.status})`);
+  }
+
   start(intervalMs = 2000): void {
     if (this.timer) return;
+    void this.registerMenuCommands();
     this.timer = setInterval(() => this.poll(), intervalMs);
   }
 
@@ -349,12 +368,19 @@ export class TelegramCallbackPoller {
     const senderId = String(query.from?.id ?? query.message?.chat?.id ?? this.chatId);
     const senderName = query.from?.first_name;
 
+    // Menu buttons (e.g. agent picker) are not approvals
+    if (action === "agent") {
+      const reply = await this.gateway?.handleMenuCallback?.(action, requestId, chatId, senderId, senderName);
+      if (reply) await this.sendMarkdown(chatId, reply);
+      return;
+    }
+
     // If gateway is available, route through it for identity tracking
     if (this.gateway) {
       const response = await this.gateway.handleApprovalCallback(
         action, requestId, chatId, senderId, senderName,
       );
-      if (response) await this.sendReply(chatId, markdownToHtml(response));
+      if (response) await this.sendMarkdown(chatId, response);
       return;
     }
 
@@ -382,10 +408,11 @@ export class TelegramCallbackPoller {
 
     const text = message.text ?? message.caption;
 
-    if (!text) return; // No usable content
-
-    // ── Gateway mode: route ALL messages through the ChannelGateway ──
+    // ── Gateway mode: route ALL messages (text and media) through the ChannelGateway ──
     if (this.gateway) {
+      const media = inboundMediaOf(message);
+      if (!text && media.length === 0) return; // stickers, locations, … carry nothing usable
+
       // Send typing immediately and keep refreshing every 4s until we respond
       await this.sendChatAction(chatId, "typing");
       const typingInterval = setInterval(() => {
@@ -393,10 +420,21 @@ export class TelegramCallbackPoller {
       }, 4000);
 
       try {
+        const { attachments, skipped } = await this.downloadMedia(media);
+        if (media.length > 0 && attachments.length === 0) {
+          await this.sendReply(chatId, escapeHtml(skipped[0] ?? "Could not download the attachment."));
+          return;
+        }
         const response = await this.gateway.handleInboundMessage(
-          senderId, chatId, text, senderName, String(message.message_id),
+          senderId, chatId, text ?? "", senderName, String(message.message_id), attachments,
         );
-        if (response) await this.sendReply(chatId, markdownToHtml(response));
+        if (typeof response === "string") await this.sendMarkdown(chatId, response);
+        else if (response) {
+          if (response.text.trim() || response.buttons || response.forceReply) {
+            await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply);
+          }
+          for (const file of response.files ?? []) await this.sendDocument(chatId, file.path, file.filename);
+        }
       } finally {
         clearInterval(typingInterval);
       }
@@ -404,7 +442,7 @@ export class TelegramCallbackPoller {
     }
 
     // ── Legacy mode: only handle pending rejection feedback ──
-    if (!this.resolver) return;
+    if (!text || !this.resolver) return;
 
     const requestId = this.pendingRevise.get(chatId);
     if (!requestId) return;
@@ -416,6 +454,30 @@ export class TelegramCallbackPoller {
       ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(text)}</i>`
       : `❌ Error: ${result.error}`;
     await this.sendReply(chatId, msg);
+  }
+
+  /** Download inbound media via getFile. Oversized or failed files are reported, not thrown. */
+  private async downloadMedia(media: InboundMediaRef[]): Promise<{ attachments: InboundAttachment[]; skipped: string[] }> {
+    const attachments: InboundAttachment[] = [];
+    const skipped: string[] = [];
+    for (const ref of media) {
+      if ((ref.fileSize ?? 0) > TELEGRAM_MAX_DOWNLOAD_BYTES) {
+        skipped.push(`${ref.filename} is too large (Telegram bots can receive up to 20 MB).`);
+        continue;
+      }
+      try {
+        const info = await fetch(`https://api.telegram.org/bot${this.botToken}/getFile?file_id=${encodeURIComponent(ref.fileId)}`)
+          .then(r => r.json()) as { ok: boolean; result?: { file_path?: string } };
+        if (!info.ok || !info.result?.file_path) throw new Error("getFile failed");
+        const res = await fetch(`https://api.telegram.org/file/bot${this.botToken}/${info.result.file_path}`);
+        if (!res.ok) throw new Error(`download failed (${res.status})`);
+        attachments.push({ kind: ref.kind, filename: ref.filename, mimeType: ref.mimeType, data: Buffer.from(await res.arrayBuffer()) });
+      } catch (err) {
+        console.error(`[polpo/telegram] media download error (${ref.kind}): ${err instanceof Error ? err.message : String(err)}`);
+        skipped.push(`Could not download ${ref.filename}.`);
+      }
+    }
+    return { attachments, skipped };
   }
 
   private async answerCallback(callbackQueryId: string): Promise<void> {
@@ -434,7 +496,51 @@ export class TelegramCallbackPoller {
 
   /** Send a partial response as a separate message (for multi-turn tool loops). */
   async sendPartial(chatId: string, text: string): Promise<void> {
-    await this.sendReply(chatId, markdownToHtml(text));
+    await this.sendMarkdown(chatId, text);
+  }
+
+  /** Upload a local file as a document; failures are reported to the chat instead of being lost. */
+  async sendDocument(chatId: string, path: string, filename: string): Promise<boolean> {
+    try {
+      const { readFile, stat } = await import("node:fs/promises");
+      const size = (await stat(path)).size;
+      if (size > TELEGRAM_MAX_UPLOAD_BYTES) {
+        await this.sendReply(chatId, `${escapeHtml(filename)} is too large to send on Telegram (max 50 MB).`);
+        return false;
+      }
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("document", new Blob([new Uint8Array(await readFile(path))]), filename);
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendDocument`, { method: "POST", body: form });
+      if (res.ok) return true;
+      const body = await res.json().catch(() => null) as { description?: string } | null;
+      console.error(`[polpo/telegram] sendDocument rejected (${res.status}): ${body?.description ?? ""}`);
+    } catch (err) {
+      console.error(`[polpo/telegram] sendDocument failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    await this.sendReply(chatId, `Could not send ${escapeHtml(filename)}.`);
+    return false;
+  }
+
+  /**
+   * Send Markdown as one or more HTML messages (Telegram's 4096-char limit).
+   * Markup (buttons / reply prompt) goes on the last message. If Telegram
+   * rejects the HTML, the chunk is resent as plain text instead of being lost.
+   */
+  async sendMarkdown(
+    chatId: string,
+    markdown: string,
+    buttons?: { text: string; data: string }[][],
+    forceReply?: { placeholder?: string },
+  ): Promise<void> {
+    const chunks = splitMarkdown(markdown);
+    for (let i = 0; i < chunks.length; i++) {
+      const last = i === chunks.length - 1;
+      const sent = await this.sendReply(chatId, markdownToTelegramHtml(chunks[i]), last ? buttons : undefined, last ? forceReply : undefined);
+      if (!sent) {
+        await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false);
+      }
+    }
   }
 
   private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing"): Promise<void> {
@@ -446,17 +552,36 @@ export class TelegramCallbackPoller {
     }).catch(() => {});
   }
 
-  private async sendReply(chatId: string, text: string): Promise<void> {
+  /** Send one message; returns false when Telegram rejects it (e.g. invalid HTML). */
+  private async sendReply(
+    chatId: string,
+    text: string,
+    buttons?: { text: string; data: string }[][],
+    forceReply?: { placeholder?: string },
+    html = true,
+  ): Promise<boolean> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
-    await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
         text,
-        parse_mode: "HTML",
+        ...(html ? { parse_mode: "HTML" } : {}),
+        ...(buttons ? { reply_markup: { inline_keyboard: buttons.map(row => row.map(b => ({ text: b.text, callback_data: b.data }))) } } : {}),
+        ...(forceReply ? { reply_markup: { force_reply: true, ...(forceReply.placeholder ? { input_field_placeholder: forceReply.placeholder } : {}) } } : {}),
       }),
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error(`[polpo/telegram] sendMessage failed: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    });
+    if (!res) return false;
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { description?: string } | null;
+      console.error(`[polpo/telegram] sendMessage rejected (${res.status}): ${body?.description ?? ""}`);
+      return false;
+    }
+    return true;
   }
 
   /** Send a message with ForceReply — opens the reply input automatically in the Telegram client. */
@@ -490,7 +615,11 @@ export interface TelegramGatewayHandler {
     text: string,
     senderName?: string,
     messageId?: string,
-  ): Promise<string | undefined>;
+    attachments?: InboundAttachment[],
+  ): Promise<string | TelegramReply | undefined>;
+
+  /** Non-approval inline buttons (e.g. "agent:<name>"). */
+  handleMenuCallback?(action: string, value: string, chatId: string, senderId: string, senderName?: string): Promise<string | undefined>;
 
   handleApprovalCallback(
     action: string,
@@ -541,7 +670,7 @@ interface TelegramCallbackQuery {
   from?: TelegramUser;
 }
 
-interface TelegramFile {
+export interface TelegramFile {
   file_id: string;
   file_unique_id: string;
   file_size?: number;
@@ -549,16 +678,25 @@ interface TelegramFile {
   mime_type?: string;
 }
 
-interface TelegramMessage {
+export interface TelegramMessage {
   message_id: number;
   chat: { id: number };
   from?: TelegramUser;
   text?: string;
   /** File attachment (document). */
   document?: TelegramFile & { file_name?: string };
+  /** Photo sizes, smallest first. */
+  photo?: TelegramFile[];
+  voice?: TelegramFile;
+  audio?: TelegramFile & { file_name?: string };
+  video?: TelegramFile & { file_name?: string };
+  video_note?: TelegramFile;
   /** Caption text (on media messages) */
   caption?: string;
 }
+
+/** Bot API getFile only serves files up to 20 MB. */
+const TELEGRAM_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 
 // ─── Utility functions ─────────────────────
 
@@ -570,17 +708,8 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * Convert standard Markdown formatting to Telegram HTML.
- */
-function markdownToHtml(text: string): string {
-  let html = escapeHtml(text);
-  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  html = html.replace(/\*(.+?)\*/g, "<i>$1</i>");
-  html = html.replace(/_(.+?)_/g, "<i>$1</i>");
-  html = html.replace(/`(.+?)`/g, "<code>$1</code>");
-  return html;
-}
+/** Convert Markdown to Telegram HTML (see telegram-format.ts). */
+const markdownToHtml = markdownToTelegramHtml;
 
 function resolveEnvVar(value: string): string {
   if (value.startsWith("${") && value.endsWith("}")) {
@@ -588,4 +717,58 @@ function resolveEnvVar(value: string): string {
     return process.env[envKey] ?? "";
   }
   return value;
+}
+
+// ─── Replies with inline buttons ───────────
+
+export interface TelegramReply {
+  text: string;
+  buttons?: { text: string; data: string }[][];
+  forceReply?: { placeholder?: string };
+  /** Local files sent as documents after the text. */
+  files?: { path: string; filename: string }[];
+}
+
+/** Bot API sendDocument upload limit. */
+const TELEGRAM_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+// ─── Inbound media ─────────────────────────
+
+/** A file received from a channel, downloaded and ready to attach to a chat turn. */
+export interface InboundAttachment {
+  kind: "photo" | "document" | "voice" | "audio" | "video";
+  filename: string;
+  mimeType: string;
+  data: Buffer;
+}
+
+interface InboundMediaRef {
+  kind: InboundAttachment["kind"];
+  fileId: string;
+  fileSize?: number;
+  filename: string;
+  mimeType: string;
+}
+
+/** Media carried by a Telegram message (largest photo size only). */
+export function inboundMediaOf(message: TelegramMessage): InboundMediaRef[] {
+  const refs: InboundMediaRef[] = [];
+  const photo = message.photo?.[message.photo.length - 1];
+  if (photo) refs.push({ kind: "photo", fileId: photo.file_id, fileSize: photo.file_size, filename: "photo.jpg", mimeType: "image/jpeg" });
+  if (message.document) {
+    const d = message.document;
+    refs.push({ kind: "document", fileId: d.file_id, fileSize: d.file_size, filename: d.file_name ?? "file", mimeType: d.mime_type ?? "application/octet-stream" });
+  }
+  if (message.voice) {
+    refs.push({ kind: "voice", fileId: message.voice.file_id, fileSize: message.voice.file_size, filename: "voice.ogg", mimeType: message.voice.mime_type ?? "audio/ogg" });
+  }
+  if (message.audio) {
+    const a = message.audio;
+    refs.push({ kind: "audio", fileId: a.file_id, fileSize: a.file_size, filename: a.file_name ?? "audio.mp3", mimeType: a.mime_type ?? "audio/mpeg" });
+  }
+  const video = message.video ?? message.video_note;
+  if (video) {
+    refs.push({ kind: "video", fileId: video.file_id, fileSize: video.file_size, filename: (video as { file_name?: string }).file_name ?? "video.mp4", mimeType: video.mime_type ?? "video/mp4" });
+  }
+  return refs;
 }

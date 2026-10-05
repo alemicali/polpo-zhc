@@ -7,7 +7,7 @@ import { basename } from "node:path";
  * Sends the full notification as a JSON POST request.
  *
  * Configuration:
- *   url: Target webhook URL
+ *   url: Target webhook URL (optional when the channel is only used for inbound messages)
  *   headers: Optional custom headers
  */
 export class WebhookChannel implements NotificationChannel {
@@ -17,7 +17,7 @@ export class WebhookChannel implements NotificationChannel {
 
   constructor(config: NotificationChannelConfig) {
     const url = resolveEnvVar(config.url ?? "");
-    if (!url) throw new Error("Webhook channel requires url");
+    if (!url && !config.gateway?.enableInbound) throw new Error("Webhook channel requires url");
     this.url = url;
     this.headers = {};
     if (config.headers) {
@@ -28,6 +28,7 @@ export class WebhookChannel implements NotificationChannel {
   }
 
   async send(notification: Notification): Promise<void> {
+    if (!this.url) return; // inbound-only webhook
     const response = await fetch(this.url, {
       method: "POST",
       headers: {
@@ -52,6 +53,7 @@ export class WebhookChannel implements NotificationChannel {
   }
 
   async sendWithAttachments(notification: Notification, attachments: OutcomeAttachment[]): Promise<void> {
+    if (!this.url) return; // inbound-only webhook
     // Include attachments as base64-encoded data in the JSON payload
     const attachmentPayloads = attachments.map(att => ({
       label: att.label,
@@ -90,6 +92,7 @@ export class WebhookChannel implements NotificationChannel {
   }
 
   async test(): Promise<boolean> {
+    if (!this.url) return true; // inbound-only webhook: nothing to reach
     try {
       new URL(this.url);
       return true;
@@ -99,7 +102,7 @@ export class WebhookChannel implements NotificationChannel {
   }
 }
 
-function resolveEnvVar(value: string): string {
+export function resolveEnvVar(value: string): string {
   if (value.startsWith("${") && value.endsWith("}")) {
     const envKey = value.slice(2, -1);
     return process.env[envKey] ?? "";

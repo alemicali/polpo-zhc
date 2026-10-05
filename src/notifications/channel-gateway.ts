@@ -8,10 +8,13 @@
  * Capabilities:
  *   - Inbound message routing from Telegram (WhatsApp/Slack/Discord ready to extend)
  *   - Peer identity resolution and DM policy enforcement (allowlist/pairing)
- *   - Session-per-peer management (each peer gets their own conversation thread)
- *   - Slash commands (/tasks, /status, /missions, /approve, /new)
- *   - Free-text chat forwarded to POST /v1/chat/completions internally
+ *   - One-time invite links (/start <token>) that pair a peer without codes
+ *   - Session management per peer and interlocutor, optionally shared with the web UI
+ *   - Slash commands (/tasks, /status, /missions, /approve, /new, /agent, /polpo)
+ *   - Free-text chat to the orchestrator, or to a single agent via the chat runner
  *   - Approval inline buttons (preserves existing TelegramCallbackPoller behavior)
+ *   - Reply routing ("conversation pipe"): chat replies can leave from another channel
+ *     (gateway.replyTo or per message), e.g. in from a webhook, out on Telegram
  *   - Presence tracking
  *
  * Architecture:
@@ -27,15 +30,16 @@ import { nanoid } from "nanoid";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
-import type { ApprovalCallbackResolver } from "./channels/telegram.js";
+import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type {
   ChannelGatewayConfig,
+  ChannelReplyTarget,
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
-import { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } from "../llm/pi-client.js";
+import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth } from "../llm/pi-client.js";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
-import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
@@ -60,12 +64,141 @@ interface InboundMessage {
   displayName?: string;
   text: string;
   messageId?: string;
+  /** Media downloaded from the channel (photos, documents, voice notes, …). */
+  attachments?: InboundAttachment[];
+  /** Where the chat reply goes: "origin" forces this channel; unset = gateway.replyTo, else origin. */
+  replyTo?: ChannelReplyTarget | "origin";
 }
 
 interface CommandResult {
   text: string;
   parseMode?: "HTML" | "Markdown";
+  buttons?: ReplyButton[][];
 }
+
+/** Inline button rendered under a reply; `data` comes back as a callback (e.g. "agent:backend"). */
+export interface ReplyButton { text: string; data: string }
+
+/** Reply with optional inline buttons or a reply prompt, for channels that support them. */
+export interface GatewayReply {
+  text: string;
+  buttons?: ReplyButton[][];
+  /** Ask the user to type an answer; the placeholder is shown in the input field. */
+  forceReply?: { placeholder?: string };
+  /** Files to deliver after the text (channels send them as documents). */
+  files?: ChannelOutboundFile[];
+  /** Set when the reply was delivered through another channel (nothing to send here). */
+  deliveredTo?: string;
+}
+
+/** What a reply router delivers to the target channel of a conversation pipe. */
+export type ReplyRouteEvent =
+  | { kind: "echo"; text: string; from: string; via: ChannelType }
+  | { kind: "partial"; text: string }
+  | { kind: "reply"; reply: GatewayReply };
+
+/** Delivers pipe events through another channel; provided by the host (orchestrator). */
+export type ReplyRouter = (target: ChannelReplyTarget, event: ReplyRouteEvent) => Promise<void>;
+
+/** An agent suggestion exposed as a channel command. */
+export interface SuggestionCommand {
+  command: string;
+  title: string;
+  prompt: string;
+  /** First [placeholder] in the prompt, filled with the user's next message. */
+  placeholder?: string;
+}
+
+const PLACEHOLDER = /\[([^\]]+)\]/;
+const RESERVED_COMMANDS = new Set(Object.keys({ new: 1, help: 1, start: 1 }));
+
+/** Telegram command name: lowercase a-z, 0-9 and _, at most 32 characters. */
+export function commandSlug(title: string): string {
+  return title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32).replace(/_+$/, "");
+}
+
+/** Agent suggestions as unique commands (reserved names and empty slugs are skipped). */
+export function suggestionCommands(suggestions: { title?: string; prompt?: string }[] | undefined): SuggestionCommand[] {
+  const seen = new Set<string>(RESERVED_COMMANDS);
+  const out: SuggestionCommand[] = [];
+  for (const s of suggestions ?? []) {
+    if (!s.title || !s.prompt) continue;
+    let command = commandSlug(s.title);
+    if (!command) continue;
+    for (let n = 2; seen.has(command); n++) command = `${commandSlug(s.title).slice(0, 29)}_${n}`;
+    seen.add(command);
+    out.push({ command, title: s.title, prompt: s.prompt, placeholder: PLACEHOLDER.exec(s.prompt)?.[1] });
+  }
+  return out;
+}
+
+/** Entry of the channel's command menu (Telegram setMyCommands). */
+export interface MenuCommand { command: string; description: string }
+
+const ORCHESTRATOR_CHOICE = "__polpo__";
+
+/** OpenAI-format content part, as accepted by the completions pipeline. */
+export type ChannelContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
+
+/** Chat turn executed by the host (the server's completions pipeline). */
+export interface ChannelChatRequest {
+  /** Target agent; omitted = the orchestrator. */
+  agent?: string;
+  sessionId: string;
+  /** Conversation history including the new user message, oldest first. */
+  messages: { role: "user" | "assistant"; content: string | ChannelContentPart[] }[];
+}
+
+/** A file the turn produced for the user (e.g. via open_file), already resolved and checked by the host. */
+export interface ChannelOutboundFile { path: string; filename: string }
+
+/** Runs one chat turn and returns the reply. The host persists both messages. */
+export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string; files?: ChannelOutboundFile[] }>;
+
+/** One-time link that pairs whoever opens it (e.g. t.me/<bot>?start=<token>). */
+export interface ChannelInvite {
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "pending" | "paired" | "expired";
+  peerId?: string;
+  externalId?: string;
+  chatId?: string;
+  displayName?: string;
+}
+
+const INVITE_TTL_MS = 15 * 60 * 1000;
+/** Replies longer than this are cut; channels split the rest into several messages. */
+const MAX_REPLY_CHARS = 16_000;
+/** Per-file limit of the chat attachment store (saveChatUserMessage). */
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const VISION_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const ATTACHMENT_LABEL: Record<InboundAttachment["kind"], string> = {
+  photo: "a photo", document: "a file", voice: "a voice message", audio: "an audio file", video: "a video",
+};
+
+/** Build the user turn: caption (or a short description) plus image/file parts. */
+export function attachmentContent(text: string, attachments: InboundAttachment[]): ChannelContentPart[] {
+  const described = attachments.map(a => `${ATTACHMENT_LABEL[a.kind]} (${a.filename})`).join(", ");
+  const voiceHint = attachments.some(a => a.kind === "voice" || a.kind === "audio")
+    ? " Audio is attached as a file; transcribe it with your tools if you can, otherwise say you cannot listen to it."
+    : "";
+  const parts: ChannelContentPart[] = [{ type: "text", text: text.trim() || `[The user sent ${described}.${voiceHint}]` }];
+  if (text.trim() && voiceHint) parts.push({ type: "text", text: `[${voiceHint.trim()}]` });
+  for (const a of attachments) {
+    const dataUrl = `data:${a.mimeType};base64,${a.data.toString("base64")}`;
+    parts.push(VISION_TYPES.has(a.mimeType)
+      ? { type: "image_url", image_url: { url: dataUrl } }
+      : { type: "file", file: { filename: a.filename, file_data: dataUrl } });
+  }
+  return parts;
+}
+const START_TOKEN = /^\/start(?:@\S+)?\s+([A-Za-z0-9_-]{8,64})\s*$/;
 
 // ── Slash Commands ──────────────────────────────────────────────────────
 
@@ -78,6 +211,8 @@ const COMMANDS: Record<string, string> = {
   "/approve": "Approve a pending approval (usage: /approve REQUEST_ID)",
   "/reject":  "Reject a pending approval (usage: /reject REQUEST_ID [reason])",
   "/new":     "Reset your conversation session",
+  "/agent":   "Talk directly to an agent (usage: /agent NAME)",
+  "/polpo":   "Go back to talking with the orchestrator",
   "/pair":    "Approve a pairing code (usage: /pair CODE)",
 };
 
@@ -94,6 +229,11 @@ export class ChannelGateway {
   private recentMessageIds = new Set<string>(); // dedup guard for duplicate polls
   private onTyping?: (chatId: string) => Promise<void>;
   private onPartialResponse?: (chatId: string, text: string) => Promise<void>;
+  private invites = new Map<string, ChannelInvite>(); // token → invite (in-memory, short-lived)
+  private pendingSuggestion = new Map<string, SuggestionCommand>(); // chatId → suggestion awaiting its placeholder
+  private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
+  private replyRouter?: ReplyRouter;
+  private partialOverride = new Map<string, (text: string) => Promise<void>>(); // chatId → routed partials
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -112,6 +252,17 @@ export class ChannelGateway {
     } catch { /* emitter may not be available */ }
   }
 
+  /** Route chat replies through other channels (gateway.replyTo / InboundMessage.replyTo). */
+  setReplyRouter(router: ReplyRouter): void {
+    this.replyRouter = router;
+  }
+
+  /** Target of the chat reply for this message, or undefined to answer on the origin channel. */
+  replyTargetFor(msg: Pick<InboundMessage, "replyTo">): ChannelReplyTarget | undefined {
+    if (msg.replyTo === "origin" || !this.replyRouter) return undefined;
+    return msg.replyTo ?? this.gatewayConfig.replyTo;
+  }
+
   /** Set a callback to send partial responses as separate messages (e.g. Telegram messages). */
   setPartialResponseHandler(handler: (chatId: string, text: string) => Promise<void>): void {
     this.onPartialResponse = handler;
@@ -122,6 +273,16 @@ export class ChannelGateway {
    * Returns a response string to send back, or undefined to ignore.
    */
   async handleMessage(msg: InboundMessage): Promise<string | undefined> {
+    return (await this.handleMessageReply(msg))?.text;
+  }
+
+  /** Like handleMessage, keeping inline buttons for channels that can render them. */
+  async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
+    const reply = await this.routeMessage(msg);
+    return typeof reply === "string" ? { text: reply } : reply;
+  }
+
+  private async routeMessage(msg: InboundMessage): Promise<string | GatewayReply | undefined> {
     if (!this.gatewayConfig.enableInbound) return undefined;
 
     // Dedup: skip if we've already processed this exact message
@@ -149,6 +310,10 @@ export class ChannelGateway {
     // Update presence
     this.peerStore.updatePresence(peerId, "chatting");
 
+    // ── One-time invite link (/start <token>) — pairs without a code ──
+    const invite = this.matchInvite(msg.text);
+    if (invite) return this.redeemInvite(invite, msg, peerId);
+
     // ── DM Policy enforcement ──
     if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
       return this.handleUnauthorized(msg, peerId);
@@ -164,10 +329,22 @@ export class ChannelGateway {
         : `Error: ${result.error}`;
     }
 
+    // ── Suggestion waiting for its [placeholder] ──
+    const pendingSuggestion = this.pendingSuggestion.get(msg.chatId);
+    if (pendingSuggestion) {
+      this.pendingSuggestion.delete(msg.chatId);
+      if (!msg.text.startsWith("/")) {
+        const filled = pendingSuggestion.prompt.replace(PLACEHOLDER, msg.text.trim());
+        return this.handleChat({ ...msg, text: filled }, peerId);
+      }
+    }
+
     // ── Slash commands ──
     if (msg.text.startsWith("/")) {
+      const suggestion = await this.handleSuggestionCommand(msg, peerId);
+      if (suggestion) return suggestion;
       const result = await this.handleCommand(msg, peerId);
-      if (result) return result.text;
+      if (result) return result.buttons ? { text: result.text, buttons: result.buttons } : result.text;
     }
 
     // ── Free-text chat → orchestrator completions ──
@@ -188,6 +365,65 @@ export class ChannelGateway {
       return "Rejected — tell the agent why. Reply with your feedback:";
     }
     return "Unknown action";
+  }
+
+  // ── Invite links ──────────────────────────────────────────────────
+
+  /** Create a one-time invite. Whoever sends `/start <token>` first is paired. */
+  createInvite(ttlMs = INVITE_TTL_MS): ChannelInvite {
+    this.pruneInvites();
+    const now = Date.now();
+    const invite: ChannelInvite = {
+      token: nanoid(24),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + ttlMs).toISOString(),
+      status: "pending",
+    };
+    this.invites.set(invite.token, invite);
+    return invite;
+  }
+
+  /** Current state of an invite, or undefined if unknown (never created or pruned). */
+  getInvite(token: string): ChannelInvite | undefined {
+    const invite = this.invites.get(token);
+    if (invite?.status === "pending" && Date.now() > new Date(invite.expiresAt).getTime()) {
+      invite.status = "expired";
+    }
+    return invite;
+  }
+
+  private matchInvite(text: string): ChannelInvite | undefined {
+    const token = START_TOKEN.exec(text.trim())?.[1];
+    if (!token) return undefined;
+    const invite = this.getInvite(token);
+    return invite?.status === "pending" ? invite : undefined;
+  }
+
+  private async redeemInvite(invite: ChannelInvite, msg: InboundMessage, peerId: string): Promise<string | undefined> {
+    if ((this.gatewayConfig.dmPolicy ?? "allowlist") === "disabled") return undefined;
+
+    await this.peerStore.addToAllowlist(peerId);
+    const pending = await this.peerStore.getPendingPairing(peerId);
+    if (pending) await this.peerStore.resolvePairing(pending.code);
+
+    invite.status = "paired";
+    invite.peerId = peerId;
+    invite.externalId = msg.externalId;
+    invite.chatId = msg.chatId;
+    invite.displayName = msg.displayName;
+    this.log("info", `Invite redeemed by ${peerId}`);
+
+    const dedicated = this.gatewayConfig.agent;
+    return dedicated
+      ? `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to ${dedicated} here.`
+      : `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to Polpo here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
+  }
+
+  private pruneInvites(): void {
+    const cutoff = Date.now() - INVITE_TTL_MS;
+    for (const [token, invite] of this.invites) {
+      if (new Date(invite.expiresAt).getTime() < cutoff) this.invites.delete(token);
+    }
   }
 
   // ── Unauthorized handler ──────────────────────────────────────────
@@ -226,7 +462,7 @@ export class ChannelGateway {
 
     switch (cmd) {
       case "/help":
-        return this.cmdHelp();
+        return await this.cmdHelp();
       case "/status":
         return this.cmdStatus();
       case "/tasks":
@@ -241,6 +477,10 @@ export class ChannelGateway {
         return this.cmdReject(args, peerId, msg.chatId);
       case "/new":
         return this.cmdNewSession(peerId);
+      case "/agent":
+        return this.cmdAgent(args, peerId);
+      case "/polpo":
+        return this.cmdPolpo(peerId);
       case "/pair":
         return this.cmdPair(args, peerId);
       default:
@@ -249,10 +489,40 @@ export class ChannelGateway {
     }
   }
 
-  private cmdHelp(): CommandResult {
+  private async cmdHelp(): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) {
+      const suggestions = await this.agentSuggestions();
+      const lines = [
+        ...suggestions.map(s => `/${s.command} — ${s.title}`),
+        `/new — ${COMMANDS["/new"]}`,
+      ];
+      return { text: `You are talking to ${this.gatewayConfig.agent}. Write freely, or use:\n\n${lines.join("\n")}` };
+    }
     const lines = Object.entries(COMMANDS)
       .map(([cmd, desc]) => `${cmd} — ${desc}`);
     return { text: `Available commands:\n\n${lines.join("\n")}` };
+  }
+
+  /** Suggestions of the dedicated agent, as commands. */
+  private async agentSuggestions(): Promise<SuggestionCommand[]> {
+    const name = this.gatewayConfig.agent;
+    if (!name) return [];
+    const agent = (await this.orchestrator.getAgents()).find(a => a.name === name);
+    return suggestionCommands((agent as { suggestions?: { title?: string; prompt?: string }[] } | undefined)?.suggestions);
+  }
+
+  /** /<suggestion> on a dedicated bot: send the prompt, or ask for its [placeholder] first. */
+  private async handleSuggestionCommand(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+    if (!this.gatewayConfig.agent) return undefined;
+    const name = msg.text.trim().split(/\s+/)[0].slice(1).replace(/@\S+$/, "").toLowerCase();
+    const suggestion = (await this.agentSuggestions()).find(s => s.command === name);
+    if (!suggestion) return undefined;
+    if (!suggestion.placeholder) return this.handleChat({ ...msg, text: suggestion.prompt }, peerId);
+    this.pendingSuggestion.set(msg.chatId, suggestion);
+    return {
+      text: `${suggestion.title}\n\n${suggestion.prompt.replace(PLACEHOLDER, `<${suggestion.placeholder}>`)}\n\nReply with: ${suggestion.placeholder}`,
+      forceReply: { placeholder: suggestion.placeholder.slice(0, 64) },
+    };
   }
 
   private async cmdStatus(): Promise<CommandResult> {
@@ -358,8 +628,139 @@ export class ChannelGateway {
   }
 
   private async cmdNewSession(peerId: string): Promise<CommandResult> {
-    await this.peerStore.clearSession(peerId);
-    return { text: "Session reset. Your next message starts a new conversation." };
+    const agent = await this.getActiveAgent(peerId);
+    const key = await this.sessionKey(peerId, agent);
+    await this.peerStore.clearSession(key);
+    this.forceNewSession.add(key);
+    return { text: `Session reset. Your next message starts a new conversation with ${agent ?? "Polpo"}.` };
+  }
+
+  private dedicatedMessage(): CommandResult {
+    return { text: `This bot is dedicated to ${this.gatewayConfig.agent}. Use the main bot to talk to Polpo or other agents.` };
+  }
+
+  private async cmdAgent(args: string[], peerId: string): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) return this.dedicatedMessage();
+    const agents = await this.orchestrator.getAgents();
+    if (args.length === 0) {
+      const current = await this.getActiveAgent(peerId);
+      const names = agents.map(a => a.name).join(", ") || "none";
+      const choices: ReplyButton[] = [
+        { text: `🐙 Polpo${current ? "" : " ✓"}`, data: `agent:${ORCHESTRATOR_CHOICE}` },
+        ...agents.map(a => ({ text: `${a.name}${a.name === current ? " ✓" : ""}`, data: `agent:${a.name}`.slice(0, 64) })),
+      ];
+      const buttons: ReplyButton[][] = [];
+      for (let i = 0; i < choices.length; i += 2) buttons.push(choices.slice(i, i + 2));
+      return {
+        text: `You are talking to ${current ?? "Polpo (orchestrator)"}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
+        buttons,
+      };
+    }
+
+    const wanted = args[0].toLowerCase();
+    const agent = agents.find(a => a.name.toLowerCase() === wanted);
+    if (!agent) {
+      return { text: `Agent "${args[0]}" not found. Send /agents to see the available agents.` };
+    }
+    if (!this.getChatRunner()) {
+      return { text: "Direct agent chat is not available on this instance." };
+    }
+
+    await this.peerStore.setSessionId(await this.activeAgentKey(peerId), agent.name);
+    return { text: `You are now talking to ${agent.name} (${agent.role}).\nSend /polpo to go back to the orchestrator.` };
+  }
+
+  private async cmdPolpo(peerId: string): Promise<CommandResult> {
+    if (this.gatewayConfig.agent) return this.dedicatedMessage();
+    await this.peerStore.clearSession(await this.activeAgentKey(peerId));
+    return { text: "You are now talking to Polpo (orchestrator)." };
+  }
+
+  /** Inline-button selection ("agent:<name>"); same rules as /agent and /polpo. */
+  async handleMenuCallback(action: string, value: string, msg: Omit<InboundMessage, "text">): Promise<string | undefined> {
+    if (action !== "agent" || !this.gatewayConfig.enableInbound) return undefined;
+    const peerId = `${msg.channel}:${msg.externalId}`;
+    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) return undefined;
+    const result = value === ORCHESTRATOR_CHOICE ? await this.cmdPolpo(peerId) : await this.cmdAgent([value], peerId);
+    return result.text;
+  }
+
+  /** Commands for the channel menu; a dedicated bot shows its agent's suggestions. */
+  async menuCommands(): Promise<MenuCommand[]> {
+    const pick = this.gatewayConfig.agent
+      ? ["/new", "/help"]
+      : ["/agent", "/polpo", "/new", "/status", "/tasks", "/missions", "/agents", "/approve", "/help"];
+    const suggestions = (await this.agentSuggestions()).map(s => ({ command: s.command, description: s.title.slice(0, 256) }));
+    return [...suggestions, ...pick.map(cmd => ({ command: cmd.slice(1), description: COMMANDS[cmd] }))];
+  }
+
+  // ── Interlocutor and session resolution ────────────────────────────
+
+  private getChatRunner(): ChannelChatRunner | undefined {
+    return this.orchestrator.getChannelChatRunner?.();
+  }
+
+  /**
+   * Agent the peer is talking to, or undefined for the orchestrator. A dedicated
+   * channel always targets its agent; stale selections fall back to the orchestrator.
+   */
+  private async getActiveAgent(peerId: string): Promise<string | undefined> {
+    if (this.gatewayConfig.agent) return this.gatewayConfig.agent;
+    const name = await this.peerStore.getSessionId(await this.activeAgentKey(peerId));
+    if (!name) return undefined;
+    const agents = await this.orchestrator.getAgents();
+    return agents.some(a => a.name === name) ? name : undefined;
+  }
+
+  // The peer→session map doubles as per-peer state: the canonical peer id keys the
+  // orchestrator session, "#agent:<name>" keys agent sessions and "#active-agent"
+  // stores the selected interlocutor. Linked identities share all three.
+  private async activeAgentKey(peerId: string): Promise<string> {
+    return `${await this.peerStore.resolveCanonicalId(peerId)}#active-agent`;
+  }
+
+  private async sessionKey(peerId: string, agent?: string): Promise<string> {
+    const canonical = await this.peerStore.resolveCanonicalId(peerId);
+    return agent ? `${canonical}#agent:${agent}` : canonical;
+  }
+
+  /** Channel defaults with the agent's overrides applied (the orchestrator uses the defaults). */
+  private sessionSettings(agent?: string): { sessionMode: "per-peer" | "shared"; idleMinutes: number } {
+    const override = agent ? this.gatewayConfig.agentSessions?.[agent] : undefined;
+    return {
+      sessionMode: override?.sessionMode ?? this.gatewayConfig.sessionMode ?? "per-peer",
+      idleMinutes: override?.sessionIdleMinutes ?? this.gatewayConfig.sessionIdleMinutes ?? 60,
+    };
+  }
+
+  /**
+   * Session for this peer and interlocutor. "per-peer" keeps a channel-owned
+   * session; "shared" continues the interlocutor's latest session, the same
+   * one the web UI resumes. Both start fresh after the idle timeout, unless
+   * it is 0 (never expire).
+   */
+  private async resolveSessionId(peerId: string, agent: string | undefined, firstText: string): Promise<string> {
+    const key = await this.sessionKey(peerId, agent);
+    const { sessionMode, idleMinutes } = this.sessionSettings(agent);
+    const isFresh = (updatedAt: string) =>
+      idleMinutes === 0 || Date.now() - new Date(updatedAt).getTime() <= idleMinutes * 60 * 1000;
+    const forceNew = this.forceNewSession.delete(key);
+
+    let sessionId: string | undefined;
+    if (!forceNew) {
+      if (sessionMode === "shared") {
+        const latest = await this.sessionStore.getLatestSession(agent ?? null);
+        if (latest && isFresh(latest.updatedAt)) sessionId = latest.id;
+      } else {
+        const mapped = await this.peerStore.getSessionId(key);
+        const session = mapped ? await this.sessionStore.getSession(mapped) : undefined;
+        if (session && isFresh(session.updatedAt)) sessionId = session.id;
+      }
+    }
+
+    if (!sessionId) sessionId = await this.sessionStore.create(firstText.slice(0, 60), agent);
+    await this.peerStore.setSessionId(key, sessionId);
+    return sessionId;
   }
 
   private async cmdPair(args: string[], peerId: string): Promise<CommandResult> {
@@ -378,28 +779,42 @@ export class ChannelGateway {
 
   // ── Chat handler (free-text → orchestrator completions) ───────────
 
-  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | undefined> {
+  /**
+   * Chat turn, answered on the origin channel or piped to another one: the inbound
+   * message is echoed there first (unless echoInbound is false), then partials and reply.
+   */
+  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+    const target = this.replyTargetFor(msg);
+    if (!target || !this.replyRouter) return this.runChat(msg, peerId);
+    const route = this.replyRouter;
+    const deliver = (event: ReplyRouteEvent) => route(target, event).catch(err => {
+      this.log("warn", `Reply route to "${target.channel}" failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+    if (target.echoInbound !== false) {
+      const files = (msg.attachments ?? []).map(a => `[${a.filename}]`).join(" ");
+      await deliver({ kind: "echo", text: [msg.text.trim(), files].filter(Boolean).join(" "), from: msg.displayName ?? msg.externalId, via: msg.channel });
+    }
+    this.partialOverride.set(msg.chatId, text => deliver({ kind: "partial", text }));
+    let reply: string | GatewayReply | undefined;
     try {
-      // Get or create session
-      let sessionId = await this.peerStore.getSessionId(peerId);
+      reply = await this.runChat(msg, peerId);
+    } finally {
+      this.partialOverride.delete(msg.chatId);
+    }
+    const out = typeof reply === "string" ? { text: reply } : reply;
+    if (out) await deliver({ kind: "reply", reply: out });
+    return { text: "", deliveredTo: target.channel };
+  }
 
-      // Check idle timeout
-      if (sessionId) {
-        const session = await this.sessionStore.getSession(sessionId);
-        if (session) {
-          const idleMinutes = this.gatewayConfig.sessionIdleMinutes ?? 60;
-          const idleMs = Date.now() - new Date(session.updatedAt).getTime();
-          if (idleMs > idleMinutes * 60 * 1000) {
-            // Session expired — create new one
-            sessionId = undefined;
-          }
-        }
-      }
-
-      if (!sessionId) {
-        sessionId = await this.sessionStore.create(msg.text.slice(0, 60));
-        await this.peerStore.setSessionId(peerId, sessionId);
-      }
+  private async runChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+    try {
+      const agent = await this.getActiveAgent(peerId);
+      const attachments = msg.attachments ?? [];
+      const title = msg.text || attachments.map(a => a.filename).join(", ");
+      const sessionId = await this.resolveSessionId(peerId, agent, title);
+      // Agents, and any turn with media, go through the host pipeline (vision + attachment storage).
+      if (agent || attachments.length > 0) return await this.handleRunnerChat(msg, agent, sessionId);
 
       // Store user message
       await this.sessionStore.addMessage(sessionId, "user", msg.text);
@@ -435,8 +850,7 @@ export class ChannelGateway {
       const settings = this.orchestrator.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
-      const streamOpts = buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens);
+      const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;
@@ -448,7 +862,7 @@ export class ChannelGateway {
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         this.log("verbose", `Turn ${turn + 1}: sending ${messages.length} messages`);
-        const piStream = streamSimple(m, {
+        const piStream = await streamSimpleWithAuth(m, {
           systemPrompt: systemPrompt + peerContext,
           messages,
           tools: ALL_ORCHESTRATOR_TOOLS,
@@ -484,8 +898,10 @@ export class ChannelGateway {
         }
 
         // There are tool calls — send partial text as a separate message if present
-        if (turnText.trim() && this.onPartialResponse) {
-          await this.onPartialResponse(msg.chatId, turnText);
+        const partial = this.partialOverride.get(msg.chatId)
+          ?? (this.onPartialResponse ? (text: string) => this.onPartialResponse!(msg.chatId, text) : undefined);
+        if (turnText.trim() && partial) {
+          await partial(turnText);
           sentPartials = true;
           // Don't add to finalText since it was already sent
         } else {
@@ -514,9 +930,9 @@ export class ChannelGateway {
         await this.sessionStore.addMessage(sessionId, "assistant", finalText);
       }
 
-      // Telegram has a 4096 char limit
-      if (finalText.length > 4000) {
-        finalText = finalText.slice(0, 3990) + "\n\n... (truncated)";
+      // Channels split long replies into several messages; cap runaway output.
+      if (finalText.length > MAX_REPLY_CHARS) {
+        finalText = finalText.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)";
       }
 
       // If all text was already sent as partials, nothing left to return
@@ -526,5 +942,37 @@ export class ChannelGateway {
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
     }
+  }
+
+  /**
+   * Turn through the host's chat pipeline (agent-direct, or orchestrator when
+   * agent is undefined). The pipeline persists both messages and attachments.
+   */
+  private async handleRunnerChat(msg: InboundMessage, agent: string | undefined, sessionId: string): Promise<string | GatewayReply> {
+    const who = agent ?? "Polpo";
+    const runner = this.getChatRunner();
+    if (!runner) {
+      return agent
+        ? "Direct agent chat is not available on this instance. Send /polpo to talk to the orchestrator."
+        : "Attachments are not supported on this instance yet. Please send text.";
+    }
+
+    const attachments = msg.attachments ?? [];
+    const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
+    if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
+
+    const history = await this.sessionStore.getRecentMessages(sessionId, 40);
+    const messages: ChannelChatRequest["messages"] = history
+      .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
+      .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
+
+    if (this.onTyping) await this.onTyping(msg.chatId);
+    const { text, files = [] } = await runner({ agent, sessionId, messages });
+
+    const body = text.trim();
+    const reply = body || (files.length > 0 ? "" : `${who} processed your request but has nothing to say.`);
+    const capped = reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)" : reply;
+    return files.length > 0 ? { text: capped, files } : capped;
   }
 }

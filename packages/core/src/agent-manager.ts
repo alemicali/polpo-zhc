@@ -1,5 +1,5 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { AgentConfig, Team } from "./types.js";
+import type { AgentConfig, AgentUpdate, Team } from "./types.js";
 
 /**
  * Manages multi-team agent topology: CRUD operations on teams and agents,
@@ -141,11 +141,27 @@ export class AgentManager {
     this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name} (team: ${team.name})` });
   }
 
-  /** Atomic update of an agent's fields. No more remove+add. */
-  async updateAgent(name: string, updates: Partial<Omit<AgentConfig, "name">>): Promise<AgentConfig> {
-    const updated = await this.ctx.agentStore.updateAgent(name, updates);
+  /** Update agent fields and, when requested, its team relationship. */
+  async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    const { team: teamName, ...agentUpdates } = updates;
+
+    if (teamName !== undefined) {
+      const destination = await this.ctx.teamStore.getTeam(teamName);
+      if (!destination) throw new Error(`Team "${teamName}" not found`);
+    }
+
+    // Always pass through updateAgent so stores can normalize legacy payloads
+    // where the relational `team` value was accidentally embedded in config.
+    let updated = await this.ctx.agentStore.updateAgent(name, agentUpdates);
+    if (teamName !== undefined) {
+      updated = await this.ctx.agentStore.moveAgent(name, teamName);
+    }
+
     await this.syncConfigCache();
-    this.ctx.emitter.emit("log", { level: "info", message: `Agent updated: ${name}` });
+    this.ctx.emitter.emit("log", {
+      level: "info",
+      message: `Agent updated: ${name}${teamName !== undefined ? ` (team: ${teamName})` : ""}`,
+    });
     return updated;
   }
 

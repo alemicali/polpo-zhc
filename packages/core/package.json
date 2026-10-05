@@ -22,6 +22,10 @@
       "types": "./dist/events.d.ts",
       "import": "./dist/events.js"
     },
+    "./hook-events": {
+      "types": "./dist/hook-events.d.ts",
+      "import": "./dist/hook-events.js"
+    },
     "./state-machine": {
       "types": "./dist/state-machine.d.ts",
       "import": "./dist/state-machine.js"
@@ -38,6 +42,10 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./task-control-store": {
+      "types": "./dist/task-control-store.d.ts",
+      "import": "./dist/task-control-store.js"
+    },
     "./memory-store": {
       "types": "./dist/memory-store.d.ts",
       "import": "./dist/memory-store.js"
@@ -53,6 +61,10 @@
     "./session-store": {
       "types": "./dist/session-store.d.ts",
       "import": "./dist/session-store.js"
+    },
+    "./coding-session-store": {
+      "types": "./dist/coding-session-store.d.ts",
+      "import": "./dist/coding-session-store.js"
     },
     "./notification-store": {
       "types": "./dist/notification-store.d.ts",

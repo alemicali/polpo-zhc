@@ -8,6 +8,7 @@
  */
 
 import type { OrchestratorContext } from "./orchestrator-context.js";
+import type { TaskStore } from "./task-store.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext, ModelConfig } from "./types.js";
 import { setAssessment } from "./types.js";
 import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
@@ -115,13 +116,15 @@ export class AssessmentOrchestrator {
       });
       return false;
     }
-    this.ctx.emitter.emit("task:transition", {
-      taskId,
-      from: task.status,
-      to: "done",
-      task: { ...task, status: "done" },
-    });
     await this.ctx.registry.transition(taskId, "done");
+    if (!(this.ctx.registry as TaskStore & { __emitsTaskTransitionEvents?: boolean }).__emitsTaskTransitionEvents) {
+      this.ctx.emitter.emit("task:transition", {
+        taskId,
+        from: task.status,
+        to: "done",
+        task: { ...task, status: "done" },
+      });
+    }
     await this.ctx.registry.updateTask(taskId, { phase: undefined });
 
     // Fire after:task:complete (async, fire-and-forget)

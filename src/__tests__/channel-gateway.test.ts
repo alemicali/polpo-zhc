@@ -623,7 +623,7 @@ describe("TelegramGatewayAdapter", () => {
     const adapter = new TelegramGatewayAdapter(gateway);
 
     const result = await adapter.handleInboundMessage("42", "chat-1", "/help", "Alice", "msg-1");
-    expect(result).toContain("/help");
+    expect(result?.text).toContain("/help");
     expect(peerStore.upsertPeer).toHaveBeenCalled();
   });
 

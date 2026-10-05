@@ -1,7 +1,7 @@
 /**
  * Polpo Engine — the built-in agentic runtime.
  *
- * Uses @mariozechner/pi-agent-core Agent class for the agentic loop,
+ * Uses @earendil-works/pi-agent-core Agent class for the agentic loop,
  * with pi-ai for multi-provider LLM abstraction.
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
@@ -9,7 +9,14 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault } from "../vault/index.js";
-import { buildAgentSystemPrompt } from "@polpo-ai/core";
+import {
+  buildAgentSystemPrompt,
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "@polpo-ai/core";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -21,14 +28,16 @@ export function createActivity(): AgentActivity {
     lastUpdate: new Date().toISOString(),
   };
 }
-import { Agent } from "@mariozechner/pi-agent-core";
-import type { AgentEvent } from "@mariozechner/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
-import { resolveModel, resolveApiKeyAsync, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, streamSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
+import { createDataAgentTools } from "../tools/data-tools.js";
+import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -102,8 +111,9 @@ function describeToolsForAgent(agent: AgentConfig): string {
       "",
       "**WhatsApp:**",
       "- `whatsapp_send` — send a WhatsApp message (WARNING: irreversible side effect)",
+      "- `whatsapp_send_file` — send image/video/audio/document attachments from a local file path",
       "- `whatsapp_list` — list recent conversations",
-      "- `whatsapp_read` — read messages in a conversation",
+      "- `whatsapp_read` — read messages in a conversation; default markRead=false is hidden/local, set markRead=true only when asked",
       "- `whatsapp_search` — search messages",
       "- `whatsapp_contacts` — list contacts",
     );
@@ -194,6 +204,31 @@ function describeToolsForAgent(agent: AgentConfig): string {
     );
   }
 
+  if (hasPattern("data_")) {
+    extended.push(
+      "",
+      "**Structured data:**",
+      "- `data_list_sources` / `data_describe` — discover your scoped sources and datasets",
+      "- `data_register_source` / `data_update_source` / `data_set_source_grant` — manage sources only when these tools are explicitly enabled; credentials always go to Vault",
+      "- `data_query` — run bounded typed queries and receive a standard DataFrame",
+      "- `data_create_view` / `data_update_view` — compose native interactive views from live source bindings, bounded inline data, or both",
+      "- `data_sql` — optional read-only SQL escape hatch",
+      "- `data_mutate` — change records only when explicitly assigned and requested",
+      "Use data tools instead of shell/database clients so grants, audit, limits, and generated views remain enforced.",
+    );
+  }
+
+  if (hasPattern("brain_")) {
+    extended.push(
+      "",
+      "**Company Brain:**",
+      "- `brain_search` / `brain_get_context` — retrieve grounded entities, claims, relations, and provenance",
+      "- `brain_upsert_entity` / `brain_upsert_relation` / `brain_upsert_claim` — maintain canonical knowledge only within your scoped grant",
+      "- `brain_ingest_data_source` / `brain_enrich_text` — map governed sources or text into reviewable semantic candidates",
+      "Treat Data Sources as authoritative raw data and the Company Brain as the evidence-aware semantic layer. Never invent evidence or silently replace conflicting claims.",
+    );
+  }
+
   if (extended.length > 0) {
     lines.push(...extended);
   }
@@ -222,10 +257,25 @@ function describeToolsForAgent(agent: AgentConfig): string {
   return lines.join("\n");
 }
 
+/** Same shape as ResolvedVault.MailboxDescriptor — re-declared so the
+ *  function signature doesn't reach into a sibling module. */
+export interface MailboxPromptInfo {
+  name: string;
+  from?: string;
+  label?: string;
+  canSend: boolean;
+  canRead: boolean;
+}
+
 /**
  * Build the system prompt for the agent, including loaded skills.
+ *
+ * `mailboxes` (when provided) is rendered as an "Email Accounts" section so
+ * the agent knows which `account` names to pass to email_* tools. The
+ * caller resolves it from the agent's vault before calling this (avoids a
+ * vault dependency reaching into the prompt builder).
  */
-export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[]): string {
+export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[], mailboxes?: MailboxPromptInfo[]): string {
   // Load skills (sync, Node.js filesystem)
   const skills = polpoDir
     ? loadAgentSkills(cwd, polpoDir, agent.name, agent.skills)
@@ -241,6 +291,27 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
   // shell scripts, npm installs, or manual workarounds for capabilities it already has.
   const toolSection = describeToolsForAgent(agent);
   if (toolSection) parts.push("", toolSection);
+
+  // Email accounts — when the agent has multiple mailboxes configured the
+  // email_* tools REQUIRE an explicit `account` param. Listing them here
+  // gives the model the names + capabilities (send/read) upfront so it
+  // doesn't have to call list_email_accounts on every turn. Single-mailbox
+  // setups omit the section entirely (zero noise).
+  if (mailboxes && mailboxes.length > 0) {
+    parts.push("", "## Email Accounts");
+    if (mailboxes.length === 1) {
+      const m = mailboxes[0]!;
+      const caps = [m.canSend ? "send" : null, m.canRead ? "read" : null].filter(Boolean).join(" + ");
+      parts.push(`You have one mailbox configured: \`${m.name}\` (${caps}${m.from ? `, from: ${m.from}` : ""}). The \`account\` param on email_* tools is optional in this case.`);
+    } else {
+      parts.push("You have multiple mailboxes configured. You MUST pass `account: \"<name>\"` to every email_* tool:");
+      for (const m of mailboxes) {
+        const caps = [m.canSend ? "send" : null, m.canRead ? "read" : null].filter(Boolean).join(" + ");
+        parts.push(`- \`${m.name}\` — ${caps}${m.from ? ` (from: ${m.from})` : ""}${m.label ? ` — ${m.label}` : ""}`);
+      }
+      parts.push("Call `list_email_accounts` at runtime if you need to re-check.");
+    }
+  }
 
   // Working directory — tell the agent where it is so it uses correct relative paths
   parts.push(
@@ -356,7 +427,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create all tools scoped to working directory with path sandboxing
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list
-  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*")
+  // Extended tools are auto-loaded when their names appear in allowedTools (e.g. "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*")
   // polpoDir must always be provided via SpawnContext.
   // Fallback to join(cwd, ".polpo") is WRONG when settings.workDir points to a
   // subdirectory — cwd would be e.g. /project/packages/app while .polpo/ lives
@@ -407,6 +478,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = undefined;
   }
 
+  if (ctx?.polpoDir && agentConfig.allowedTools?.some(t => t.toLowerCase().startsWith("whatsapp_"))) {
+    const whatsappMediaDir = join(ctx.polpoDir, "whatsapp-media");
+    effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
+  }
+
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
   const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
@@ -422,20 +498,55 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
+  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
+  const contextBudget = contextBudgetForModel(model);
   const agent = new Agent({
-    getApiKey: (provider: string) => resolveApiKeyAsync(provider),
+    streamFn: streamSimpleWithAuth,
+    transformContext: async (messages) => {
+      const estimate = estimateContextTokens({
+        systemPrompt: initialSystemPrompt,
+        messages: messages as any[],
+        tools: codingTools,
+      });
+      if (estimate <= contextBudget.softLimit) return messages;
+      if (messages.length < 2) {
+        return [{
+          role: "user",
+          content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
+          timestamp: Date.now(),
+        }];
+      }
+      const cut = selectCompactionCut(messages as any[], contextBudget.keepRecentTokens);
+      const summary = summarizeContextMessages((messages as any[]).slice(0, cut));
+      const compacted = compactContextMessages(messages as any[], cut, summary);
+      const compactedEstimate = estimateContextTokens({
+        systemPrompt: initialSystemPrompt,
+        messages: compacted,
+        tools: codingTools,
+      });
+      if (compactedEstimate <= contextBudget.softLimit) {
+        return compacted as unknown as AgentMessage[];
+      }
+      return [{
+        role: "user",
+        content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
+        timestamp: Date.now(),
+      }];
+    },
     initialState: {
-      systemPrompt: buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths),
+      // Mailboxes section is added later (handle.done) after vault is async-resolved.
+      systemPrompt: initialSystemPrompt,
       model,
       thinkingLevel,
       maxTokens: model.maxTokens,
       tools: codingTools,
-      messages: [],
+      messages: (ctx?.resumeMessages ?? []) as any[],
       isStreaming: false,
       streamMessage: null,
       pendingToolCalls: new Set(),
     } as any,
   });
+  const directionAcks = new WeakMap<object, string[]>();
 
   const handle: AgentHandle = {
     agentName: agentConfig.name,
@@ -450,6 +561,24 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       alive = false;
 
     },
+    steer: (message: string, directionId?: string) => {
+      const userMessage: AgentMessage = {
+        role: "user",
+        content: [{ type: "text", text: message }],
+        timestamp: Date.now(),
+      };
+      if (directionId) directionAcks.set(userMessage, [directionId]);
+      agent.steer(userMessage);
+    },
+    followUp: (message: string, directionId?: string) => {
+      const userMessage: AgentMessage = {
+        role: "user",
+        content: [{ type: "text", text: message }],
+        timestamp: Date.now(),
+      };
+      if (directionId) directionAcks.set(userMessage, [directionId]);
+      agent.followUp(userMessage);
+    },
   };
 
   // Track turns for maxTurns enforcement
@@ -457,10 +586,18 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const maxTurns = agentConfig.maxTurns ?? 150;
 
   // Subscribe to agent events for activity tracking + transcript
-  agent.subscribe((event: AgentEvent) => {
+  agent.subscribe(async (event: AgentEvent) => {
     activity.lastUpdate = new Date().toISOString();
 
     switch (event.type) {
+      case "message_start": {
+        const directionIds = directionAcks.get(event.message as object);
+        if (directionIds) {
+          directionAcks.delete(event.message as object);
+          await handle.onDirectionApplied?.(directionIds);
+        }
+        break;
+      }
       case "message_end": {
         const msg = event.message;
         if (msg && "content" in msg && msg.role === "assistant") {
@@ -524,6 +661,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
       case "turn_end": {
         turnCount++;
+        await handle.onCheckpoint?.(structuredClone(agent.state.messages), turnCount);
         if (turnCount >= maxTurns) {
           agent.abort();
         }
@@ -557,14 +695,47 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           outputDir,
           whatsappStore: ctx?.whatsappStore,
           whatsappSendMessage: ctx?.whatsappSendMessage,
+          whatsappSendMedia: ctx?.whatsappSendMedia,
+          whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
         });
       }
-      agent.setTools(allTools);
+      if (ctx?.polpoDir) {
+        allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+        allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+      }
+      agent.state.tools = allTools;
 
+      // Refresh system prompt with mailboxes info now that vault is resolved.
+      // The initial prompt set in `new Agent(...)` had no mailbox section
+      // because vault is async-only here; the agent hasn't yet consumed the
+      // prompt, so overwriting state.systemPrompt before .prompt() is safe.
+      // pi-agent-core 1.0: systemPrompt is read from the transcript, so the leading
+      // system message is replaced (nothing has been sent yet).
+      const mailboxes = vault.listMailboxes();
+      if (mailboxes.length > 0) {
+        const prompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths, mailboxes);
+        const [head, ...rest] = agent.state.messages;
+        agent.state.messages =
+          head && head.role === "system"
+            ? [{ ...head, content: prompt }, ...rest]
+            : [{ role: "system", content: prompt, timestamp: Date.now() } as AgentMessage, ...agent.state.messages];
+      }
 
-      const prompt = buildPrompt(task);
-      await agent.prompt(prompt);
+      if (ctx?.continuation) {
+        const continuationPrompt = ctx.resumeMessages?.length
+          ? ctx.continuation.message
+          : `${buildPrompt(task)}\n\n[Human direction]\n${ctx.continuation.message}`;
+        const continuationMessage: AgentMessage = {
+          role: "user",
+          content: [{ type: "text", text: continuationPrompt }],
+          timestamp: Date.now(),
+        };
+        directionAcks.set(continuationMessage, ctx.continuation.directionIds);
+        await agent.prompt(continuationMessage);
+      } else {
+        await agent.prompt(buildPrompt(task));
+      }
 
       // Extract final text from the last assistant message
       const messages = agent.state.messages;

@@ -73,7 +73,7 @@ function ViewToggle() {
 function SearchBar() {
   const { state, actions } = useAgentsPage();
   return (
-    <div className="relative w-64">
+    <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
       <Input
         placeholder="Search agents..."
@@ -96,12 +96,12 @@ function RefreshButton() {
 
 function Toolbar() {
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <ViewToggle />
         <SearchBar />
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-0.5 sm:justify-end sm:overflow-visible sm:pb-0">
         <AddTeamDialog />
         <AddAgentDialog />
         <RefreshButton />
@@ -161,7 +161,7 @@ function AgentsPageInner() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-3 sm:gap-4">
       <SummaryHeader />
       <Toolbar />
       <AgentsContent />

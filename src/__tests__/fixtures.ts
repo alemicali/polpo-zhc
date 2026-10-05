@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, TaskStore, RunStore, RunRecord, RunStatus, Team } from "../core/index.js";
+import type { Task, TaskStatus, TaskOutcome, PolpoState, AgentConfig, AgentActivity, TaskResult, AgentHandle, TaskStore, RunStore, RunRecord, RunStatus, Team, TaskControlStore, TaskDirection, AgentConversationCheckpoint } from "../core/index.js";
 import type { TeamStore } from "../core/team-store.js";
 import type { AgentStore } from "../core/agent-store.js";
 import { assertValidTransition } from "../core/state-machine.js";
@@ -207,6 +207,80 @@ export class InMemoryRunStore implements RunStore {
 
   close(): void {
     this.runs.clear();
+  }
+}
+
+export class InMemoryTaskControlStore implements TaskControlStore {
+  private directions: TaskDirection[] = [];
+  private checkpoints = new Map<string, AgentConversationCheckpoint>();
+
+  async enqueueDirection(input: {
+    taskId: string;
+    runId?: string;
+    mode: TaskDirection["mode"];
+    message: string;
+  }): Promise<TaskDirection> {
+    const direction: TaskDirection = {
+      id: nanoid(),
+      ...input,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+    };
+    this.directions.push(direction);
+    return { ...direction };
+  }
+
+  async claimDirections(taskId: string, runId: string): Promise<TaskDirection[]> {
+    const claimed: TaskDirection[] = [];
+    for (const direction of this.directions) {
+      if (direction.taskId !== taskId || direction.status !== "queued") continue;
+      if (direction.runId && direction.runId !== runId) continue;
+      direction.runId = runId;
+      direction.status = "delivered";
+      direction.deliveredAt = new Date().toISOString();
+      claimed.push({ ...direction });
+    }
+    return claimed;
+  }
+
+  async markDirectionApplied(id: string): Promise<void> {
+    const direction = this.directions.find((item) => item.id === id);
+    if (direction) {
+      direction.status = "applied";
+      direction.appliedAt = new Date().toISOString();
+    }
+  }
+
+  async failDirection(id: string, error: string): Promise<void> {
+    const direction = this.directions.find((item) => item.id === id);
+    if (direction) {
+      direction.status = "failed";
+      direction.error = error;
+    }
+  }
+
+  async requeueDirection(id: string): Promise<void> {
+    const direction = this.directions.find((item) => item.id === id);
+    if (direction) {
+      direction.runId = undefined;
+      direction.status = "queued";
+      direction.deliveredAt = undefined;
+      direction.appliedAt = undefined;
+      direction.error = undefined;
+    }
+  }
+
+  async listDirections(taskId: string): Promise<TaskDirection[]> {
+    return this.directions.filter((item) => item.taskId === taskId).map((item) => ({ ...item }));
+  }
+
+  async saveCheckpoint(checkpoint: AgentConversationCheckpoint): Promise<void> {
+    this.checkpoints.set(checkpoint.taskId, structuredClone(checkpoint));
+  }
+
+  async getCheckpoint(taskId: string): Promise<AgentConversationCheckpoint | undefined> {
+    const checkpoint = this.checkpoints.get(taskId);
+    return checkpoint ? structuredClone(checkpoint) : undefined;
   }
 }
 

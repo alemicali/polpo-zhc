@@ -3,6 +3,66 @@ import { join, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
+
+interface IndexedRunLog {
+  file: string;
+  runId: string;
+  taskId: string;
+  startedAt?: string;
+}
+
+interface ActivityLogIndex {
+  signature: string;
+  byTaskId: Map<string, IndexedRunLog[]>;
+}
+
+const activityLogIndexes = new Map<string, ActivityLogIndex>();
+
+async function indexActivityLogs(fs: FileSystem, logsDir: string): Promise<ActivityLogIndex> {
+  const files = (await fs.readdir(logsDir))
+    .filter((file) => file.startsWith("run-") && file.endsWith(".jsonl"))
+    .sort();
+  const signature = files.join("\0");
+  const cached = activityLogIndexes.get(logsDir);
+  if (cached?.signature === signature) return cached;
+
+  const byTaskId = new Map<string, IndexedRunLog[]>();
+  await Promise.all(files.map(async (file) => {
+    try {
+      const content = await fs.readFile(join(logsDir, file));
+      const newline = content.indexOf("\n");
+      const firstLine = newline >= 0 ? content.slice(0, newline) : content;
+      const header = JSON.parse(firstLine);
+      if (!header?._run || typeof header.taskId !== "string") return;
+      const runId = typeof header.runId === "string"
+        ? header.runId
+        : file.slice("run-".length, -".jsonl".length);
+      const runs = byTaskId.get(header.taskId) ?? [];
+      runs.push({
+        file,
+        runId,
+        taskId: header.taskId,
+        startedAt: typeof header.startedAt === "string" ? header.startedAt : undefined,
+      });
+      byTaskId.set(header.taskId, runs);
+    } catch {
+      // A runner may have created the file but not written its header yet.
+    }
+  }));
+
+  const index = { signature, byTaskId };
+  activityLogIndexes.set(logsDir, index);
+  return index;
+}
+
+function compareRunLogs(a: IndexedRunLog, b: IndexedRunLog): number {
+  const aTime = a.startedAt ? Date.parse(a.startedAt) : Number.NaN;
+  const bTime = b.startedAt ? Date.parse(b.startedAt) : Number.NaN;
+  if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
+  if (a.startedAt && b.startedAt && a.startedAt !== b.startedAt) return a.startedAt.localeCompare(b.startedAt);
+  return a.runId.localeCompare(b.runId);
+}
 
 /**
  * Agent/team management routes.
@@ -30,10 +90,20 @@ export function agentRoutes(getDeps: () => {
     path: "/",
     tags: ["Agents"],
     summary: "List agents",
+    request: {
+      query: z.object({
+        summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+          description: "If `true`, returns a slim projection: only the identity bits the list rows render (displayName, title, avatar, company, email) plus pre-computed `capabilities` counts. Drops `allowedTools`, `allowedPaths`, `skills`, `mcpServers`, `systemPrompt`, `reasoning`, `browserProfile`, `emailAllowedDomains`, `suggestions`, and the bulky `identity.responsibilities/bio/personality/tone/timezone`. Default `false` for backwards compat.",
+        }),
+      }),
+    },
     responses: {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
         description: "List of agents",
+      },
+      304: {
+        description: "Not modified — client has the current list per ETag",
       },
     },
   });
@@ -41,7 +111,45 @@ export function agentRoutes(getDeps: () => {
   app.openapi(listAgentsRoute, async (c) => {
     const deps = getDeps();
     const agents = await deps.getAgents();
-    return c.json({ ok: true, data: agents.map(redactAgentConfig) });
+    const redacted = agents.map(redactAgentConfig);
+    const { summary } = c.req.valid("query");
+
+    if (summary === "true") {
+      const slim = redacted.map((a: any) => {
+        const id = a.identity && typeof a.identity === "object" ? a.identity : null;
+        const slimIdentity = id ? {
+          ...(id.displayName ? { displayName: id.displayName } : {}),
+          ...(id.title ? { title: id.title } : {}),
+          ...(id.avatar ? { avatar: id.avatar } : {}),
+          ...(id.company ? { company: id.company } : {}),
+          ...(id.email ? { email: id.email } : {}),
+        } : undefined;
+        return {
+          name: a.name,
+          role: a.role,
+          model: a.model,
+          team: a.team,
+          reportsTo: a.reportsTo,
+          volatile: a.volatile,
+          createdAt: a.createdAt,
+          ...(slimIdentity && Object.keys(slimIdentity).length > 0 ? { identity: slimIdentity } : {}),
+          capabilities: {
+            tools: Array.isArray(a.allowedTools) ? a.allowedTools.length : 0,
+            skills: Array.isArray(a.skills) ? a.skills.length : 0,
+            mcpServers: a.mcpServers && typeof a.mcpServers === "object"
+              ? Object.keys(a.mcpServers).length
+              : 0,
+          },
+        };
+      });
+      const etag = buildETag(quickFingerprint(slim));
+      if (handleConditional(c, etag)) return c.body(null, 304);
+      return c.json({ ok: true, data: slim });
+    }
+
+    const etag = buildETag(quickFingerprint(redacted));
+    if (handleConditional(c, etag)) return c.body(null, 304);
+    return c.json({ ok: true, data: redacted });
   });
 
   // POST /agents — add agent
@@ -73,7 +181,11 @@ export function agentRoutes(getDeps: () => {
       allowedTools: body.allowedTools,
       systemPrompt: body.systemPrompt,
       skills: body.skills,
+      suggestions: body.suggestions,
       maxTurns: body.maxTurns,
+      runtime: body.runtime,
+      loops: body.loops,
+      pipeline: body.pipeline,
       identity: body.identity,
       reportsTo: body.reportsTo,
       browserProfile: body.browserProfile,
@@ -281,44 +393,43 @@ export function agentRoutes(getDeps: () => {
       return c.json({ ok: true, data: [] });
     }
 
-    // Strategy: first check active RunStore for the runId, otherwise scan JSONL headers
-    let runId: string | undefined;
-    const run = await deps.runStore.getRunByTaskId(taskId);
-    if (run) {
-      runId = run.id;
-    } else {
-      const files = (await fs.readdir(logsDir)).filter((f: string) => f.startsWith("run-") && f.endsWith(".jsonl"));
-      for (const file of files) {
-        try {
-          const firstLine = (await fs.readFile(join(logsDir, file))).split("\n")[0];
-          const header = JSON.parse(firstLine);
-          if (header._run && header.taskId === taskId) {
-            runId = header.runId;
-            break;
-          }
-        } catch { /* skip malformed files */ }
+    const index = await indexActivityLogs(fs, logsDir);
+    const runLogs = [...(index.byTaskId.get(taskId) ?? [])];
+
+    // The file can briefly exist without a header while a runner starts. The
+    // RunStore lets us include that active log on the next poll without
+    // waiting for another file to invalidate the directory index.
+    const activeRun = await deps.runStore.getRunByTaskId(taskId);
+    if (activeRun && !runLogs.some((item) => item.runId === activeRun.id)) {
+      const file = `run-${activeRun.id}.jsonl`;
+      if (await fs.exists(join(logsDir, file))) {
+        const activeRunLog = {
+          file,
+          runId: activeRun.id,
+          taskId,
+          startedAt: activeRun.startedAt,
+        };
+        runLogs.push(activeRunLog);
+        index.byTaskId.set(taskId, [...(index.byTaskId.get(taskId) ?? []), activeRunLog]);
       }
     }
 
-    if (!runId) {
-      return c.json({ ok: true, data: [] });
+    runLogs.sort(compareRunLogs);
+    const entries: any[] = [];
+    for (const runLog of runLogs) {
+      try {
+        const parsed = (await fs.readFile(join(logsDir, runLog.file)))
+          .split("\n")
+          .filter(Boolean)
+          .map((line: string) => { try { return JSON.parse(line); } catch { return null; } })
+          .filter(Boolean)
+          .map(sanitizeTranscriptEntry);
+        entries.push(...parsed);
+      } catch {
+        // Keep other attempts visible if one log is temporarily unreadable.
+      }
     }
-
-    const logPath = join(logsDir, `run-${runId}.jsonl`);
-    if (!(await fs.exists(logPath))) {
-      return c.json({ ok: true, data: [] });
-    }
-
-    try {
-      const lines = (await fs.readFile(logPath)).split("\n").filter(Boolean);
-      const entries = lines
-        .map((line: string) => { try { return JSON.parse(line); } catch { return null; } })
-        .filter(Boolean)
-        .map(sanitizeTranscriptEntry);
-      return c.json({ ok: true, data: entries });
-    } catch {
-      return c.json({ ok: true, data: [] });
-    }
+    return c.json({ ok: true, data: entries });
   });
 
   // PATCH /agents/:name — update agent (registered after static routes to avoid conflicts with /team)
@@ -364,12 +475,16 @@ export function agentRoutes(getDeps: () => {
       ...(body.model !== undefined && { model: body.model }),
       ...(body.systemPrompt !== undefined && { systemPrompt: body.systemPrompt }),
       ...(body.skills !== undefined && { skills: body.skills }),
+      ...(body.suggestions !== undefined && { suggestions: body.suggestions }),
       ...(body.allowedPaths !== undefined && { allowedPaths: body.allowedPaths }),
       ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
       ...(typeof body.reportsTo === "string" && { reportsTo }),
       ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
       ...(body.maxTurns !== undefined && { maxTurns: body.maxTurns }),
       ...(body.maxConcurrency !== undefined && { maxConcurrency: body.maxConcurrency }),
+      ...(body.runtime !== undefined && { runtime: body.runtime }),
+      ...(body.loops !== undefined && { loops: body.loops }),
+      ...(body.pipeline !== undefined && { pipeline: body.pipeline }),
       ...(body.browserProfile !== undefined && { browserProfile: body.browserProfile }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
       ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),

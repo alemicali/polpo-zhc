@@ -6,7 +6,8 @@
  * shell layer (src/core/events.ts), not here.
  */
 
-import type { Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity } from "./types.js";
+import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
+import type { BackgroundWait, TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
 export interface PolpoEventMap {
   // Task lifecycle
@@ -14,11 +15,18 @@ export interface PolpoEventMap {
   "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task };
   "task:updated": { taskId: string; task: Task };
   "task:removed": { taskId: string };
+  "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
+  "agent:created": { agentName: string; teamName?: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "agent:updated": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "agent:removed": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:created": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:updated": { oldName?: string; teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
+  "team:removed": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
 
   // Assessment
   "assessment:started": { taskId: string };
@@ -66,7 +74,17 @@ export interface PolpoEventMap {
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };
+  "session:updated": { sessionId: string; title?: string; starred?: boolean };
+  "session:deleted": { sessionId: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
+
+  // Durable background task waits
+  "background-wait:created": { wait: BackgroundWait };
+  "background-wait:ready": { wait: BackgroundWait };
+  "background-wait:running": { wait: BackgroundWait };
+  "background-wait:completed": { wait: BackgroundWait };
+  "background-wait:failed": { wait: BackgroundWait };
+  "background-wait:cancelled": { wait: BackgroundWait };
 
   // Approval gates
   "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; missionId?: string };
@@ -102,6 +120,13 @@ export interface PolpoEventMap {
   "schedule:created": { scheduleId: string; missionId: string; nextRunAt?: string };
   "schedule:completed": { scheduleId: string; missionId: string };
   "schedule:expired": { scheduleId: string; missionId: string; endDate?: string };
+
+  // Registries and operational surfaces
+  "app:changed": { appId: string; action: "created" | "updated" | "deleted" | "runtime" | "log"; resourceId?: string; timestamp: string };
+  "data-source:changed": { sourceId: string; action: "created" | "updated" | "deleted" | "activity" | "data"; timestamp: string };
+  "data-view:changed": { viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
+  "skill:changed": { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string };
+  "token-usage:recorded": { timestamp: string };
 
   // Notifications
   "notification:sent": { ruleId: string; channel: string; event: string };

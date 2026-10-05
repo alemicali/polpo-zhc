@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -13,12 +14,36 @@ const listTasksRoute = createRoute({
       status: z.string().optional(),
       group: z.string().optional(),
       assignTo: z.string().optional(),
+      summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+      }),
+      // `slim` is an alias for `summary` — the web UI uses `slim=true`
+      // by convention (matches `/agents?slim=true`). Either flag triggers
+      // the same projection; kept distinct so docs can keep both names.
+      slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
+        description: "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+      }),
+      // Cursor pagination. Activating `limit` or `cursor` switches the
+      // response envelope from `{ tasks: Task[] }` to
+      // `{ tasks, nextCursor, hasMore }`.
+      limit: z.string().optional().openapi({
+        description: "Page size (default 50, max 200). Presence triggers the paginated response shape `{ tasks, nextCursor, hasMore }`.",
+      }),
+      cursor: z.string().optional().openapi({
+        description: "ISO timestamp from a previous page's `nextCursor`. Returns tasks with `updated_at < cursor`. Ignored when `q` is set.",
+      }),
+      q: z.string().optional().openapi({
+        description: "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored.",
+      }),
     }),
   },
   responses: {
     200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-      description: "List of tasks",
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "List of tasks. Returns `{ tasks, nextCursor, hasMore }` when `limit`/`cursor`/`q` is set, otherwise `Task[]` for backwards compat.",
+    },
+    304: {
+      description: "Not modified — client has the current list per ETag",
     },
   },
 });
@@ -140,6 +165,55 @@ const killTaskRoute = createRoute({
   },
 });
 
+const TaskDirectionBodySchema = z.object({
+  message: z.string().trim().min(1).max(8_000),
+  mode: z.enum(["auto", "steer", "follow_up", "continue"]).default("auto"),
+  confirmSideEffects: z.boolean().optional(),
+});
+
+const sendTaskDirectionRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/directions",
+  tags: ["Tasks"],
+  summary: "Steer or continue a task",
+  request: {
+    params: z.object({ taskId: z.string() }),
+    body: { content: { "application/json": { schema: TaskDirectionBodySchema } } },
+  },
+  responses: {
+    202: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Direction queued for the active or next task runner",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task state does not permit this direction",
+    },
+  },
+});
+
+const listTaskDirectionsRoute = createRoute({
+  method: "get",
+  path: "/{taskId}/directions",
+  tags: ["Tasks"],
+  summary: "List task directions",
+  request: { params: z.object({ taskId: z.string() }) },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
+      description: "Direction history, including delivery status",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Task not found",
+    },
+  },
+});
+
 const reassessTaskRoute = createRoute({
   method: "post",
   path: "/{taskId}/reassess",
@@ -223,14 +297,50 @@ const bulkDeleteTasksRoute = createRoute({
 // ── Route handlers ────────────────────────────────────────────────────
 
 /**
+ * Slim projection used by both the legacy list path and the paginated one.
+ * Keeps the fields list rows actually render and drops the heavy tail
+ * (outcomes, stdout/stderr, expectations, metrics). The full record is
+ * still served by `GET /tasks/:id`.
+ */
+function projectSlim(t: any): any {
+  const desc = typeof t.description === "string" ? t.description : "";
+  const assess = t.result && typeof t.result === "object" ? t.result.assessment : null;
+  const slimAssessment = assess && typeof assess === "object"
+    ? {
+        globalScore: assess.globalScore,
+        passed: assess.passed,
+        checksCount: Array.isArray(assess.checks) ? assess.checks.length : 0,
+      }
+    : null;
+  return {
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    phase: t.phase,
+    assignTo: t.assignTo,
+    group: t.group,
+    missionId: t.missionId,
+    dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+    retries: t.retries ?? 0,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    descriptionPreview: desc.length > 200 ? desc.slice(0, 200) : desc,
+    ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
+  };
+}
+
+/**
  * Task CRUD + action routes.
  */
 export function taskRoutes(getDeps: () => {
   taskStore: any;
+  wakeSupervisor?: () => void;
   addTask: (opts: any) => Promise<any>;
   deleteTask: (taskId: string) => Promise<any>;
   retryTask: (taskId: string) => Promise<any>;
   killTask: (taskId: string) => Promise<any>;
+  sendDirection: (taskId: string, message: string, opts?: any) => Promise<any>;
+  listDirections: (taskId: string) => Promise<any[]>;
   reassessTask: (taskId: string) => Promise<any>;
   forceFailTask: (taskId: string) => Promise<any>;
   updateTaskDescription: (taskId: string, desc: string) => Promise<any>;
@@ -242,14 +352,84 @@ export function taskRoutes(getDeps: () => {
   // GET /tasks — list all tasks, optional filters
   app.openapi(listTasksRoute, async (c) => {
     const deps = getDeps();
+    const { status, group, assignTo, summary, slim, limit, cursor, q } = c.req.valid("query");
+
+    // ── Paginated path ────────────────────────────────────────────────
+    // Triggered by *any* of `limit`, `cursor`, or `q`. Uses the SQLite
+    // FTS5 + cursor query when the store exposes `getTasksPage()`;
+    // otherwise falls back to fetch-all + in-memory filtering so the file
+    // store and tests keep working.
+    const usePagination = limit !== undefined || cursor !== undefined || q !== undefined;
+    if (usePagination) {
+      const parsedLimit = limit ? Math.max(1, Math.min(200, parseInt(limit, 10) || 50)) : 50;
+      let page: { tasks: any[]; nextCursor: string | null; hasMore: boolean };
+
+      const taskStore = deps.taskStore as { getTasksPage?: (opts: any) => Promise<any> };
+      if (typeof taskStore.getTasksPage === "function") {
+        page = await taskStore.getTasksPage({
+          limit: parsedLimit,
+          cursor: cursor ?? null,
+          q: q ?? null,
+          status: status ?? null,
+          group: group ?? null,
+          assignTo: assignTo ?? null,
+        });
+      } else {
+        // Fallback: fetch everything, filter + sort in memory.
+        let all = await deps.taskStore.getAllTasks();
+        if (status) all = all.filter((t: any) => t.status === status);
+        if (group) all = all.filter((t: any) => t.group === group);
+        if (assignTo) all = all.filter((t: any) => t.assignTo === assignTo);
+        if (q && q.trim().length > 0) {
+          const needle = q.toLowerCase();
+          all = all.filter((t: any) =>
+            (t.title ?? "").toLowerCase().includes(needle) ||
+            (t.description ?? "").toLowerCase().includes(needle)
+          );
+        }
+        // Newest-updated first; cursor filter is `updated_at < cursor`.
+        all.sort((a: any, b: any) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+        if (cursor) all = all.filter((t: any) => (t.updatedAt ?? "") < cursor);
+        const sliced = all.slice(0, parsedLimit + 1);
+        const hasMore = sliced.length > parsedLimit;
+        const tasks = hasMore ? sliced.slice(0, parsedLimit) : sliced;
+        page = {
+          tasks,
+          nextCursor: hasMore && tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : null,
+          hasMore,
+        };
+      }
+
+      // Same slim projection used in the legacy path.
+      const wantSlim = summary === "true" || slim === "true";
+      const projected = wantSlim ? page.tasks.map((t: any) => projectSlim(t)) : page.tasks;
+      return c.json({
+        ok: true,
+        data: {
+          tasks: projected,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+        },
+      });
+    }
+
+    // ── Legacy path (backward compat) ─────────────────────────────────
     let tasks = await deps.taskStore.getAllTasks();
-
-    // Optional filters
-    const { status, group, assignTo } = c.req.valid("query");
-
     if (status) tasks = tasks.filter((t: any) => t.status === status);
     if (group) tasks = tasks.filter((t: any) => t.group === group);
     if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
+
+    // `slim=true` is an alias for `summary=true`. Slim projection kicks in
+    // only when the client opts in. Keeps every field the list rows render;
+    // drops the heavy tail (outcomes, stdout/stderr, expectations, metrics).
+    const wantSlim = summary === "true" || slim === "true";
+    if (wantSlim) tasks = tasks.map((t: any) => projectSlim(t));
+
+    // Conditional GET — return 304 if the client already has this exact list.
+    // Fingerprint runs on the (possibly filtered & slimmed) array so different
+    // query combinations get distinct ETags.
+    const etag = buildETag(quickFingerprint(tasks));
+    if (handleConditional(c, etag)) return c.body(null, 304);
 
     return c.json({ ok: true, data: tasks });
   });
@@ -285,6 +465,7 @@ export function taskRoutes(getDeps: () => {
       draft: body.draft,
     });
 
+    if (task.status !== "draft") deps.wakeSupervisor?.();
     return c.json({ ok: true, data: task }, 201);
   });
 
@@ -301,6 +482,7 @@ export function taskRoutes(getDeps: () => {
 
     if (body.status !== undefined) {
       await deps.taskStore.unsafeSetStatus(taskId, body.status as any, "manual status update via API");
+      if (body.status === "pending") deps.wakeSupervisor?.();
     }
     if (body.description !== undefined) {
       await deps.updateTaskDescription(taskId, body.description);
@@ -341,6 +523,7 @@ export function taskRoutes(getDeps: () => {
     const deps = getDeps();
     const { taskId } = c.req.valid("param");
     await deps.retryTask(taskId);
+    deps.wakeSupervisor?.();
     return c.json({ ok: true, data: { retried: true } });
   });
 
@@ -353,6 +536,37 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { killed: true } }, 200);
+  });
+
+  app.openapi(sendTaskDirectionRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      const result = await deps.sendDirection(taskId, body.message, {
+        mode: body.mode,
+        confirmSideEffects: body.confirmSideEffects,
+      });
+      if (result.action === "continue") deps.wakeSupervisor?.();
+      return c.json({ ok: true, data: result }, 202);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "Task not found") {
+        return c.json({ ok: false, error: message, code: "NOT_FOUND" }, 404);
+      }
+      return c.json({ ok: false, error: message, code: "INVALID_STATE" }, 409);
+    }
+  });
+
+  app.openapi(listTaskDirectionsRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    try {
+      return c.json({ ok: true, data: await deps.listDirections(taskId) }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ ok: false, error: message, code: "NOT_FOUND" }, 404);
+    }
   });
 
   // POST /tasks/:taskId/reassess — re-run assessment
@@ -375,6 +589,7 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: `Task is not in draft state (current: ${task.status})`, code: "INVALID_STATE" }, 404);
     }
     await deps.taskStore.transition(taskId, "pending");
+    deps.wakeSupervisor?.();
     return c.json({ ok: true, data: { queued: true } }, 200);
   });
 

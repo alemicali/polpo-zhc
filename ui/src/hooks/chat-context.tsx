@@ -25,13 +25,17 @@ import type {
   AskUserQuestion,
   MissionPreviewData,
   VaultPreviewData,
+  WhatsAppPreviewData,
+  EmailPreviewData,
   OpenFileData,
   NavigateToData,
   OpenTabData,
+  SetDesignData,
   ChatMessageWithQuestions,
   AskUserAnswer,
   MissionPreviewAction,
   VaultPreviewAction,
+  SendPreviewAction,
 } from "./use-polpo";
 
 // ═══════════════════════════════════════════════════════
@@ -72,6 +76,45 @@ export function useSidebarOpen(): boolean {
 export const sidebarActions = { setSidebarOpen, toggleSidebar } as const;
 
 // ═══════════════════════════════════════════════════════
+//  Dedicated /chat page session sidebar store
+// ═══════════════════════════════════════════════════════
+
+let _chatPageSessionsOpen = false;
+const chatPageSessionsListeners = new Set<() => void>();
+
+function chatPageSessionsSubscribe(cb: () => void) {
+  chatPageSessionsListeners.add(cb);
+  return () => { chatPageSessionsListeners.delete(cb); };
+}
+
+function getChatPageSessionsSnapshot() {
+  return _chatPageSessionsOpen;
+}
+
+export function setChatPageSessionsOpen(open: boolean) {
+  if (_chatPageSessionsOpen === open) return;
+  _chatPageSessionsOpen = open;
+  chatPageSessionsListeners.forEach((cb) => cb());
+}
+
+function toggleChatPageSessions() {
+  setChatPageSessionsOpen(!_chatPageSessionsOpen);
+}
+
+export function useChatPageSessionsOpen(): boolean {
+  return useSyncExternalStore(
+    chatPageSessionsSubscribe,
+    getChatPageSessionsSnapshot,
+    getChatPageSessionsSnapshot,
+  );
+}
+
+export const chatPageSessionActions = {
+  setOpen: setChatPageSessionsOpen,
+  toggle: toggleChatPageSessions,
+} as const;
+
+// ═══════════════════════════════════════════════════════
 //  Chat contexts — split state from actions
 // ═══════════════════════════════════════════════════════
 
@@ -81,37 +124,59 @@ export interface ChatStateValue {
   isLoading: boolean;
   messagesLoading: boolean;
   sessionId: string | null;
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string }[];
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean }[];
   sessionsLoading: boolean;
+  streamingSessionIds: string[];
   pendingQuestions: AskUserQuestion[] | null;
   pendingMission: MissionPreviewData | null;
   pendingVault: VaultPreviewData | null;
+  pendingWhatsApp: WhatsAppPreviewData | null;
+  pendingEmail: EmailPreviewData | null;
   pendingOpenFile: OpenFileData | null;
   pendingNavigateTo: NavigateToData | null;
   pendingOpenTab: OpenTabData | null;
+  pendingSetDesign: SetDesignData | null;
   /** Currently selected agent for agent-direct chat. null = orchestrator. */
   selectedAgent: string | null;
 }
 
 /** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
 export interface ChatActionsValue {
-  send: (message: string, images?: { url: string; mimeType: string }[]) => Promise<void>;
+  send: (message: string, images?: { url: string; mimeType: string }[], context?: string, options?: { onAccepted?: () => void }) => Promise<void>;
   stop: () => void;
   answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
   respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;
   respondToVault: (action: VaultPreviewAction, editedCredentials?: Record<string, string>) => Promise<void>;
+  respondToWhatsApp: (action: SendPreviewAction, feedback?: string) => Promise<{ id?: string; error?: string }>;
+  respondToEmail: (action: SendPreviewAction, feedback?: string) => Promise<{ id?: string; error?: string }>;
   consumeOpenFile: () => void;
   consumeNavigateTo: () => void;
   consumeOpenTab: () => void;
+  consumeSetDesign: (result?: { applied: boolean; description: string }) => void;
   clear: () => void;
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
+  /** Rename a session (PATCH title). Silent catch — dialog handles the error UX. */
+  renameSession: (id: string, title: string) => Promise<void>;
+  /** Toggle the star flag (PATCH starred). Does NOT bump updatedAt. */
+  setStarred: (id: string, starred: boolean) => Promise<void>;
   setSelectedAgent: (agent: string | null) => void;
 }
 
 const ChatStateContext = createContext<ChatStateValue | null>(null);
 const ChatActionsContext = createContext<ChatActionsValue | null>(null);
+
+export type ChatSessionStateValue = Pick<ChatStateValue,
+  | "sessionId"
+  | "sessions"
+  | "sessionsLoading"
+  | "streamingSessionIds"
+  | "messagesLoading"
+  | "selectedAgent"
+>;
+
+const ChatSessionStateContext = createContext<ChatSessionStateValue | null>(null);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const chat = useChat();
@@ -124,19 +189,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     sessionId: chat.sessionId,
     sessions: chat.sessions,
     sessionsLoading: chat.sessionsLoading,
+    streamingSessionIds: chat.streamingSessionIds,
     pendingQuestions: chat.pendingQuestions,
     pendingMission: chat.pendingMission,
     pendingVault: chat.pendingVault,
+    pendingWhatsApp: chat.pendingWhatsApp,
+    pendingEmail: chat.pendingEmail,
     pendingOpenFile: chat.pendingOpenFile,
     pendingNavigateTo: chat.pendingNavigateTo,
     pendingOpenTab: chat.pendingOpenTab,
+    pendingSetDesign: chat.pendingSetDesign,
     selectedAgent: chat.selectedAgent,
   }), [
     chat.messages, chat.isLoading, chat.messagesLoading,
-    chat.sessionId, chat.sessions, chat.sessionsLoading,
+    chat.sessionId, chat.sessions, chat.sessionsLoading, chat.streamingSessionIds,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
+    chat.pendingWhatsApp, chat.pendingEmail,
     chat.pendingOpenFile, chat.pendingNavigateTo,
-    chat.pendingOpenTab, chat.selectedAgent,
+    chat.pendingOpenTab, chat.pendingSetDesign, chat.selectedAgent,
   ]);
 
   const actions: ChatActionsValue = useMemo(() => ({
@@ -145,29 +215,56 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     answerQuestions: chat.answerQuestions,
     respondToMission: chat.respondToMission,
     respondToVault: chat.respondToVault,
+    respondToWhatsApp: chat.respondToWhatsApp,
+    respondToEmail: chat.respondToEmail,
     consumeOpenFile: chat.consumeOpenFile,
     consumeNavigateTo: chat.consumeNavigateTo,
     consumeOpenTab: chat.consumeOpenTab,
+    consumeSetDesign: chat.consumeSetDesign,
     clear: chat.clear,
     loadSession: chat.loadSession,
     newSession: chat.newSession,
     deleteSession: chat.deleteSession,
+    renameSession: chat.renameSession,
+    setStarred: chat.setStarred,
     setSelectedAgent: chat.setSelectedAgent,
   }), [
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
+    chat.respondToWhatsApp, chat.respondToEmail,
     chat.consumeOpenFile, chat.consumeNavigateTo,
-    chat.consumeOpenTab,
+    chat.consumeOpenTab, chat.consumeSetDesign,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
+    chat.renameSession, chat.setStarred,
     chat.setSelectedAgent,
   ]);
 
+  // Session chrome must not re-render for every streamed token. Keep this
+  // narrow context independent from the message-heavy state context.
+  const sessionState: ChatSessionStateValue = useMemo(() => ({
+    sessionId: chat.sessionId,
+    sessions: chat.sessions,
+    sessionsLoading: chat.sessionsLoading,
+    streamingSessionIds: chat.streamingSessionIds,
+    messagesLoading: chat.messagesLoading,
+    selectedAgent: chat.selectedAgent,
+  }), [
+    chat.sessionId,
+    chat.sessions,
+    chat.sessionsLoading,
+    chat.streamingSessionIds,
+    chat.messagesLoading,
+    chat.selectedAgent,
+  ]);
+
   return (
-    <ChatStateContext.Provider value={state}>
-      <ChatActionsContext.Provider value={actions}>
-        {children}
-      </ChatActionsContext.Provider>
-    </ChatStateContext.Provider>
+    <ChatSessionStateContext.Provider value={sessionState}>
+      <ChatStateContext.Provider value={state}>
+        <ChatActionsContext.Provider value={actions}>
+          {children}
+        </ChatActionsContext.Provider>
+      </ChatStateContext.Provider>
+    </ChatSessionStateContext.Provider>
   );
 }
 
@@ -175,6 +272,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 export function useChatState(): ChatStateValue {
   const ctx = use(ChatStateContext);
   if (!ctx) throw new Error("useChatState must be used within a <ChatProvider>");
+  return ctx;
+}
+
+/** Session metadata without subscribing to message/token updates. */
+export function useChatSessionState(): ChatSessionStateValue {
+  const ctx = use(ChatSessionStateContext);
+  if (!ctx) throw new Error("useChatSessionState must be used within a <ChatProvider>");
   return ctx;
 }
 
@@ -189,15 +293,16 @@ export function useChatActions(): ChatActionsValue {
  * Derived hook — true when the chat input should be disabled.
  * Centralises the boolean chain so consumers don't repeat it.
  */
-export function useChatInputDisabled(): boolean {
+export function useChatInputDisabled(options?: { includeLoading?: boolean }): boolean {
   const {
     isLoading, pendingQuestions, pendingMission, pendingVault,
-    pendingOpenFile, pendingNavigateTo, pendingOpenTab,
+    pendingWhatsApp, pendingEmail,
+    pendingOpenFile, pendingNavigateTo, pendingOpenTab, pendingSetDesign,
   } = useChatState();
+  const includeLoading = options?.includeLoading ?? true;
   return (
-    isLoading || !!pendingQuestions || !!pendingMission || !!pendingVault
-    || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab
+    (includeLoading && isLoading) || !!pendingQuestions || !!pendingMission || !!pendingVault
+    || !!pendingWhatsApp || !!pendingEmail
+    || !!pendingOpenFile || !!pendingNavigateTo || !!pendingOpenTab || !!pendingSetDesign
   );
 }
-
-

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolpo } from "./use-polpo.js";
 import { useEvents } from "./use-events.js";
 import { useMutation } from "./use-mutation.js";
@@ -48,11 +48,13 @@ export function useApprovals(status?: ApprovalStatus): UseApprovalsReturn {
   }, [client, status, fetchCount]);
 
   // Auto-refetch when new approval events arrive
+  const latestEventId = approvalEvents.at(-1)?.id;
+  const handledEventRef = useRef(latestEventId);
   useEffect(() => {
-    if (approvalEvents.length > 0) {
-      refetch();
-    }
-  }, [approvalEvents.length, refetch]);
+    if (!latestEventId || handledEventRef.current === latestEventId) return;
+    handledEventRef.current = latestEventId;
+    refetch();
+  }, [latestEventId, refetch]);
 
   const pending = approvals.filter((a) => a.status === "pending");
 

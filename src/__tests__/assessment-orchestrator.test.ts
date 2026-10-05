@@ -119,6 +119,7 @@ function createSessionStore() {
     getSession: () => undefined,
     getLatestSession: () => undefined,
     renameSession: () => false,
+    setStarred: () => false,
     deleteSession: () => false,
     prune: () => 0,
     close: () => {},

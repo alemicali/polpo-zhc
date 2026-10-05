@@ -3,6 +3,7 @@ import type {
   Mission,
   AgentConfig,
   AgentProcess,
+  Team,
   SSEEvent,
 } from "../client/types.js";
 import type { ConnectionStatus } from "../client/event-source.js";
@@ -17,6 +18,7 @@ function createInitialState(): StoreState {
     missions: new Map(),
     missionReports: new Map(),
     agents: [],
+    teams: [],
     processes: [],
     stats: null,
     connectionStatus: "disconnected",
@@ -105,6 +107,15 @@ export class PolpoStore {
       return;
     }
     this.state = { ...this.state, agents };
+    this.notify();
+  }
+
+  setTeams(teams: Team[]): void {
+    const prev = this.state.teams;
+    if (prev.length === teams.length && teams.every((t, i) => prev[i] === t)) {
+      return;
+    }
+    this.state = { ...this.state, teams };
     this.notify();
   }
 

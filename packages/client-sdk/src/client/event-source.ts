@@ -45,7 +45,7 @@ export class EventSourceManager {
       url += `${sep}lastEventId=${encodeURIComponent(this.lastEventId)}`;
     }
 
-    const es = new EventSource(url);
+    const es = new EventSource(url, { withCredentials: true });
     this.es = es;
 
     es.onopen = () => {
@@ -59,10 +59,15 @@ export class EventSourceManager {
 
     // Listen for named events (Polpo sends typed event names)
     // EventSource API: use addEventListener for named events
+    for (const name of ["session:created", "session:updated", "session:deleted", "message:added",
+      "background-wait:completed", "background-wait:failed", "background-wait:cancelled"]) {
+      es.addEventListener(name, (e) => this.handleMessage(e as MessageEvent));
+    }
     es.addEventListener("task:created", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:transition", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:updated", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:removed", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("task:direction", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:retry", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:fix", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:maxRetries", (e) => this.handleMessage(e as MessageEvent));
@@ -71,9 +76,15 @@ export class EventSourceManager {
     es.addEventListener("task:timeout", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("task:recovered", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("agent:spawned", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("agent:created", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("agent:updated", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("agent:removed", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("agent:finished", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("agent:activity", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("agent:stale", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("team:created", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("team:updated", (e) => this.handleMessage(e as MessageEvent));
+    es.addEventListener("team:removed", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("assessment:started", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("assessment:progress", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("assessment:complete", (e) => this.handleMessage(e as MessageEvent));

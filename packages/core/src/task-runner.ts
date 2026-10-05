@@ -37,9 +37,26 @@ export class TaskRunner {
    * Collect results from terminal runs and pass them to the callback.
    * The callback is typically the assessment pipeline (handleResult).
    */
-  async collectResults(onResult: (taskId: string, result: TaskResult) => void): Promise<void> {
+  async collectResults(onResult: (taskId: string, result: TaskResult) => Promise<void> | void): Promise<void> {
     const terminalRuns = await this.ctx.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
+      const recoveredContinuation = await this.recoverInterruptedDirections(run);
+      const task = await this.ctx.registry.getTask(run.taskId);
+      const queuedContinuation = (task?.status === "pending" || recoveredContinuation) && this.ctx.taskControlStore
+        ? (await this.ctx.taskControlStore.listDirections(run.taskId)).some(
+            (direction) => direction.mode === "continue" && direction.status === "queued",
+          )
+        : false;
+      if (queuedContinuation) {
+        this.ctx.emitter.emit("log", {
+          level: "info",
+          message: `[${run.taskId}] Human continuation superseded terminal run ${run.id}`,
+        });
+        await this.ctx.runStore.deleteRun(run.id);
+        this.staleWarned.delete(run.taskId);
+        continue;
+      }
+
       // Persist sessionId on the task before deleting the run
       const sid = run.sessionId ?? run.activity.sessionId;
       if (sid) {
@@ -69,11 +86,40 @@ export class TaskRunner {
             run.result.stderr = (run.result.stderr ? run.result.stderr + "\n" : "") + diagnosis;
           }
         }
-        onResult(run.taskId, run.result);
+        await onResult(run.taskId, run.result);
       }
       await this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
     }
+  }
+
+  private async recoverInterruptedDirections(run: RunRecord): Promise<boolean> {
+    const controlStore = this.ctx.taskControlStore;
+    if (!controlStore) return false;
+
+    let recoveredContinuation = false;
+    const directions = await controlStore.listDirections(run.taskId);
+    for (const direction of directions) {
+      if (direction.runId !== run.id || (direction.status !== "queued" && direction.status !== "delivered")) continue;
+      if (direction.mode === "continue") {
+        await controlStore.requeueDirection(direction.id);
+        recoveredContinuation = true;
+      } else {
+        await controlStore.failDirection(direction.id, "Runner stopped before the direction was applied");
+      }
+    }
+
+    if (recoveredContinuation) {
+      const task = await this.ctx.registry.getTask(run.taskId);
+      if (task && task.status !== "draft" && task.status !== "awaiting_approval") {
+        await this.ctx.registry.unsafeSetStatus(
+          run.taskId,
+          "pending",
+          "recover interrupted human continuation",
+        );
+      }
+    }
+    return recoveredContinuation;
   }
 
   /**
@@ -297,6 +343,7 @@ export class TaskRunner {
         this.ctx.emitter.emit("log", { level: "info", message: `Runner PID ${run.pid} still alive for task ${run.taskId} — reconnecting` });
       } else {
         // Runner died — clean up the run record
+        await this.recoverInterruptedDirections(run);
         await this.ctx.runStore.completeRun(run.id, "failed", {
           exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0,
         });

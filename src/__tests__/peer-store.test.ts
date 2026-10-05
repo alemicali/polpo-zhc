@@ -405,3 +405,34 @@ describe("FilePeerStore — Presence", () => {
     expect(presence[0].channel).toBe("telegram");
   });
 });
+
+// ── Pending pairing management ───────────────────────────
+
+describe("FilePeerStore — pending pairings", () => {
+  it("listPendingPairings returns unexpired, unresolved requests newest first", async () => {
+    const a = await store.createPairingRequest("telegram", "1", "A");
+    await new Promise(r => setTimeout(r, 5));
+    const b = await store.createPairingRequest("telegram", "2", "B");
+    const c = await store.createPairingRequest("whatsapp", "3", "C");
+    await store.resolvePairing(c.code);
+
+    const pending = await store.listPendingPairings();
+    expect(pending.map(p => p.code)).toEqual([b.code, a.code]);
+  });
+
+  it("rejectPairing dismisses the request without granting access", async () => {
+    const req = await store.createPairingRequest("telegram", "9", "Z");
+
+    expect(await store.rejectPairing(req.code.toLowerCase())).toBe(true);
+    expect(await store.listPendingPairings()).toEqual([]);
+    expect(await store.isAllowed("telegram:9", { dmPolicy: "pairing" })).toBe(false);
+    expect(await store.resolvePairing(req.code)).toBeUndefined();
+    expect(await store.rejectPairing(req.code)).toBe(false);
+  });
+
+  it("rejections persist across reloads", async () => {
+    const req = await store.createPairingRequest("telegram", "9");
+    await store.rejectPairing(req.code);
+    expect(await createStore().listPendingPairings()).toEqual([]);
+  });
+});

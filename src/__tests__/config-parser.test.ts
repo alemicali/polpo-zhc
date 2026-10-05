@@ -78,6 +78,28 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.settings.orchestratorModel).toBe("claude-sonnet-4-5-20250929");
     });
 
+    it("preserves shared instance branding", async () => {
+      const cfg = {
+        ...minimalConfig(),
+        settings: {
+          ...minimalConfig().settings,
+          branding: {
+            productName: "Acme Ops",
+            tagline: "Internal AI",
+            logoUrl: "/api/v1/config/branding/logo",
+          },
+        },
+      };
+      const workDir = writeConfig(cfg);
+      const config = await parseConfig(workDir);
+
+      expect(config.settings.branding).toEqual({
+        productName: "Acme Ops",
+        tagline: "Internal AI",
+        logoUrl: "/api/v1/config/branding/logo",
+      });
+    });
+
     it("ignores teams in polpo.json — returns empty teams", async () => {
       const cfg = {
         ...minimalConfig(),

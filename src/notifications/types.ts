@@ -62,4 +62,10 @@ export interface NotificationChannel {
   sendWithAttachments?(notification: Notification, attachments: OutcomeAttachment[]): Promise<void>;
   /** Test connectivity. Returns true if the channel is reachable. */
   test(): Promise<boolean>;
+  /**
+   * Optional visible test delivery.
+   * Channels can implement this when reachability is best verified by sending
+   * a real test notification to the destination.
+   */
+  sendTest?(): Promise<void>;
 }

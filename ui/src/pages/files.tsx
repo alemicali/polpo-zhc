@@ -25,10 +25,15 @@ import {
   FolderOpen,
   ChevronDown,
   Upload,
+  FolderUp,
   FolderPlus,
   Pencil,
   Trash2,
   Copy,
+  Play,
+  Music,
+  LayoutPanelLeft,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,8 +65,16 @@ import {
   mimeFromPath,
   previewCategory,
 } from "@/components/shared/file-preview";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
+import {
+  describeUploadExclusions,
+  emptyUploadExclusions,
+  mergeUploadExclusions,
+  uploadPathExclusion,
+  type UploadExclusions,
+} from "@/lib/upload-exclusions";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 
@@ -86,13 +99,227 @@ interface RootDir {
   totalSize?: number;
 }
 
-type ViewMode = "list" | "grid";
+interface UploadFile {
+  file: globalThis.File;
+  relativePath: string;
+}
+
+interface UploadSelection {
+  files: UploadFile[];
+  exclusions: UploadExclusions;
+}
+
+interface DeleteInfo {
+  path: string;
+  type: "file" | "directory";
+  empty?: boolean;
+  entryCount?: number;
+}
+
+class FileApiError extends Error {
+  readonly status: number;
+  readonly jsonResponse: boolean;
+
+  constructor(message: string, status: number, jsonResponse: boolean) {
+    super(message);
+    this.name = "FileApiError";
+    this.status = status;
+    this.jsonResponse = jsonResponse;
+  }
+}
+
+interface DroppedEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+}
+
+interface DroppedFileEntry extends DroppedEntry {
+  file: (success: (file: globalThis.File) => void, error?: (error: DOMException) => void) => void;
+}
+
+interface DroppedDirectoryReader {
+  readEntries: (success: (entries: DroppedEntry[]) => void, error?: (error: DOMException) => void) => void;
+}
+
+interface DroppedDirectoryEntry extends DroppedEntry {
+  createReader: () => DroppedDirectoryReader;
+}
+
+interface DirectoryDropItem {
+  webkitGetAsEntry?: () => DroppedEntry | null;
+}
+
+type ViewMode = "list" | "grid" | "rows";
 type SortKey = "name" | "type" | "size" | "modified";
 type SortDir = "asc" | "desc";
 
 // ── Helpers ──
 
 const base = config.baseUrl || "";
+const UPLOAD_BATCH_FILE_LIMIT = 100;
+const UPLOAD_BATCH_BYTE_LIMIT = 32 * 1024 * 1024;
+
+function uploadFile(file: globalThis.File, relativePath?: string): UploadFile {
+  const webkitRelativePath = (file as globalThis.File & { webkitRelativePath?: string }).webkitRelativePath;
+  return { file, relativePath: relativePath || webkitRelativePath || file.name };
+}
+
+function uploadBatches(files: UploadFile[]): UploadFile[][] {
+  const batches: UploadFile[][] = [];
+  let current: UploadFile[] = [];
+  let currentBytes = 0;
+
+  for (const entry of files) {
+    if (
+      current.length > 0 &&
+      (current.length >= UPLOAD_BATCH_FILE_LIMIT || currentBytes + entry.file.size > UPLOAD_BATCH_BYTE_LIMIT)
+    ) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(entry);
+    currentBytes += entry.file.size;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+function uploadAbortError(): DOMException {
+  return new DOMException("Upload stopped", "AbortError");
+}
+
+function throwIfUploadAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw uploadAbortError();
+}
+
+function readDroppedFile(entry: DroppedFileEntry, signal?: AbortSignal): Promise<globalThis.File> {
+  return new Promise((resolveFile, reject) => {
+    const abort = () => reject(uploadAbortError());
+    signal?.addEventListener("abort", abort, { once: true });
+    entry.file(
+      (file) => {
+        signal?.removeEventListener("abort", abort);
+        if (signal?.aborted) reject(uploadAbortError());
+        else resolveFile(file);
+      },
+      (error) => {
+        signal?.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function readDroppedDirectory(reader: DroppedDirectoryReader, signal?: AbortSignal): Promise<DroppedEntry[]> {
+  return new Promise((resolveEntries, reject) => {
+    const entries: DroppedEntry[] = [];
+    const abort = () => reject(uploadAbortError());
+    signal?.addEventListener("abort", abort, { once: true });
+    const readNext = () => {
+      if (signal?.aborted) {
+        signal.removeEventListener("abort", abort);
+        reject(uploadAbortError());
+        return;
+      }
+      reader.readEntries((batch) => {
+        if (batch.length === 0) {
+          signal?.removeEventListener("abort", abort);
+          resolveEntries(entries);
+          return;
+        }
+        entries.push(...batch);
+        readNext();
+      }, (error) => {
+        signal?.removeEventListener("abort", abort);
+        reject(error);
+      });
+    };
+    readNext();
+  });
+}
+
+function filterUploadFiles(files: UploadFile[]): UploadSelection {
+  const included: UploadFile[] = [];
+  const directories = new Set<string>();
+  const reasons = new Set<string>();
+  let excludedFiles = 0;
+
+  for (const entry of files) {
+    const exclusion = uploadPathExclusion(entry.relativePath, "file");
+    if (!exclusion) {
+      included.push(entry);
+      continue;
+    }
+    excludedFiles++;
+    reasons.add(exclusion.reason);
+    if (exclusion.kind === "directory") directories.add(exclusion.path);
+  }
+  return {
+    files: included,
+    exclusions: { files: excludedFiles, directories: [...directories], reasons: [...reasons] },
+  };
+}
+
+async function collectDroppedEntry(
+  entry: DroppedEntry,
+  parentPath = "",
+  signal?: AbortSignal,
+): Promise<UploadSelection> {
+  throwIfUploadAborted(signal);
+  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const exclusion = uploadPathExclusion(relativePath, "file");
+    if (exclusion) {
+      return {
+        files: [],
+        exclusions: {
+          files: 1,
+          directories: exclusion.kind === "directory" ? [exclusion.path] : [],
+          reasons: [exclusion.reason],
+        },
+      };
+    }
+    const file = await readDroppedFile(entry as DroppedFileEntry, signal);
+    return { files: [uploadFile(file, relativePath)], exclusions: emptyUploadExclusions() };
+  }
+  if (!entry.isDirectory) return { files: [], exclusions: emptyUploadExclusions() };
+
+  const exclusion = uploadPathExclusion(relativePath, "directory");
+  if (exclusion) {
+    return {
+      files: [],
+      exclusions: { files: 0, directories: [exclusion.path], reasons: [exclusion.reason] },
+    };
+  }
+
+  const children = await readDroppedDirectory((entry as DroppedDirectoryEntry).createReader(), signal);
+  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, relativePath, signal)));
+  return {
+    files: nested.flatMap((selection) => selection.files),
+    exclusions: mergeUploadExclusions(...nested.map((selection) => selection.exclusions)),
+  };
+}
+
+async function collectDroppedFiles(
+  items: DataTransferItem[],
+  fallbackFiles: globalThis.File[],
+  signal?: AbortSignal,
+): Promise<UploadSelection> {
+  throwIfUploadAborted(signal);
+  const entries = items
+    .map((item) => (item as unknown as DirectoryDropItem).webkitGetAsEntry?.() ?? null)
+    .filter((entry): entry is DroppedEntry => entry !== null);
+  if (entries.length > 0) {
+    const selections = await Promise.all(entries.map((entry) => collectDroppedEntry(entry, "", signal)));
+    return {
+      files: selections.flatMap((selection) => selection.files),
+      exclusions: mergeUploadExclusions(...selections.map((selection) => selection.exclusions)),
+    };
+  }
+  return filterUploadFiles(fallbackFiles.map((file) => uploadFile(file)));
+}
 
 function formatSize(bytes?: number): string {
   if (bytes == null) return "";
@@ -155,7 +382,7 @@ function isPreviewableEntry(entry: FileEntry): boolean {
   if (entry.type === "directory") return false;
   const mime = entry.mimeType ?? mimeFromPath(entry.name);
   if (!mime) return false;
-  const cat = previewCategory(mime);
+  const cat = previewCategory(mime, entry.name);
   return cat !== "binary";
 }
 
@@ -187,14 +414,34 @@ function entryPath(currentPath: string, name: string): string {
 
 // ── API helpers ──
 
-async function apiUpload(destPath: string, files: globalThis.File[]): Promise<{ count: number }> {
+async function readFileApiResponse<T>(resp: Response): Promise<T> {
+  const text = await resp.text();
+  let json: { ok?: boolean; data?: T; error?: string } | null = null;
+  try {
+    json = text ? JSON.parse(text) as { ok?: boolean; data?: T; error?: string } : null;
+  } catch {
+    const message = text.trim() || `File request failed (${resp.status})`;
+    throw new FileApiError(message, resp.status, false);
+  }
+  if (!resp.ok || !json?.ok) {
+    throw new FileApiError(json?.error || `File request failed (${resp.status})`, resp.status, true);
+  }
+  return json.data as T;
+}
+
+async function apiUpload(
+  destPath: string,
+  files: UploadFile[],
+  signal?: AbortSignal,
+): Promise<{ count: number; excluded?: { count: number; reasons: string[] } }> {
   const form = new FormData();
   form.set("path", destPath);
-  for (const f of files) form.append("file", f);
-  const resp = await fetch(`${base}/api/v1/files/upload`, { method: "POST", body: form });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
-  return json.data;
+  for (const entry of files) {
+    form.append("file", entry.file);
+    form.append("relativePath", entry.relativePath);
+  }
+  const resp = await fetch(`${base}/api/v1/files/upload`, { method: "POST", body: form, signal });
+  return readFileApiResponse(resp);
 }
 
 async function apiMkdir(path: string): Promise<void> {
@@ -203,8 +450,7 @@ async function apiMkdir(path: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
 async function apiRename(path: string, newName: string): Promise<void> {
@@ -213,21 +459,299 @@ async function apiRename(path: string, newName: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, newName }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
-async function apiDelete(path: string): Promise<void> {
+async function apiDeleteInfo(path: string): Promise<DeleteInfo> {
+  const resp = await fetch(`${base}/api/v1/files/delete-info?path=${encodeURIComponent(path)}`);
+  return readFileApiResponse(resp);
+}
+
+async function apiLegacyDeleteInfo(path: string, type: FileEntry["type"]): Promise<DeleteInfo> {
+  if (type === "file") return { path, type: "file" };
+  const resp = await fetch(`${base}/api/v1/files/list?path=${encodeURIComponent(path)}`);
+  const data = await readFileApiResponse<{ entries: FileEntry[] }>(resp);
+  return { path, type: "directory", empty: data.entries.length === 0, entryCount: data.entries.length };
+}
+
+async function apiDelete(path: string, recursive = false): Promise<void> {
   const resp = await fetch(`${base}/api/v1/files/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, recursive }),
   });
-  const json = await resp.json();
-  if (!json.ok) throw new Error(json.error);
+  await readFileApiResponse<void>(resp);
 }
 
 // ── Root selector component ──
+
+// ── Finder-style grid: lazy thumbnails ─────────────────────────────────
+//
+// Tiles auto-fit ~144px columns. Real preview for images/videos; stylised
+// fallback "paper card" for PDF / audio / code / generic. Lazy-loaded via
+// IntersectionObserver — only tiles near the viewport request bytes.
+
+/** Lazy mount helper — true once the element comes within `rootMargin`. */
+function useInView(rootMargin = "200px"): [React.RefObject<HTMLDivElement | null>, boolean] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (inView) return; // sticky — once visible, stay loaded
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setInView(true);
+            io.disconnect();
+            return;
+          }
+        }
+      },
+      { rootMargin },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [inView, rootMargin]);
+  return [ref, inView];
+}
+
+const EXTENSION_PALETTE: Record<string, { ink: string; chip: string }> = {
+  pdf:      { ink: "text-rose-500",    chip: "bg-rose-500/12 text-rose-500 border-rose-500/30" },
+  doc:      { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
+  docx:     { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
+  xls:      { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
+  xlsx:     { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
+  zip:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+  tar:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+  gz:       { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+};
+
+function extensionPalette(ext: string): { ink: string; chip: string } {
+  return EXTENSION_PALETTE[ext.toLowerCase()] ?? {
+    ink: "text-muted-foreground",
+    chip: "bg-muted/40 text-muted-foreground border-border/60",
+  };
+}
+
+/**
+ * Stylised paper-card fallback used for non-previewable types.
+ * The card has a top-right corner fold so it visually reads as a document.
+ */
+function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: string } }) {
+  return (
+    <div className="relative w-full h-full flex items-center justify-center">
+      <div className="relative w-[64%] h-[80%] rounded-md bg-background/80 border border-border/60 shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_18%)] overflow-hidden">
+        {/* corner fold */}
+        <div className="absolute top-0 right-0 w-3.5 h-3.5">
+          <div className="absolute inset-0 bg-muted/60" style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%)" }} />
+          <div className="absolute inset-0 border-l border-b border-border/70" style={{ clipPath: "polygon(0 100%, 0 0, 100% 100%)" }} />
+        </div>
+        {/* faux text lines */}
+        <div className="absolute inset-x-2 top-2 space-y-1">
+          <div className="h-0.5 w-3/4 bg-muted/60 rounded-full" />
+          <div className="h-0.5 w-full bg-muted/40 rounded-full" />
+          <div className="h-0.5 w-5/6 bg-muted/40 rounded-full" />
+          <div className="h-0.5 w-2/3 bg-muted/40 rounded-full" />
+        </div>
+        {/* extension chip — center-bottom */}
+        <div className="absolute inset-x-0 bottom-2 flex justify-center">
+          <span className={cn(
+            "px-1.5 py-px rounded font-mono text-[9px] font-bold uppercase tracking-wider border",
+            accent.chip,
+          )}>
+            {ext || "file"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Custom tide-pool folder — gradient SVG, more polished than the generic
+ * lucide outline.
+ */
+function FolderGlyph({ open }: { open?: boolean }) {
+  return (
+    <div className="relative w-[68%] h-[68%]">
+      <svg viewBox="0 0 64 56" className="w-full h-full drop-shadow-[0_3px_4px_oklch(0.2_0.04_235_/_18%)]">
+        <defs>
+          <linearGradient id="folder-back" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="oklch(0.78 0.07 200)" />
+            <stop offset="100%" stopColor="oklch(0.62 0.115 205)" />
+          </linearGradient>
+          <linearGradient id="folder-front" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="oklch(0.86 0.05 205)" />
+            <stop offset="100%" stopColor="oklch(0.7 0.1 205)" />
+          </linearGradient>
+        </defs>
+        {/* back leaf */}
+        <path d="M 4 10 Q 4 6 8 6 L 22 6 L 28 12 L 56 12 Q 60 12 60 16 L 60 50 Q 60 54 56 54 L 8 54 Q 4 54 4 50 Z"
+              fill="url(#folder-back)" />
+        {/* front pocket */}
+        <path d={open
+          ? "M 6 22 L 58 22 Q 62 22 60 26 L 54 50 Q 53 54 49 54 L 8 54 Q 4 54 4 50 L 4 26 Q 4 22 8 22 Z"
+          : "M 4 22 L 60 22 L 60 50 Q 60 54 56 54 L 8 54 Q 4 54 4 50 Z"}
+              fill="url(#folder-front)" />
+      </svg>
+    </div>
+  );
+}
+
+/** Renders the right preview content for a file given its category. */
+function FileThumb({
+  entry,
+  path,
+  category,
+  inView,
+}: {
+  entry: FileEntry;
+  path: string;
+  category: ReturnType<typeof previewCategory>;
+  inView: boolean;
+}) {
+  const [errored, setErrored] = useState(false);
+  const ext = (entry.name.split(".").pop() ?? "").toLowerCase();
+
+  if (entry.type === "directory") {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <FolderGlyph />
+      </div>
+    );
+  }
+
+  if (category === "image" && !errored) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-muted/20 to-muted/40">
+        {inView && (
+          <img
+            src={fileReadUrl(path)}
+            alt={entry.name}
+            loading="lazy"
+            decoding="async"
+            onError={() => setErrored(true)}
+            className="w-full h-full object-cover"
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (category === "video" && !errored) {
+    return (
+      <div className="relative w-full h-full bg-gradient-to-br from-muted/30 to-muted/50">
+        {inView && (
+          <video
+            src={`${fileReadUrl(path)}#t=0.5`}
+            preload="metadata"
+            muted
+            playsInline
+            onError={() => setErrored(true)}
+            className="w-full h-full object-cover"
+          />
+        )}
+        {/* play overlay */}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center shadow-md ring-1 ring-border/40">
+            <Play className="h-3.5 w-3.5 fill-foreground text-foreground translate-x-px" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (category === "audio") {
+    return (
+      <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-500/8 to-fuchsia-500/8">
+        {/* faux waveform */}
+        <div className="flex items-end gap-px h-1/2 px-3">
+          {[3, 6, 4, 8, 5, 9, 6, 4, 7, 3, 6, 5, 8, 4, 7].map((h, i) => (
+            <span key={i} className="w-1 rounded-full bg-violet-500/60" style={{ height: `${h * 8}%` }} />
+          ))}
+        </div>
+        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center ring-1 ring-violet-500/30">
+          <Music className="h-2.5 w-2.5 text-violet-500" />
+        </div>
+      </div>
+    );
+  }
+
+  // PDF / code / text / binary — paper-card with extension chip
+  return <PaperCard ext={ext} accent={extensionPalette(ext)} />;
+}
+
+interface FileTileProps {
+  entry: FileEntry;
+  path: string;
+  selected: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+  onContextMenu: () => void;
+}
+
+/** Finder-style tile: square thumb + 2-line filename. */
+function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu }: FileTileProps) {
+  const [ref, inView] = useInView();
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name), entry.name);
+  const isPreviewable = entry.type === "file" && (category === "image" || category === "video");
+
+  return (
+    <div
+      ref={ref}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+      className={cn(
+        "group flex flex-col items-center gap-1.5 p-2 rounded-xl cursor-pointer select-none",
+        "transition-[background-color,box-shadow,transform] duration-150",
+        selected
+          ? "bg-primary/10 ring-1 ring-primary/40 shadow-[0_0_20px_oklch(0.6_0.115_205_/_22%)]"
+          : "hover:bg-accent/30",
+      )}
+    >
+      <div
+        className={cn(
+          "relative aspect-square w-full overflow-hidden rounded-lg",
+          "bg-card/60 border border-border/50",
+          isPreviewable
+            ? "shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_15%)]"
+            : "",
+          "transition-shadow duration-150 group-hover:shadow-[0_6px_14px_-4px_oklch(0.18_0.04_235_/_22%)]",
+        )}
+      >
+        <FileThumb entry={entry} path={path} category={category} inView={inView} />
+      </div>
+      <span
+        className="text-[11px] text-center leading-tight max-w-full font-medium px-0.5 line-clamp-2 break-words"
+        title={entry.name}
+      >
+        {entry.name}
+      </span>
+      {entry.size != null && (
+        <span className="text-[9px] text-muted-foreground/60 font-mono tabular-nums -mt-1">
+          {formatSize(entry.size)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact 44px thumbnail for the rows view — same renderer as FileTile but
+ * with smaller fixed dimensions, no card wrapper, eager-loaded since rows
+ * are short and there are typically fewer in viewport at once.
+ */
+function RowThumb({ entry, path }: { entry: FileEntry; path: string }) {
+  const category = previewCategory(entry.mimeType ?? mimeFromPath(entry.name), entry.name);
+  return (
+    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-border/50 bg-card/60">
+      <FileThumb entry={entry} path={path} category={category} inView />
+    </div>
+  );
+}
 
 function RootItem({
   root,
@@ -263,33 +787,60 @@ function RootItem({
 function Breadcrumb({
   segments,
   onNavigate,
+  fullPath,
 }: {
   segments: string[];
   onNavigate: (index: number) => void;
+  fullPath: string;
 }) {
+  const copyFullPath = async () => {
+    try {
+      await navigator.clipboard.writeText(fullPath);
+      toast.success("Full path copied");
+    } catch {
+      toast.error("Could not copy path");
+    }
+  };
+
   return (
-    <nav className="flex items-center gap-0.5 text-sm min-w-0 overflow-hidden">
-      <button
-        onClick={() => onNavigate(-1)}
-        className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
-      >
-        <Home className="h-3.5 w-3.5" />
-      </button>
-      {segments.map((seg, i) => (
-        <div key={i} className="flex items-center gap-0.5 min-w-0">
-          <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-          {i === segments.length - 1 ? (
-            <span className="font-medium text-foreground truncate">{seg}</span>
-          ) : (
-            <button
-              onClick={() => onNavigate(i)}
-              className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
-            >
-              {seg}
-            </button>
-          )}
-        </div>
-      ))}
+    <nav className="group/path flex min-w-0 items-center gap-0.5 text-sm">
+      <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+        <button
+          onClick={() => onNavigate(-1)}
+          className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+          aria-label="Workspace root"
+        >
+          <Home className="h-3.5 w-3.5" />
+        </button>
+        {segments.map((seg, i) => (
+          <div key={i} className="flex items-center gap-0.5 min-w-0">
+            <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+            {i === segments.length - 1 ? (
+              <span className="font-medium text-foreground truncate">{seg}</span>
+            ) : (
+              <button
+                onClick={() => onNavigate(i)}
+                className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+              >
+                {seg}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => void copyFullPath()}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent/40 hover:text-foreground focus-visible:opacity-100 group-hover/path:opacity-100"
+            aria-label="Copy full path"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Copy full path</TooltipContent>
+      </Tooltip>
     </nav>
   );
 }
@@ -348,11 +899,16 @@ export function FilesPage() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [renamingEntry, setRenamingEntry] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ entry: FileEntry; path: string; info?: DeleteInfo; inspecting: boolean } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   /** Currently selected (highlighted) file name — single click selects, double click opens */
   const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const dragCounter = useRef(0);
   const { previewState, openPreview, closePreview } = useFilePreview();
 
@@ -360,6 +916,15 @@ export function FilesPage() {
   const currentPath = searchParams.get("path") || ".";
   const highlightParam = searchParams.get("highlight");
   const activeRoot = roots.find(r => currentPath === r.path || (r.path !== "." && currentPath.startsWith(r.path + "/"))) || roots[0];
+  const currentAbsolutePath = useMemo(() => {
+    if (!activeRoot) return currentPath;
+    const relativePath = activeRoot.path === "."
+      ? (currentPath === "." ? "" : currentPath)
+      : (currentPath === activeRoot.path ? "" : currentPath.slice(activeRoot.path.length + 1));
+    if (!relativePath) return activeRoot.absolutePath;
+    const separator = activeRoot.absolutePath.includes("\\") ? "\\" : "/";
+    return `${activeRoot.absolutePath.replace(/[\\/]$/, "")}${separator}${relativePath.replace(/\//g, separator)}`;
+  }, [activeRoot, currentPath]);
 
   // Path segments for breadcrumb
   const pathSegments = useMemo(() => {
@@ -499,48 +1064,130 @@ export function FilesPage() {
   }, [currentPath, navigateTo, openPreview, renamingEntry]);
 
   // ── Upload ──
-  const handleUploadFiles = useCallback(async (files: globalThis.File[]) => {
-    if (files.length === 0) return;
+  const handleUploadFiles = useCallback(async (
+    selection: UploadSelection,
+    activeUpload?: { controller: AbortController; toastId: string | number },
+  ) => {
+    const controller = activeUpload?.controller ?? new AbortController();
+    if (!activeUpload) {
+      uploadAbortRef.current?.abort();
+      uploadAbortRef.current = controller;
+      setUploading(true);
+    }
+
+    const excludedDescription = describeUploadExclusions(selection.exclusions);
+    if (excludedDescription) toast.info(excludedDescription);
+
+    const toastId = activeUpload?.toastId ?? toast.loading(`Uploading 0 of ${selection.files.length} files...`);
+    if (selection.files.length === 0) {
+      toast.info(excludedDescription ? "Nothing to upload after exclusions" : "No files to upload", { id: toastId });
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+      }
+      return;
+    }
+
+    let uploaded = 0;
+    let serverExcluded = 0;
+    const serverExclusionReasons = new Set<string>();
     try {
-      const result = await apiUpload(currentPath, files);
-      toast.success(`Uploaded ${result.count} file${result.count !== 1 ? "s" : ""}`);
+      toast.loading(`Uploading 0 of ${selection.files.length} files...`, { id: toastId });
+      for (const batch of uploadBatches(selection.files)) {
+        throwIfUploadAborted(controller.signal);
+        const result = await apiUpload(currentPath, batch, controller.signal);
+        uploaded += result.count;
+        serverExcluded += result.excluded?.count ?? 0;
+        for (const reason of result.excluded?.reasons ?? []) serverExclusionReasons.add(reason);
+        toast.loading(`Uploading ${uploaded} of ${selection.files.length} files...`, { id: toastId });
+      }
+      toast.success(`Uploaded ${uploaded} file${uploaded !== 1 ? "s" : ""}`, { id: toastId });
+      if (serverExcluded > 0) {
+        toast.info(`Server excluded ${serverExcluded} file${serverExcluded === 1 ? "" : "s"} (${[...serverExclusionReasons].join(", ")})`);
+      }
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Upload failed");
+      if (controller.signal.aborted) {
+        toast.info(uploaded > 0 ? `Upload stopped after ${uploaded} files` : "Upload stopped", { id: toastId });
+        refresh();
+      } else {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        toast.error(uploaded > 0 ? `${message} (${uploaded} files uploaded)` : message, { id: toastId });
+      }
+    } finally {
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+        setUploading(false);
+      }
     }
   }, [currentPath, refresh]);
 
+  const cancelUpload = useCallback(() => {
+    uploadAbortRef.current?.abort();
+  }, []);
+
   const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files && files.length > 0) handleUploadFiles(Array.from(files));
+    if (files && files.length > 0) {
+      void handleUploadFiles(filterUploadFiles(Array.from(files, (file) => uploadFile(file))));
+    }
+    e.target.value = "";
+  }, [handleUploadFiles]);
+
+  const handleFolderInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      void handleUploadFiles(filterUploadFiles(Array.from(files, (file) => uploadFile(file))));
+    }
     e.target.value = "";
   }, [handleUploadFiles]);
 
   // ── Drag & drop ──
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current++;
     if (e.dataTransfer.types.includes("Files")) setDragging(true);
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current--;
     if (dragCounter.current === 0) setDragging(false);
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "copy";
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     dragCounter.current = 0;
     setDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) handleUploadFiles(files);
+    const items = Array.from(e.dataTransfer.items);
+    const fallbackFiles = Array.from(e.dataTransfer.files);
+    uploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    setUploading(true);
+    const toastId = toast.loading("Scanning dropped folders...");
+    void collectDroppedFiles(items, fallbackFiles, controller.signal)
+      .then((selection) => handleUploadFiles(selection, { controller, toastId }))
+      .catch((error) => {
+        if (controller.signal.aborted) toast.info("Upload stopped", { id: toastId });
+        else toast.error(error instanceof Error ? error.message : "Could not read dropped folder", { id: toastId });
+        if (uploadAbortRef.current === controller) {
+          uploadAbortRef.current = null;
+          setUploading(false);
+        }
+      });
   }, [handleUploadFiles]);
+
+  useEffect(() => () => uploadAbortRef.current?.abort(), []);
 
   // ── Create folder ──
   const handleCreateFolder = useCallback(async (name: string) => {
@@ -568,14 +1215,47 @@ export function FilesPage() {
 
   // ── Delete ──
   const handleDelete = useCallback(async (entry: FileEntry) => {
+    const path = entryPath(currentPath, entry.name);
+    setDeleteTarget({ entry, path, inspecting: true });
     try {
-      await apiDelete(entryPath(currentPath, entry.name));
-      toast.success(`Deleted "${entry.name}"`);
+      const info = await apiDeleteInfo(path);
+      setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
+    } catch (err) {
+      if (err instanceof FileApiError && err.status === 404 && !err.jsonResponse) {
+        try {
+          const info = await apiLegacyDeleteInfo(path, entry.type);
+          if (info.type === "directory" && info.empty === false) {
+            setDeleteTarget(null);
+            toast.error("Recursive deletion will be available after the pending server update is restarted.");
+            return;
+          }
+          setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
+          return;
+        } catch (fallbackError) {
+          err = fallbackError;
+        }
+      }
+      setDeleteTarget(null);
+      toast.error(err instanceof Error ? err.message : "Could not inspect this path");
+    }
+  }, [currentPath]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget?.info || deleting) return;
+    setDeleting(true);
+    try {
+      const recursive = deleteTarget.info.type === "directory" && deleteTarget.info.empty === false;
+      await apiDelete(deleteTarget.path, recursive);
+      toast.success(`Deleted "${deleteTarget.entry.name}"`);
+      setDeleteTarget(null);
+      setSelectedEntry(null);
       refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
     }
-  }, [currentPath, refresh]);
+  }, [deleteTarget, deleting, refresh]);
 
   // Filter and sort
   const filtered = useMemo(() => {
@@ -691,27 +1371,70 @@ export function FilesPage() {
     );
   };
 
-  // ── Render entry card (grid view) ──
-  const renderGridEntry = (entry: FileEntry) => {
-    const Icon = fileIcon(entry);
-    const color = fileIconColor(entry);
+  // ── Render entry row (rows / list-with-thumbnail view) ──
+  // List metadata layout (name, size, date, hover actions) but with a real
+  // 48px thumbnail leading each row instead of a flat icon.
+  const renderRowsEntry = (entry: FileEntry) => {
     const canPreview = isPreviewableEntry(entry);
+    const isRenaming = renamingEntry === entry.name;
+    const isSelected = selectedEntry === entry.name;
+    const path = entryPath(currentPath, entry.name);
 
-    const isSelectedGrid = selectedEntry === entry.name;
-    const card = (
+    const row = (
       <div
-        onClick={() => handleEntryClick(entry)}
-        onDoubleClick={() => handleEntryDoubleClick(entry)}
+        onClick={() => !isRenaming && handleEntryClick(entry)}
+        onDoubleClick={() => !isRenaming && handleEntryDoubleClick(entry)}
         onContextMenu={() => setSelectedEntry(entry.name)}
         className={cn(
-          "flex flex-col items-center gap-1.5 p-3 rounded-lg group cursor-pointer select-none",
-          isSelectedGrid ? "bg-primary/10 ring-1 ring-primary/30 hover:bg-primary/15" : "hover:bg-accent/30",
+          "flex items-center gap-3 w-full px-3 py-2.5 text-left group cursor-pointer select-none",
+          isSelected ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-accent/30",
         )}
       >
-        <Icon className={cn("h-8 w-8", color)} />
-        <span className="text-[11px] text-center leading-tight max-w-full truncate w-full">{entry.name}</span>
-        {entry.size != null && (
-          <span className="text-[9px] text-muted-foreground/50">{formatSize(entry.size)}</span>
+        <RowThumb entry={entry} path={path} />
+        {isRenaming ? (
+          <InlineRename
+            initialName={entry.name}
+            onConfirm={name => handleRename(entry, name)}
+            onCancel={() => setRenamingEntry(null)}
+          />
+        ) : (
+          <>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm truncate font-medium">
+                {entry.name}
+                {entry.type === "directory" && <span className="text-muted-foreground/40">/</span>}
+              </div>
+              {(entry.size != null || entry.modifiedAt) && (
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 mt-0.5">
+                  {entry.size != null && <span className="tabular-nums">{formatSize(entry.size)}</span>}
+                  {entry.size != null && entry.modifiedAt && <span className="opacity-50">·</span>}
+                  {entry.modifiedAt && <span>{formatDate(entry.modifiedAt)}</span>}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              {entry.type === "file" && canPreview && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); const m = entry.mimeType ?? mimeFromPath(entry.name); openPreview({ label: entry.name, path, mimeType: m, size: entry.size }); }}>
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Preview</TooltipContent>
+                </Tooltip>
+              )}
+              {entry.type === "file" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); window.open(fileReadUrl(path, true), "_blank"); }}>
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Download</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </>
         )}
       </div>
     );
@@ -719,7 +1442,57 @@ export function FilesPage() {
     return (
       <ContextMenu key={entry.name}>
         <ContextMenuTrigger asChild>
-          {card}
+          {row}
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {entry.type === "directory" ? (
+            <ContextMenuItem onSelect={() => navigateTo(path)}>
+              <FolderOpen className="h-3.5 w-3.5 mr-2" /> Open
+            </ContextMenuItem>
+          ) : (
+            <>
+              {canPreview && (
+                <ContextMenuItem onSelect={() => { const m = entry.mimeType ?? mimeFromPath(entry.name); openPreview({ label: entry.name, path, mimeType: m, size: entry.size }); }}>
+                  <Eye className="h-3.5 w-3.5 mr-2" /> Preview
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem onSelect={() => window.open(fileReadUrl(path, true), "_blank")}>
+                <Download className="h-3.5 w-3.5 mr-2" /> Download
+              </ContextMenuItem>
+            </>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => { navigator.clipboard.writeText(entry.name); toast.success("Name copied"); }}>
+            <Copy className="h-3.5 w-3.5 mr-2" /> Copy name
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => setRenamingEntry(entry.name)}>
+            <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onSelect={() => handleDelete(entry)}>
+            <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
+
+  // ── Render entry card (grid / Finder-style thumbnail view) ──
+  const renderGridEntry = (entry: FileEntry) => {
+    const canPreview = isPreviewableEntry(entry);
+    const isSelectedGrid = selectedEntry === entry.name;
+    const path = entryPath(currentPath, entry.name);
+
+    return (
+      <ContextMenu key={entry.name}>
+        <ContextMenuTrigger asChild>
+          <FileTile
+            entry={entry}
+            path={path}
+            selected={isSelectedGrid}
+            onClick={() => handleEntryClick(entry)}
+            onDoubleClick={() => handleEntryDoubleClick(entry)}
+            onContextMenu={() => setSelectedEntry(entry.name)}
+          />
         </ContextMenuTrigger>
         <ContextMenuContent>
           {entry.type === "directory" ? (
@@ -754,24 +1527,60 @@ export function FilesPage() {
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-0">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-0">
       {/* Hidden file input */}
       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFolderInputChange}
+        {...({ webkitdirectory: "" } as Record<string, string>)}
+      />
 
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-1 pb-3 shrink-0">
-        <div className="flex-1 min-w-0">
-          <Breadcrumb segments={pathSegments} onNavigate={handleBreadcrumbNav} />
+      <div className="flex shrink-0 flex-col gap-2 px-1 pb-3 lg:flex-row lg:items-center">
+        <div className="min-w-0 flex-1">
+          <Breadcrumb segments={pathSegments} onNavigate={handleBreadcrumbNav} fullPath={currentAbsolutePath} />
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex max-w-full shrink-0 items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 lg:overflow-visible lg:pb-0">
           {/* Upload */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-4 w-4" />
+              <Button
+                variant={uploading ? "destructive" : "ghost"}
+                size={uploading ? "sm" : "icon"}
+                className={cn("h-8", uploading ? "gap-1.5 px-2.5" : "w-8")}
+                onClick={() => uploading ? cancelUpload() : fileInputRef.current?.click()}
+                aria-label={uploading ? "Stop upload" : "Upload files"}
+              >
+                {uploading ? (
+                  <>
+                    <X className="h-4 w-4" />
+                    <span>Stop upload</span>
+                  </>
+                ) : <Upload className="h-4 w-4" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Upload files</TooltipContent>
+            <TooltipContent side="bottom">{uploading ? "Stop the current upload" : "Upload files"}</TooltipContent>
+          </Tooltip>
+
+          {/* Upload folder */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={uploading}
+                aria-label="Upload folder"
+              >
+                <FolderUp className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Upload folder</TooltipContent>
           </Tooltip>
 
           {/* New folder */}
@@ -784,25 +1593,25 @@ export function FilesPage() {
             <TooltipContent side="bottom">New folder</TooltipContent>
           </Tooltip>
 
-          <Separator orientation="vertical" className="h-5 mx-1" />
+          <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
 
           {/* Search */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Filter..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="h-8 w-36 lg:w-48 pl-7 text-sm"
+              className="h-8 w-32 pl-7 text-sm lg:w-48"
             />
           </div>
 
-          <Separator orientation="vertical" className="h-5 mx-1" />
+          <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
 
           {/* Sort */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 text-xs gap-1">
+              <Button variant="ghost" size="sm" className="h-8 shrink-0 text-xs gap-1">
                 <ChevronDown className="h-3 w-3" />
                 {sortKey}
               </Button>
@@ -824,13 +1633,31 @@ export function FilesPage() {
           </DropdownMenu>
 
           {/* View toggle */}
-          <div className="flex items-center border rounded-md">
-            <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none" onClick={() => setViewMode("list")}>
-              <LayoutList className="h-3.5 w-3.5" />
-            </Button>
-            <Button variant={viewMode === "grid" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none" onClick={() => setViewMode("grid")}>
-              <LayoutGrid className="h-3.5 w-3.5" />
-            </Button>
+          <div className="flex shrink-0 items-center rounded-md border">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none rounded-l-md" onClick={() => setViewMode("list")}>
+                  <LayoutList className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Compact list</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "rows" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-none border-x" onClick={() => setViewMode("rows")}>
+                  <LayoutPanelLeft className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Rows with previews</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant={viewMode === "grid" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none rounded-r-md" onClick={() => setViewMode("grid")}>
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Thumbnails</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Back / Refresh */}
@@ -913,8 +1740,8 @@ export function FilesPage() {
           {dragging && (
             <div className="absolute inset-0 z-20 bg-primary/5 border-2 border-dashed border-primary/40 rounded flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-2 text-primary">
-                <Upload className="h-8 w-8" />
-                <span className="text-sm font-medium">Drop files to upload</span>
+                <FolderUp className="h-8 w-8" />
+                <span className="text-sm font-medium">Drop files or folders to upload</span>
               </div>
             </div>
           )}
@@ -959,14 +1786,18 @@ export function FilesPage() {
                       <div className="flex flex-col items-center justify-center py-20 gap-2 text-muted-foreground">
                         <Folder className="h-8 w-8 mb-2 opacity-30" />
                         <p className="text-sm">{search ? "No matching entries" : "Empty directory"}</p>
-                        <p className="text-xs opacity-50">Drop files here or use the upload button</p>
+                        <p className="text-xs opacity-50">Drop files or folders here, or use an upload button</p>
                       </div>
                     ) : viewMode === "list" ? (
                       <div className="divide-y divide-border/30">
                         {filtered.map(renderListEntry)}
                       </div>
+                    ) : viewMode === "rows" ? (
+                      <div className="divide-y divide-border/20">
+                        {filtered.map(renderRowsEntry)}
+                      </div>
                     ) : (
-                      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1 p-2">
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-2 p-3">
                         {filtered.map(renderGridEntry)}
                       </div>
                     )}
@@ -977,6 +1808,9 @@ export function FilesPage() {
             <ContextMenuContent>
               <ContextMenuItem onSelect={() => fileInputRef.current?.click()}>
                 <Upload className="h-3.5 w-3.5 mr-2" /> Upload files
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => folderInputRef.current?.click()}>
+                <FolderUp className="h-3.5 w-3.5 mr-2" /> Upload folder
               </ContextMenuItem>
               <ContextMenuItem onSelect={() => setCreatingFolder(true)}>
                 <FolderPlus className="h-3.5 w-3.5 mr-2" /> New folder
@@ -989,6 +1823,29 @@ export function FilesPage() {
           </ContextMenu>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+        title={deleteTarget?.inspecting
+          ? `Checking "${deleteTarget.entry.name}"...`
+          : deleteTarget?.info?.type === "directory"
+            ? deleteTarget.info.empty ? "Delete empty directory?" : "Delete directory and all contents?"
+            : "Delete file?"}
+        description={deleteTarget?.inspecting
+          ? "Polpo is checking the directory contents before allowing deletion."
+          : deleteTarget?.info?.type === "directory"
+            ? deleteTarget.info.empty
+              ? <span>The directory <span className="font-mono text-foreground">{deleteTarget.entry.name}</span> is empty and will be permanently deleted.</span>
+              : <span><span className="block font-medium text-destructive">This directory is not empty.</span><span className="mt-1 block">It contains {deleteTarget.info.entryCount} top-level item{deleteTarget.info.entryCount === 1 ? "" : "s"}. The directory and everything nested inside it will be permanently deleted.</span></span>
+            : <span>The file <span className="font-mono text-foreground">{deleteTarget?.entry.name}</span> will be permanently deleted.</span>}
+        confirmLabel={deleteTarget?.info?.type === "directory"
+          ? deleteTarget.info.empty ? "Delete directory" : "Delete recursively"
+          : "Delete file"}
+        destructive
+        loading={Boolean(deleteTarget?.inspecting || deleting)}
+        onConfirm={() => void confirmDelete()}
+      />
 
       {/* File preview dialog */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />

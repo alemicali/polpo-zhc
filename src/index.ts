@@ -61,6 +61,7 @@ export { SlackChannel } from "./notifications/channels/slack.js";
 export { TelegramChannel } from "./notifications/channels/telegram.js";
 export { EmailChannel } from "./notifications/channels/email.js";
 export { WebhookChannel } from "./notifications/channels/webhook.js";
+export { PushChannel } from "./notifications/channels/push.js";
 
 // Security
 export { safeEnv, bashSafeEnv } from "./tools/safe-env.js";

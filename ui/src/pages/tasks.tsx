@@ -1,4 +1,5 @@
 import { useState, useMemo, memo, createContext, use } from "react";
+import { Virtuoso } from "react-virtuoso";
 import {
   Card,
   CardContent,
@@ -52,7 +53,6 @@ import {
   Layers,
   ChevronRight,
   ChevronDown,
-  Calendar,
   Settings2,
 } from "lucide-react";
 import {
@@ -74,11 +74,10 @@ import type {
   GroupByKey,
   ColumnByKey,
   SortKey,
-  TimeField,
-  TimeFilterState,
-  TimeRange,
   CardFieldVisibility,
 } from "@/hooks/use-tasks-page";
+import { TimeRangeFilter } from "@/components/shared/time-range-filter";
+import { getTimeRangeLabel } from "@/lib/time-filter";
 
 // ── Card settings context (avoids prop drilling) ──
 
@@ -388,108 +387,6 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "score", label: "Score" },
 ];
 
-// ── Time filter ──
-
-const timeFieldOptions: { value: TimeField; label: string }[] = [
-  { value: "createdAt", label: "Created" },
-  { value: "updatedAt", label: "Updated" },
-];
-
-const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
-  { value: "1h", label: "Last hour", ms: 60 * 60 * 1000 },
-  { value: "6h", label: "Last 6 hours", ms: 6 * 60 * 60 * 1000 },
-  { value: "24h", label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
-  { value: "7d", label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: "30d", label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-];
-
-
-
-function TimeFilter({
-  value,
-  onChange,
-  onClear,
-}: {
-  value: TimeFilterState | null;
-  onChange: (v: TimeFilterState) => void;
-  onClear: () => void;
-}) {
-  const hasFilter = value !== null;
-  const [field, setField] = useState<TimeField>(value?.field ?? "updatedAt");
-
-  const applyPreset = (preset: (typeof timeRangePresets)[number]) => {
-    onChange({ field, range: preset.value, after: Date.now() - preset.ms });
-  };
-
-  const activePresetLabel = value
-    ? timeRangePresets.find(p => p.value === value.range)?.label ?? value.range
-    : null;
-  const activeFieldLabel = value
-    ? timeFieldOptions.find(f => f.value === value.field)?.label ?? value.field
-    : null;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
-          <Calendar className="h-3.5 w-3.5" />
-          {hasFilter ? `${activeFieldLabel}: ${activePresetLabel}` : "Time"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-2" align="start">
-        {/* Field selector */}
-        <div className="flex items-center gap-1 mb-2">
-          {timeFieldOptions.map((opt) => (
-            <Button
-              key={opt.value}
-              variant={field === opt.value ? "default" : "ghost"}
-              size="sm"
-              className="h-6 text-[10px] flex-1"
-              onClick={() => setField(opt.value)}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
-
-        {/* Range presets */}
-        <div className="space-y-0.5">
-          {timeRangePresets.map((preset) => (
-            <button
-              key={preset.value}
-              className={cn(
-                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-muted",
-              )}
-              onClick={() => applyPreset(preset)}
-            >
-              <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-primary border-primary"
-                  : "border-muted-foreground/30",
-              )}>
-                {value?.range === preset.value && value?.field === field && (
-                  <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                )}
-              </div>
-              <span>{preset.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {hasFilter && (
-          <Button variant="ghost" size="sm" className="w-full mt-1 text-xs" onClick={onClear}>
-            Clear
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 // ── Task card ──
 
 const TaskCard = memo(function TaskCard({
@@ -497,11 +394,13 @@ const TaskCard = memo(function TaskCard({
   process,
   size = "default",
   allTasks,
+  enableStatusDrag = false,
 }: {
   task: Task;
   process?: AgentProcess;
   size?: "default" | "compact";
   allTasks?: Task[];
+  enableStatusDrag?: boolean;
 }) {
   const { retry, kill, queue, click } = useTaskActions();
   const { fields, agentConfigMap } = useCardSettings();
@@ -520,13 +419,24 @@ const TaskCard = memo(function TaskCard({
     return !dep || dep.status !== "done";
   });
   const isBlocked = unresolvedDeps.length > 0 && (task.status === "pending" || task.status === "assigned");
+  const canDragToQueued = enableStatusDrag && task.status === "draft";
+
+  const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!canDragToQueued) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-polpo-task-id", task.id);
+    event.dataTransfer.setData("text/plain", task.id);
+  };
 
   return (
     <div
+      draggable={canDragToQueued}
+      onDragStart={handleDragStart}
       className={cn(
         "group rounded-lg border bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
         "hover:shadow-[0_2px_8px_oklch(0_0_0/0.12)] hover:border-primary/25",
         "w-full max-w-full overflow-hidden box-border",
+        canDragToQueued && "cursor-grab active:cursor-grabbing",
         isBlocked
           ? "border-amber-500/40 bg-amber-500/[0.03]"
           : "border-border/40",
@@ -784,12 +694,14 @@ function GroupBlock({
   tasks,
   processes,
   allTasks,
+  enableStatusDrag,
 }: {
   label: string;
   icon: React.ElementType;
   tasks: Task[];
   processes: AgentProcess[];
   allTasks: Task[];
+  enableStatusDrag: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -846,6 +758,7 @@ function GroupBlock({
               process={processes.find(p => p.taskId === task.id)}
               size="compact"
               allTasks={allTasks}
+              enableStatusDrag={enableStatusDrag}
             />
           ))}
         </div>
@@ -874,6 +787,9 @@ function KanbanColumn({
   agentTeamMap: Record<string, string>;
 }) {
   const colTasks = useMemo(() => tasks.filter(col.filter), [tasks, col]);
+  const { moveToKanbanColumn } = useTaskActions();
+  const [isDragOver, setIsDragOver] = useState(false);
+  const acceptsStatusDrop = columnBy === "status" && col.key === "queued";
 
   // Status dot color — resolve from statusConfig when column-by is status
   const statusKey = col.key === "queued" ? "pending" : col.key;
@@ -891,8 +807,42 @@ function KanbanColumn({
 
   const GroupIcon = effectiveGroupBy !== "none" ? (groupByIcons[effectiveGroupBy] ?? Layers) : Layers;
 
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!acceptsStatusDrop) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!acceptsStatusDrop) return;
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!acceptsStatusDrop) return;
+    event.preventDefault();
+    setIsDragOver(false);
+    const taskId = event.dataTransfer.getData("application/x-polpo-task-id") || event.dataTransfer.getData("text/plain");
+    if (!taskId) return;
+    const task = allTasks.find((t) => t.id === taskId);
+    if (!task) return;
+    moveToKanbanColumn(task, col.key);
+  };
+
   return (
-    <div className="flex flex-col w-[260px] min-w-[260px] max-w-[260px] shrink-0 overflow-hidden">
+    <div
+      className={cn(
+        "flex flex-col w-[260px] min-w-[260px] max-w-[260px] shrink-0 overflow-hidden rounded-lg border border-dashed border-transparent transition-colors",
+        acceptsStatusDrop && "data-[drop=true]:border-blue-400/60 data-[drop=true]:bg-blue-500/[0.06]",
+      )}
+      data-drop={isDragOver ? "true" : undefined}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Column header */}
       <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2 min-w-0">
         {colCfg ? (
@@ -922,6 +872,7 @@ function KanbanColumn({
                 tasks={groupTasks}
                 processes={processes}
                 allTasks={allTasks}
+                enableStatusDrag={columnBy === "status"}
               />
             ))
           ) : (
@@ -932,6 +883,7 @@ function KanbanColumn({
                 process={processes.find(p => p.taskId === task.id)}
                 size="compact"
                 allTasks={allTasks}
+                enableStatusDrag={columnBy === "status"}
               />
             ))
           )}
@@ -964,8 +916,9 @@ function KanbanBoard({
   // Filter out empty columns unless showEmptyColumns is on
   const visibleColumns = useMemo(() => {
     if (showEmptyColumns) return columns;
-    return columns.filter((col) => tasks.some(col.filter));
-  }, [columns, tasks, showEmptyColumns]);
+    const hasDrafts = tasks.some((task) => task.status === "draft");
+    return columns.filter((col) => tasks.some(col.filter) || (columnBy === "status" && hasDrafts && col.key === "queued"));
+  }, [columns, tasks, showEmptyColumns, columnBy]);
 
   return (
     <div className="flex gap-3 flex-1 min-h-0 overflow-x-auto pb-2">
@@ -990,20 +943,30 @@ function KanbanBoard({
 function ListView({
   tasks,
   processes,
+  hasMore,
+  fetchNextPage,
+  isLoadingMore,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
+  hasMore: boolean;
+  fetchNextPage: () => Promise<void> | void;
+  isLoadingMore: boolean;
 }) {
   const [tab, setTab] = useState("all");
 
-  const filtered = tasks
-    .filter((t) => {
+  const filtered = useMemo(
+    () => tasks.filter((t) => {
       if (tab === "pending") return t.status === "pending" || t.status === "assigned";
       if (tab !== "all" && t.status !== tab) return false;
       return true;
-    });
+    }),
+    [tasks, tab],
+  );
 
-  // Single-pass count reduction instead of 5 separate .filter() calls
+  // Single-pass count reduction instead of 5 separate .filter() calls.
+  // Note: counts reflect the LOADED page, not the global total — with
+  // cursor pagination we don't know the total until we've fetched it.
   const counts = useMemo(() => {
     const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0 };
     for (const t of tasks) {
@@ -1025,6 +988,14 @@ function ListView({
     { value: "pending", label: "Queued", count: counts.pending },
   ];
 
+  // Pre-build a Map for O(1) process lookups in itemContent — re-rendered
+  // on every fetched page; cheap relative to the list.
+  const processByTask = useMemo(() => {
+    const m = new Map<string, AgentProcess>();
+    for (const p of processes) m.set(p.taskId, p);
+    return m;
+  }, [processes]);
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
       {/* Tab bar */}
@@ -1043,35 +1014,58 @@ function ListView({
         ))}
       </div>
 
-      {/* Task list */}
-      <ScrollArea className="flex-1 min-h-0 -mx-1">
-        <div className="space-y-1.5 px-1 pr-5 pb-1">
-          {filtered.length === 0 ? (
-            <Card className="bg-card/60 backdrop-blur-sm">
-              <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <ListChecks className="h-10 w-10 mb-3 opacity-40" />
-                <p className="text-sm font-medium">
-                  {tab !== "all" ? "No tasks in this category" : "No tasks yet"}
-                </p>
-                {tab === "all" && (
-                  <p className="text-xs mt-1 text-center max-w-xs">
-                    Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            filtered.map((task) => (
+      {/* Task list — virtualised. Virtuoso handles windowing so we can
+          render a 1000+ row list without paying the React reconciliation
+          tax. `endReached` fires when the user scrolls within `overscan`
+          px of the bottom; we use it as the cursor-pagination trigger. */}
+      {filtered.length === 0 ? (
+        <Card className="bg-card/60 backdrop-blur-sm">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <ListChecks className="h-10 w-10 mb-3 opacity-40" />
+            <p className="text-sm font-medium">
+              {tab !== "all" ? "No tasks in this category" : "No tasks yet"}
+            </p>
+            {tab === "all" && (
+              <p className="text-xs mt-1 text-center max-w-xs">
+                Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <Virtuoso
+          style={{ height: "100%" }}
+          className="flex-1 min-h-0 -mx-1"
+          data={filtered}
+          endReached={() => {
+            if (hasMore && !isLoadingMore) {
+              void fetchNextPage();
+            }
+          }}
+          overscan={300}
+          computeItemKey={(_, task) => task.id}
+          itemContent={(_, task) => (
+            <div className="px-1 pb-1.5">
               <TaskRow
-                key={task.id}
                 task={task}
-                process={processes.find(p => p.taskId === task.id)}
+                process={processByTask.get(task.id)}
                 allTasks={tasks}
               />
-            ))
+            </div>
           )}
-        </div>
-      </ScrollArea>
+          components={{
+            Footer: () =>
+              isLoadingMore ? (
+                <div className="flex items-center justify-center py-4 text-muted-foreground/60">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                  <span className="text-xs">Loading more…</span>
+                </div>
+              ) : hasMore ? (
+                <div className="h-2" />
+              ) : null,
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1160,6 +1154,7 @@ export function TasksPage() {
     showEmptyColumns, toggleEmptyColumns,
     cardFields, toggleCardField,
     taskActions, handleRefresh, isRefreshing,
+    hasMore, fetchNextPage, isLoadingMore,
     agentTeamMap, agentConfigMap,
   } = state;
 
@@ -1179,10 +1174,10 @@ export function TasksPage() {
   return (
     <TaskActionsProvider actions={taskActions}>
       <CardSettingsContext value={cardSettingsCtx}>
-      <div className="flex flex-col flex-1 min-h-0 gap-2">
+      <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-2">
         {/* ── Row 1: Search + data filters + active chips ── */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="relative flex-1 min-w-[140px] max-w-xs">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
             <Input
               placeholder="Search..."
@@ -1191,7 +1186,7 @@ export function TasksPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex max-w-full items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5 sm:overflow-visible sm:pb-0">
             <MultiSelectFilter
               icon={<Target className="h-3.5 w-3.5" />}
               label="Missions"
@@ -1209,7 +1204,7 @@ export function TasksPage() {
               onClear={() => setSelectedTeams(new Set())}
               isLoading={teamsLoading}
             />
-            <TimeFilter
+            <TimeRangeFilter
               value={timeFilter}
               onChange={setTimeFilter}
               onClear={() => setTimeFilter(null)}
@@ -1219,7 +1214,7 @@ export function TasksPage() {
           {hasActiveFilters && (
             <>
               <div className="h-4 w-px bg-border/50 mx-0.5" />
-              <div className="flex items-center gap-1 flex-wrap min-w-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
                 {Array.from(selectedMissions).map((name) => (
                   <Badge
                     key={`m-${name}`}
@@ -1248,7 +1243,7 @@ export function TasksPage() {
                     className="text-[10px] gap-0.5 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20 py-0 h-5"
                     onClick={() => setTimeFilter(null)}
                   >
-                    {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+                    {getTimeRangeLabel(timeFilter.range)}
                     <XCircle className="h-2.5 w-2.5" />
                   </Badge>
                 )}
@@ -1258,17 +1253,20 @@ export function TasksPage() {
               </div>
             </>
           )}
-          <div className="flex-1" />
-          <span className="text-[11px] text-muted-foreground/50 tabular-nums shrink-0">
-            {filtered.length}{hasActiveFilters ? `/${tasks.length}` : ""} task{filtered.length !== 1 ? "s" : ""}
-          </span>
-          <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-          </Button>
+          <div className="flex items-center justify-between gap-2 sm:ml-auto">
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">
+              {search
+                ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""}`
+                : `${filtered.length}${hasActiveFilters ? `/${tasks.length}` : ""}${hasMore ? "+" : ""} task${filtered.length !== 1 ? "s" : ""}`}
+            </span>
+            <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+            </Button>
+          </div>
         </div>
 
         {/* ── Row 2: View controls ── */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex max-w-full shrink-0 items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
           {/* View toggle */}
           <div className="flex items-center rounded-md border border-border/50 mr-1">
             <Button
@@ -1380,7 +1378,7 @@ export function TasksPage() {
           )}
 
           {/* Spacer */}
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
 
           {/* Card fields */}
           <CardFieldSettings fields={cardFields} onToggle={toggleCardField} />
@@ -1413,6 +1411,9 @@ export function TasksPage() {
           <ListView
             tasks={filtered}
             processes={processes}
+            hasMore={hasMore}
+            fetchNextPage={fetchNextPage}
+            isLoadingMore={isLoadingMore}
           />
         )}
       </div>

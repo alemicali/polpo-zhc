@@ -9,9 +9,13 @@
 
 import { useState, useMemo, useCallback, createContext, use } from "react";
 import { useNavigate } from "react-router-dom";
-import { useTasks, usePolpo, useProcesses, useMissions, useAgents } from "@polpo-ai/react";
+import { useTasksInfinite, usePolpo, useProcesses, useMissions, useAgents } from "@polpo-ai/react";
 import type { Task } from "@polpo-ai/react";
 import type { FilterOption } from "@/components/shared/multi-select-filter";
+import {
+  createDefaultTimeFilter,
+  type TimeFilterState,
+} from "@/lib/time-filter";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { toast } from "sonner";
 import { Target, Users } from "lucide-react";
@@ -22,8 +26,6 @@ export type ViewMode = "list" | "kanban";
 export type SortKey = "updated" | "created" | "name" | "status" | "priority" | "score";
 export type GroupByKey = "none" | "status" | "mission" | "team" | "agent";
 export type ColumnByKey = "status" | "mission" | "team" | "agent";
-export type TimeField = "createdAt" | "updatedAt";
-export type TimeRange = "1h" | "6h" | "24h" | "7d" | "30d" | "custom";
 
 /** Toggleable fields on task cards. */
 export interface CardFieldVisibility {
@@ -60,13 +62,6 @@ function loadCardFields(): CardFieldVisibility {
     if (raw) return { ...DEFAULT_CARD_FIELDS, ...JSON.parse(raw) };
   } catch { /* ignore */ }
   return { ...DEFAULT_CARD_FIELDS };
-}
-
-export interface TimeFilterState {
-  field: TimeField;
-  range: TimeRange;
-  /** Epoch ms — resolved from preset or custom input */
-  after: number;
 }
 
 // ── Sort helpers ──
@@ -115,6 +110,7 @@ export interface TaskActions {
   retry: (id: string) => void;
   kill: (id: string) => void;
   queue: (id: string) => void;
+  moveToKanbanColumn: (task: Task, columnKey: string) => void;
   click: (id: string) => void;
 }
 
@@ -144,7 +140,6 @@ export function useTaskActions(): TaskActions {
 
 export function useTasksPageState() {
   const navigate = useNavigate();
-  const { tasks, isLoading: loading, refetch, retryTask } = useTasks();
   const { processes } = useProcesses();
   const { client } = usePolpo();
   const { missions } = useMissions();
@@ -152,9 +147,37 @@ export function useTasksPageState() {
 
   // ── Filter state ──
   const [search, setSearch] = useState("");
+
+  // Cursor pagination + FTS5 search. Server returns 50 tasks per page by
+  // default; Virtuoso fires fetchNextPage() when the user scrolls within
+  // the buffer. `q` is the debounced full-text query (handled inside the
+  // hook). Using full payloads (slim:false) keeps the page wire-format
+  // compatible with the existing card/row renderers — the cold-load win
+  // comes entirely from pagination (50 rows instead of 483).
+  const {
+    tasks,
+    hasMore,
+    isLoading: loading,
+    isLoadingMore,
+    fetchNextPage,
+    refresh: refetch,
+  } = useTasksInfinite({ limit: 50, q: search }) as {
+    tasks: Task[];
+    hasMore: boolean;
+    isLoading: boolean;
+    isLoadingMore: boolean;
+    fetchNextPage: () => Promise<void>;
+    refresh: () => Promise<void>;
+    error: Error | null;
+  };
+
+  const retryTask = useCallback(
+    async (id: string) => { await client.retryTask(id); },
+    [client],
+  );
   const [selectedMissions, setSelectedMissions] = useState<Set<string>>(new Set());
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
-  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(null);
+  const [timeFilter, setTimeFilter] = useState<TimeFilterState | null>(() => createDefaultTimeFilter());
 
   // ── View preferences (persisted to localStorage) ──
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {
@@ -263,6 +286,11 @@ export function useTasksPageState() {
   }, [agents]);
 
   const filtered = useMemo(() => {
+    // Note: full-text search (`search`) is handled SERVER-SIDE by the
+    // useTasksInfinite hook via SQLite FTS5. We don't re-filter on `search`
+    // here — that would double-filter and could miss matches where the
+    // server scored a description hit that the client-side `title /
+    // assignTo / group` filter would miss.
     const result = tasks.filter((t) => {
       if (selectedMissions.size > 0 && !selectedMissions.has(t.group ?? "")) return false;
       if (selectedTeams.size > 0) {
@@ -273,18 +301,10 @@ export function useTasksPageState() {
         const ts = new Date(t[timeFilter.field]).getTime();
         if (ts < timeFilter.after) return false;
       }
-      if (search) {
-        const q = search.toLowerCase();
-        return (
-          t.title.toLowerCase().includes(q) ||
-          t.assignTo.toLowerCase().includes(q) ||
-          (t.group ?? "").toLowerCase().includes(q)
-        );
-      }
       return true;
     });
     return sortTasks(result, sortKey);
-  }, [tasks, search, selectedMissions, selectedTeams, agentTeamMap, sortKey, timeFilter]);
+  }, [tasks, selectedMissions, selectedTeams, agentTeamMap, sortKey, timeFilter]);
 
   const missionFilterOptions = useMemo((): FilterOption[] => {
     const names = new Set<string>();
@@ -339,6 +359,24 @@ export function useTasksPageState() {
     }
   }, [client, refetch]);
 
+  const handleMoveToKanbanColumn = useCallback(async (task: Task, columnKey: string) => {
+    if (columnKey !== "queued") {
+      toast.info("Only Draft → Queued is supported right now");
+      return;
+    }
+    if (task.status !== "draft") {
+      toast.info("Only draft tasks can be queued from the board");
+      return;
+    }
+    try {
+      await client.queueTask(task.id);
+      toast.success("Task queued");
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [client, refetch]);
+
   const handleTaskClick = useCallback((id: string) => {
     navigate(`/tasks/${id}`);
   }, [navigate]);
@@ -351,8 +389,9 @@ export function useTasksPageState() {
     retry: handleRetry,
     kill: handleKill,
     queue: handleQueue,
+    moveToKanbanColumn: handleMoveToKanbanColumn,
     click: handleTaskClick,
-  }), [handleRetry, handleKill, handleQueue, handleTaskClick]);
+  }), [handleRetry, handleKill, handleQueue, handleMoveToKanbanColumn, handleTaskClick]);
 
   return {
     // Data
@@ -400,6 +439,11 @@ export function useTasksPageState() {
     taskActions,
     handleRefresh,
     isRefreshing,
+
+    // Pagination
+    hasMore,
+    fetchNextPage,
+    isLoadingMore,
 
     // Derived
     agentTeamMap,

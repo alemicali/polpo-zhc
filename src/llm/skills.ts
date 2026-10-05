@@ -100,9 +100,34 @@ export function parseSkillFrontmatter(content: string): { name?: string; descrip
     return {
       name: fm.name ?? undefined,
       description: fm.description ?? "",
-      allowedTools: fm["allowed-tools"] ?? fm.allowedTools,
+      allowedTools: normalizeAllowedTools(fm["allowed-tools"] ?? fm.allowedTools),
     };
   } catch { return null; }
+}
+
+/**
+ * Tolerant `allowed-tools` parser. Accepts:
+ *   - YAML block list:   `allowed-tools:\n  - read\n  - write`  → ["read","write"]
+ *   - YAML flow list:    `allowed-tools: [read, write]`         → ["read","write"]
+ *   - CSV-as-string:     `allowed-tools: read, write`           → ["read","write"]
+ *   - undefined/null/anything-else                              → undefined
+ *
+ * The CSV-string case is the one that historically crashes consumers: YAML
+ * parses an unquoted comma-separated value as a single string, and downstream
+ * code (prompts.ts, orchestrator-tools.ts) calls `.join(", ")` on it expecting
+ * an array. Normalizing here is the single source of truth.
+ */
+function normalizeAllowedTools(value: unknown): string[] | undefined {
+  if (value == null) return undefined;
+  if (Array.isArray(value)) {
+    const out = value.map(t => String(t).trim()).filter(Boolean);
+    return out.length > 0 ? out : undefined;
+  }
+  if (typeof value === "string") {
+    const out = value.split(",").map(t => t.trim()).filter(Boolean);
+    return out.length > 0 ? out : undefined;
+  }
+  return undefined;
 }
 
 /** Extract the markdown body (everything after the frontmatter block). */

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Card,
@@ -36,10 +36,110 @@ import {
   Hammer,
   HelpCircle,
   FileEdit,
+  Binary,
+  CalendarDays,
 } from "lucide-react";
-import { useTasks, useMissions, useProcesses, useAgents, useStats } from "@polpo-ai/react";
+import { useTasks, useMissions, useProcesses, useAgents } from "@polpo-ai/react";
 import type { Task, AgentProcess, PolpoStats } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
+import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
+
+const DASHBOARD_RANGES: { value: TokenUsageRange; label: string; shortLabel: string }[] = [
+  { value: "today", label: "Today", shortLabel: "Today" },
+  { value: "7d", label: "Last 7 days", shortLabel: "7d" },
+  { value: "30d", label: "Last 30 days", shortLabel: "30d" },
+  { value: "all", label: "All time", shortLabel: "All" },
+];
+
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat("en", {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function TokenUsageStrip({ range }: { range: TokenUsageRange }) {
+  const { usage, loading } = useTokenUsage(range);
+  const metrics: Array<{ label: string; display: string; raw: string | number; detail?: string }> = [
+    { label: "Processed", display: formatTokens(usage?.totalTokens ?? 0), raw: usage?.totalTokens ?? 0 },
+    { label: "Uncached input", display: formatTokens(usage?.inputTokens ?? 0), raw: usage?.inputTokens ?? 0 },
+    { label: "Generated", display: formatTokens(usage?.outputTokens ?? 0), raw: usage?.outputTokens ?? 0 },
+    {
+      label: "Cache read",
+      display: formatTokens(usage?.cacheReadTokens ?? 0),
+      raw: `${(usage?.cacheReadTokens ?? 0).toLocaleString()} read / ${(usage?.cacheWriteTokens ?? 0).toLocaleString()} write`,
+      detail: `${formatTokens(usage?.cacheWriteTokens ?? 0)} write`,
+    },
+    { label: "Task processed", display: formatTokens(usage?.taskTokens ?? 0), raw: usage?.taskTokens ?? 0 },
+  ] as const;
+
+  return (
+    <section className="border-y border-border/70 bg-card/35 px-4 py-3" aria-label="Token usage">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-2 lg:w-36 lg:shrink-0">
+          <Binary className="h-4 w-4 text-primary" />
+          <div className="min-w-0">
+            <div className="text-xs font-semibold">Token usage</div>
+            <div className="text-[10px] text-muted-foreground">{usage?.calls ?? 0} chat calls</div>
+          </div>
+          {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-5">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="min-w-0 border-l border-border/60 pl-3">
+              <div className="truncate text-[10px] text-muted-foreground" title={metric.label}>{metric.label}</div>
+              <div className="mt-1 truncate font-mono text-lg font-semibold tabular-nums" title={String(metric.raw)}>
+                {metric.display}
+              </div>
+              {metric.detail && <div className="text-[10px] text-muted-foreground">{metric.detail}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function dashboardRangeStart(range: TokenUsageRange, now = new Date()): number {
+  if (range === "all") return 0;
+  if (range === "today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
+  }
+  const duration = range === "24h" ? 1 : range === "7d" ? 7 : 30;
+  return now.getTime() - duration * 86_400_000;
+}
+
+function dashboardRangeLabel(range: TokenUsageRange): string {
+  return DASHBOARD_RANGES.find((option) => option.value === range)?.label ?? "Last 24 hours";
+}
+
+function DashboardRangeControl({ range, onChange }: { range: TokenUsageRange; onChange: (range: TokenUsageRange) => void }) {
+  return (
+    <div className="flex h-8 shrink-0 items-center border border-border/70 bg-background/60 p-0.5" role="group" aria-label="Dashboard period">
+      <span className="hidden items-center gap-1.5 px-2 text-[10px] font-medium text-muted-foreground sm:flex">
+        <CalendarDays className="h-3.5 w-3.5" /> Period
+      </span>
+      {DASHBOARD_RANGES.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          title={option.label}
+          className={cn(
+            "h-7 min-w-10 px-2 text-[11px] font-medium transition-colors",
+            range === option.value
+              ? "bg-foreground text-background"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {option.shortLabel}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ── Phase icon helper ──
 
@@ -64,7 +164,7 @@ const TICKER_ITEMS = [
 
 const LiveTicker = memo(function LiveTicker({ stats }: { stats: PolpoStats | null }) {
   if (!stats) return null;
-  const total = stats.pending + stats.running + stats.done + stats.failed;
+  const total = stats.pending + stats.queued + stats.running + stats.done + stats.failed;
 
   return (
     <div className="flex items-center gap-4">
@@ -149,7 +249,7 @@ const STATUS_COLORS = {
   queued: "#6366f1",
 };
 
-const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
+const TaskProgress = memo(function TaskProgress({ tasks, range, now }: { tasks: Task[]; range: TokenUsageRange; now: number }) {
   const total = tasks.length;
   // Single-pass count reduction instead of 4 separate .filter() calls
   const counts = useMemo(() => {
@@ -182,7 +282,7 @@ const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
   }
 
   return (
-    <Card className="lg:col-span-2 bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="lg:col-span-7 bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
@@ -197,17 +297,17 @@ const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-5">
           {/* Donut chart */}
-          <ChartContainer config={progressChartConfig} className="h-[140px] w-[140px] shrink-0">
+          <ChartContainer config={progressChartConfig} className="h-[120px] w-[120px] shrink-0">
             <PieChart>
               <ChartTooltip content={<ChartTooltipContent hideLabel />} />
               <Pie
                 data={chartData}
                 dataKey="count"
                 nameKey="status"
-                innerRadius={42}
-                outerRadius={65}
+                innerRadius={36}
+                outerRadius={56}
                 strokeWidth={2}
                 stroke="hsl(var(--background))"
               >
@@ -219,19 +319,19 @@ const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
                     if (viewBox && "cx" in viewBox && "cy" in viewBox) {
                       return isEmpty ? (
                         <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
-                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 4} className="fill-muted-foreground text-xs font-medium">
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 3} className="fill-muted-foreground text-[11px] font-medium">
                             No tasks
                           </tspan>
-                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 12} className="fill-muted-foreground/60 text-[10px]">
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 10} className="fill-muted-foreground/60 text-[9px]">
                             yet
                           </tspan>
                         </text>
                       ) : (
                         <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
-                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 6} className="fill-foreground text-2xl font-bold">
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) - 5} className="fill-foreground text-xl font-bold">
                             {completionRate}%
                           </tspan>
-                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 12} className="fill-muted-foreground text-[10px]">
+                          <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 10} className="fill-muted-foreground text-[9px]">
                             complete
                           </tspan>
                         </text>
@@ -244,17 +344,17 @@ const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
           </ChartContainer>
 
           {/* Legend + counts */}
-          <div className="flex-1 grid grid-cols-2 gap-3">
+          <div className="flex-1 grid grid-cols-2 gap-2.5">
             {([
               ["Done", counts.done, STATUS_COLORS.done, "text-teal-400"],
               ["Failed", counts.failed, STATUS_COLORS.failed, "text-rose-500"],
               ["Running", counts.running, STATUS_COLORS.running, "text-cyan-400"],
               ["Queued", counts.queued, STATUS_COLORS.queued, "text-indigo-400"],
             ] as const).map(([label, count, dotColor, textColor]) => (
-              <div key={label} className="flex items-center gap-2.5">
-                <div className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: dotColor }} />
+              <div key={label} className="flex items-center gap-2">
+                <div className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: dotColor }} />
                 <div>
-                  <p className={cn("text-lg font-semibold leading-none", count > 0 ? textColor : "text-muted-foreground")}>
+                  <p className={cn("text-base font-semibold leading-none tabular-nums", count > 0 ? textColor : "text-muted-foreground")}>
                     {count}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
@@ -263,10 +363,209 @@ const TaskProgress = memo(function TaskProgress({ tasks }: { tasks: Task[] }) {
             ))}
           </div>
         </div>
+
+        {/* ── Vital signs strip ── */}
+        <VitalSignsStrip tasks={tasks} range={range} now={now} />
       </CardContent>
     </Card>
   );
 });
+
+// ── Vital signs strip — range-aware throughput, quality and completion metrics.
+
+function Sparkline({ data, height = 30 }: { data: number[]; height?: number }) {
+  if (data.length === 0) return null;
+  const max = Math.max(...data, 1);
+  const w = 100;
+  const stepX = w / Math.max(data.length - 1, 1);
+  const pad = 1.5; // top padding so the line never touches the edge
+  const yFor = (v: number) => height - pad - (v / max) * (height - pad * 2);
+  const linePts = data.map((v, i) => `${(i * stepX).toFixed(2)},${yFor(v).toFixed(2)}`).join(" ");
+  const areaPts = `0,${height} ${linePts} ${(data.length - 1) * stepX},${height}`;
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${height}`}
+      preserveAspectRatio="none"
+      className="w-full block"
+      style={{ height }}
+    >
+      <polygon points={areaPts} fill="var(--primary)" opacity="0.16" />
+      <polyline
+        points={linePts}
+        fill="none"
+        stroke="var(--primary)"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+const VitalSignsStrip = memo(function VitalSignsStrip({ tasks, range, now }: { tasks: Task[]; range: TokenUsageRange; now: number }) {
+  const stats = useMemo(() => {
+    const start = range === "all"
+      ? Math.min(...tasks.map((task) => Date.parse(task.updatedAt)).filter(Number.isFinite), now)
+      : dashboardRangeStart(range, new Date(now));
+    const bucketCount = range === "today" || range === "24h" ? 24 : range === "7d" ? 7 : range === "30d" ? 30 : 24;
+    const span = Math.max(1, now - start);
+    const buckets = Array<number>(bucketCount).fill(0);
+    const durations: number[] = [];
+    const scores: number[] = [];
+    let completed = 0;
+    let doneOrFailed = 0;
+    let firstPass = 0;
+
+    for (const t of tasks) {
+      const ts = new Date(t.updatedAt).getTime();
+      if (t.status === "done") {
+        completed++;
+        const bucket = Math.min(bucketCount - 1, Math.max(0, Math.floor(((ts - start) / span) * bucketCount)));
+        buckets[bucket]++;
+        const created = new Date(t.createdAt).getTime();
+        const dur = ts - created;
+        if (dur > 0) durations.push(dur);
+      }
+      const score = t.result?.assessment?.globalScore;
+      if (score != null) scores.push(score);
+      if (t.status === "done" || t.status === "failed") {
+        doneOrFailed++;
+        if (t.status === "done" && (t.retries ?? 0) === 0) firstPass++;
+      }
+    }
+
+    const sortedDurations = durations.sort((a, b) => a - b);
+    const midpoint = Math.floor(sortedDurations.length / 2);
+    const medianDuration = sortedDurations.length === 0
+      ? null
+      : sortedDurations.length % 2 === 0
+        ? (sortedDurations[midpoint - 1] + sortedDurations[midpoint]) / 2
+        : sortedDurations[midpoint];
+
+    return {
+      buckets,
+      completed,
+      averageScore: scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null,
+      firstPassRate: doneOrFailed > 0 ? (firstPass / doneOrFailed) * 100 : null,
+      medianDuration,
+    };
+  }, [now, range, tasks]);
+
+  const period = dashboardRangeLabel(range).toLocaleLowerCase();
+
+  return (
+    <div className="mt-6 pt-5 border-t border-border/40 flex flex-col gap-6">
+      <div className="min-w-0 flex flex-col gap-2">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[9.5px] text-muted-foreground/80 uppercase tracking-wider font-medium leading-none">
+            Throughput
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-base font-semibold tabular-nums leading-none">{stats.completed}</span>
+            <span className="text-[10px] text-muted-foreground/70 leading-none">tasks</span>
+          </div>
+        </div>
+        <Sparkline data={stats.buckets} height={36} />
+        <span className="text-[10px] text-muted-foreground/55 leading-none">
+          Completed during {period}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-x-6">
+        <Metric label="Avg Quality" caption={period}>
+          {stats.averageScore != null ? (
+            <MetricBigValue
+              value={stats.averageScore.toFixed(1)}
+              unit={
+                <span className="flex items-center gap-1">
+                  / 5 <Star className="h-3 w-3 text-amber-400" fill="currentColor" />
+                </span>
+              }
+            />
+          ) : (
+            <MetricEmpty text="No assessments yet" />
+          )}
+        </Metric>
+
+        <Metric label="First-Pass" caption={`no retries · ${period}`}>
+          {stats.firstPassRate != null ? (
+            <MetricBigValue
+              value={Math.round(stats.firstPassRate).toString()}
+              unit="%"
+            />
+          ) : (
+            <MetricEmpty text="No completed yet" />
+          )}
+        </Metric>
+
+        <Metric label="Median Duration" caption={`time to complete · ${period}`}>
+          {stats.medianDuration != null ? (
+            <MetricBigValue
+              value={formatShortDuration(stats.medianDuration)}
+              unit=""
+            />
+          ) : (
+            <MetricEmpty text="No completed yet" />
+          )}
+        </Metric>
+      </div>
+    </div>
+  );
+});
+
+// ── Strip primitives — keep markup uniform across cells ──
+
+function Metric({ label, caption, children }: { label: string; caption?: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 flex flex-col gap-2">
+      <span className="text-[9.5px] text-muted-foreground/80 uppercase tracking-wider font-medium leading-none">
+        {label}
+      </span>
+      <div className="flex-1 flex flex-col justify-center min-h-[40px]">
+        {children}
+      </div>
+      {caption && (
+        <span className="text-[10px] text-muted-foreground/55 leading-none">
+          {caption}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MetricBigValue({
+  value,
+  unit,
+  delta,
+}: {
+  value: string;
+  unit: React.ReactNode;
+  delta?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
+      {unit && <span className="text-[10px] text-muted-foreground/70 leading-none">{unit}</span>}
+      {delta && <span className="ml-auto self-center">{delta}</span>}
+    </div>
+  );
+}
+
+function MetricEmpty({ text }: { text: string }) {
+  return <span className="text-xs text-muted-foreground/55">{text}</span>;
+}
+
+function formatShortDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  if (min < 60) return remSec === 0 ? `${min}m` : `${min}m ${remSec}s`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin === 0 ? `${hr}h` : `${hr}h ${remMin}m`;
+}
 
 // ── Active agents with narrative ──
 
@@ -341,10 +640,10 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
 const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
   const recent = [...tasks]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 8);
+    .slice(0, 6);
 
   return (
-    <Card className="lg:col-span-2 bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="lg:col-span-5 bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
@@ -438,19 +737,36 @@ export function DashboardPage() {
   const { missions } = useMissions();
   const { processes } = useProcesses();
   const { agents } = useAgents();
-  const statsRaw = useStats();
-  const stats = (statsRaw as any)?.stats ?? statsRaw ?? null;
+  const [range, setRange] = useState<TokenUsageRange>("today");
+  const [rangeNow] = useState(() => Date.now());
+  const filteredTasks = useMemo(
+    () => {
+      const cutoff = dashboardRangeStart(range, new Date(rangeNow));
+      return tasks.filter((task) => range === "all" || Date.parse(task.updatedAt) >= cutoff);
+    },
+    [range, rangeNow, tasks],
+  );
+  const filteredMissions = useMemo(
+    () => {
+      const cutoff = dashboardRangeStart(range, new Date(rangeNow));
+      return missions.filter((mission) => range === "all" || Date.parse(mission.updatedAt) >= cutoff);
+    },
+    [missions, range, rangeNow],
+  );
 
-  // Single-pass count reduction instead of 3 separate .filter() calls
-  const { activeMissions, doneCount, failedCount } = useMemo(() => {
+  const { activeMissions, doneCount, failedCount, stats } = useMemo(() => {
     let active = 0, done = 0, failed = 0;
-    for (const p of missions) if (p.status === "active") active++;
-    for (const t of tasks) {
-      if (t.status === "done") done++;
-      else if (t.status === "failed") failed++;
+    const nextStats: PolpoStats = { pending: 0, queued: 0, running: 0, done: 0, failed: 0 };
+    for (const mission of filteredMissions) if (mission.status === "active") active++;
+    for (const task of filteredTasks) {
+      if (task.status === "done") { done++; nextStats.done++; }
+      else if (task.status === "failed") { failed++; nextStats.failed++; }
+      else if (task.status === "in_progress" || task.status === "review") nextStats.running++;
+      else if (task.status === "assigned" || task.status === "awaiting_approval") nextStats.queued++;
+      else nextStats.pending++;
     }
-    return { activeMissions: active, doneCount: done, failedCount: failed };
-  }, [missions, tasks]);
+    return { activeMissions: active, doneCount: done, failedCount: failed, stats: nextStats };
+  }, [filteredMissions, filteredTasks]);
 
   if (tasksLoading) {
     return (
@@ -462,29 +778,31 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 flex-1 min-h-0 overflow-auto pb-bottom-nav lg:pb-0">
-      {/* Live ticker */}
-      <LiveTicker stats={stats} />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
+        <LiveTicker stats={stats} />
+        <DashboardRangeControl range={range} onChange={setRange} />
+      </div>
 
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 lg:gap-4">
         <StatCard
-          title="Total Tasks"
-          value={tasks.length}
+          title="Tasks"
+          value={filteredTasks.length}
           icon={ListChecks}
-          description={`${doneCount} completed, ${failedCount} failed`}
+          description={`${doneCount} completed, ${failedCount} failed · ${dashboardRangeLabel(range).toLocaleLowerCase()}`}
         />
         <StatCard
           title="Active Missions"
           value={activeMissions}
           icon={Target}
-          description={`${missions.length} total`}
+          description={`${filteredMissions.length} in selected period`}
           color={activeMissions > 0 ? "text-blue-500" : undefined}
         />
         <StatCard
           title="Agents Online"
           value={processes.length}
           icon={Bot}
-          description={`${agents.length} configured`}
+          description={`${agents.length} configured · live now`}
           color={processes.length > 0 ? "text-emerald-500" : undefined}
         />
         <StatCard
@@ -506,13 +824,19 @@ export function DashboardPage() {
         />
       </div>
 
-      {/* Main content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TaskProgress tasks={tasks} />
-        <ActiveAgents processes={processes} />
+      <TokenUsageStrip range={range} />
+
+      {/* Main content — TaskProgress + Recent Activity in the top row,
+          Active Agents below at full width so a busy team doesn't get
+          squashed into 1/3 of the viewport.
+          12-col grid lets us narrow TaskProgress a touch (7/12 ≈ 58%) so
+          Recent Activity gets a more comfortable column. */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <TaskProgress tasks={filteredTasks} range={range} now={rangeNow} />
+        <RecentTasks tasks={filteredTasks} />
       </div>
 
-      <RecentTasks tasks={tasks} />
+      <ActiveAgents processes={processes} />
     </div>
   );
 }

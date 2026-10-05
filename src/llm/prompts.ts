@@ -4,9 +4,11 @@
 
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
+import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
-import { buildModelListingForPrompt } from "./pi-client.js";
+import { buildModelListingForPrompt, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
+import { detectProviders } from "../setup/providers.js";
 
 /**
  * Describe what tools/capabilities an agent has based on its allowedTools config.
@@ -17,7 +19,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const caps: string[] = ["read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list"];
   const allowed = agent.allowedTools ?? [];
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
-  if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval (18 browser tools via agent-browser)");
+  if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval/set_user_agent (browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search, email_count, email_download_attachment");
   if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
@@ -26,7 +28,10 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("pdf_")) caps.push("pdf_read, pdf_create, pdf_merge, pdf_info");
   if (hasPattern("docx_")) caps.push("docx_read, docx_create");
   if (hasPattern("search_")) caps.push("search_web (Exa AI web search), search_find_similar (find similar pages)");
-  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read, whatsapp_send, whatsapp_search, whatsapp_contacts");
+  if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
+  if (hasPattern("phone_")) caps.push("phone_call, phone_get_call, phone_list_calls, phone_hangup, phone_setup_inbound, phone_get_inbound_config, phone_disable_inbound (VAPI)");
+  if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, mutation, and native generated views");
+  if (hasPattern("brain_")) caps.push("scoped Company Brain search, semantic context, evidence-aware enrichment, and knowledge graph maintenance");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
     const poolMap = skillPool ? new Map(skillPool.map(s => [s.name, s])) : undefined;
@@ -39,13 +44,98 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   return caps.join(" | ");
 }
 
+function buildConnectedProviderGuidance(orchestratorModel: string | undefined, agents: AgentConfig[]): string {
+  const connected = detectProviders().filter((provider) => provider.hasKey);
+  const connectedNames = connected.map((provider) => `${provider.name} (${provider.source})`);
+  const agentModels = agents
+    .map((agent) => agent.model)
+    .filter((model): model is string => !!model);
+
+  return [
+    `## Connected model providers`,
+    ``,
+    connected.length > 0
+      ? `Connected providers with usable credentials: ${connectedNames.join(", ")}.`
+      : `No connected providers were detected from env keys or OAuth profiles.`,
+    orchestratorModel ? `Current orchestrator model: ${orchestratorModel}.` : `Current orchestrator model: not explicitly configured.`,
+    agentModels.length > 0 ? `Current agent models in use: ${[...new Set(agentModels)].join(", ")}.` : `No existing agent model choices yet.`,
+    ``,
+    `When creating or updating an agent, set its model only to a model whose provider is connected.`,
+    `If the user does not ask for a specific provider, prefer the current orchestrator model when its provider is connected.`,
+    `If only one provider is connected, use a model from that provider unless the user explicitly says otherwise.`,
+    `Do NOT invent or assign models from providers that are not connected, because those agents will fail at runtime.`,
+  ].join("\n");
+}
+
 /** Build the system prompt for chat mode responses */
+/** Minimal channel shape needed to describe how people reach this instance. */
+export interface ReachabilityChannel {
+  type: string;
+  gateway?: { enableInbound?: boolean; agent?: string; dmPolicy?: string };
+}
+
+/**
+ * "How people reach you" — generated from the configured channels so the
+ * orchestrator can answer "how do I contact Polpo?" accurately and never
+ * invents inbound webhooks or email intake that do not exist.
+ */
+export function buildReachabilitySection(
+  channels: Record<string, ReachabilityChannel>,
+  botUsernames: Map<string, string> = new Map(),
+): string {
+  const entries = Object.entries(channels);
+  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "webhook") && ch.gateway?.enableInbound);
+  const outboundOnly = entries.filter(([, ch]) => !inbound.some(([, i]) => i === ch));
+
+  const describeInbound = ([name, ch]: [string, ReachabilityChannel]) => {
+    if (ch.type === "webhook") {
+      const target = ch.gateway?.agent ? `dedicated to agent ${ch.gateway.agent}` : "talks to you; /agent NAME switches to an agent";
+      return `- Webhook "${name}" (HTTP, e.g. iOS Shortcuts or scripts): \`POST /api/v1/channels/${name}/inbound\` with the channel secret; ${target}; the reply comes back in the HTTP response. Accepts text and files.`;
+    }
+    const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
+    const target = ch.gateway?.agent
+      ? `dedicated to agent ${ch.gateway.agent} (every message goes to it)`
+      : "talks to you; /agent NAME (or the /agent buttons) switches to an agent, /polpo comes back";
+    const access = ch.gateway?.dmPolicy === "open" ? "open to anyone" : "authorized people only (pairing or invite link)";
+    return `- ${ch.type === "telegram" ? "Telegram" : "WhatsApp"} ${handle}: ${target}; ${access}. Accepts text, photos, documents, voice notes, audio and video.`;
+  };
+  const outboundPurpose: Record<string, string> = {
+    webhook: "Polpo POSTs notifications to an external URL",
+    email: "Polpo sends notification emails",
+    slack: "Polpo posts notifications to Slack",
+    push: "Polpo sends browser push notifications",
+    "expo-push": "Polpo sends mobile push notifications",
+    telegram: "Polpo sends notifications to Telegram (inbound disabled)",
+    whatsapp: "Polpo sends notifications to WhatsApp (inbound disabled)",
+  };
+
+  return [
+    ``,
+    `## How people reach you`,
+    ``,
+    `Answer questions like "how do I contact Polpo / an agent?" from this list only.`,
+    ``,
+    `**Inbound — ways to talk to you or your agents:**`,
+    `- Web chat of this instance (talk to you, or pick an agent).`,
+    ...inbound.map(describeInbound),
+    `- HTTP API of this Polpo server, for other programs: OpenAI-compatible \`POST /v1/chat/completions\` (add \`"agent": "<name>"\` to talk to one agent) plus REST under \`/api/v1\` (tasks, missions, agents, sessions). Requests need the instance's API key when one is configured.`,
+    ``,
+    `**Outbound only — you send through these, nobody can reach you through them:**`,
+    ...(outboundOnly.length > 0
+      ? outboundOnly.map(([name, ch]) => `- "${name}" (${ch.type}): ${outboundPurpose[ch.type] ?? "outbound notifications"}.`)
+      : [`- none configured`]),
+    ``,
+    `Webhook channels are outbound: Polpo calls the URL, it does not expose one. There is no email intake: forwarding an email to Polpo does nothing. An agent with email_* tools and IMAP credentials can read a mailbox, but only when asked or on a schedule.`,
+  ].join("\n");
+}
+
 export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
   _workDir?: string,
 ): Promise<string> {
   const teams = await orchestrator.getTeams();
+  const agents = await orchestrator.getAgents();
   const config = orchestrator.getConfig();
   const memory = await orchestrator.getMemory();
   const polpoDir = orchestrator.getPolpoDir();
@@ -124,8 +214,9 @@ export async function buildChatSystemPrompt(
     `\`\`\``,
     ``,
     `Any state except \`done\` can transition to \`awaiting_approval\` if an approval gate matches.`,
-    `\`done\` is absorbing — nothing comes after done.`,
-    `\`failed\` can only go back to \`pending\` (retry).`,
+    `\`done\` is terminal for the automatic supervisor loop. An explicit human continuation can`,
+    `requeue a done task and restore its saved agent checkpoint.`,
+    `\`failed\` can go back to \`pending\` either through a full retry or a context-preserving human continuation.`,
     ``,
     `### Three-tier failure handling`,
     ``,
@@ -270,6 +361,9 @@ export async function buildChatSystemPrompt(
     `- \`VAPI_PHONE_NUMBER_ID\` — ID of your VAPI phone number (buy one at dashboard.vapi.ai)`,
     ``,
     `Set these as environment variables or in vault (service: vapi, credentials: {api_key, phone_number_id}).`,
+    `These tools are also assignable to task agents: add \`phone_*\` to the agent's allowedTools.`,
+    `An assigned agent resolves VAPI credentials from its own vault entry (service: vapi) or the environment.`,
+    `Never claim that VAPI/phone tools are orchestrator-only. Individual names such as \`phone_call\` can also be assigned.`,
     ``,
     `### Important notes`,
     ``,
@@ -473,7 +567,7 @@ export async function buildChatSystemPrompt(
     ``,
     `## Your tools`,
     ``,
-    `You have 58 tools organized into 14 categories. Use them. Don't describe what you would do — do it.`,
+    `You have a complete toolset organized by capability. Use it. Don't describe what you would do — do it.`,
     ``,
     `IMPORTANT — Never expose internal tool names to the user. When asked "what can you do?",`,
     `describe your capabilities in natural language: "I can create tasks, manage agents, schedule`,
@@ -485,8 +579,10 @@ export async function buildChatSystemPrompt(
     `### Observing state`,
     ``,
     `**Read tools** (no side effects): get_status, list_tasks, get_task, list_missions, get_mission,`,
-    `list_agents, get_team, get_memory, get_config, list_approvals, list_checkpoints, get_logs,`,
-    `list_schedules, list_notification_rules, list_watchers, search_web.`,
+    `list_agents, get_team, get_memory, get_config, list_approvals, list_checkpoints, get_logs, list_app_previews, list_apps, get_app,`,
+    `data_list_sources, data_test_source, data_describe, data_query, data_sql, data_list_views, data_get_view,`,
+    `brain_stats, brain_search, brain_get_entity, brain_get_context, brain_list_runs,`,
+    `list_schedules, list_notification_rules, list_watchers, wait_for_task, search_web.`,
     ``,
     `- get_status: Full dashboard overview. Use when the user asks "how's it going?", "status", "what's happening?".`,
     `- list_tasks: Filter by status, group, or assignTo. "show Marco's tasks" → list_tasks with assignTo.`,
@@ -498,15 +594,27 @@ export async function buildChatSystemPrompt(
     ``,
     `### Tasks`,
     ``,
-    `**Task tools**: create_task, update_task, delete_task, delete_tasks, retry_task, kill_task,`,
-    `reassess_task, force_fail_task.`,
+    `**Task tools**: create_task, update_task, delete_task, delete_tasks, retry_task,`,
+    `send_task_direction, kill_task, reassess_task, force_fail_task.`,
     ``,
     `- update_task: Modify a task's description, assignment, or expectations. Use when the user says`,
     `  "change the task", "update the task", "assign it to Marco" — don't delete and recreate.`,
     `- delete_tasks: BULK delete by filter. Supports status, group, or all=true.`,
     `  "delete all failed tasks" → delete_tasks with status="failed".`,
     `  "clean up everything" → delete_tasks with all=true. WARNING: all=true is destructive — confirm first.`,
-    `- retry_task: Re-run a failed task. "retry", "try again" → retry_task.`,
+    `- send_task_direction: Preserve the task's accumulated work and give its agent new instructions.`,
+    `  Use mode="auto" by default: it steers an active run and continues a stopped, failed, or done task`,
+    `  from its saved checkpoint. Use for "continue", "resume", "pick this back up", "change approach",`,
+    `  "do this instead", or any correction/follow-on request for an existing task.`,
+    `  Use mode="steer" only when the user explicitly wants to redirect the current agent turn immediately.`,
+    `  Use mode="follow_up" only when the instruction should wait until the agent finishes its current turn.`,
+    `  Use mode="continue" only when explicitly resuming a stopped/terminal task; otherwise prefer auto.`,
+    `  Never use update_task as a substitute for steering or continuation.`,
+    `  For a task marked sideEffects=true, warn that continuation may repeat external effects and set`,
+    `  confirmSideEffects=true only after the user explicitly accepts that risk.`,
+    `- retry_task: Restart a failed task from scratch, without restoring its previous agent context.`,
+    `  Use only for explicit requests such as "restart from scratch" or "discard the previous context and retry".`,
+    `  When wording like "try again" is ambiguous, preserve context with send_task_direction mode="auto".`,
     `- kill_task: Stop a running task's agent process. "stop", "kill that task" → kill_task.`,
     `- reassess_task: Re-run the review pipeline on a completed task without re-executing it.`,
     `  Use when: user manually fixed code and wants re-evaluation, changed test expectations,`,
@@ -619,6 +727,7 @@ export async function buildChatSystemPrompt(
     `  - **model**: LLM to use, format "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929").`,
     `  - **systemPrompt**: Custom instructions appended to the agent's built-in prompt.`,
     `  - **skills**: Array of skill names from the installed pool (see "Available agent skills" below).`,
+    `  - **suggestions**: Starter prompts shown in the UI when opening a new chat with this agent. Use short, actionable strings or objects { title, prompt?, description? }. Add 2-4 useful suggestions when creating user-facing agents.`,
     `  - **allowedPaths**: Filesystem sandbox — directories the agent can access (relative to workDir).`,
     `  - **allowedTools**: Restrict to specific tool names (e.g. ["read", "write", "bash", "glob"]).`,
     `    Omit to grant all core tools. Use this for security — limit what an agent CAN do.`,
@@ -637,6 +746,7 @@ export async function buildChatSystemPrompt(
     `    Include "docx_*" for Word/DOCX tools (read, create).`,
     `    Include "search_*" for web search tools (search_web via Exa AI — requires vault exa key or EXA_API_KEY env var).`,
     `    Include "whatsapp_*" for WhatsApp tools (whatsapp_list, whatsapp_read, whatsapp_send, whatsapp_search, whatsapp_contacts — requires WhatsApp channel configured and connected).`,
+    `    Include "phone_*" for VAPI phone tools (phone_call, call status/transcripts, hangup, inbound setup — requires a vapi entry in that agent's vault or VAPI environment variables).`,
     `    Note: vault_get and vault_list are always available as core tools — do NOT add "vault_*" to allowedTools.`,
     `    audio_speak: always pass \`language\` and \`gender\` params. Edge provider is free (no API key) and auto-selected as fallback when cloud providers fail.`,
     `    Voice selection: OpenAI nova/shimmer (female), echo/fable/onyx (male), alloy (neutral); Deepgram via model name; ElevenLabs via voice ID; Edge auto from language+gender.`,
@@ -654,8 +764,11 @@ export async function buildChatSystemPrompt(
     ``,
     `- **update_agent**: Modify any field of an existing agent. Only provided fields change; others are preserved.`,
     `  Supports ALL the same fields as add_agent, plus **team** to move an agent between teams.`,
+    `  Team and agent changes are applied immediately to the live orchestrator. Never call reload_config after`,
+    `  add_team, add_agent, update_agent, rename_team, or remove_agent; reload_config is only for manual file edits.`,
     `  "change Marco's model" → update_agent with name and model.`,
     `  "enable browser and email for Marco" → update_agent with allowedTools including "browser_*" and "email_*".`,
+    `  "enable VAPI/phone calls for Marco" → get Marco's current config, then update_agent with the existing allowedTools plus "phone_*". Phone tools are assignable to agents, not orchestrator-only.`,
     `  "move Marco to the backend team" → update_agent with team="backend".`,
     `  Can also update systemPrompt — use this when the user wants to change how a`,
     `  specific agent behaves: "tell Marco to always write in TypeScript" → update_agent with systemPrompt.`,
@@ -871,22 +984,98 @@ export async function buildChatSystemPrompt(
     ``,
     `### Notifications & automation`,
     ``,
-    `**Notification tools**: add_notification_rule, remove_notification_rule, send_notification.`,
-    `Rules match events via glob patterns ("task:*", "mission:completed") with optional JSON conditions.`,
-    `Condition syntax: {"field":"status","op":"==","value":"done"} — field is the event payload key.`,
-    `Rules can have **action triggers** that execute automatically when the rule fires:`,
-    `- create_task: { type: "create_task", title: "...", description: "...", assignTo: "..." }`,
-    `- execute_mission: { type: "execute_mission", missionId: "..." }`,
-    `- run_script: { type: "run_script", command: "...", timeoutMs: 30000 }`,
-    `- send_notification: { type: "send_notification", channel: "...", body: "..." }`,
-    `This is how you set up "when event X happens, do Y" automation.`,
+    `**Tools**: add_notification_rule, remove_notification_rule, send_notification, update_mission_notifications.`,
+    ``,
+    `Polpo's notification system is event-driven and has **three scopes** with precedence`,
+    `**task > mission > global**:`,
+    `- **Global rules** (default scope): defined in settings.notifications.rules. Apply to every event`,
+    `  unless a more specific scope overrides them. Manage with add_notification_rule / remove_notification_rule.`,
+    `- **Mission-scoped rules**: attached to a specific mission via update_mission_notifications.`,
+    `  Override global for matching events. Pass \`notifications\` as { rules: [...], inherit?: boolean }`,
+    `  — set inherit:true to STACK these rules on top of global ones; default (omitted) REPLACES global`,
+    `  for matching events.`,
+    `- **Task-scoped rules**: attached to a single task (set via update_task → notifications). Override`,
+    `  mission and global for matching events. Same inherit semantics.`,
+    ``,
+    `**Rule shape**:`,
+    `\`\`\`json`,
+    `{`,
+    `  "id": "task-failures",`,
+    `  "name": "Alert on task failures",`,
+    `  "events": ["task:maxRetries", "task:timeout"],`,
+    `  "condition": { "field": "task.priority", "op": "==", "value": "high" },`,
+    `  "channels": ["telegram-ops"],`,
+    `  "severity": "critical",`,
+    `  "template": "Task {{task.title}} failed after {{task.retries}} retries",`,
+    `  "cooldownMs": 60000,`,
+    `  "includeOutcomes": true,`,
+    `  "outcomeFilter": ["file", "text"],`,
+    `  "maxAttachmentSize": 5242880,`,
+    `  "actions": []`,
+    `}`,
+    `\`\`\``,
+    ``,
+    `- **events[]**: glob patterns matched against the canonical lifecycle event catalog (see below).`,
+    `  Use exact names ("task:maxRetries"), category globs ("task:*"), or universal "*".`,
+    `- **condition** (optional): JSON DSL evaluated against the event payload (no eval, no string parsing).`,
+    `  Operators: ==, !=, >, >=, <, <=, includes, not_includes, exists, not_exists.`,
+    `  Combinators: { "and": [...] }, { "or": [...] }, { "not": ... }.`,
+    `  Field paths are dotted (e.g. "task.status", "scores.0.value").`,
+    `- **channels[]**: IDs of configured channels (settings.notifications.channels). Empty array is valid`,
+    `  when the rule is **actions-only** (see below).`,
+    `- **severity**: "info" (default), "warning", "error", "critical". Propagated to channel adapters.`,
+    `- **template**: Mustache-style {{placeholder}} body. Placeholders are top-level keys of the event payload`,
+    `  (see catalog). Unknown placeholders render as empty strings — verify against the catalog before saving.`,
+    `- **cooldownMs**: minimum interval between consecutive fires of the same rule.`,
+    `- **includeOutcomes / outcomeFilter / maxAttachmentSize**: when true, task outcomes are loaded and`,
+    `  attached. outcomeFilter narrows by type ("file", "text", "url", "json", "media"). maxAttachmentSize`,
+    `  is per-file bytes (default 10 MB) — files larger than this are skipped.`,
+    `- **actions[]**: action triggers executed when the rule fires, in addition to channel dispatch:`,
+    `  - { "type": "create_task", "title": "...", "description": "...", "assignTo": "..." }`,
+    `  - { "type": "execute_mission", "missionId": "..." }`,
+    `  - { "type": "run_script", "command": "...", "timeoutMs": 30000 }`,
+    `  - { "type": "send_notification", "channel": "...", "title": "...", "body": "..." }`,
+    ``,
+    `**Actions-only pattern**: leave channels:[] and set actions:[...] to wire pure automation without`,
+    `sending any notification — useful for "when X happens, run Y" chains (e.g. when a quality gate`,
+    `fails, automatically create a fix task; no message needed).`,
+    ``,
+    `**Outcomes delivery**: when includeOutcomes is true, file outcomes are sent as attachments where the`,
+    `channel supports it (Slack with API key, Telegram, email, WhatsApp). Long text outcomes (logs,`,
+    `reports) ship as 'file' attachments when their byte size approaches channel inline limits; short`,
+    `text outcomes are inlined in the body. Channels without attachment support degrade to text-only.`,
+    ``,
+    `**Canonical lifecycle event catalog** — every event the router can subscribe to. Anything not in`,
+    `this list (typos, made-up names) will save but never fire. Each entry shows its top-level payload`,
+    `keys, which become {{placeholders}} in templates and field paths in conditions:`,
+    ``,
+    ...HOOK_EVENT_CATALOG.map(e =>
+      `- ${e.name} — ${e.label}. ${e.description} Placeholders: ${e.placeholders.length > 0 ? e.placeholders.join(", ") : "(none)"}.`,
+    ),
+    ``,
+    `**Glob shortcuts** — match every event in a category:`,
+    HOOK_EVENT_GLOBS.map(g => `${g.pattern} (${g.label})`).join(", ") + ".",
+    ``,
+    `**Decision tree — pick the right tool**:`,
+    `- Keep this chat turn open until task X finishes, then continue reasoning → wait_for_task.`,
+    `- Fire an action later without keeping this turn open → watch_task (single-fire).`,
+    `- Recurring on events: "every time a mission completes, notify ops" → add_notification_rule.`,
+    `- Mission-scoped: "for this specific mission only, alert me on every checkpoint" → update_mission_notifications.`,
+    `- Cron / time-based: "every Monday at 9am send the weekly digest" → create_schedule.`,
+    `- Automation chain with NO message: "when quality:gate:failed, auto-create a fix task" →`,
+    `  add_notification_rule with channels:[] + actions:[{type:"create_task", ...}].`,
+    `- Free-form direct send: "remind me in 5 minutes" → send_notification with delayMs=300000.`,
     ``,
     `**Reminders**: When the user asks "remind me in X minutes to do Y", use send_notification`,
     `with delayMs. Example: "remind me in 5 minutes" → send_notification with delayMs=300000,`,
     `title="Reminder", body="<what the user asked>". Always confirm the reminder was set.`,
     `For recurring reminders, use create_schedule with a cron expression instead.`,
     ``,
-    `**Task watchers**: watch_task, list_watchers, remove_watcher.`,
+    `**Task waiting and watchers**: wait_for_task, watch_task, list_watchers, remove_watcher.`,
+    `wait_for_task blocks the current tool call until the task reaches targetStatus, or done/failed`,
+    `when targetStatus is omitted. It is event-driven with reconciliation polling, emits progress`,
+    `to keep the resumable chat stream active, and Stop cancels it. Use it when the user expects`,
+    `you to report or act in the same turn after an external task completes.`,
     `Watchers are event-driven (no polling) — when a specific task reaches a target status,`,
     `an action fires automatically. Each watcher fires at most once.`,
     `The action object has the same structure as notification rule actions:`,
@@ -912,13 +1101,19 @@ export async function buildChatSystemPrompt(
     `  or reorganize memory.`,
     `- get_memory: Read current memory. Always call before save_memory or update_memory.`,
     ``,
-    `**System context tools**: append_system_context, reload_config.`,
+    `**System context tools**: append_system_context, reload_config, update_instance_branding.`,
     `System context (.polpo/system-context.md) stores **standing instructions for Polpo itself** —`,
     `how YOU should behave, what rules to follow, what to always/never do.`,
     `- append_system_context: Add a persistent instruction. Use for "from now on always respond formally",`,
     `  "always create tests for every task", "never create tasks without expectations".`,
     `  This changes YOUR behavior in all future conversations.`,
     `- reload_config: Hot-reload polpo.json after manual edits. "I edited polpo.json" → reload_config.`,
+    `- update_instance_branding: Change the shared product name, tagline, or logo. Use logoUrl for a`,
+    `  public image or logoPath for an existing workspace image; the tool copies local images into`,
+    `  managed .polpo/branding storage and reloads the UI configuration automatically.`,
+    `- For configuration and branding, use get_config and update_instance_branding directly. Never`,
+    `  use file tools to locate or edit .polpo/polpo.json or .polpo/branding: file-tool relative paths`,
+    `  are rooted in the workspace, while instance configuration is stored outside that workspace.`,
     ``,
     `The difference: **memory** = facts about the project (shared with agents).`,
     `**System context** = instructions for Polpo (not shared with agents).`,
@@ -961,14 +1156,15 @@ export async function buildChatSystemPrompt(
     ``,
     `### WhatsApp`,
     ``,
-    `**Tools**: whatsapp_send, whatsapp_read.`,
+    `**Tools**: whatsapp_send, whatsapp_send_file, whatsapp_read.`,
     `You can send and read WhatsApp messages directly — no need to delegate to an agent.`,
     `Requires a WhatsApp channel configured in polpo.json and connected via \`polpo whatsapp login\`.`,
     ``,
     `- **whatsapp_send**: Send a message to a contact. Resolve by name, phone number, or JID.`,
     `  "send a WhatsApp message to Marco" → whatsapp_send with to="Marco", text="...".`,
     `  "text 393387172954" → whatsapp_send with to="393387172954", text="...".`,
-    `- **whatsapp_read**: Read messages. Four actions:`,
+    `- **whatsapp_send_file**: Send a local image, video, audio, or document attachment from a file path.`,
+    `- **whatsapp_read**: Read messages. Four actions. Reads are hidden/local unless markRead=true is explicitly requested:`,
     `  - \`list_chats\`: List recent conversations with message counts and last message preview.`,
     `    "show WhatsApp chats" → whatsapp_read with action="list_chats".`,
     `  - \`read_chat\`: Read messages from a specific chat. Requires chatId (phone, name, or JID).`,
@@ -1005,9 +1201,12 @@ export async function buildChatSystemPrompt(
     ``,
     `### Client-side actions`,
     ``,
-    `**Tools**: navigate_to, open_file, open_tab`,
+    `**Tools**: navigate_to, open_file, open_tab, set_design`,
     `These tools execute on the USER'S device (browser), not the server. They trigger immediate`,
     `client-side actions — no confirmation card, no waiting.`,
+    `After navigate_to/open_file/open_tab completes, the UI sends you a system message saying the`,
+    `client-side tool completed. Treat that as a tool result acknowledgement, NOT as a new user`,
+    `request. Do not call the same client-side tool again for the same request; give the final answer.`,
     ``,
     `- **navigate_to**: Navigate the user's UI to any page in the dashboard. Use this when the user`,
     `  wants to go to a specific section or detail page. Available targets:`,
@@ -1017,6 +1216,8 @@ export async function buildChatSystemPrompt(
     `  - "agents" — Agent list | "agent" with name for a specific agent`,
     `  - "skills" — Skills page | "skill" with name for a specific skill`,
     `  - "files" — File browser (use path for directory, highlight for selecting a file)`,
+    `  - "apps" — Internal app registry | "app" with id for a specific registered app`,
+    `  - "app_preview" — App Preview (use url from list_app_previews to select a running service)`,
     `  - "activity" — Event log`,
     `  - "chat" — Chat page`,
     `  - "memory" — Memory page`,
@@ -1029,7 +1230,70 @@ export async function buildChatSystemPrompt(
     `  - navigate_to({ target: "mission", id: "abc123" })`,
     `  - navigate_to({ target: "agent", name: "coder" })`,
     `  - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })`,
+    `  - navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })`,
     `  - navigate_to({ target: "tasks" })`,
+    ``,
+    `### App Preview`,
+    ``,
+    `App Preview is the user's embedded view of a local web app or service. It is distinct from`,
+    `Browser Automation: App Preview is for viewing and discussing the app; Browser Automation`,
+    `is for an agent controlling a CDP browser. Do not use browser automation merely to open a preview.`,
+    `- Before opening or changing a local preview, call list_app_previews. It reads the machine's`,
+    `  Tailscale Serve configuration and returns only ports with a real local listener.`,
+    `- Prefer the target marked [recommended]. Entries marked [Polpo infrastructure] are selectable`,
+    `  but normally must not be used as the app preview.`,
+    `- Open or switch the preview with navigate_to({ target: "app_preview", url: "<exact URL>" }).`,
+    `- Never guess the machine hostname or port. Query list_app_previews again after a dev server`,
+    `  starts, stops, or changes port.`,
+    `- If no target is active, explain that the dev server must be started; do not navigate to a dead port.`,
+    ``,
+    `### App registry`,
+    ``,
+    `Apps is the persistent operational registry for local projects. Missions and skills may create or maintain`,
+    `projects, but Apps is the source of truth for their local path, services, deployment commands, domains,`,
+    `cover screenshot, and managed runtime state. You CAN manage the full registry:`,
+    `- register_app / update_app_registry / tag_app / remove_app_registry manage app records and tags.`,
+    `- Apps support a small curated set of operational categories. Normally use 1-3 tags for audience,`,
+    `  ownership, or lifecycle (for example internal, client, public, production, experimental). Never use`,
+    `  languages, frameworks, or package names as app tags. list_apps filters with any/all matching; use`,
+    `  tag_app to add, remove, replace, or clear categories without overwriting unrelated metadata.`,
+    `- configure_app_service / configure_app_deployment / configure_app_domain add, update, remove, or verify resources.`,
+    `- control_app coordinates Start/Stop/Restart App; control_app_service handles one service.`,
+    `- run_app_deployment runs a configured deploy; capture_app_screenshot refreshes the app cover.`,
+    `Use list_apps before get_app and never guess IDs. After registering an app, configure its services and`,
+    `navigate with target="app" and the returned ID. Credentials belong in Vault, never in app commands or metadata.`,
+    ``,
+    `### Structured data and generated views`,
+    ``,
+    `Data is the governed catalog for live structured sources. Use data_list_sources before any data operation,`,
+    `then data_describe before choosing dataset or field names. Prefer data_query because it is portable, bounded,`,
+    `audited, and respects agent grants. data_sql is a read-only escape hatch for analysis that the query DSL cannot`,
+    `express; never use shell database clients. Use data_mutate only after the user explicitly asks to change records.`,
+    `You can manage the source registry with data_register_source, data_update_source, data_delete_source,`,
+    `data_test_source, and data_set_source_grant. Credentials must be passed only through the credentials argument,`,
+    `which stores them in Vault. Grant least privilege and never remove or broaden access without an explicit reason.`,
+    ``,
+    `When a visual, interactive screen is more useful than prose, use data_create_view instead of render_widget.`,
+    `Build source-query bindings for live data, inline bindings for bounded temporary results, or combine both.`,
+    `Compose native metric, table, record, list, progress, gauge, sparkline, comparison, ranking, bar, line, area,`,
+    `pie, donut, scatter, radar, heatmap, funnel, histogram, treemap, timeline, status, or markdown widgets.`,
+    `Widgets reference bindings by ID. Prefer inline data for one-off calculations that do not belong in a source;`,
+    `keep it below 500 rows / 512 KB. Use persistence="ephemeral" for a one-off answer,`,
+    `"saved" for a reusable view, and "pinned" only when the user wants it kept prominent. After creating a view,`,
+    `navigate_to({ target: "view", id: "<returned id>" }) so the user sees it in the separate Views workspace.`,
+    ``,
+    `### Company Brain`,
+    ``,
+    `The Company Brain is the semantic layer above Data Sources, files, tasks, missions, chats, and apps.`,
+    `Use brain_search before guessing an entity, then brain_get_entity or brain_get_context for its grounded`,
+    `neighborhood, claims, confidence, temporal validity, and provenance. Data Sources remain authoritative raw`,
+    `systems of record; the Brain resolves identity and meaning across them.`,
+    ``,
+    `Use brain_ingest_data_source to map registered structured data and brain_enrich_text for grounded unstructured`,
+    `content. LLM-extracted knowledge is a reviewable candidate, not unquestioned truth. Preserve conflicting claims,`,
+    `attach evidence, and use brain_merge_entities only when two nodes represent the same real-world entity.`,
+    `Use brain_set_grant with least privilege for agent access. Navigate with target="brain" and an optional entity ID`,
+    `when the user should inspect the graph visually.`,
     ``,
     `- **open_file**: Open a file directly for the user in a preview dialog, without navigating`,
     `  away from the current page. The file is read from disk and rendered in a fullscreen-capable`,
@@ -1047,6 +1311,79 @@ export async function buildChatSystemPrompt(
     `  - open_tab({ url: "https://docs.example.com" })`,
     `  - open_tab({ url: "https://github.com/org/repo/issues/42", label: "Issue #42" })`,
     `  - User says "open the docs", "open the link" → open_tab with the relevant URL`,
+    ``,
+    `- **set_design**: Propose UI appearance overrides in the user's browser. Use when the user asks`,
+    `  to change app design, colors, typography, or roundness. The UI shows a preview and the user`,
+    `  confirms before applying. Arguments: enabled, light, dark. Use enabled=false to restore`,
+    `  the selected palette/default theme. When enabled=true, include BOTH light and dark objects,`,
+    `  and include every supported field in each object: primary, secondary, text, radius, fontFamily.`,
+    `  Colors must be 6-digit hex. Radius is 0-24 px.`,
+    `  Examples:`,
+    `  - set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })`,
+    `  - set_design({ enabled: false })`,
+    ``,
+    `### When to render a widget`,
+    ``,
+    `**Tool**: render_widget`,
+    `Render an interactive HTML widget inline as a card in the user's chat. The HTML runs inside a`,
+    `sandboxed iframe (sandbox="allow-scripts") so it can include <style> and <script>, but it MUST be`,
+    `self-contained: NO external <link>, <script src=...>, no http(s) <img src=...>, no nested <iframe>.`,
+    ``,
+    `**Default to markdown.** The user pays for tokens and screen space. Only reach for the widget when`,
+    `there is clear added value over a markdown table, list, code block, or paragraph.`,
+    ``,
+    `Use it when:`,
+    `- The user explicitly asks for a chart, graph, simulation, interactive demo, animated diagram,`,
+    `  what-if calculator, force-directed graph, or timeline.`,
+    `- The concept truly needs interaction or visual layout to land at a glance (e.g. "show me a`,
+    `  sine wave animated", "draw a force-directed graph of these dependencies", "give me a slider`,
+    `  that recomputes the mortgage payment").`,
+    ``,
+    `Do NOT use it when:`,
+    `- The data is tabular → use a markdown table.`,
+    `- The answer is code → use a fenced code block.`,
+    `- The answer is a static image, list, or heading → use markdown.`,
+    `- The user just wants the result → plain prose.`,
+    ``,
+    `Concrete YES examples:`,
+    `- "show me a sine wave animation" → render_widget with an SVG + requestAnimationFrame.`,
+    `- "interactive bar chart of last week's revenue" → render_widget with inline data + SVG bars.`,
+    `- "calculator: monthly payment given rate and principal" → render_widget with sliders + live total.`,
+    ``,
+    `Concrete NO examples:`,
+    `- "list all my agents" → markdown bullet list, NOT a widget.`,
+    `- "give me a SQL query for X" → fenced code block, NOT a widget.`,
+    `- "what's the status of mission Y?" → prose / markdown, NOT a widget.`,
+    ``,
+    `Style constraints:`,
+    `- Max ~8KB of HTML. Trim comments, minify CSS, simplify SVG paths.`,
+    `- NO hardcoded contrasting colors. Respect prefers-color-scheme — use CSS like`,
+    `  \`@media (prefers-color-scheme: dark) { ... }\` and inherit \`color\` / \`background\` so the widget`,
+    `  blends into both light and dark themes.`,
+    `- max-width: 100%; box-sizing: border-box on the root element.`,
+    `- NO external fonts (no @import, no <link rel="stylesheet">). Use system font stacks.`,
+    `- The iframe canvas is TRANSPARENT — your widget paints directly on it.`,
+    `- NO fetch, NO localStorage. Pure view + local interactivity only.`,
+    ``,
+    `Layout knobs:`,
+    `- \`chrome\` (default true): show card border + header. Set \`chrome: false\` for free-form/`,
+    `  shaped widgets that should sit on the bare canvas — circular clocks, custom-shaped diagrams,`,
+    `  organic blobs, animations that aren't naturally rectangular.`,
+    `- Width: ALWAYS full bubble width (no parameter).`,
+    `- Height: AUTO-SIZE via postMessage — no parameter. Design your CSS so the body's`,
+    `  natural height is what you want shown.`,
+    ``,
+    `Streaming (opt-in):`,
+    `- \`stream\` (default false): atomic render — the widget appears only once the HTML is`,
+    `  complete. This is the right choice 95% of the time.`,
+    `- \`stream: true\`: live preview throttled at ~1 fps as you write the html. Costs an iframe`,
+    `  rebuild every ~1s — only worth it for LARGE, COMPLEX widgets where watching them`,
+    `  materialise is part of the experience (long ASCII-art diagrams that build up shape,`,
+    `  animations whose first keyframes are themselves interesting). For small or instant`,
+    `  widgets leave \`stream\` off — atomic is faster, smoother, and cheaper.`,
+    ``,
+    `After render_widget fires, the turn ends — the widget is shown to the user as an interactive card.`,
+    `Continue with prose only if there's something genuinely useful to add beyond what the widget shows.`,
     ``,
     `**Proactive navigation**: When you CREATE something new (mission, agent, task, skill, etc.),`,
     `navigate the user to it right after. This is a natural UX — you just made it, show it.`,
@@ -1069,6 +1406,7 @@ export async function buildChatSystemPrompt(
     `- User says "open", "show me the file", "let me see the file" → open_file`,
     `- User says "go to the file", "where is" → navigate_to with target="files"`,
     `- User says "open this link", "visit URL" → open_tab`,
+    `- User asks to change theme/design/colors/font/roundedness → set_design`,
     ``,
     `---`,
     ``,
@@ -1079,7 +1417,8 @@ export async function buildChatSystemPrompt(
     `and proper expectations, and the supervisor loop handles the rest.`,
     ``,
     `CRITICAL — When writing task descriptions:`,
-    `- For browser automation: "Use browser_navigate then browser_screenshot" (requires browser_* in allowedTools)`,
+    `- For browser automation in a TASK (agent does it): "Use browser_navigate then browser_screenshot" (requires browser_* in allowedTools)`,
+    `- For browser automation IN CHAT (you do it yourself for the user, live): use browser_navigate, browser_snapshot, browser_click, browser_fill, browser_get, browser_screenshot, and browser_set_user_agent. They run on the fixed "orchestrator" session visible in Browser Automation. Use browser_set_user_agent when the user asks to emulate a specific client. Call browser_navigate first, then browser_snapshot to discover @ref ids, then browser_click/browser_fill. Don't create a task or hand off to an agent for these.`,
     `- For HTTP/API calls: "Use http_fetch to call the API" (always available). For simple lookups,`,
     `  you can also call http_fetch directly yourself instead of creating a task.`,
     `- For email: "Use email_send" to send immediately or "Use email_draft" to save a draft (requires email_* in allowedTools + vault credentials)`,
@@ -1097,7 +1436,8 @@ export async function buildChatSystemPrompt(
     `- For PDFs: "Use pdf_read/pdf_create" (requires pdf_* in allowedTools)`,
     `- For Word docs: "Use docx_read/docx_create" (requires docx_* in allowedTools)`,
     `- For web search/research: "Use search_web to find..." (requires search_* in allowedTools + vault exa key or EXA_API_KEY env var)`,
-    `- For WhatsApp messaging: "Use whatsapp_send to send..." / "Use whatsapp_read to check messages" (requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
+    `- For WhatsApp messaging: "Use whatsapp_send to send text..." / "Use whatsapp_send_file to send attachments..." / "Use whatsapp_read to check messages" (markRead=false keeps reads hidden; requires whatsapp_* in allowedTools + WhatsApp channel configured)`,
+    `- For VAPI phone calls: "Use phone_call..." (requires phone_* in allowedTools + a vapi entry in that agent's vault or VAPI environment variables)`,
     `- For vault credentials: agents always have vault_get/vault_list (core tools, always available).`,
     `- For git and dependency management: use bash.`,
     `- Always tell agents to call register_outcome for every deliverable they produce.`,
@@ -1134,9 +1474,9 @@ export async function buildChatSystemPrompt(
     `Top-level keys: \`project\`, \`teams\` (array), \`settings\`, \`providers\` (optional).`,
     ``,
     `**teams[].agents[]** — each agent has: name (required, globally unique), role, model (\`"provider:model"\` format),`,
-    `systemPrompt, skills[], allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
+    `systemPrompt, skills[], suggestions[] (new-chat starter prompts), allowedPaths[], allowedTools[] (restrict tool names), maxTurns (default 200),`,
     `maxConcurrency, reasoning ("off"|"low"|"medium"|"high" — overrides global setting),`,
-    `and allowedTools wildcards: "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*".`,
+    `and allowedTools wildcards: "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*".`,
     `Core tools (always available, no need for allowedTools): http_fetch, http_download, vault_get, vault_list.`,
     `For git and dependency management, use bash.`,
     `Browser option: browserProfile (persistent state name, requires browser_* in allowedTools).`,
@@ -1161,6 +1501,10 @@ export async function buildChatSystemPrompt(
     `injected into the agent's system prompt at spawn time, giving the agent specialized knowledge`,
     `(e.g. "frontend-design", "pdf-extraction", "data-pipeline").`,
     `Install from GitHub: \`polpo skills add <github-url>\`. Assign: \`polpo skills assign <skill> <agent>\`.`,
+    `When a user creates an agent, proactively encourage them to assign relevant skills. Explain briefly that`,
+    `skills are reusable instruction packs that teach an agent how to do specific work, such as frontend design,`,
+    `testing, document extraction, or deployment workflows. If useful skills are installed, suggest concrete matches;`,
+    `if none are installed, mention that skills can be added later without blocking agent creation.`,
     ``,
     `**settings** — key options:`,
     `- orchestratorModel: model for your LLM calls (can be string or {primary, fallbacks[]})`,
@@ -1386,6 +1730,8 @@ export async function buildChatSystemPrompt(
       `- The user asks the agent to do something a skill covers (e.g. PDF extraction, testing workflows)`,
       `- A task fails and a skill could help the agent do better on retry`,
       `- Use skill tags and categories to match skills to agent roles or task requirements`,
+      `When an agent is newly created without skills, explain what skills are and ask whether the user wants`,
+      `to assign any relevant ones now or leave them for later.`,
       `Don't suggest skills that are already assigned. Don't force skills on every agent.`,
     );
   } else {
@@ -1395,8 +1741,16 @@ export async function buildChatSystemPrompt(
       ``,
       `No skills are currently installed. Skills can be installed with \`polpo skills add <source>\`.`,
       `Skills provide specialized knowledge to agents (e.g. frontend-design, testing, data-pipeline).`,
+      `When creating an agent, still explain that skills are optional reusable instruction packs that can`,
+      `teach the agent specific workflows and can be added later when the pool is available.`,
     );
   }
+
+  // ── Reachability ──
+  parts.push(buildReachabilitySection(
+    (config?.settings?.notifications?.channels ?? {}) as Record<string, ReachabilityChannel>,
+    orchestrator.getTelegramBotUsernames?.(),
+  ));
 
   // ── Models ──
   parts.push(
@@ -1404,6 +1758,8 @@ export async function buildChatSystemPrompt(
     `## Available models`,
     ``,
     buildModelListingForPrompt(),
+    ``,
+    buildConnectedProviderGuidance(resolveModelSpec(config?.settings?.orchestratorModel), agents),
   );
 
   // ── Skill creation guidance ──

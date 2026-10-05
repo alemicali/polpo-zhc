@@ -142,6 +142,26 @@ export class DrizzlePeerStore implements PeerStore {
     return valid ? this.rowToPairing(valid) : undefined;
   }
 
+  async listPendingPairings(): Promise<PairingRequest[]> {
+    const rows: any[] = await this.db.select().from(this.schema.pairingRequests)
+      .where(eq(this.schema.pairingRequests.resolved, 0));
+    const now = new Date().toISOString();
+    return rows
+      .filter((r) => r.expiresAt >= now)
+      .map((r) => this.rowToPairing(r))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async rejectPairing(code: string): Promise<boolean> {
+    const rows: any[] = await this.db.select().from(this.schema.pairingRequests)
+      .where(and(eq(this.schema.pairingRequests.code, code.toUpperCase()), eq(this.schema.pairingRequests.resolved, 0)));
+    if (rows.length === 0) return false;
+    await this.db.update(this.schema.pairingRequests)
+      .set({ resolved: 1 })
+      .where(eq(this.schema.pairingRequests.id, rows[0].id));
+    return true;
+  }
+
   async cleanExpiredPairings(): Promise<number> {
     const now = new Date().toISOString();
     const result = await this.db.delete(this.schema.pairingRequests)

@@ -1,6 +1,8 @@
 import type {
   Task,
   AgentProcess,
+  AgentConfig,
+  Team,
   SSEEvent,
   TaskStatus,
   DimensionScore,
@@ -133,6 +135,20 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
 
     case "agent:stale":
       return next;
+
+    case "agent:created":
+    case "agent:updated":
+    case "agent:removed":
+    case "team:created":
+    case "team:updated":
+    case "team:removed": {
+      const payload = data as { agents?: AgentConfig[]; teams?: Team[] };
+      return {
+        ...next,
+        ...(payload.agents ? { agents: payload.agents } : {}),
+        ...(payload.teams ? { teams: payload.teams } : {}),
+      };
+    }
 
     // ── Assessment ────────────────────────────────────────────
 

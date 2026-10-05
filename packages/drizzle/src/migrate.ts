@@ -62,6 +62,7 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_group ON tasks("group")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_assign_to ON tasks(assign_to)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_mission_id ON tasks(mission_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_tasks_updated_at ON tasks(updated_at DESC)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS missions (
     id               TEXT PRIMARY KEY,
@@ -110,13 +111,66 @@ export async function ensurePgSchema(db: any): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_status ON runs(status)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_task_id ON runs(task_id)`);
 
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS task_directions (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL,
+    run_id       TEXT,
+    mode         VARCHAR(32) NOT NULL,
+    message      TEXT NOT NULL,
+    status       VARCHAR(32) NOT NULL DEFAULT 'queued',
+    created_at   TEXT NOT NULL,
+    delivered_at TEXT,
+    applied_at   TEXT,
+    error        TEXT
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_task_directions_task ON task_directions(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_task_directions_run_status ON task_directions(run_id, status)`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS agent_checkpoints (
+    task_id    TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL,
+    messages   JSONB NOT NULL DEFAULT '[]',
+    saved_at   TEXT NOT NULL,
+    turn_count INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS background_waits (
+    id               TEXT PRIMARY KEY,
+    task_id          TEXT NOT NULL,
+    session_id       TEXT NOT NULL,
+    target_status    TEXT,
+    state            VARCHAR(32) NOT NULL DEFAULT 'waiting',
+    last_task_status TEXT,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    triggered_at     TEXT,
+    completed_at     TEXT,
+    error            TEXT
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_background_waits_session_state ON background_waits(session_id, state)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_background_waits_task_state ON background_waits(task_id, state)`);
+
   await db.execute(sql`CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     title      TEXT,
     agent      TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    starred    BOOLEAN
   )`);
+
+  // Migration: add starred column for sidebar "Starred" section (additive, idempotent).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'sessions' AND column_name = 'starred'
+      ) THEN
+        ALTER TABLE sessions ADD COLUMN starred BOOLEAN;
+      END IF;
+    END $$
+  `);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS messages (
     id         TEXT PRIMARY KEY,
@@ -124,10 +178,15 @@ export async function ensurePgSchema(db: any): Promise<void> {
     role       TEXT NOT NULL,
     content    TEXT NOT NULL,
     ts         TEXT NOT NULL,
-    tool_calls TEXT
+    tool_calls TEXT,
+    segments   TEXT
   )`);
+  await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS segments TEXT`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_messages_session ON messages(session_id, ts)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_messages_session_id ON messages(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_sessions_updated_at ON sessions(updated_at DESC)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_sessions_agent ON sessions(agent)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS notifications (
     id               TEXT PRIMARY KEY,
@@ -165,7 +224,11 @@ export async function ensurePgSchema(db: any): Promise<void> {
   )`);
 
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_session ON log_entries(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_session_id ON log_entries(session_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_entries_ts ON log_entries(ts)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_runs_task_id_alt ON runs(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_approvals_status_alt ON approvals(status)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_notifications_rule_id_alt ON notifications(rule_id)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS approvals (
     id           TEXT PRIMARY KEY,
@@ -242,15 +305,41 @@ export async function ensurePgSchema(db: any): Promise<void> {
   )`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS vault (
-    agent       TEXT NOT NULL,
-    service     TEXT NOT NULL,
-    type        TEXT NOT NULL,
-    label       TEXT,
-    credentials TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
+    agent          TEXT NOT NULL,
+    service        TEXT NOT NULL,
+    type           TEXT NOT NULL,
+    label          TEXT,
+    account        TEXT,
+    allowed_agents TEXT,
+    credentials    TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
     PRIMARY KEY (agent, service)
   )`);
+
+  // Migration: add account column to existing vault tables (v0.3.x → mailbox grouping).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'vault' AND column_name = 'account'
+      ) THEN
+        ALTER TABLE vault ADD COLUMN account TEXT;
+      END IF;
+    END $$;
+  `);
+
+  // Migration: add allowed_agents column for shared credentials (v0.3.x → multi-agent sharing).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'vault' AND column_name = 'allowed_agents'
+      ) THEN
+        ALTER TABLE vault ADD COLUMN allowed_agents TEXT;
+      END IF;
+    END $$;
+  `);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS playbooks (
     name        TEXT PRIMARY KEY,
@@ -288,4 +377,52 @@ export async function ensurePgSchema(db: any): Promise<void> {
       END IF;
     END $$
   `);
+
+  // ── New tables added by the file→sqlite migration work (v0.2.14+) ────
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS coding_sessions (
+    id          TEXT PRIMARY KEY,
+    state       JSONB NOT NULL,
+    initialized BOOLEAN NOT NULL DEFAULT false,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+  )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS expo_tokens (
+    token         TEXT PRIMARY KEY,
+    platform      TEXT NOT NULL,
+    device_id     TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    disabled      BOOLEAN NOT NULL DEFAULT false
+  )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_expo_tokens_device_id ON expo_tokens(device_id)`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint        TEXT PRIMARY KEY,
+    expiration_time BIGINT,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    user_agent      TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    last_success_at TEXT,
+    last_failure_at TEXT,
+    failure_count   INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS push_vapid (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key  TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    subject     TEXT NOT NULL
+  )`);
+
+  // ── Hot indices added in the post-migration audit pass ─────────────────
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_agents_team_name ON agents(team_name)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_processes_agent_name ON processes(agent_name)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_processes_task_id ON processes(task_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_peer_sessions_session_id ON peer_sessions(session_id)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_vault_agent ON vault(agent)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pg_log_sessions_started_at ON log_sessions(started_at DESC)`);
 }

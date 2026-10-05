@@ -13,8 +13,9 @@
  */
 
 import { readFileSync, unlinkSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
+import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
@@ -24,8 +25,10 @@ import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
+const CONTROL_POLL_MS = 350;
 
 function readConfigFromFile(): RunnerConfig {
   const idx = process.argv.indexOf("--config");
@@ -80,6 +83,46 @@ function errorResult(err: unknown): TaskResult {
   return { exitCode: 1, stdout: "", stderr: `Runner error: ${msg}`, duration: 0 };
 }
 
+function buildWaMediaContent(
+  path: string,
+  mimeType?: string,
+  fileName?: string,
+  caption?: string,
+  mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
+  viewOnce?: boolean,
+): any {
+  const mime = mimeType ?? guessMime(path);
+  const kind = resolveMediaKind(mediaKind, mime);
+  const file = { url: path };
+  const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
+  if (kind === "image") return { image: file, ...base };
+  if (kind === "video") return { video: file, ...base };
+  if (kind === "audio") return { audio: file, mimetype: mime };
+  return { document: file, fileName: fileName ?? basename(path), ...base };
+}
+
+function resolveMediaKind(kind: string | undefined, mime: string): "image" | "video" | "audio" | "document" {
+  if (kind && kind !== "auto") return kind as "image" | "video" | "audio" | "document";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function guessMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
+}
+
 /** Persistent per-run activity log (JSONL file in .polpo/logs/) */
 class RunActivityLog {
   private logPath: string;
@@ -118,6 +161,7 @@ class RunActivityLog {
 
 interface RunnerStores {
   runStore: RunStore;
+  taskControlStore: TaskControlStore;
   logStore?: LogStore;
   vaultStore?: VaultStore;
 }
@@ -130,7 +174,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const sql = postgres(config.databaseUrl);
     const db = drizzle(sql);
     const stores = createPgStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
   if (config.storage === "sqlite") {
     const { createSqliteStores } = await import("@polpo-ai/drizzle");
@@ -147,15 +191,18 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     const { drizzle } = await import("drizzle-orm/better-sqlite3");
     const db = drizzle(sqlite);
     const stores = createSqliteStores(db);
-    return { runStore: stores.runStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
   }
-  return { runStore: new FileRunStore(config.polpoDir) };
+  return {
+    runStore: new FileRunStore(config.polpoDir),
+    taskControlStore: new FileTaskControlStore(config.polpoDir),
+  };
 }
 
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const { runStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
+  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   // When LogStore is available (postgres/sqlite), persist transcript to DB.
@@ -182,16 +229,30 @@ async function main(): Promise<void> {
   actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
+  let initialDirections: TaskDirection[] = [];
+  let checkpointWrites: Promise<void> = Promise.resolve();
   try {
-    // Use Drizzle vault store when available (postgres/sqlite), fall back to file-based
-    let vaultStore: VaultStore | undefined = drizzleVaultStore;
-    if (!vaultStore) {
-      try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
-    }
+    // Vault is intentionally FILE-BASED for every storage mode — matches the
+    // orchestrator (src/core/orchestrator.ts:initVaultStore). Crypto round-trip
+    // to DB is sensitive and not wired automatically; the explicit
+    // `polpo vault migrate` command would do it on user request. The
+    // `drizzleVaultStore` returned by createStores is ignored on purpose.
+    void drizzleVaultStore;
+    let vaultStore: VaultStore | undefined;
+    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
     // WhatsApp store + send function (if configured)
     let waStore: WhatsAppStore | undefined;
     let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;
+    let waSendMedia: ((jid: string, opts: {
+      path: string;
+      caption?: string;
+      mimeType?: string;
+      fileName?: string;
+      mediaKind?: "auto" | "image" | "video" | "audio" | "document";
+      viewOnce?: boolean;
+    }) => Promise<string | undefined>) | undefined;
+    let waMarkRead: ((keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>) | undefined;
     if (config.whatsappDbPath && config.whatsappProfilePath) {
       try {
         const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
@@ -199,7 +260,7 @@ async function main(): Promise<void> {
 
         // Lazy Baileys connection for sending — only connects when first send is called
         let waSock: any;
-        waSendMessage = async (jid: string, text: string): Promise<string | undefined> => {
+        const ensureWaSock = async () => {
           if (!waSock) {
             const {
               default: makeWASocket,
@@ -227,11 +288,38 @@ async function main(): Promise<void> {
               });
             });
           }
-          const result = await waSock.sendMessage(jid, { text });
+          return waSock;
+        };
+        waSendMessage = async (jid: string, text: string): Promise<string | undefined> => {
+          const sock = await ensureWaSock();
+          const result = await sock.sendMessage(jid, { text });
           return result?.key?.id ?? undefined;
+        };
+        waSendMedia = async (jid, opts) => {
+          const sock = await ensureWaSock();
+          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+          const result = await sock.sendMessage(jid, content);
+          return result?.key?.id ?? undefined;
+        };
+        waMarkRead = async (keys) => {
+          const sock = await ensureWaSock();
+          await sock.readMessages(keys);
+          waStore?.markRead(keys.map(k => k.id));
         };
       } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
     }
+
+    initialDirections = await taskControlStore.claimDirections(config.taskId, config.runId);
+    const continuationDirections = initialDirections.filter((item) => item.mode === "continue");
+    const checkpoint = continuationDirections.length > 0
+      ? await taskControlStore.getCheckpoint(config.taskId)
+      : undefined;
+    const continuation = continuationDirections.length > 0
+      ? {
+          directionIds: continuationDirections.map((item) => item.id),
+          message: continuationDirections.map((item) => item.message).join("\n\n"),
+        }
+      : undefined;
 
     const spawnCtx = {
       polpoDir: config.polpoDir,
@@ -241,6 +329,10 @@ async function main(): Promise<void> {
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
+      whatsappSendMedia: waSendMedia,
+      whatsappMarkRead: waMarkRead,
+      resumeMessages: checkpoint?.messages,
+      continuation,
     };
     handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
@@ -255,6 +347,27 @@ async function main(): Promise<void> {
         logStore.append({ ts: new Date().toISOString(), event, data: sanitizeTranscriptEntry(entry) })
           .catch(() => {}); // best-effort, don't block engine
       }
+    };
+    handle.onCheckpoint = async (messages, turnCount) => {
+      checkpointWrites = checkpointWrites.then(async () => {
+        await taskControlStore.saveCheckpoint({
+          taskId: config.taskId,
+          runId: config.runId,
+          messages,
+          savedAt: new Date().toISOString(),
+          turnCount,
+        });
+        actLog.logEvent("checkpoint", { turnCount, messageCount: messages.length });
+      });
+      await checkpointWrites;
+    };
+    handle.onDirectionApplied = async (directionIds) => {
+      const knownDirections = await taskControlStore.listDirections(config.taskId);
+      for (const id of directionIds) await taskControlStore.markDirectionApplied(id);
+      const modes = knownDirections
+        .filter((direction) => directionIds.includes(direction.id))
+        .map((direction) => direction.mode);
+      actLog.logEvent("direction:applied", { directionIds, modes });
     };
     actLog.logEvent("spawned");
   } catch (err) {
@@ -277,6 +390,34 @@ async function main(): Promise<void> {
     }
   }, ACTIVITY_POLL_MS);
 
+  let controlPolling = false;
+  const deliverDirection = async (direction: TaskDirection) => {
+    try {
+      if (direction.mode === "follow_up") {
+        if (!handle.followUp) throw new Error("Agent adapter does not support follow-up messages");
+        handle.followUp(direction.message, direction.id);
+      } else {
+        if (!handle.steer) throw new Error("Agent adapter does not support steering");
+        handle.steer(direction.message, direction.id);
+      }
+    } catch (error) {
+      await taskControlStore.failDirection(direction.id, error instanceof Error ? error.message : String(error));
+    }
+  };
+  const controlPoll = setInterval(async () => {
+    if (controlPolling || !handle.isAlive()) return;
+    controlPolling = true;
+    try {
+      const directions = await taskControlStore.claimDirections(config.taskId, config.runId);
+      for (const direction of directions) await deliverDirection(direction);
+    } finally {
+      controlPolling = false;
+    }
+  }, CONTROL_POLL_MS);
+  for (const direction of initialDirections) {
+    if (direction.mode !== "continue") await deliverDirection(direction);
+  }
+
   // SIGTERM handler: graceful kill
   let sigterm = false;
   process.on("SIGTERM", () => {
@@ -288,6 +429,8 @@ async function main(): Promise<void> {
   try {
     const result = await handle.done;
     clearInterval(poll);
+    clearInterval(controlPoll);
+    await checkpointWrites;
     // Final activity + sessionId flush before marking terminal
     try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logActivity({ ...handle.activity });
@@ -312,6 +455,8 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     clearInterval(poll);
+    clearInterval(controlPoll);
+    await checkpointWrites.catch(() => {});
     try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
     actLog.logEvent("error", { message: err instanceof Error ? err.message : String(err) });
     await runStore.completeRun(config.runId, "failed", errorResult(err));

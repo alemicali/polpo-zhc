@@ -427,9 +427,9 @@ export function ApprovalsPage() {
   ];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-4">
       {/* ── Stats row ── */}
-      <div className="grid grid-cols-4 gap-3 shrink-0">
+      <div className="grid grid-cols-2 gap-2 shrink-0 sm:grid-cols-4 sm:gap-3">
         <StatCard
           label="Total Requests"
           value={counts.all}
@@ -462,9 +462,9 @@ export function ApprovalsPage() {
       </div>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
         {/* Tab buttons */}
-        <div className="flex items-center gap-1">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 lg:overflow-visible lg:pb-0">
           {tabs.map((t) => (
             <Button
               key={t.value}
@@ -490,9 +490,7 @@ export function ApprovalsPage() {
           ))}
         </div>
 
-        <div className="flex-1" />
-
-        <div className="relative w-64">
+        <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search approvals..."
@@ -502,7 +500,7 @@ export function ApprovalsPage() {
           />
         </div>
 
-        <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleRefresh} disabled={isRefreshing}>
+        <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 self-start lg:self-auto" onClick={handleRefresh} disabled={isRefreshing}>
           <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>
       </div>
@@ -542,7 +540,7 @@ export function ApprovalsPage() {
         </Card>
       ) : (
         <ScrollArea className="flex-1 min-h-0">
-          <div className="space-y-2 pr-4">
+          <div className="space-y-2 pr-1 pb-bottom-nav sm:pr-4 lg:pb-0">
             {filtered.map((req) => (
               <ApprovalCard
                 key={req.id}

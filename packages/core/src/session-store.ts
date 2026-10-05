@@ -20,6 +20,12 @@ export interface ToolCallInfo {
   state: ToolCallState;
 }
 
+/** Ordered assistant render timeline. Tool segments reference toolCalls by id. */
+export type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "thinking"; content: string }
+  | { type: "tool"; toolId: string };
+
 export interface Message {
   id: string;              // nanoid(10)
   role: MessageRole;
@@ -27,6 +33,8 @@ export interface Message {
   ts: string;              // ISO timestamp
   /** Tool calls executed during this assistant message (only for role=assistant) */
   toolCalls?: ToolCallInfo[];
+  /** Ordered render timeline preserving text/reasoning/tool interleaving. */
+  segments?: MessageSegment[];
 }
 
 export interface Session {
@@ -37,13 +45,15 @@ export interface Session {
   messageCount: number;
   /** Agent name when this session targets a specific agent (agent-direct mode). Null/undefined for orchestrator sessions. */
   agent?: string;
+  /** Whether the session is starred. When true, the UI surfaces it in a dedicated section above the normal list. */
+  starred?: boolean;
 }
 
 export interface SessionStore {
   create(title?: string, agent?: string): Promise<string>;
-  addMessage(sessionId: string, role: MessageRole, content: string): Promise<Message>;
+  addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message>;
   /** Update the content of an existing message (e.g. finalize a streaming response). */
-  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[]): Promise<boolean>;
+  updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<boolean>;
   getMessages(sessionId: string): Promise<Message[]>;
   getRecentMessages(sessionId: string, limit: number): Promise<Message[]>;
   listSessions(): Promise<Session[]>;
@@ -52,6 +62,8 @@ export interface SessionStore {
   getLatestSession(agent?: string | null): Promise<Session | undefined>;
   /** Rename (update the title of) an existing session. */
   renameSession(sessionId: string, title: string): Promise<boolean>;
+  /** Star or unstar a session. Does NOT bump updatedAt (preserves recent ordering). */
+  setStarred(sessionId: string, starred: boolean): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
   prune(keepSessions: number): Promise<number>;
   close(): Promise<void> | void;

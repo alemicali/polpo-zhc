@@ -5,7 +5,7 @@
  * eliminating prop drilling.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,9 +17,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Loader2, Plus, FolderPlus, Trash2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Loader2, Plus, FolderPlus, Trash2, ChevronDown, X } from "lucide-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { useAgentsPage } from "./agents-page-provider";
+import { ModelPicker } from "@/components/shared/model-picker";
+import { useAuthStatus } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 
 // ─── Add Agent Dialog ────────────────────────────────────
@@ -32,7 +35,22 @@ export function AddAgentDialog() {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [model, setModel] = useState("");
+  const [modelOpen, setModelOpen] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(teams[0]?.name ?? "");
+
+  // Models come from configured/authenticated providers — same source as the
+  // settings page picker, so users see only models they can actually call.
+  const { authStatus } = useAuthStatus();
+  const { configuredProviders, providerSources } = useMemo(() => {
+    if (!authStatus) return { configuredProviders: [] as string[], providerSources: {} as Record<string, string> };
+    const active = Object.entries(authStatus.providers).filter(
+      ([, info]) => info.hasEnvKey || info.profiles.some((p) => p.status === "active"),
+    );
+    return {
+      configuredProviders: active.map(([n]) => n),
+      providerSources: Object.fromEntries(active.map(([n, info]) => [n, info.hasEnvKey ? "env" : "oauth"])),
+    };
+  }, [authStatus]);
 
   const [handleSubmit, isSubmitting] = useAsyncAction(async () => {
     if (!name.trim()) return;
@@ -96,7 +114,53 @@ export function AddAgentDialog() {
           </div>
           <div className="space-y-2">
             <span className="text-sm font-medium">Model</span>
-            <Input placeholder="e.g. claude-sonnet-4-20250514" value={model} onChange={(e) => setModel(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <Popover open={modelOpen} onOpenChange={setModelOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={modelOpen}
+                    className="flex-1 justify-between font-normal"
+                  >
+                    <span className={cn("truncate", !model && "text-muted-foreground")}>
+                      {model || "Use project default"}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[420px] p-0" align="start">
+                  {configuredProviders.length === 0 ? (
+                    <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                      No authenticated providers. Configure one in Settings → Providers first.
+                    </div>
+                  ) : (
+                    <ModelPicker
+                      configuredProviders={configuredProviders}
+                      providerSources={providerSources}
+                      value={model || null}
+                      onSelect={(spec) => { setModel(spec); setModelOpen(false); }}
+                      maxHeight="280px"
+                      heading={null}
+                      subheading={null}
+                    />
+                  )}
+                </PopoverContent>
+              </Popover>
+              {model && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 text-muted-foreground"
+                  onClick={() => setModel("")}
+                  aria-label="Clear model selection"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
             <p className="text-[11px] text-muted-foreground">Leave empty to use the project default.</p>
           </div>
           <DialogFooter>

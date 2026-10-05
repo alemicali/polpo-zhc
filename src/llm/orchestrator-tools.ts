@@ -9,11 +9,13 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { Tool } from "@mariozechner/pi-ai";
+import { nanoid } from "nanoid";
+import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
-import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team } from "../core/types.js";
+import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team, Task, TaskStatus } from "../core/types.js";
+import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "../core/app-registry.js";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
-import { join, resolve, relative, isAbsolute, dirname } from "path";
+import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
@@ -35,9 +37,37 @@ import {
   stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
-import { FileTeamStore } from "../stores/file-team-store.js";
-import { FileAgentStore } from "../stores/file-agent-store.js";
+import { createCliStores } from "../cli/stores.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
+import { detectProviders } from "../setup/providers.js";
+import { listModels, resolveModelSpec } from "./pi-client.js";
+import {
+  ALL_ORCHESTRATOR_BROWSER_TOOLS,
+  ORCHESTRATOR_BROWSER_TOOL_NAMES,
+  executeOrchestratorBrowserTool,
+} from "./orchestrator-browser-tools.js";
+import { activeTaskWaitRegistry } from "./active-task-waits.js";
+import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
+import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
+import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
+import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
+import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
+import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+
+export interface OrchestratorToolProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
+export interface OrchestratorToolExecutionContext {
+  signal?: AbortSignal;
+  onProgress?: (progress: OrchestratorToolProgress) => void | Promise<void>;
+  turnId?: string;
+  toolCallId?: string;
+  sessionId?: string;
+}
 
 
 
@@ -49,6 +79,142 @@ const getStatusTool: Tool = {
   name: "get_status",
   description: "Get a full overview: task counts, active processes, team info, missions, memory status, pending approvals, active checkpoints.",
   parameters: Type.Object({}),
+};
+
+const listAppPreviewsTool: Tool = {
+  name: "list_app_previews",
+  description: "List local web services that are currently running and exposed through this machine's Tailscale Serve configuration. Returns public HTTPS URLs and identifies the recommended App Preview target.",
+  parameters: Type.Object({}),
+};
+
+const listAppsTool: Tool = {
+  name: "list_apps",
+  description: "List the persistent internal app registry, optionally filtered by one or more operational categories. Includes local paths, categories, services, deployments, domains, and live managed-process status.",
+  parameters: Type.Object({
+    tags: Type.Optional(Type.Array(Type.String(), { description: "Filter by high-level app categories such as internal, client, or public (case-insensitive)" })),
+    tagMatch: Type.Optional(Type.Union([Type.Literal("any"), Type.Literal("all")], { default: "any", description: "Match any requested category or require all of them" })),
+  }),
+};
+
+const getAppTool: Tool = {
+  name: "get_app",
+  description: "Get one registered app by ID or slug with its complete operational configuration and current runtime state.",
+  parameters: Type.Object({
+    id: Type.String({ description: "Registered app ID or slug" }),
+  }),
+};
+
+const controlAppServiceTool: Tool = {
+  name: "control_app_service",
+  description: "Start, stop, or restart a configured service belonging to a registered app. Use list_apps/get_app first; never guess identifiers.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    serviceId: Type.String({ description: "Service ID from get_app" }),
+    action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart")]),
+  }),
+};
+
+const runAppDeploymentTool: Tool = {
+  name: "run_app_deployment",
+  description: "Run or stop a deployment command configured in the app registry. Use get_app first and report that deployment output remains visible in Apps.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    deploymentId: Type.String({ description: "Deployment ID from get_app" }),
+    action: Type.Optional(Type.Union([Type.Literal("run"), Type.Literal("stop")], { default: "run" })),
+  }),
+};
+
+const registerAppTool: Tool = {
+  name: "register_app",
+  description: "Register a local project in the persistent Apps registry. This creates the operational record; it does not scaffold or modify project files.",
+  parameters: Type.Object({
+    name: Type.String(),
+    localPath: Type.String({ description: "Existing local project directory" }),
+    slug: Type.Optional(Type.String({ description: "Lowercase URL-safe slug; generated from name when omitted" })),
+    description: Type.Optional(Type.String()),
+    repositoryUrl: Type.Optional(Type.String()),
+    branch: Type.Optional(Type.String()),
+    framework: Type.Optional(Type.String()),
+    tags: Type.Optional(Type.Array(Type.String(), { description: "Normally 1-3 high-level operational categories. Do not use languages or frameworks as tags." })),
+  }),
+};
+
+const updateAppRegistryTool: Tool = {
+  name: "update_app_registry",
+  description: "Update metadata for an existing registered app. Omitted fields remain unchanged.",
+  parameters: Type.Object({
+    appId: Type.String(), name: Type.Optional(Type.String()), slug: Type.Optional(Type.String()),
+    localPath: Type.Optional(Type.String()), description: Type.Optional(Type.String()),
+    repositoryUrl: Type.Optional(Type.String()), branch: Type.Optional(Type.String()),
+    framework: Type.Optional(Type.String()), tags: Type.Optional(Type.Array(Type.String(), { description: "Normally 1-3 high-level operational categories. Do not use languages or frameworks as tags." })),
+  }),
+};
+
+const tagAppTool: Tool = {
+  name: "tag_app",
+  description: "Add, remove, replace, or clear an app's small set of operational categories without rewriting unrelated metadata. Prefer 1-3 categories such as internal, client, public, production, or experimental; never tag languages or frameworks. Use list_apps first and never guess the app ID.",
+  parameters: Type.Object({
+    appId: Type.String({ description: "Registered app ID or slug" }),
+    operation: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("set"), Type.Literal("clear")]),
+    tags: Type.Optional(Type.Array(Type.String(), { description: "One or more tags. Required for add/remove/set; set accepts an empty array to clear all tags." })),
+  }),
+};
+
+const removeAppRegistryTool: Tool = {
+  name: "remove_app_registry",
+  description: "Stop all managed processes and remove an app from the registry. Project files are never deleted.",
+  parameters: Type.Object({ appId: Type.String() }),
+};
+
+const configureAppServiceTool: Tool = {
+  name: "configure_app_service",
+  description: "Add, update, or remove a frontend/backend/worker/database service in a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove")]),
+    serviceId: Type.Optional(Type.String()), name: Type.Optional(Type.String()),
+    kind: Type.Optional(Type.Union([Type.Literal("frontend"), Type.Literal("backend"), Type.Literal("worker"), Type.Literal("database")])),
+    command: Type.Optional(Type.String()), cwd: Type.Optional(Type.String()), port: Type.Optional(Type.Number()),
+    healthPath: Type.Optional(Type.String()), publicUrl: Type.Optional(Type.String()), autoStart: Type.Optional(Type.Boolean()),
+  }),
+};
+
+const configureAppDeploymentTool: Tool = {
+  name: "configure_app_deployment",
+  description: "Add, update, or remove a deployment command from a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove")]),
+    deploymentId: Type.Optional(Type.String()), name: Type.Optional(Type.String()),
+    environment: Type.Optional(Type.Union([Type.Literal("development"), Type.Literal("preview"), Type.Literal("staging"), Type.Literal("production")])),
+    command: Type.Optional(Type.String()), cwd: Type.Optional(Type.String()), provider: Type.Optional(Type.String()),
+    url: Type.Optional(Type.String()), branch: Type.Optional(Type.String()),
+  }),
+};
+
+const configureAppDomainTool: Tool = {
+  name: "configure_app_domain",
+  description: "Add, update, remove, or verify a domain and its expected DNS records for a registered app.",
+  parameters: Type.Object({
+    appId: Type.String(), operation: Type.Union([Type.Literal("upsert"), Type.Literal("remove"), Type.Literal("verify")]),
+    domainId: Type.Optional(Type.String()), hostname: Type.Optional(Type.String()),
+    environment: Type.Optional(Type.Union([Type.Literal("development"), Type.Literal("preview"), Type.Literal("staging"), Type.Literal("production")])),
+    deploymentId: Type.Optional(Type.String()),
+    expectedRecords: Type.Optional(Type.Array(Type.Object({
+      type: Type.Union([Type.Literal("A"), Type.Literal("AAAA"), Type.Literal("CNAME"), Type.Literal("TXT")]),
+      name: Type.String(), value: Type.String(),
+    }))),
+  }),
+};
+
+const controlAppTool: Tool = {
+  name: "control_app",
+  description: "Start, stop, or restart a registered app as a coordinated unit. Starts autoStart services, or all services when none are marked.",
+  parameters: Type.Object({ appId: Type.String(), action: Type.Union([Type.Literal("start"), Type.Literal("stop"), Type.Literal("restart")]) }),
+};
+
+const captureAppScreenshotTool: Tool = {
+  name: "capture_app_screenshot",
+  description: "Capture and store the registered app cover from one of its configured service, deployment, or domain URLs.",
+  parameters: Type.Object({ appId: Type.String(), url: Type.Optional(Type.String()) }),
 };
 
 const listTasksTool: Tool = {
@@ -111,7 +277,7 @@ const getMemoryTool: Tool = {
 
 const getConfigTool: Tool = {
   name: "get_config",
-  description: "Get the current Polpo configuration: settings, models, providers, notification rules, approval gates, SLA config.",
+  description: "Get the current Polpo configuration, including branding, settings, models, providers, notification rules, approval gates, and SLA config. Use this instead of reading .polpo/polpo.json with file tools.",
   parameters: Type.Object({}),
 };
 
@@ -205,9 +371,35 @@ const deleteTasksTool: Tool = {
 
 const retryTaskTool: Tool = {
   name: "retry_task",
-  description: "Retry a failed task — resets it to pending status.",
+  description: "Restart a failed task from scratch by resetting it to pending. Do not use this to preserve and resume the previous agent context; use send_task_direction with continue or auto instead.",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to retry" }),
+  }),
+};
+
+const sendTaskDirectionTool: Tool = {
+  name: "send_task_direction",
+  description:
+    "Send new instructions to a task while preserving its work context. In auto mode, an active task is steered and a stopped or terminal task is continued from its checkpoint. Use retry_task only for a full restart.",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID receiving the instruction" }),
+    message: Type.String({
+      minLength: 1,
+      maxLength: 8_000,
+      description: "Concrete instruction describing what the agent should change, do next, or resume",
+    }),
+    mode: Type.Optional(Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("steer"),
+      Type.Literal("follow_up"),
+      Type.Literal("continue"),
+    ], {
+      description: "auto (default) selects steer for an active run and continue otherwise; steer redirects the current turn; follow_up queues a message after the current turn; continue resumes a stopped or terminal task from its checkpoint",
+      default: "auto",
+    })),
+    confirmSideEffects: Type.Optional(Type.Boolean({
+      description: "Set true only after the user explicitly confirms that continuing may repeat this task's external side effects",
+    })),
   }),
 };
 
@@ -563,18 +755,23 @@ const updateMissionNotificationsTool: Tool = {
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*']). Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
     model: Type.Optional(Type.String({ description: "LLM model (e.g. 'claude-sonnet-4-5-20250929', 'gpt-4o')" })),
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for this agent" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to assign" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent. Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*']). Vault tools are always available. Omit for core coding tools only." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*','phone_*']). phone_* enables VAPI calls for this agent. Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
-    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
@@ -592,18 +789,23 @@ const removeAgentTool: Tool = {
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
+  description: "Update an existing agent's configuration or move it to another team. Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
     model: Type.Optional(Type.String({ description: "New LLM model" })),
     systemPrompt: Type.Optional(Type.String({ description: "New system prompt" })),
     skills: Type.Optional(Type.Array(Type.String(), { description: "New skill list (replaces existing)" })),
+    suggestions: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
+      title: Type.String({ description: "Short suggestion label shown in the chat empty state" }),
+      prompt: Type.Optional(Type.String({ description: "Prompt to send when selected. Defaults to title." })),
+      description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
+    })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', or 'whatsapp_*' to grant those categories. Vault tools are always available. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', or 'phone_*' to grant those categories. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
-    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")], { description: "Agent thinking/reasoning level" })),
+    reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
@@ -619,7 +821,7 @@ const listTeamsTool: Tool = {
 
 const addTeamTool: Tool = {
   name: "add_team",
-  description: "Create a new team.",
+  description: "Create a new team immediately. The team can be used by subsequent tool calls without reloading config.",
   parameters: Type.Object({
     name: Type.String({ description: "Team name (must be unique)" }),
     description: Type.Optional(Type.String({ description: "Team description" })),
@@ -649,9 +851,9 @@ const renameTeamTool: Tool = {
 
 const setVaultEntryTool: Tool = {
   name: "set_vault_entry",
-  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields).",
+  description: "Add or update a credential in an agent's vault. Credentials are encrypted at rest (AES-256-GCM). Ask the user for actual values — do NOT use placeholder or template syntax. Common types: smtp (host, port, user, pass), imap (host, port, user, pass), api_key (key), oauth (clientId, clientSecret, refreshToken), login (username, password), custom (any fields). To share with other agents set `allowedAgents` to their names — the owner agent is always implicit.",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key, e.g. 'gmail', 'sendgrid', 'stripe')" }),
     type: Type.Union([
       Type.Literal("smtp"),
@@ -662,17 +864,22 @@ const setVaultEntryTool: Tool = {
       Type.Literal("custom"),
     ], { description: "Credential type" }),
     label: Type.Optional(Type.String({ description: "Human-readable label (e.g. 'Work Gmail SMTP')" })),
+    account: Type.Optional(Type.String({ description: "Mailbox account name (groups SMTP+IMAP of the same mailbox, e.g. 'work'). Only meaningful for smtp/imap." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "OTHER agent names that may use this credential. Owner is always implicit and not in this list. Omit / [] = owner-private." })),
     credentials: Type.Record(Type.String(), Type.String(), { description: "Key-value credential fields. Use actual values — they will be encrypted at rest." }),
   }),
 };
 
 const updateVaultCredentialsTool: Tool = {
   name: "update_vault_credentials",
-  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field.",
+  description: "Update specific credential fields in an existing vault entry without overwriting the entire entry. Only the provided fields are merged — existing fields are preserved. Use this instead of set_vault_entry when you only need to change a password, rotate a key, or add a field. Pass `allowedAgents` to also update sharing (REPLACES the list, pass [] to revoke all shares).",
   parameters: Type.Object({
-    agent: Type.String({ description: "Agent name" }),
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
     service: Type.String({ description: "Service name (vault key)" }),
-    credentials: Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." }),
+    credentials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Credential fields to add or update. Only these fields are changed — existing fields are preserved." })),
+    allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "REPLACES the sharing list. Owner always implicit. Pass [] to revoke all shares." })),
+    account: Type.Optional(Type.String({ description: "Update the mailbox account name. Pass empty string to clear." })),
+    label: Type.Optional(Type.String({ description: "Update the human-readable label." })),
   }),
 };
 
@@ -682,6 +889,17 @@ const removeVaultEntryTool: Tool = {
   parameters: Type.Object({
     agent: Type.String({ description: "Agent name" }),
     service: Type.String({ description: "Service name (vault key) to remove" }),
+  }),
+};
+
+const shareVaultEntryTool: Tool = {
+  name: "share_vault_entry",
+  description: "Convenience helper to change WHO an existing vault entry is shared with — without re-writing the credentials. Adds/removes agent names from the entry's `allowedAgents` list. Use 'add' to grant access, 'remove' to revoke, or 'replace' to fully overwrite the list. Owner is always implicit and is rejected if passed.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
+    service: Type.String({ description: "Service name (vault key)" }),
+    action: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("replace")], { description: "What to do with `withAgents`." }),
+    withAgents: Type.Array(Type.String(), { description: "Other agent names. The owner cannot share with themselves." }),
   }),
 };
 
@@ -891,6 +1109,21 @@ const watchTaskTool: Tool = {
   }),
 };
 
+const waitForTaskTool: Tool = {
+  name: "wait_for_task",
+  description: "Wait for a task to reach a status. Foreground blocks this turn and can be moved to background from the UI; background returns immediately and starts a new turn in this chat when the task finishes.",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID to wait for" }),
+    targetStatus: Type.Optional(Type.String({ description: "Specific status to wait for. Omit to wait for either done or failed." })),
+    mode: Type.Optional(Type.Union([
+      Type.Literal("foreground"),
+      Type.Literal("background"),
+    ], { description: "Default foreground. Use background to continue the current turn immediately." })),
+    timeoutMs: Type.Optional(Type.Number({ minimum: 1, description: "Optional maximum wait in milliseconds. Omit to wait indefinitely." })),
+    pollIntervalMs: Type.Optional(Type.Number({ minimum: 100, maximum: 30_000, description: "Reconciliation polling interval in milliseconds. Default: 2000." })),
+  }),
+};
+
 const listWatchersTool: Tool = {
   name: "list_watchers",
   description: "List all task watchers (active and fired).",
@@ -915,6 +1148,18 @@ const reloadConfigTool: Tool = {
   name: "reload_config",
   description: "Hot-reload polpo.json from disk. Picks up changes to settings, team, providers, notifications, approvals, SLA, scheduling.",
   parameters: Type.Object({}),
+};
+
+const updateInstanceBrandingTool: Tool = {
+  name: "update_instance_branding",
+  description: "Update the shared instance product name, tagline, or logo. The logo can be an HTTP(S) URL or an existing PNG/JPEG/WebP/GIF file in the workspace. Omitted fields remain unchanged.",
+  parameters: Type.Object({
+    productName: Type.Optional(Type.String({ maxLength: 80, description: "Primary product name shown in navigation. Use an empty string to restore the default." })),
+    tagline: Type.Optional(Type.String({ maxLength: 120, description: "Short secondary label shown below the product name. Use an empty string to restore the default." })),
+    logoUrl: Type.Optional(Type.String({ description: "Public HTTP(S) logo URL" })),
+    logoPath: Type.Optional(Type.String({ description: "Existing local image path, absolute or relative to the workspace" })),
+    clearLogo: Type.Optional(Type.Boolean({ description: "Remove the configured logo and restore the default mark" })),
+  }),
 };
 
 const saveMemoryTool: Tool = {
@@ -965,12 +1210,12 @@ const listOrchestratorSkillsTool: Tool = {
 
 const createOrchestratorSkillTool: Tool = {
   name: "create_orchestrator_skill",
-  description: "Create a new skill in the orchestrator's pool. Writes a SKILL.md with YAML frontmatter and markdown body.",
+  description: "Create a new skill in the orchestrator's pool. Writes a SKILL.md with YAML frontmatter and markdown body. Prefer this over hand-writing the file with `write`: it guarantees a valid YAML block list for allowed-tools.",
   parameters: Type.Object({
     name: Type.String({ description: "Skill name (directory name, e.g. 'project-planner')" }),
     description: Type.String({ description: "Short description for the skill frontmatter" }),
     content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires. MUST be a JSON array of strings (e.g. [\"read\",\"write\",\"bash\"]) — never a single comma-separated string. The tool writes it as a YAML block list automatically." })),
   }),
 };
 
@@ -981,7 +1226,7 @@ const updateOrchestratorSkillTool: Tool = {
     name: Type.String({ description: "Skill name to update" }),
     description: Type.Optional(Type.String({ description: "New description" })),
     content: Type.Optional(Type.String({ description: "New markdown body content" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list. MUST be a JSON array of strings (e.g. [\"read\",\"write\"]) — never a single comma-separated string." })),
   }),
 };
 
@@ -1029,12 +1274,12 @@ const removeAgentSkillTool: Tool = {
 
 const createAgentSkillTool: Tool = {
   name: "create_agent_skill",
-  description: "Create a new skill in the agent skill pool (.polpo/skills/). Writes a SKILL.md with YAML frontmatter and markdown body. After creation, assign it to agents with update_agent.",
+  description: "Create a new skill in the agent skill pool (.polpo/skills/). Writes a SKILL.md with YAML frontmatter and markdown body. After creation, assign it to agents with update_agent. Prefer this over hand-writing the file with `write`: it guarantees a valid YAML block list for allowed-tools.",
   parameters: Type.Object({
     name: Type.String({ description: "Skill name (directory name, e.g. 'api-testing')" }),
     description: Type.String({ description: "Short description for the skill frontmatter" }),
     content: Type.String({ description: "Markdown body content (the skill instructions, without frontmatter)" }),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires (informational)" })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names this skill requires. MUST be a JSON array of strings (e.g. [\"read\",\"write\",\"bash\"]) — never a single comma-separated string. The tool writes it as a YAML block list automatically." })),
   }),
 };
 
@@ -1253,9 +1498,29 @@ const whatsappSendTool: Tool = {
   }),
 };
 
+const whatsappSendFileTool: Tool = {
+  name: "whatsapp_send_file",
+  description: "Send a WhatsApp file/media attachment from a local file path. Supports image, video, audio, and document messages. Requires a WhatsApp channel configured and connected.",
+  parameters: Type.Object({
+    to: Type.String({ description: "Recipient: phone number, contact name, or JID" }),
+    path: Type.String({ description: "Local file path to send. Relative paths resolve from the agent workspace." }),
+    caption: Type.Optional(Type.String({ description: "Optional caption" })),
+    mediaKind: Type.Optional(Type.Union([
+      Type.Literal("auto"),
+      Type.Literal("image"),
+      Type.Literal("video"),
+      Type.Literal("audio"),
+      Type.Literal("document"),
+    ], { description: "Force media kind (default auto)" })),
+    mimeType: Type.Optional(Type.String({ description: "Override MIME type" })),
+    fileName: Type.Optional(Type.String({ description: "Override displayed filename" })),
+    viewOnce: Type.Optional(Type.Boolean({ description: "Send supported media as view-once" })),
+  }),
+};
+
 const whatsappReadTool: Tool = {
   name: "whatsapp_read",
-  description: "Read WhatsApp messages. List recent chats, read messages from a specific chat, or search across all chats. Requires a WhatsApp channel configured.",
+  description: "Read WhatsApp messages. Defaults to hidden/local reads; set markRead=true only when the user explicitly wants WhatsApp read receipts.",
   parameters: Type.Object({
     action: Type.Union([
       Type.Literal("list_chats"),
@@ -1266,6 +1531,7 @@ const whatsappReadTool: Tool = {
     chatId: Type.Optional(Type.String({ description: "Chat phone/name/JID for read_chat (required for read_chat)" })),
     query: Type.Optional(Type.String({ description: "Search query (required for search)" })),
     limit: Type.Optional(Type.Number({ description: "Max results (default: 30)" })),
+    markRead: Type.Optional(Type.Boolean({ description: "For read_chat only: send WhatsApp read receipts for returned inbound messages (default false)" })),
   }),
 };
 
@@ -1388,7 +1654,7 @@ const phoneDisableInboundTool: Tool = {
 //  CLIENT-SIDE TOOLS (executed on the user's browser, not the server)
 // ═══════════════════════════════════════════════════════
 
-const openFileTool: Tool = {
+export const openFileTool: Tool = {
   name: "open_file",
   description: `Open a file for the user in an inline preview dialog, without navigating away.
 Use this when the user says "open the file", "show me the file", "let me see it", etc.
@@ -1400,7 +1666,7 @@ Prefer this over navigate_to with target="files" when the user wants to SEE the 
   }),
 };
 
-const navigateToTool: Tool = {
+export const navigateToTool: Tool = {
   name: "navigate_to",
   description: `Navigate the user's UI to any page in the dashboard.
 Use this when the user asks to see a specific section or detail page, e.g. "show me the dashboard",
@@ -1425,23 +1691,31 @@ Available targets:
 - "approvals" — Approvals page
 - "playbooks" — Playbooks page
 - "config" — Configuration / settings page
+- "apps" — Internal app registry
+- "app" — Specific registered app (requires id)
+- "app_preview" — App Preview page (optional url selects a running app/service)
+- "data" — Data sources and query explorer
+- "views" / "view" — Generated view registry or a specific view (id)
 
 Examples:
 - navigate_to({ target: "dashboard" })
 - navigate_to({ target: "mission", id: "abc123" })
 - navigate_to({ target: "agent", name: "coder" })
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
+- navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })
+- navigate_to({ target: "view", id: "view-id" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
     highlight: Type.Optional(Type.String({ description: "File to highlight/select for files target" })),
+    url: Type.Optional(Type.String({ description: "Public preview URL when target is app_preview. Obtain it from list_app_previews instead of guessing ports." })),
   }),
 };
 
-const openTabTool: Tool = {
+export const openTabTool: Tool = {
   name: "open_tab",
   description: `Open a URL in a new browser tab on the user's device.
 Use this when the user asks to open a link, website, documentation page, PR, issue, deploy URL, etc.
@@ -1453,11 +1727,52 @@ This is a client-side action — calls window.open() in the user's browser.`,
   }),
 };
 
+const designThemeParameters = Type.Object({
+  primary: Type.String({ description: "Primary color as 6-digit hex, e.g. #2563eb" }),
+  secondary: Type.String({ description: "Secondary/accent color as 6-digit hex, e.g. #f1f5f9" }),
+  text: Type.String({ description: "Main text color as 6-digit hex, e.g. #0f172a" }),
+  radius: Type.Number({ description: "Roundedness in pixels, 0-24" }),
+  fontFamily: Type.String({ description: "CSS font-family stack. Supports any installed or loaded browser font." }),
+});
+
+const setDesignTool: Tool = {
+  name: "set_design",
+  description: `Propose UI appearance overrides on the user's device.
+Use this when the user asks to change the app design, colors, typography, or roundness.
+This is a client-side action: the UI shows a preview and the user must confirm before applying it.
+
+Supported properties:
+- enabled: turn appearance overrides on/off. Use true when setting any override, false to restore the selected palette.
+- light: complete light-mode override object.
+- dark: complete dark-mode override object.
+
+Each light/dark object must include every supported override field:
+- primary: main brand/action color as a 6-digit hex value, e.g. "#2563eb".
+- secondary: secondary/accent surface color as a 6-digit hex value.
+- text: main text color as a 6-digit hex value.
+- radius: roundedness in pixels, 0-24.
+- fontFamily: any valid CSS font-family stack, e.g. '"Inter", ui-sans-serif, system-ui, sans-serif'.
+
+Examples:
+- set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })
+- set_design({ enabled: false })`,
+  parameters: Type.Object({
+    enabled: Type.Optional(Type.Boolean({ description: "Enable or disable appearance overrides. Defaults to true when any override property is provided." })),
+    light: Type.Optional(designThemeParameters),
+    dark: Type.Optional(designThemeParameters),
+    primary: Type.Optional(Type.String({ description: "Legacy fallback: primary color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    secondary: Type.Optional(Type.String({ description: "Legacy fallback: secondary/accent color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    text: Type.Optional(Type.String({ description: "Legacy fallback: main text color as 6-digit hex, applied to both modes when light/dark are omitted." })),
+    radius: Type.Optional(Type.Number({ description: "Legacy fallback: roundedness in pixels, 0-24, applied to both modes when light/dark are omitted." })),
+    fontFamily: Type.Optional(Type.String({ description: "Legacy fallback: CSS font-family stack, applied to both modes when light/dark are omitted." })),
+  }),
+};
+
 // ═══════════════════════════════════════════════════════
 //  INTERACTIVE TOOLS
 // ═══════════════════════════════════════════════════════
 
-const askUserTool: Tool = {
+export const askUserTool: Tool = {
   name: "ask_user",
   description: `Ask the user clarifying questions when something is ambiguous or you need preferences.
 Each question has pre-populated options the user can pick from, plus a free-text custom input.
@@ -1479,16 +1794,82 @@ After receiving answers, continue with the task using the clarified information.
   }),
 };
 
+export const renderWidgetTool: Tool = {
+  name: "render_widget",
+  description: `Render an interactive HTML widget inline as a card in the user's chat. Use ONLY when the visual/interactive form delivers genuinely more value than markdown.
+
+✅ USE WHEN
+• The user explicitly asks for a chart, graph, simulation, interactive demo, animated diagram, what-if calculator, force-directed graph, timeline
+• A concept truly needs interaction or visual layout to land at a glance
+
+❌ DO NOT USE WHEN markdown already covers it
+• Tabular data → use a markdown table
+• Code → use a fenced code block
+• Static image / lists / headings → markdown
+• 'Just show the result' → plain text
+
+The user pays for tokens and screen space. Default to markdown. Only reach for the widget when there's clear added value.`,
+  parameters: Type.Object({
+    html: Type.String({ description: "Self-contained HTML (with embedded <style> and <script>). Max ~8KB. NO external resources (no <link>, no <script src=...>, no http(s) images). Inherits theme via prefers-color-scheme. Will be rendered inside a sandboxed iframe (sandbox=\"allow-scripts\"). The iframe auto-sizes to your content height via postMessage — design accordingly. Always full-width of the chat bubble." }),
+    title: Type.Optional(Type.String({ description: "Short title shown in the card header. Ignored if chrome=false." })),
+    description: Type.Optional(Type.String({ description: "Brief alt text for accessibility / search" })),
+    chrome: Type.Optional(Type.Boolean({ description: "Show card chrome (border + header). Default true. Set false for free-form / shaped widgets that should sit directly on the chat canvas (e.g. a circular clock, a custom-shaped diagram)." })),
+    stream: Type.Optional(Type.Boolean({ description: "Opt-in chunk-by-chunk live preview. Default false (atomic — widget appears only when the HTML is fully composed). Set true ONLY when the HTML is large/complex enough that watching it materialise has value (e.g. ASCII-art diagrams that build up shape, animations whose first frames are themselves interesting). For small/instant widgets leave it off — the live preview costs an iframe rebuild every ~1s and is overkill." })),
+  }),
+};
+
+/** Maximum HTML payload size for render_widget (bytes). */
+export const RENDER_WIDGET_MAX_HTML_BYTES = 8192;
+
+/** Patterns that indicate disallowed external resources / nested iframes inside widget HTML. */
+const RENDER_WIDGET_FORBIDDEN_PATTERNS: RegExp[] = [
+  /<script[^>]+\bsrc\s*=/i,
+  /<link[^>]+\bhref\s*=\s*["']?https?:/i,
+  /<img[^>]+\bsrc\s*=\s*["']?https?:/i,
+  /<iframe/i,
+];
+
+/**
+ * Validate render_widget tool arguments.
+ * Returns null on success, or an error message string suitable for returning to the LLM as the tool result.
+ *
+ * The caller (the streaming/non-streaming completions loop) should:
+ * - On null: emit the widget_render interactive intercept and return a tool result of
+ *   "Widget rendered to the user. Continue with prose only if necessary."
+ * - On non-null: skip the emit and feed the returned string back to the model as the tool result.
+ */
+export function validateRenderWidgetArgs(args: Record<string, unknown>): string | null {
+  const html = typeof args.html === "string" ? args.html : "";
+  if (!html) {
+    return "Error: render_widget requires a non-empty 'html' string argument.";
+  }
+  // Use byte length (UTF-8) — generous: code points outside ASCII count more.
+  const byteLen = Buffer.byteLength(html, "utf8");
+  if (byteLen > RENDER_WIDGET_MAX_HTML_BYTES) {
+    return "Error: Widget HTML exceeds 8KB. Trim it (remove comments, minify CSS, simplify SVG paths) and retry.";
+  }
+  for (const pat of RENDER_WIDGET_FORBIDDEN_PATTERNS) {
+    if (pat.test(html)) {
+      return "Error: Widget HTML must be self-contained: no external scripts/links/images, no nested iframes.";
+    }
+  }
+  // height removed from tool params — il widget auto-sizes sempre via
+  // postMessage. Lasciamo passare anche se il modello dovesse ancora
+  // includerlo per qualche reason (vecchio prompt cached): viene
+  // semplicemente ignorato lato client.
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════
 //  TOOL COLLECTIONS
 // ═══════════════════════════════════════════════════════
 
 export const READ_TOOLS = new Set([
-  "get_status", "list_tasks", "get_task", "list_missions", "get_mission",
+  "get_status", "list_app_previews", "list_apps", "get_app", "list_tasks", "get_task", "list_missions", "get_mission",
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
-  "list_schedules", "list_notification_rules", "list_watchers",
+  "list_schedules", "list_notification_rules", "list_watchers", "wait_for_task",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // Playbooks (read-only)
@@ -1501,18 +1882,22 @@ export const READ_TOOLS = new Set([
   "search_web",
   // WhatsApp (read-only)
   "whatsapp_read",
+  // Structured data
+  "data_list_sources", "data_test_source", "data_describe", "data_query", "data_sql", "data_list_views", "data_get_view",
+  // Company Brain
+  "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
 ]);
 
 export const WRITE_TOOLS = new Set([
   // Task
   "create_task", "update_task", "delete_task", "delete_tasks",
-  "retry_task", "kill_task", "reassess_task", "force_fail_task",
+  "retry_task", "send_task_direction", "kill_task", "reassess_task", "force_fail_task",
   // Mission
   "create_mission", "update_mission", "execute_mission", "resume_mission", "abort_mission", "delete_mission",
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Vault & Identity
-  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "set_identity",
+  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "share_vault_entry", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -1522,7 +1907,7 @@ export const WRITE_TOOLS = new Set([
   // Task watchers
   "watch_task", "remove_watcher",
   // Config & Self
-  "reload_config", "save_memory", "append_memory", "update_memory", "append_system_context",
+  "reload_config", "update_instance_branding", "save_memory", "append_memory", "update_memory", "append_system_context",
   // Skills (write)
   "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
   "install_orchestrator_skill", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
@@ -1539,28 +1924,87 @@ export const WRITE_TOOLS = new Set([
   "ink_add", "ink_remove", "ink_update",
   // Phone (write — makes/terminates calls, configures inbound)
   "phone_call", "phone_hangup", "phone_setup_inbound", "phone_disable_inbound",
+  // App runtime
+  "register_app", "update_app_registry", "tag_app", "remove_app_registry",
+  "configure_app_service", "configure_app_deployment", "configure_app_domain",
+  "control_app", "control_app_service", "run_app_deployment", "capture_app_screenshot",
+  // Structured data
+  "data_register_source", "data_update_source", "data_delete_source", "data_set_source_grant",
+  "data_mutate", "data_create_view", "data_update_view", "data_delete_view",
+  // Company Brain
+  "brain_upsert_entity", "brain_upsert_relation", "brain_upsert_claim", "brain_ingest_data_source",
+  "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
-export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab"]);
+// render_widget NON è interactive: è un tool "fire-and-display" che
+// emette un chunk widget_render durante l'esecuzione, NON ferma il turn,
+// e può essere chiamato N volte nello stesso turno (multiple widgets
+// inline). Gli interactive bloccano il turn aspettando input utente.
+export const INTERACTIVE_TOOLS = new Set(["ask_user", "create_mission", "set_vault_entry", "open_file", "navigate_to", "open_tab", "set_design"]);
+export const CLIENT_SIDE_CHAT_TOOLS: Tool[] = [openFileTool, navigateToTool, openTabTool];
+export const CLIENT_SIDE_CHAT_TOOL_NAMES = new Set(CLIENT_SIDE_CHAT_TOOLS.map((tool) => tool.name));
+
+/** Server-side tool that renames the current chat session. Available to
+ *  every agent (orchestrator + agent-direct) — the intercept in
+ *  completions.ts resolves the sessionId from the X-Session-Id header,
+ *  calls `sessionStore.renameSession`, and emits a `session_title`
+ *  SSE chunk so the sidebar refreshes in real time. The tool is sticky:
+ *  agents may call it any time but should ONLY do so on the first turn
+ *  of a new session or when the user explicitly asks for a rename.
+ *  The system prompt is augmented on first-turn to force the call. */
+export const setSessionTitleTool: Tool = {
+  name: "set_session_title",
+  description:
+    "Rename the current chat session with a short, meaningful title (≤50 characters) that summarises what the user is asking. " +
+    "MUST be called once at the very beginning of a new session — the system prompt will remind you on the first turn. " +
+    "On later turns, call it ONLY when the user explicitly asks to rename the conversation. " +
+    "Do not include emojis or quotes; use plain Title Case.",
+  parameters: Type.Object({
+    title: Type.String({ minLength: 1, maxLength: 80, description: "New title for the session — short and descriptive (≤50 chars recommended)." }),
+  }),
+};
+
+/**
+ * Side-effect tools that ship a real-world message (WhatsApp / email)
+ * the moment they execute. In CHAT mode we gate them behind an
+ * approval preview (Invia / Refine / Annulla) — exactly like
+ * `create_mission`. The TASK runner is unaffected: tasks are agentic and
+ * the user already authorised them upstream when the task was created.
+ *
+ * The actual gate lives in `resolveAgentTools` (src/server/app.ts) and in
+ * the orchestrator path (src/server/app.ts:resolveOrchestratorContext).
+ * The intercept emits `whatsapp_preview` / `email_preview` chunks; the
+ * UI then calls REST endpoints to perform the send after explicit user
+ * confirmation.
+ */
+export const SIDE_EFFECT_GATED_TOOLS = new Set(["whatsapp_send", "whatsapp_send_file", "email_send"]);
+
+export function isSideEffectGated(toolName: string): boolean {
+  return SIDE_EFFECT_GATED_TOOLS.has(toolName);
+}
 
 export function needsApproval(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
 }
 
 export function isInteractive(toolName: string): boolean {
-  return INTERACTIVE_TOOLS.has(toolName);
+  return INTERACTIVE_TOOLS.has(toolName) || SIDE_EFFECT_GATED_TOOLS.has(toolName);
+}
+
+export function isClientSideChatTool(toolName: string): boolean {
+  return CLIENT_SIDE_CHAT_TOOL_NAMES.has(toolName);
 }
 
 export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
-  // Read (15)
-  getStatusTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
+  // Read
+  getStatusTool, listAppPreviewsTool, listAppsTool, getAppTool, listTasksTool, getTaskTool, listMissionsTool, getMissionTool,
   listAgentsTool, getTeamsTool, getMemoryTool, getConfigTool,
   listApprovalsTool, listCheckpointsTool, listDelaysTool, getLogsTool,
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
-  // Task (8)
+  // Task (9)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
-  retryTaskTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
+  retryTaskTool, sendTaskDirectionTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
   // Mission (6 + 14 atomic)
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   addMissionTaskTool, updateMissionTaskTool, removeMissionTaskTool, reorderMissionTasksTool,
@@ -1571,8 +2015,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   updateMissionNotificationsTool,
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
-  // Vault (4)
-  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool,
+  // Vault (5)
+  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
   // Identity (2)
   setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
@@ -1581,10 +2025,10 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   createScheduleTool, deleteScheduleTool, updateScheduleTool,
   // Notification rules (2 write + 1 read above + 1 direct send)
   addNotificationRuleTool, removeNotificationRuleTool, sendNotificationTool,
-  // Task watchers (2 write + 1 read above)
-  watchTaskTool, removeWatcherTool,
-  // Config & Self (4)
-  reloadConfigTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
+  // Task watchers (2 write + 2 read above)
+  watchTaskTool, waitForTaskTool, removeWatcherTool,
+  // Config & Self
+  reloadConfigTool, updateInstanceBrandingTool, saveMemoryTool, appendMemoryTool, updateMemoryTool, appendSystemContextTool,
   // Skills (10)
   listOrchestratorSkillsTool, createOrchestratorSkillTool, updateOrchestratorSkillTool,
   removeOrchestratorSkillTool, installOrchestratorSkillTool,
@@ -1603,12 +2047,25 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Phone (7)
   phoneCallTool, phoneGetCallTool, phoneListCallsTool, phoneHangupTool,
   phoneSetupInboundTool, phoneGetInboundConfigTool, phoneDisableInboundTool,
-  // WhatsApp (2)
-  whatsappSendTool, whatsappReadTool,
-  // Interactive (1)
-  askUserTool,
-  // Client-side (3)
-  openFileTool, navigateToTool, openTabTool,
+  // App registry + runtime
+  registerAppTool, updateAppRegistryTool, tagAppTool, removeAppRegistryTool,
+  configureAppServiceTool, configureAppDeploymentTool, configureAppDomainTool,
+  controlAppTool, controlAppServiceTool, runAppDeploymentTool, captureAppScreenshotTool,
+  // Structured data + generated views
+  ...DATA_ORCHESTRATOR_TOOLS,
+  // Evidence-grounded semantic company graph
+  ...BRAIN_ORCHESTRATOR_TOOLS,
+  // WhatsApp (3)
+  whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
+  // Interactive (2)
+  askUserTool, renderWidgetTool,
+  // Client-side (4)
+  openFileTool, navigateToTool, openTabTool, setDesignTool,
+  // Session meta (1)
+  setSessionTitleTool,
+  // Browser (7) — wired to agent-browser CLI, session="orchestrator",
+  // viewable live in the Agent Live tab.
+  ...ALL_ORCHESTRATOR_BROWSER_TOOLS,
 ];
 
 /** Tool action labels for the approval prompt title. */
@@ -1618,9 +2075,48 @@ const TOOL_LABELS: Record<string, string> = {
   delete_task: "Delete Task",
   delete_tasks: "Delete Tasks",
   retry_task: "Retry Task",
+  send_task_direction: "Direct Task",
   kill_task: "Kill Task",
   reassess_task: "Reassess Task",
   force_fail_task: "Force Fail Task",
+  register_app: "Register App",
+  update_app_registry: "Update App",
+  tag_app: "Tag App",
+  remove_app_registry: "Remove App",
+  configure_app_service: "Configure App Service",
+  configure_app_deployment: "Configure App Deployment",
+  configure_app_domain: "Configure App Domain",
+  control_app: "Control App",
+  control_app_service: "Control App Service",
+  run_app_deployment: "Run App Deployment",
+  capture_app_screenshot: "Capture App Cover",
+  data_list_sources: "List Data Sources",
+  data_register_source: "Register Data Source",
+  data_update_source: "Update Data Source",
+  data_delete_source: "Remove Data Source",
+  data_test_source: "Test Data Source",
+  data_set_source_grant: "Set Data Access",
+  data_describe: "Describe Data Source",
+  data_query: "Query Data",
+  data_sql: "Run Read-only SQL",
+  data_mutate: "Change Source Data",
+  data_list_views: "List Data Views",
+  data_get_view: "Get Data View",
+  data_create_view: "Create Data View",
+  data_update_view: "Update Data View",
+  data_delete_view: "Delete Data View",
+  brain_stats: "Inspect Company Brain",
+  brain_search: "Search Company Brain",
+  brain_get_entity: "Get Brain Entity",
+  brain_get_context: "Get Semantic Context",
+  brain_list_runs: "List Brain Runs",
+  brain_upsert_entity: "Update Brain Entity",
+  brain_upsert_relation: "Update Brain Relation",
+  brain_upsert_claim: "Update Brain Claim",
+  brain_ingest_data_source: "Ingest Data into Brain",
+  brain_enrich_text: "Enrich Company Brain",
+  brain_merge_entities: "Merge Brain Entities",
+  brain_set_grant: "Set Brain Access",
   create_mission: "Create Mission",
   update_mission: "Update Mission",
   execute_mission: "Execute Mission",
@@ -1650,6 +2146,7 @@ const TOOL_LABELS: Record<string, string> = {
   set_vault_entry: "Set Vault Entry",
   update_vault_credentials: "Update Vault Credentials",
   remove_vault_entry: "Remove Vault Entry",
+  share_vault_entry: "Share Vault Entry",
   set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
@@ -1664,9 +2161,11 @@ const TOOL_LABELS: Record<string, string> = {
   send_notification: "Send Notification",
   // Task watchers
   watch_task: "Watch Task",
+  wait_for_task: "Wait for Task",
   remove_watcher: "Remove Watcher",
   // Config & Self
   reload_config: "Reload Config",
+  update_instance_branding: "Update Instance Branding",
   save_memory: "Save Memory",
   append_memory: "Append Memory",
   update_memory: "Update Memory",
@@ -1696,6 +2195,9 @@ const TOOL_LABELS: Record<string, string> = {
   whatsapp_read: "WhatsApp Read",
   // Client-side
   open_tab: "Open Tab",
+  set_design: "Set Design",
+  set_session_title: "Set Session Title",
+  render_widget: "Render Widget",
   // Ink Hub
   ink_search: "Search Ink Hub",
   ink_browse: "Browse Installed Packages",
@@ -1767,11 +2269,15 @@ export async function executeOrchestratorTool(
   toolName: string,
   args: Record<string, unknown>,
   polpo: Orchestrator,
+  context: OrchestratorToolExecutionContext = {},
 ): Promise<string> {
   try {
     switch (toolName) {
       // ── Read ──
       case "get_status":       return execGetStatus(polpo);
+      case "list_app_previews": return execListAppPreviews();
+      case "list_apps":        return execListApps(polpo, args);
+      case "get_app":          return execGetApp(polpo, args);
       case "list_tasks":       return execListTasks(polpo, args);
       case "get_task":         return execGetTask(polpo, args);
       case "list_missions":    return execListMissions(polpo, args);
@@ -1785,12 +2291,48 @@ export async function executeOrchestratorTool(
       case "list_delays":      return execListDelays(polpo);
       case "get_logs":         return execGetLogs(polpo, args);
 
+      // ── Apps ──
+      case "control_app_service": return execControlAppService(polpo, args);
+      case "run_app_deployment":  return execRunAppDeployment(polpo, args);
+      case "register_app": return execRegisterApp(polpo, args);
+      case "update_app_registry": return execUpdateAppRegistry(polpo, args);
+      case "tag_app": return execTagApp(polpo, args);
+      case "remove_app_registry": return execRemoveAppRegistry(polpo, args);
+      case "configure_app_service": return execConfigureAppService(polpo, args);
+      case "configure_app_deployment": return execConfigureAppDeployment(polpo, args);
+      case "configure_app_domain": return execConfigureAppDomain(polpo, args);
+      case "control_app": return execControlApp(polpo, args);
+      case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
+
+      // ── Structured data ──
+      case "data_list_sources": case "data_register_source": case "data_update_source": case "data_delete_source":
+      case "data_test_source": case "data_set_source_grant": case "data_describe": case "data_query": case "data_sql": case "data_mutate":
+      case "data_list_views": case "data_get_view": case "data_create_view": case "data_update_view": case "data_delete_view":
+        return executeDataTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), context.sessionId, (event) => {
+          if (event.type === "source") {
+            const { type: _type, ...payload } = event;
+            polpo.emit("data-source:changed", payload);
+          } else {
+            const { type: _type, ...payload } = event;
+            polpo.emit("data-view:changed", payload);
+          }
+        });
+
+      // ── Company Brain ──
+      case "brain_stats": case "brain_search": case "brain_get_entity": case "brain_get_context": case "brain_list_runs":
+      case "brain_upsert_entity": case "brain_upsert_relation": case "brain_upsert_claim": case "brain_ingest_data_source":
+      case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
+        return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
+          polpo.emit("brain:changed" as any, event);
+        });
+
       // ── Task ──
       case "create_task":      return execCreateTask(polpo, args);
       case "update_task":      return execUpdateTask(polpo, args);
       case "delete_task":      return execDeleteTask(polpo, args);
       case "delete_tasks":     return execDeleteTasks(polpo, args);
       case "retry_task":       return execRetryTask(polpo, args);
+      case "send_task_direction": return execSendTaskDirection(polpo, args);
       case "kill_task":        return execKillTask(polpo, args);
       case "reassess_task":    return execReassessTask(polpo, args);
       case "force_fail_task":  return execForceFailTask(polpo, args);
@@ -1835,6 +2377,7 @@ export async function executeOrchestratorTool(
       case "set_vault_entry":           return execSetVaultEntry(polpo, args);
       case "update_vault_credentials": return execUpdateVaultCredentials(polpo, args);
       case "remove_vault_entry":       return execRemoveVaultEntry(polpo, args);
+      case "share_vault_entry":        return execShareVaultEntry(polpo, args);
       case "list_vault":               return execListVault(polpo, args);
 
       // ── Identity ──
@@ -1860,11 +2403,13 @@ export async function executeOrchestratorTool(
 
       // ── Task Watchers ──
       case "watch_task":          return execWatchTask(polpo, args);
+      case "wait_for_task":       return execWaitForTask(polpo, args, context);
       case "list_watchers":       return execListWatchers(polpo, args);
       case "remove_watcher":      return execRemoveWatcher(polpo, args);
 
       // ── Config & Self ──
       case "reload_config":        return execReloadConfig(polpo);
+      case "update_instance_branding": return execUpdateInstanceBranding(polpo, args);
       case "save_memory":          return execSaveMemory(polpo, args);
       case "append_memory":        return execAppendMemory(polpo, args);
       case "update_memory":        return execUpdateMemory(polpo, args);
@@ -1925,16 +2470,30 @@ export async function executeOrchestratorTool(
 
       // ── WhatsApp ──
       case "whatsapp_send":    return await execWhatsAppSend(polpo, args);
-      case "whatsapp_read":    return execWhatsAppRead(polpo, args);
+      case "whatsapp_send_file": return await execWhatsAppSendFile(polpo, args);
+      case "whatsapp_read":    return await execWhatsAppRead(polpo, args);
 
       // ── Interactive (handled by the calling loop, not here) ──
       case "ask_user":
         return "Questions sent to user. Waiting for answers.";
+      case "render_widget":
+        // Validation + emit happen in the completions loop. If we ever get here it
+        // means the tool wasn't intercepted — fall back to validating args so the
+        // model gets a useful error rather than a silent no-op.
+        return validateRenderWidgetArgs(args) ?? "Widget rendered to the user. Continue with prose only if necessary.";
 
       default:
+        // ── Browser (delegated) ──
+        // Browser tools share a single executor in
+        // orchestrator-browser-tools.ts. Routed here so we don't have to
+        // mirror every case branch.
+        if (ORCHESTRATOR_BROWSER_TOOL_NAMES.has(toolName)) {
+          return await executeOrchestratorBrowserTool(toolName, args, polpo);
+        }
         return `Unknown tool: ${toolName}`;
     }
   } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
     const msg = err instanceof Error ? err.message : String(err);
     return `Error: ${msg}`;
   }
@@ -2044,6 +2603,12 @@ export async function formatToolDetails(
       main.push(["Task", await resolveTask(args.taskId)]);
       if (args.assignTo) main.push(["New agent", String(args.assignTo)]);
       if (args.description) extra.push(["New description", trunc(args.description, 200)]);
+      break;
+    case "send_task_direction":
+      main.push(["Task", await resolveTask(args.taskId)]);
+      main.push(["Mode", String(args.mode ?? "auto")]);
+      if (args.confirmSideEffects) main.push(["Repeat side effects", "confirmed"]);
+      extra.push(["Direction", trunc(args.message, 200)]);
       break;
     case "create_mission":
       main.push(["Name", trunc(args.name)]);
@@ -2194,6 +2759,22 @@ export async function formatToolDetails(
       main.push(["URL", trunc(args.url)]);
       if (args.label) main.push(["Label", trunc(args.label)]);
       break;
+    case "set_design":
+      if (args.enabled !== undefined) main.push(["Override", args.enabled ? "on" : "off"]);
+      if (args.light) main.push(["Light", "custom"]);
+      if (args.dark) main.push(["Dark", "custom"]);
+      if (args.primary) main.push(["Primary", String(args.primary)]);
+      if (args.secondary) main.push(["Secondary", String(args.secondary)]);
+      if (args.text) main.push(["Text", String(args.text)]);
+      if (args.radius !== undefined) main.push(["Radius", String(args.radius)]);
+      if (args.fontFamily) extra.push(["Font", trunc(args.fontFamily)]);
+      break;
+    case "render_widget":
+      if (args.title) main.push(["Title", trunc(args.title)]);
+      if (args.height !== undefined) main.push(["Height", `${String(args.height)}px`]);
+      if (typeof args.html === "string") main.push(["HTML size", `${Buffer.byteLength(args.html, "utf8")} bytes`]);
+      if (args.description) extra.push(["Description", trunc(args.description, 200)]);
+      break;
     default:
       for (const [k, v] of Object.entries(args)) {
         if (v !== undefined && v !== null) main.push([k, trunc(v)]);
@@ -2254,6 +2835,293 @@ async function execGetStatus(polpo: Orchestrator): Promise<string> {
   if (checkpoints?.length) lines.push(`Active checkpoints: ${checkpoints.length}`);
 
   return lines.join("\n");
+}
+
+async function execListAppPreviews(): Promise<string> {
+  const discovery = await discoverAppPreviewTargets();
+  if (discovery.targets.length === 0) {
+    return "No active local services are currently exposed through Tailscale Serve.";
+  }
+  const lines = [
+    `Tailscale machine: ${discovery.hostname ?? "unknown"}`,
+    "Active App Preview targets:",
+  ];
+  for (const target of discovery.targets) {
+    const recommended = discovery.suggested?.url === target.url ? " [recommended]" : "";
+    const platform = target.infrastructure ? " [Polpo infrastructure]" : "";
+    lines.push(`- ${target.label} — port ${target.port} — ${target.url}${recommended}${platform}`);
+  }
+  lines.push('Use navigate_to with target="app_preview" and one of these exact URLs to show it in the user interface.');
+  return lines.join("\n");
+}
+
+async function execListApps(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const requestedTags = normalizeAppTags(stringArray(args.tags));
+  const requestedKeys = requestedTags.map((tag) => tag.toLocaleLowerCase());
+  const tagMatch = args.tagMatch === "all" ? "all" : "any";
+  const apps = (await store.list()).filter((app) => {
+    if (requestedKeys.length === 0) return true;
+    const appTags = new Set(app.tags.map((tag) => tag.toLocaleLowerCase()));
+    return tagMatch === "all"
+      ? requestedKeys.every((tag) => appTags.has(tag))
+      : requestedKeys.some((tag) => appTags.has(tag));
+  });
+  if (apps.length === 0) return requestedTags.length
+    ? `No registered apps matched ${tagMatch === "all" ? "all" : "any"} of these tags: ${requestedTags.join(", ")}.`
+    : "The internal app registry is empty. Register an app from the Apps page first.";
+  return apps.map((app) => {
+    const active = runtime.list(app.id).filter((item) => item.status === "running" || item.status === "starting");
+    const services = app.services.map((service) => `${service.name} (${service.id}, ${service.kind}${service.port ? `, :${service.port}` : ""})`).join(", ") || "none";
+    return `[${app.id}] ${app.name} (${app.slug})\n  path: ${app.localPath}\n  tags: ${app.tags.join(", ") || "none"}\n  services: ${services}\n  deployments: ${app.deployments.length}; domains: ${app.domains.length}; active processes: ${active.length}`;
+  }).join("\n");
+}
+
+async function execGetApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const id = String(args.id ?? "").trim();
+  if (!id) return "Error: id is required";
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await store.get(id);
+  if (!app) return `Error: App "${id}" not found`;
+  return JSON.stringify({ ...app, runtime: runtime.list(app.id) }, null, 2);
+}
+
+async function execControlAppService(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const appId = String(args.appId ?? "").trim();
+  const serviceId = String(args.serviceId ?? "").trim();
+  const action = String(args.action ?? "");
+  if (!appId || !serviceId || !["start", "stop", "restart"].includes(action)) return "Error: appId, serviceId and a valid action are required";
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await store.get(appId);
+  if (!app) return `Error: App "${appId}" not found`;
+  if (action === "stop") {
+    const stopped = await runtime.stop(app.id, "service", serviceId);
+    return stopped ? `Stopped service ${serviceId} for ${app.name}.` : `Service ${serviceId} is not running.`;
+  }
+  const status = action === "restart"
+    ? await runtime.restartService(app.id, serviceId)
+    : await runtime.startService(app.id, serviceId);
+  return `${action === "restart" ? "Restarted" : "Started"} service ${serviceId} for ${app.name} (PID ${status.pid ?? "pending"}).`;
+}
+
+async function execRunAppDeployment(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const appId = String(args.appId ?? "").trim();
+  const deploymentId = String(args.deploymentId ?? "").trim();
+  const action = String(args.action ?? "run");
+  if (!appId || !deploymentId || !["run", "stop"].includes(action)) return "Error: appId, deploymentId and a valid action are required";
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await store.get(appId);
+  if (!app) return `Error: App "${appId}" not found`;
+  if (action === "stop") {
+    const stopped = await runtime.stop(app.id, "deployment", deploymentId);
+    return stopped ? `Stopped deployment ${deploymentId} for ${app.name}.` : `Deployment ${deploymentId} is not running.`;
+  }
+  const status = await runtime.runDeployment(app.id, deploymentId);
+  return `Deployment ${deploymentId} started for ${app.name} (PID ${status.pid ?? "pending"}). Open Apps to follow its live output.`;
+}
+
+async function execRegisterApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const name = String(args.name ?? "").trim();
+  const localPath = resolve(String(args.localPath ?? ""));
+  if (!name || !statSync(localPath, { throwIfNoEntry: false })?.isDirectory()) return "Error: name and an existing localPath directory are required";
+  const slug = normalizeAppSlug(String(args.slug ?? name));
+  if (!slug) return "Error: could not derive a valid app slug";
+  const { store } = getLiveAppRegistry(polpo);
+  const app = await store.create({
+    name,
+    slug,
+    localPath,
+    description: optionalString(args.description),
+    repository: optionalString(args.repositoryUrl) ? { url: String(args.repositoryUrl), branch: optionalString(args.branch) } : undefined,
+    framework: optionalString(args.framework),
+    tags: normalizeAppTags(stringArray(args.tags)),
+    services: [], deployments: [], domains: [],
+  });
+  return `Registered app "${app.name}" with ID ${app.id} and slug ${app.slug}. Configure its services, deployments, and domains next, then navigate to target="app" with id="${app.id}".`;
+}
+
+async function execUpdateAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const updates: Record<string, unknown> = {};
+  if (args.name !== undefined) updates.name = String(args.name).trim();
+  if (args.slug !== undefined) updates.slug = normalizeAppSlug(String(args.slug));
+  if (args.description !== undefined) updates.description = optionalString(args.description);
+  if (args.framework !== undefined) updates.framework = optionalString(args.framework);
+  if (args.tags !== undefined) updates.tags = normalizeAppTags(stringArray(args.tags));
+  if (args.localPath !== undefined) {
+    const path = resolve(String(args.localPath));
+    if (!statSync(path, { throwIfNoEntry: false })?.isDirectory()) return `Error: Local path is not a directory: ${path}`;
+    updates.localPath = path;
+  }
+  if (args.repositoryUrl !== undefined || args.branch !== undefined) {
+    const url = args.repositoryUrl !== undefined ? optionalString(args.repositoryUrl) : app.repository?.url;
+    updates.repository = url ? { url, branch: optionalString(args.branch) ?? app.repository?.branch } : undefined;
+  }
+  const updated = await store.update(app.id, updates);
+  return `Updated registry metadata for ${updated!.name} (${updated!.id}).`;
+}
+
+async function execTagApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const operation = String(args.operation ?? "");
+  const requested = normalizeAppTags(stringArray(args.tags));
+  if (!["add", "remove", "set", "clear"].includes(operation)) return "Error: operation must be add, remove, set, or clear";
+  if ((operation === "add" || operation === "remove") && requested.length === 0) return `Error: tags are required for ${operation}`;
+  if (operation === "set" && !Array.isArray(args.tags)) return "Error: tags are required for set";
+
+  const removedKeys = new Set(requested.map((tag) => tag.toLocaleLowerCase()));
+  const tags = operation === "clear"
+    ? []
+    : operation === "set"
+      ? requested
+      : operation === "remove"
+        ? app.tags.filter((tag) => !removedKeys.has(tag.toLocaleLowerCase()))
+        : normalizeAppTags([...app.tags, ...requested]);
+  await store.update(app.id, { tags });
+  return `Updated tags for ${app.name} (${app.id}): ${tags.join(", ") || "none"}.`;
+}
+
+async function execRemoveAppRegistry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  await runtime.stopApp(app.id);
+  await store.delete(app.id);
+  await removeAppScreenshot(polpo.getPolpoDir(), app.id).catch(() => undefined);
+  return `Removed ${app.name} from the registry. Project files were not deleted.`;
+}
+
+async function execConfigureAppService(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.serviceId);
+  if (args.operation === "remove") {
+    if (!id) return "Error: serviceId is required for remove";
+    await runtime.stop(app.id, "service", id);
+    await store.update(app.id, { services: app.services.filter((item) => item.id !== id) });
+    return `Removed service ${id} from ${app.name}.`;
+  }
+  const existing = id ? app.services.find((item) => item.id === id) : undefined;
+  const name = optionalString(args.name) ?? existing?.name;
+  const command = optionalString(args.command) ?? existing?.command;
+  const kind = (optionalString(args.kind) ?? existing?.kind) as AppService["kind"] | undefined;
+  if (!name || !command || !kind) return "Error: name, kind, and command are required for a new service";
+  const service: AppService = {
+    id: existing?.id ?? id ?? nanoid(), name, kind, command,
+    cwd: args.cwd !== undefined ? optionalString(args.cwd) : existing?.cwd,
+    port: typeof args.port === "number" ? args.port : existing?.port,
+    healthPath: args.healthPath !== undefined ? optionalString(args.healthPath) : existing?.healthPath,
+    publicUrl: args.publicUrl !== undefined ? optionalString(args.publicUrl) : existing?.publicUrl,
+    autoStart: typeof args.autoStart === "boolean" ? args.autoStart : existing?.autoStart,
+  };
+  const services = existing ? app.services.map((item) => item.id === service.id ? service : item) : [...app.services, service];
+  await store.update(app.id, { services });
+  return `${existing ? "Updated" : "Added"} service ${service.name} (${service.id}) on ${app.name}.`;
+}
+
+async function execConfigureAppDeployment(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.deploymentId);
+  if (args.operation === "remove") {
+    if (!id) return "Error: deploymentId is required for remove";
+    await runtime.stop(app.id, "deployment", id);
+    await store.update(app.id, { deployments: app.deployments.filter((item) => item.id !== id) });
+    return `Removed deployment ${id} from ${app.name}.`;
+  }
+  const existing = id ? app.deployments.find((item) => item.id === id) : undefined;
+  const name = optionalString(args.name) ?? existing?.name;
+  const command = optionalString(args.command) ?? existing?.command;
+  const environment = (optionalString(args.environment) ?? existing?.environment) as AppEnvironment | undefined;
+  if (!name || !command || !environment) return "Error: name, environment, and command are required for a new deployment";
+  const deployment: AppDeployment = {
+    id: existing?.id ?? id ?? nanoid(), name, command, environment,
+    cwd: args.cwd !== undefined ? optionalString(args.cwd) : existing?.cwd,
+    provider: args.provider !== undefined ? optionalString(args.provider) : existing?.provider,
+    url: args.url !== undefined ? optionalString(args.url) : existing?.url,
+    branch: args.branch !== undefined ? optionalString(args.branch) : existing?.branch,
+    lastRun: existing?.lastRun,
+  };
+  const deployments = existing ? app.deployments.map((item) => item.id === deployment.id ? deployment : item) : [...app.deployments, deployment];
+  await store.update(app.id, { deployments });
+  return `${existing ? "Updated" : "Added"} deployment ${deployment.name} (${deployment.id}) on ${app.name}.`;
+}
+
+async function execConfigureAppDomain(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const id = optionalString(args.domainId);
+  const existing = id ? app.domains.find((item) => item.id === id) : undefined;
+  if (args.operation === "remove") {
+    if (!id) return "Error: domainId is required for remove";
+    await store.update(app.id, { domains: app.domains.filter((item) => item.id !== id) });
+    return `Removed domain ${id} from ${app.name}.`;
+  }
+  if (args.operation === "verify") {
+    if (!existing) return "Error: domainId must identify an existing domain for verify";
+    const verification = await verifyAppDomain(existing);
+    await store.update(app.id, { domains: app.domains.map((item) => item.id === existing.id ? { ...item, verification } : item) });
+    return `Verified ${existing.hostname}: ${verification.status}.\n${verification.details?.join("\n") ?? ""}`;
+  }
+  const hostname = optionalString(args.hostname) ?? existing?.hostname;
+  const environment = (optionalString(args.environment) ?? existing?.environment) as AppEnvironment | undefined;
+  if (!hostname || !environment) return "Error: hostname and environment are required for a new domain";
+  const domain: AppDomain = {
+    id: existing?.id ?? id ?? nanoid(), hostname: hostname.replace(/^https?:\/\//, "").split("/")[0]!.replace(/\.$/, "").toLowerCase(), environment,
+    deploymentId: args.deploymentId !== undefined ? optionalString(args.deploymentId) : existing?.deploymentId,
+    expectedRecords: Array.isArray(args.expectedRecords) ? args.expectedRecords as AppDomain["expectedRecords"] : existing?.expectedRecords ?? [],
+    verification: existing?.verification ?? { status: "unchecked" },
+  };
+  const domains = existing ? app.domains.map((item) => item.id === domain.id ? domain : item) : [...app.domains, domain];
+  await store.update(app.id, { domains });
+  return `${existing ? "Updated" : "Added"} domain ${domain.hostname} (${domain.id}) on ${app.name}.`;
+}
+
+async function execControlApp(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store, runtime } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const action = String(args.action ?? "");
+  if (action === "stop") {
+    await runtime.stopApp(app.id);
+    return `Stopped all managed processes for ${app.name}.`;
+  }
+  const result = action === "restart" ? await runtime.restartApp(app.id) : action === "start" ? await runtime.startApp(app.id) : null;
+  if (!result) return "Error: action must be start, stop, or restart";
+  return `${action === "restart" ? "Restarted" : "Started"} ${app.name}: ${result.statuses.length} service(s) running${result.errors.length ? `; errors: ${result.errors.join("; ")}` : ""}.`;
+}
+
+async function execCaptureAppScreenshot(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { store } = getLiveAppRegistry(polpo);
+  const app = await requireRegisteredApp(store, args.appId);
+  const capturedAt = await captureAppScreenshot(app, polpo.getPolpoDir(), optionalString(args.url));
+  await store.update(app.id, { screenshotUpdatedAt: capturedAt });
+  return `Captured a new cover for ${app.name}.`;
+}
+
+function getLiveAppRegistry(polpo: Orchestrator): ReturnType<typeof getAppRegistryRuntime> {
+  return getAppRegistryRuntime(polpo.getPolpoDir(), (event) => polpo.emit("app:changed", event));
+}
+
+async function requireRegisteredApp(store: ReturnType<typeof getAppRegistryRuntime>["store"], idValue: unknown) {
+  const id = String(idValue ?? "").trim();
+  if (!id) throw new Error("appId is required");
+  const app = await store.get(id);
+  if (!app) throw new Error(`App "${id}" not found`);
+  return app;
+}
+
+function normalizeAppSlug(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.map(String).map((item) => item.trim()).filter(Boolean))] : [];
 }
 
 async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -2479,6 +3347,18 @@ async function execDeleteTasks(polpo: Orchestrator, args: Record<string, unknown
 async function execRetryTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   await polpo.retryTask(args.taskId as string);
   return `Task ${args.taskId} retried — reset to pending.`;
+}
+
+async function execSendTaskDirection(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const result = await polpo.sendDirection(
+    args.taskId as string,
+    args.message as string,
+    {
+      mode: (args.mode as "auto" | "steer" | "follow_up" | "continue" | undefined) ?? "auto",
+      confirmSideEffects: args.confirmSideEffects as boolean | undefined,
+    },
+  );
+  return `Direction sent to task ${args.taskId} using ${result.action} mode.`;
 }
 
 async function execKillTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -2731,6 +3611,31 @@ async function execUpdateMissionNotifications(polpo: Orchestrator, args: Record<
 //  TEAM IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
+function getModelProvider(spec: string | undefined): string | undefined {
+  if (!spec) return undefined;
+  if (spec.includes(":")) return spec.split(":")[0];
+  if (spec.includes("/")) return spec.split("/")[0];
+  return undefined;
+}
+
+function resolveAgentModelForConnectedProvider(polpo: Orchestrator, requested: string | undefined): string | undefined {
+  const connectedProviders = detectProviders().filter((provider) => provider.hasKey).map((provider) => provider.name);
+  if (connectedProviders.length === 0) return requested;
+
+  const requestedProvider = getModelProvider(requested);
+  if (requested && requestedProvider && connectedProviders.includes(requestedProvider)) return requested;
+
+  const orchestratorModel = resolveModelSpec(polpo.getConfig()?.settings?.orchestratorModel);
+  const orchestratorProvider = getModelProvider(orchestratorModel);
+  if (orchestratorModel && orchestratorProvider && connectedProviders.includes(orchestratorProvider)) {
+    return orchestratorModel;
+  }
+
+  const fallbackProvider = connectedProviders[0];
+  const fallbackModel = listModels(fallbackProvider)[0];
+  return fallbackModel ? `${fallbackProvider}:${fallbackModel.id}` : requested;
+}
+
 async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const existing = await polpo.getAgents();
   // For add_agent, check if agent already exists (by name or displayName)
@@ -2739,12 +3644,14 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     return `Error: Agent "${args.name}" already exists (matched "${dup.name}"). Use update_agent to modify.`;
   }
   const teamName = args.team as string | undefined;
+  const model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   const config: Record<string, unknown> = {
     name: args.name as string,
     role: args.role as string | undefined,
-    model: args.model as string | undefined,
+    model,
     systemPrompt: args.systemPrompt as string | undefined,
     skills: args.skills as string[] | undefined,
+    suggestions: args.suggestions as Array<string | { title: string; prompt?: string; description?: string }> | undefined,
     allowedPaths: args.allowedPaths as string[] | undefined,
     allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
@@ -2756,7 +3663,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
   };
   // Strip undefined values so addAgent only receives explicitly set fields
   const cleaned = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
-  polpo.addAgent(cleaned as any, teamName);
+  await polpo.addAgent(cleaned as any, teamName);
   return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
 }
 
@@ -2786,9 +3693,10 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   // Build updates from explicit args, only including fields that were provided
   const updates: Record<string, unknown> = {};
   if (args.role !== undefined) updates.role = args.role as string;
-  if (args.model !== undefined) updates.model = args.model as string;
+  if (args.model !== undefined) updates.model = resolveAgentModelForConnectedProvider(polpo, args.model as string | undefined);
   if (args.systemPrompt !== undefined) updates.systemPrompt = args.systemPrompt as string;
   if (args.skills !== undefined) updates.skills = args.skills as string[];
+  if (args.suggestions !== undefined) updates.suggestions = args.suggestions as Array<string | { title: string; prompt?: string; description?: string }>;
   if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
   if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;
@@ -2815,7 +3723,7 @@ async function execAddTeam(polpo: Orchestrator, args: Record<string, unknown>): 
   const name = args.name as string;
   const existing = await polpo.getTeam(name);
   if (existing) return `Error: Team "${name}" already exists.`;
-  polpo.addTeam({
+  await polpo.addTeam({
     name,
     description: args.description as string | undefined,
     agents: [],
@@ -2836,7 +3744,7 @@ async function execRenameTeam(polpo: Orchestrator, args: Record<string, unknown>
   const newName = args.name as string;
   const team = await polpo.getTeam(oldName);
   if (!team) return `Error: Team "${oldName}" not found.`;
-  polpo.renameTeam(oldName, newName);
+  await polpo.renameTeam(oldName, newName);
   return `Team "${oldName}" renamed to "${newName}".`;
 }
 
@@ -3085,6 +3993,187 @@ async function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>)
   return `Watcher created: [${watcher.id}] watching task "${task.title}" for status "${targetStatus}" → action: ${action.type}`;
 }
 
+const WAITABLE_TASK_STATUSES: TaskStatus[] = [
+  "draft",
+  "pending",
+  "awaiting_approval",
+  "assigned",
+  "in_progress",
+  "review",
+  "done",
+  "failed",
+];
+const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(["done", "failed"]);
+
+function abortWaitError(): DOMException {
+  return new DOMException("Task wait cancelled", "AbortError");
+}
+
+function taskReachedWaitTarget(task: Task, targetStatus?: TaskStatus): boolean {
+  return targetStatus ? task.status === targetStatus : TERMINAL_TASK_STATUSES.has(task.status);
+}
+
+function formatTaskWaitResult(task: Task, targetStatus: TaskStatus | undefined, startedAt: number): string {
+  return `Task wait completed.\n${JSON.stringify({
+    taskId: task.id,
+    title: task.title,
+    status: task.status,
+    waitedFor: targetStatus ?? "terminal (done or failed)",
+    elapsedMs: Date.now() - startedAt,
+    result: task.result ?? null,
+    outcomes: task.outcomes ?? [],
+  }, null, 2)}`;
+}
+
+async function emitTaskWaitProgress(
+  context: OrchestratorToolExecutionContext,
+  task: Task,
+  startedAt: number,
+): Promise<void> {
+  if (!context.onProgress) return;
+  try {
+    await context.onProgress({
+      message: `Waiting for task "${task.title}" (${task.status})`,
+      taskId: task.id,
+      status: task.status,
+      elapsedMs: Date.now() - startedAt,
+    });
+  } catch {
+    // Progress is best-effort and must never terminate the task wait.
+  }
+}
+
+function waitForTaskWake(
+  polpo: Orchestrator,
+  taskId: string,
+  waitMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortWaitError());
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      polpo.off("task:transition", onTransition);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (error?: DOMException) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onTransition = (event: { taskId: string }) => {
+      if (event.taskId === taskId) finish();
+    };
+    const onAbort = () => finish(abortWaitError());
+    const timer = setTimeout(() => finish(), waitMs);
+
+    polpo.on("task:transition", onTransition);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    // Close the narrow race where the signal aborts between the initial
+    // check and listener registration.
+    if (signal?.aborted) onAbort();
+  });
+}
+
+async function execWaitForTask(
+  polpo: Orchestrator,
+  args: Record<string, unknown>,
+  context: OrchestratorToolExecutionContext,
+): Promise<string> {
+  const taskId = typeof args.taskId === "string" ? args.taskId.trim() : "";
+  if (!taskId) return "Error: wait_for_task requires a taskId.";
+
+  const rawTarget = typeof args.targetStatus === "string" ? args.targetStatus : undefined;
+  if (rawTarget && !WAITABLE_TASK_STATUSES.includes(rawTarget as TaskStatus)) {
+    return `Error: Invalid target status "${rawTarget}". Valid: ${WAITABLE_TASK_STATUSES.join(", ")}`;
+  }
+  const targetStatus = rawTarget as TaskStatus | undefined;
+  const mode = args.mode === "background" ? "background" : "foreground";
+  if (mode === "background") {
+    if (!context.sessionId) return "Error: Background waits require a persisted chat session.";
+    try {
+      const wait = await polpo.createBackgroundWait({ taskId, sessionId: context.sessionId, targetStatus });
+      return `Background wait started [${wait.id}] for task "${taskId}"${targetStatus ? ` until ${targetStatus}` : " until completion"}. This turn can continue; the orchestrator will be notified in the same chat.`;
+    } catch (error) {
+      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  const pollIntervalMs = Math.min(30_000, Math.max(100,
+    typeof args.pollIntervalMs === "number" ? args.pollIntervalMs : 2_000,
+  ));
+  const timeoutMs = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs)
+    ? Math.max(1, args.timeoutMs)
+    : undefined;
+  const startedAt = Date.now();
+  let lastProgressAt = 0;
+  let lastStatus: TaskStatus | undefined;
+  const detachController = new AbortController();
+  let detachedWaitId: string | undefined;
+  const signal = context.signal
+    ? AbortSignal.any([context.signal, detachController.signal])
+    : detachController.signal;
+  const unregister = context.toolCallId && context.sessionId
+    ? activeTaskWaitRegistry.register({
+      toolCallId: context.toolCallId,
+      turnId: context.turnId,
+      sessionId: context.sessionId,
+      taskId,
+      targetStatus,
+      detach: (backgroundWaitId) => {
+        detachedWaitId = backgroundWaitId;
+        detachController.abort();
+      },
+    })
+    : undefined;
+
+  try {
+    while (true) {
+      if (signal.aborted) {
+        if (detachedWaitId) {
+          return `Wait moved to background [${detachedWaitId}]. This turn can continue; the orchestrator will be notified in the same chat.`;
+        }
+        throw abortWaitError();
+      }
+      const task = await polpo.getStore().getTask(taskId);
+      if (!task) return `Error: Task "${taskId}" not found.`;
+
+      if (taskReachedWaitTarget(task, targetStatus)) {
+        return formatTaskWaitResult(task, targetStatus, startedAt);
+      }
+      if (targetStatus && TERMINAL_TASK_STATUSES.has(task.status)) {
+        return `Error: Task "${task.title}" reached terminal status "${task.status}" before target status "${targetStatus}".`;
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      if (timeoutMs !== undefined && elapsedMs >= timeoutMs) {
+        return `Error: Timed out waiting for task "${task.title}" after ${timeoutMs}ms (current status: ${task.status}).`;
+      }
+
+      if (task.status !== lastStatus || Date.now() - lastProgressAt >= 15_000) {
+        await emitTaskWaitProgress(context, task, startedAt);
+        lastStatus = task.status;
+        lastProgressAt = Date.now();
+      }
+
+      const remainingMs = timeoutMs === undefined ? pollIntervalMs : timeoutMs - elapsedMs;
+      try {
+        await waitForTaskWake(polpo, taskId, Math.min(pollIntervalMs, remainingMs), signal);
+      } catch (error) {
+        if (detachedWaitId && signal.aborted) {
+          return `Wait moved to background [${detachedWaitId}]. This turn can continue; the orchestrator will be notified in the same chat.`;
+        }
+        throw error;
+      }
+    }
+  } finally {
+    unregister?.();
+  }
+}
+
 async function execListWatchers(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const watcherMgr = polpo.getWatcherManager();
   if (!watcherMgr) return "Watcher manager not available.";
@@ -3114,6 +4203,77 @@ function execRemoveWatcher(polpo: Orchestrator, args: Record<string, unknown>): 
 async function execReloadConfig(polpo: Orchestrator): Promise<string> {
   const reloaded = await polpo.reloadConfig();
   return reloaded ? "Configuration reloaded from polpo.json." : "Error: Failed to reload configuration.";
+}
+
+async function execUpdateInstanceBranding(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const hasProductName = typeof args.productName === "string";
+  const hasTagline = typeof args.tagline === "string";
+  const logoUrl = typeof args.logoUrl === "string" ? args.logoUrl.trim() : undefined;
+  const logoPath = typeof args.logoPath === "string" ? args.logoPath.trim() : undefined;
+  const clearLogo = args.clearLogo === true;
+  if (!hasProductName && !hasTagline && !logoUrl && !logoPath && !clearLogo) {
+    return "Error: Provide at least one branding field to update.";
+  }
+  if ([Boolean(logoUrl), Boolean(logoPath), clearLogo].filter(Boolean).length > 1) {
+    return "Error: Use only one of logoUrl, logoPath, or clearLogo.";
+  }
+  if (logoUrl) {
+    try {
+      const url = new URL(logoUrl);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported protocol");
+    } catch {
+      return "Error: logoUrl must be a valid HTTP(S) URL.";
+    }
+  }
+
+  const polpoDir = polpo.getPolpoDir();
+  const config = loadPolpoConfig(polpoDir);
+  if (!config) return "Error: No polpo.json configuration found.";
+  const branding = { ...(config.settings.branding ?? {}) };
+  if (hasProductName) {
+    const productName = String(args.productName).trim().slice(0, 80);
+    if (productName) branding.productName = productName;
+    else delete branding.productName;
+  }
+  if (hasTagline) {
+    const tagline = String(args.tagline).trim().slice(0, 120);
+    if (tagline) branding.tagline = tagline;
+    else delete branding.tagline;
+  }
+
+  const extensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+  const brandingDir = join(polpoDir, "branding");
+  const clearManaged = () => {
+    for (const extension of ["png", "jpg", "webp", "gif"]) {
+      const path = join(brandingDir, `logo.${extension}`);
+      if (existsSync(path)) rmSync(path);
+    }
+  };
+
+  if (logoPath) {
+    const source = resolveFilePath(polpo, logoPath);
+    if (!existsSync(source) || !statSync(source).isFile()) return `Error: Logo file not found: ${source}`;
+    const extension = extname(source).toLowerCase();
+    if (!extensions.has(extension)) return "Error: Local logo must be PNG, JPEG, WebP, or GIF.";
+    if (statSync(source).size > 4 * 1024 * 1024) return "Error: Local logo must be smaller than 4 MB.";
+    mkdirSync(brandingDir, { recursive: true });
+    clearManaged();
+    const normalizedExtension = extension === ".jpeg" ? "jpg" : extension.slice(1);
+    cpSync(source, join(brandingDir, `logo.${normalizedExtension}`));
+    branding.logoUrl = "/api/v1/config/branding/logo";
+  } else if (logoUrl) {
+    clearManaged();
+    branding.logoUrl = logoUrl;
+  } else if (clearLogo) {
+    clearManaged();
+    delete branding.logoUrl;
+  }
+
+  config.settings.branding = branding;
+  savePolpoConfig(polpoDir, config);
+  const reloaded = await polpo.reloadConfig();
+  if (!reloaded) return "Error: Branding was saved but the runtime config reload failed.";
+  return `Instance branding updated:\n${JSON.stringify(branding, null, 2)}`;
 }
 
 async function execSaveMemory(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3178,15 +4338,25 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
 
   const service = args.service as string;
+  // Filter allowedAgents: drop owner (implicit), de-dupe.
+  const rawAllowed = Array.isArray(args.allowedAgents) ? (args.allowedAgents as string[]) : undefined;
+  const allowedAgents = rawAllowed
+    ? Array.from(new Set(rawAllowed.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)))
+    : undefined;
   const entry: VaultEntry = {
     type: args.type as VaultEntry["type"],
     ...(args.label ? { label: args.label as string } : {}),
+    ...(args.account ? { account: args.account as string } : {}),
+    ...(allowedAgents && allowedAgents.length > 0 ? { allowedAgents } : {}),
     credentials: args.credentials as Record<string, string>,
   };
 
   await vaultStore.set(agentName, service, entry);
   const credKeys = Object.keys(entry.credentials).join(", ");
-  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}`;
+  const shareMsg = entry.allowedAgents && entry.allowedAgents.length > 0
+    ? ` Shared with: ${entry.allowedAgents.join(", ")}.`
+    : "";
+  return `Vault entry "${service}" (${entry.type}) set for agent "${agentName}". Credential fields: ${credKeys}.${shareMsg}`;
 }
 
 async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3202,10 +4372,68 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   const existing = await vaultStore.get(agentName, service);
   if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}". Use set_vault_entry to create one.`;
 
-  const credentials = args.credentials as Record<string, string>;
-  const mergedKeys = await vaultStore.patch(agentName, service, { credentials });
-  const updatedKeys = Object.keys(credentials).join(", ");
+  const credentials = (args.credentials as Record<string, string> | undefined) ?? undefined;
+  // allowedAgents semantics: present → REPLACES. omitted → preserved.
+  const rawAllowed = args.allowedAgents;
+  let allowedAgents: string[] | undefined;
+  if (Array.isArray(rawAllowed)) {
+    allowedAgents = Array.from(new Set((rawAllowed as string[]).filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  }
+  const account = typeof args.account === "string" ? args.account : undefined;
+  const label = typeof args.label === "string" ? args.label : undefined;
+
+  const mergedKeys = await vaultStore.patch(agentName, service, {
+    ...(credentials ? { credentials } : {}),
+    ...(allowedAgents !== undefined ? { allowedAgents } : {}),
+    ...(account !== undefined ? { account } : {}),
+    ...(label !== undefined ? { label } : {}),
+  });
+  const updatedKeys = credentials ? Object.keys(credentials).join(", ") : "(metadata only)";
   return `Vault entry "${service}" updated for agent "${agentName}". Updated fields: ${updatedKeys}. All fields: ${mergedKeys.join(", ")}`;
+}
+
+async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
+
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+
+  const service = args.service as string;
+  const action = args.action as "add" | "remove" | "replace";
+  const withAgents = Array.isArray(args.withAgents) ? (args.withAgents as string[]) : [];
+
+  // Validate target agents exist (defensive — orchestrator may resolve aliases).
+  const known = new Set(agents.map(a => a.name));
+  const cleaned = Array.from(new Set(withAgents.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
+  const unknown = cleaned.filter(n => !known.has(n));
+  if (unknown.length > 0) {
+    return `Error: unknown agent name(s): ${unknown.join(", ")}. Use list_agents to verify.`;
+  }
+
+  const existing = await vaultStore.get(agentName, service);
+  if (!existing) return `Error: No vault entry "${service}" for agent "${agentName}".`;
+
+  const current = new Set(existing.allowedAgents ?? []);
+  let next: string[];
+  if (action === "replace") {
+    next = cleaned;
+  } else if (action === "add") {
+    for (const n of cleaned) current.add(n);
+    next = Array.from(current);
+  } else {
+    // remove
+    for (const n of cleaned) current.delete(n);
+    next = Array.from(current);
+  }
+
+  await vaultStore.patch(agentName, service, { allowedAgents: next });
+  const summary = next.length === 0
+    ? `Vault entry "${service}" is now owner-private.`
+    : `Vault entry "${service}" is now shared with: ${next.join(", ")}.`;
+  return summary;
 }
 
 async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3390,6 +4618,7 @@ function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   }
 
   const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools });
+  emitSkillChanged(polpo, "orchestrator", "created", name);
   return `Created orchestrator skill "${name}" at ${path}`;
 }
 
@@ -3403,6 +4632,8 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates);
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
 
+  emitSkillChanged(polpo, "orchestrator", "updated", name);
+
   const fields = Object.keys(updates);
   return `Updated orchestrator skill "${name}": ${fields.join(", ")}`;
 }
@@ -3411,6 +4642,7 @@ function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   const name = args.name as string;
   const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name);
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
+  emitSkillChanged(polpo, "orchestrator", "deleted", name);
   return `Removed orchestrator skill "${name}"`;
 }
 
@@ -3420,6 +4652,7 @@ function execInstallOrchestratorSkill(polpo: Orchestrator, args: Record<string, 
   const force = args.force as boolean | undefined;
 
   const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  if (result.installed.length > 0) emitSkillChanged(polpo, "orchestrator", "installed");
 
   const lines: string[] = [];
   if (result.installed.length > 0) {
@@ -3456,6 +4689,7 @@ function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown
   const force = args.force as boolean | undefined;
 
   const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  if (result.installed.length > 0) emitSkillChanged(polpo, "agent", "installed");
 
   const lines: string[] = [];
   if (result.installed.length > 0) {
@@ -3495,6 +4729,7 @@ function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
   }
 
   const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools });
+  emitSkillChanged(polpo, "agent", "created", name);
   return `Created agent skill "${name}" at ${skillPath}. Assign it to agents with update_agent (add to their skills array).`;
 }
 
@@ -3502,6 +4737,7 @@ function execRemoveAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
   const name = args.name as string;
   const ok = removeSkill(polpo.getPolpoDir(), name);
   if (!ok) return `Error: Agent skill "${name}" not found.`;
+  emitSkillChanged(polpo, "agent", "deleted", name);
   return `Removed agent skill "${name}"`;
 }
 
@@ -3565,11 +4801,21 @@ function execTagSkill(polpo: Orchestrator, args: Record<string, unknown>): strin
   if (category) entry.category = category;
 
   updateSkillIndex(polpoDir, name, entry as { tags?: string[]; category?: string });
+  emitSkillChanged(polpo, "agent", "indexed", name);
 
   const parts = [`Skill "${name}" index updated.`];
   if (tags) parts.push(`Tags: ${tags.join(", ")}`);
   if (category) parts.push(`Category: ${category}`);
   return parts.join("\n");
+}
+
+function emitSkillChanged(
+  polpo: Orchestrator,
+  scope: "agent" | "orchestrator",
+  action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed",
+  skillName?: string,
+): void {
+  polpo.emit("skill:changed", { scope, action, skillName, timestamp: new Date().toISOString() });
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3610,6 +4856,27 @@ allowed-tools:
 - **name**: kebab-case, lowercase, descriptive (e.g. \`api-testing\`, \`react-patterns\`, \`code-review\`)
 - **description**: What the skill teaches the agent to do — be specific, not vague
 - **allowed-tools**: Optional list of tool names this skill may need. Purely informational for filtering.
+
+### CRITICAL — \`allowed-tools\` MUST be a YAML block list
+
+The single biggest source of broken skills. \`allowed-tools\` is an ARRAY, not a string.
+
+\`\`\`yaml
+# ✅ CORRECT — YAML block list, each item on its own line with "  - "
+allowed-tools:
+  - read
+  - write
+  - bash
+
+# ✅ ALSO OK — YAML flow list (inline array form)
+allowed-tools: [read, write, bash]
+
+# ❌ WRONG — comma-separated string. YAML parses this as ONE string,
+# downstream consumers call .join() on it and crash.
+allowed-tools: read, write, bash
+\`\`\`
+
+When you use the \`create_orchestrator_skill\` / \`create_agent_skill\` tools, pass \`allowedTools\` as a JSON array (e.g. \`["read","write","bash"]\`) — the tool generates the correct YAML block list automatically. NEVER hand-write SKILL.md via the \`write\` tool unless you're certain the YAML is valid; prefer the dedicated tools.
 
 ### Markdown Body (the actual skill content)
 
@@ -4132,24 +5399,10 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const text = args.text as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
 
-  // Resolve recipient to JID
-  let jid: string;
-  if (to.includes("@")) {
-    // Already a JID
-    jid = to;
-  } else if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) {
-    // Phone number
-    const clean = to.replace(/[+\s-]/g, "");
-    jid = `${clean}@s.whatsapp.net`;
-  } else if (store) {
-    // Try resolving by contact name
-    const contact = store.resolveContact(to);
-    if (!contact) return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
-    jid = contact.jid;
-  } else {
-    return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
-  }
+  const jid = jidOrError;
 
   try {
     const msgId = await bridge.sendMessage(jid, text);
@@ -4161,7 +5414,41 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   }
 }
 
-function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execWhatsAppSendFile(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const bridge = polpo.getWhatsAppBridge();
+  if (!bridge) return "Error: WhatsApp not configured or not connected. Configure a WhatsApp channel in polpo.json.";
+
+  const store = polpo.getWhatsAppStore();
+  const to = args.to as string;
+  const path = args.path as string;
+  const jidOrError = resolveWhatsAppJid(to, store);
+  if (jidOrError.startsWith("Error:")) return jidOrError;
+
+  const baseDir = polpo.getAgentWorkDir();
+  const filePath = resolve(baseDir, path);
+  const rel = relative(baseDir, filePath);
+  if (rel.startsWith("..") || isAbsolute(rel)) return "Error: WhatsApp attachments must be inside the agent workspace.";
+  if (!existsSync(filePath)) return `Error: File not found: ${filePath}`;
+  const stat = statSync(filePath);
+  if (!stat.isFile()) return `Error: Not a file: ${filePath}`;
+
+  try {
+    const msgId = await bridge.sendMediaMessage(jidOrError, {
+      path: filePath,
+      caption: args.caption as string | undefined,
+      mimeType: (args.mimeType as string | undefined) ?? guessWhatsAppMime(filePath),
+      fileName: (args.fileName as string | undefined) ?? basename(filePath),
+      mediaKind: (args.mediaKind as "auto" | "image" | "video" | "audio" | "document" | undefined) ?? "auto",
+      viewOnce: args.viewOnce as boolean | undefined,
+    });
+    return `WhatsApp attachment sent to ${jidOrError.replace(/@.*$/, "")}: ${basename(filePath)}${msgId ? ` (id: ${msgId})` : ""}.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error sending WhatsApp attachment: ${msg}`;
+  }
+}
+
+async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const store = polpo.getWhatsAppStore();
   if (!store) return "Error: WhatsApp store not available. Configure a WhatsApp channel in polpo.json.";
 
@@ -4201,15 +5488,26 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
       const messages = store.listMessages(jid, limit);
       if (messages.length === 0) return `No messages found for ${chatId}.`;
 
+      const markRead = args.markRead === true;
+      if (markRead) {
+        const bridge = polpo.getWhatsAppBridge();
+        if (!bridge) return "Error: Cannot mark read because WhatsApp is not connected.";
+        const keys = messages
+          .filter(m => !m.fromMe && !m.readAt)
+          .map(m => ({ remoteJid: m.chatJid, id: m.id, fromMe: false, participant: m.chatJid.endsWith("@g.us") ? m.senderJid : undefined }));
+        if (keys.length > 0) await bridge.markRead(keys);
+      }
+
       // Reverse to chronological order
       const sorted = [...messages].reverse();
       const lines = sorted.map(m => {
         const ts = new Date(m.timestamp * 1000).toLocaleString();
         const sender = m.fromMe ? "Me" : (m.senderName ?? m.senderJid.replace(/@.*$/, ""));
         const media = m.mediaType ? ` [${m.mediaType}]` : "";
-        return `  [${ts}] ${sender}: ${m.text}${media}`;
+        const file = m.mediaPath ? `\n     attachment: ${m.mediaPath}${m.mimeType ? ` (${m.mimeType})` : ""}` : "";
+        return `  [${ts}] ${sender}: ${m.text}${media}${file}`;
       });
-      return `${messages.length} message(s) from ${chatId}:\n${lines.join("\n")}`;
+      return `${messages.length} message(s) from ${chatId}${markRead ? " (marked read)" : " (hidden read)"}:\n${lines.join("\n")}`;
     }
 
     case "search": {
@@ -4241,6 +5539,31 @@ function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknown>): s
     default:
       return `Error: Unknown action "${action}". Use: list_chats, read_chat, search, contacts.`;
   }
+}
+
+function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): string {
+  if (to.includes("@")) return to;
+  if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) return `${to.replace(/[+\s-]/g, "")}@s.whatsapp.net`;
+  if (store) {
+    const contact = store.resolveContact(to);
+    if (contact) return contact.jid;
+    return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
+  }
+  return `Error: Cannot resolve "${to}" — WhatsApp store not available. Use a phone number or JID.`;
+}
+
+function guessWhatsAppMime(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv",
+    ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".zip": "application/zip",
+  };
+  return map[ext] ?? "application/octet-stream";
 }
 
 // ═══════════════════════════════════════════════════════
@@ -4697,9 +6020,9 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
     packages = match;
   }
 
-  // Install packages via stores
-  const inkTeamStore = new FileTeamStore(polpoDir);
-  const inkAgentStore = new FileAgentStore(polpoDir);
+  // Install packages via stores (respect storage backend — hardcoding
+  // FileTeamStore/FileAgentStore silently bypasses sqlite/postgres).
+  const { teamStore: inkTeamStore, agentStore: inkAgentStore } = await createCliStores(polpoDir);
 
   // Ensure default team exists
   const inkTeams = await inkTeamStore.getTeams();
@@ -4843,7 +6166,7 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   const entry = getInkLockEntry(lock, source);
   if (!entry) return `Source "${source}" is not installed. Use ink_browse to see installed packages.`;
 
-  const removeAgentStore = new FileAgentStore(polpoDir);
+  const { agentStore: removeAgentStore } = await createCliStores(polpoDir);
   const removePlaybookStore = polpo.getPlaybookStore();
   const removed = await uninstallInkPackages(entry, polpoDir, removeAgentStore, removePlaybookStore);
 
@@ -4876,8 +6199,7 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
     entries = [entry];
   }
 
-  const updTeamStore = new FileTeamStore(polpoDir);
-  const updAgentStore = new FileAgentStore(polpoDir);
+  const { teamStore: updTeamStore, agentStore: updAgentStore } = await createCliStores(polpoDir);
 
   // Ensure default team exists
   const updTeams = await updTeamStore.getTeams();

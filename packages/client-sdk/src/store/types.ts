@@ -5,6 +5,7 @@ import type {
   ActiveDelay,
   AgentConfig,
   AgentProcess,
+  Team,
   SSEEvent,
 } from "../client/types.js";
 import type { ConnectionStatus } from "../client/event-source.js";
@@ -39,6 +40,7 @@ export interface StoreState {
   /** Mission completion reports keyed by missionId. Populated from mission:completed SSE events. */
   missionReports: Map<string, MissionReport>;
   agents: AgentConfig[];
+  teams: Team[];
   processes: AgentProcess[];
   stats: PolpoStats | null;
   connectionStatus: ConnectionStatus;
