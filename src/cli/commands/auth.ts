@@ -9,6 +9,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import * as readline from "node:readline";
+import type { LoginPrompt } from "../../auth/index.js";
 
 export function registerAuthCommands(parent: Command): void {
   const auth = parent
@@ -66,8 +67,16 @@ export function registerAuthCommands(parent: Command): void {
             console.log(chalk.cyan(url));
             console.log();
           },
-          onPrompt: async (message, placeholder) => {
+          onPrompt: async (message, placeholder, authPrompt) => {
+            if (authPrompt?.type === "select") {
+              return promptForSelection(authPrompt);
+            }
             return promptUser(`${message}${placeholder ? chalk.dim(` (${placeholder})`) : ""}: `);
+          },
+          onDeviceCode: ({ verificationUri, userCode }) => {
+            console.log(`\n${chalk.bold("Open this URL in your browser:")}`);
+            console.log(chalk.cyan(verificationUri));
+            console.log(`${chalk.bold("Enter code:")} ${chalk.cyan(userCode)}\n`);
           },
           onProgress: (message) => {
             console.log(chalk.dim(`  ${message}`));
@@ -181,4 +190,18 @@ function promptUser(question: string): Promise<string> {
       resolve(answer.trim());
     });
   });
+}
+
+async function promptForSelection(authPrompt: LoginPrompt): Promise<string> {
+  const options = authPrompt.options ?? [];
+  console.log(authPrompt.message);
+  for (let index = 0; index < options.length; index++) {
+    const option = options[index];
+    const description = option.description ? chalk.dim(` — ${option.description}`) : "";
+    console.log(`  ${chalk.cyan(`${index + 1}.`)} ${option.label}${description}`);
+  }
+  const answer = await promptUser(`Select option (1-${options.length}): `);
+  const selected = options[Number.parseInt(answer, 10) - 1];
+  if (!selected) throw new Error("Invalid selection");
+  return selected.id;
 }

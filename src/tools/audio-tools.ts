@@ -31,7 +31,7 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from "no
 import { resolve, dirname, extname } from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 // Re-export with concrete generic to avoid "requires 1 type argument" errors
 type ToolResult = AgentToolResult<any>;

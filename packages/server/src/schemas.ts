@@ -216,7 +216,12 @@ const ModelConfigSchema = z.object({
 export const UpdateSettingsSchema = z.object({
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
-  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  branding: z.object({
+    productName: z.string().trim().max(80).optional(),
+    tagline: z.string().trim().max(120).optional(),
+    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo")]).optional(),
+  }).optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────
@@ -417,7 +422,18 @@ const ChannelGatewaySchema = z.object({
   dmPolicy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional(),
   allowFrom: z.array(z.string()).optional(),
   enableInbound: z.boolean().optional(),
-  sessionIdleMinutes: z.number().int().min(1).optional(),
+  sessionIdleMinutes: z.number().int().min(0).optional(),
+  sessionMode: z.enum(["per-peer", "shared"]).optional(),
+  agentSessions: z.record(z.string(), z.object({
+    sessionMode: z.enum(["per-peer", "shared"]).optional(),
+    sessionIdleMinutes: z.number().int().min(0).optional(),
+  }).strict()).optional(),
+  agent: z.string().min(1).optional(),
+  replyTo: z.object({
+    channel: z.string().min(1),
+    chatId: z.string().optional(),
+    echoInbound: z.boolean().optional(),
+  }).strict().optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({
@@ -440,6 +456,7 @@ export const NotificationChannelConfigSchema = z.object({
   // Webhook
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  inboundSecret: z.string().min(16).optional(),
   // Push
   vapidPublicKey: z.string().optional(),
   vapidPrivateKey: z.string().optional(),

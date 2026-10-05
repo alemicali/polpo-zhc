@@ -2,8 +2,7 @@
  * OAuth manager — login, refresh, and API key resolution for OAuth-enabled providers.
  *
  * Wraps pi-ai's OAuth login functions with Polpo's credential persistence layer.
- * Supports all 5 OAuth providers: Anthropic, OpenAI Codex, GitHub Copilot,
- * Google Gemini CLI, Google Antigravity.
+ * Supports every OAuth provider exposed by the installed pi-ai catalog.
  *
  * Security:
  * - Expired tokens without refresh tokens are explicitly rejected (not silently used)
@@ -11,45 +10,18 @@
  * - Typed credential extraction avoids excessive `as any` casts
  */
 
-import {
-  loginAnthropic,
-  loginOpenAICodex,
-  loginGitHubCopilot,
-  loginGeminiCli,
-  loginAntigravity,
-  refreshAnthropicToken,
-  refreshOpenAICodexToken,
-  refreshGitHubCopilotToken,
-  refreshGoogleCloudToken,
-  refreshAntigravityToken,
-  getOAuthProvider,
-} from "@mariozechner/pi-ai/oauth";
-import type { OAuthCredentials } from "@mariozechner/pi-ai";
+import type { AuthEvent, AuthPrompt, ModelAuth, OAuthCredential } from "@earendil-works/pi-ai";
 import type { OAuthProviderName, OAuthProfile } from "./types.js";
+import { getPiOAuthRuntime, oauthCredentialFromProfile } from "./pi-oauth-runtime.js";
 import {
   profileId,
   saveProfile,
   getProfilesForProvider,
   updateProfileCredentials,
-  touchProfile,
   recordProfileSuccess,
   recordProfileError,
-  recordBillingFailure,
 } from "./store.js";
 import { selectProfileForProvider } from "./profile-rotation.js";
-
-// ─── Types ──────────────────────────────────────────
-
-/**
- * Extended OAuth credentials — pi-ai returns these additional fields
- * on some providers but the base OAuthCredentials type doesn't include them.
- */
-interface ExtendedOAuthCredentials extends OAuthCredentials {
-  email?: string;
-  accountId?: string;
-  projectId?: string;
-  enterpriseUrl?: string;
-}
 
 // ─── Security Helpers ───────────────────────────────
 
@@ -86,19 +58,92 @@ function sanitizeErrorMessage(err: unknown): string {
  * Extract extended credentials from an OAuthCredentials object safely.
  * Uses type narrowing instead of `as any` casts.
  */
-function extractExtendedFields(creds: OAuthCredentials): {
+function extractExtendedFields(creds: OAuthCredential): {
   email?: string;
   accountId?: string;
   projectId?: string;
   enterpriseUrl?: string;
 } {
-  const ext = creds as Partial<ExtendedOAuthCredentials>;
   return {
-    email: typeof ext.email === "string" ? ext.email : undefined,
-    accountId: typeof ext.accountId === "string" ? ext.accountId : undefined,
-    projectId: typeof ext.projectId === "string" ? ext.projectId : undefined,
-    enterpriseUrl: typeof ext.enterpriseUrl === "string" ? ext.enterpriseUrl : undefined,
+    email: typeof creds.email === "string" ? creds.email : undefined,
+    accountId: typeof creds.accountId === "string" ? creds.accountId : undefined,
+    projectId: typeof creds.projectId === "string" ? creds.projectId : undefined,
+    enterpriseUrl: typeof creds.enterpriseUrl === "string" ? creds.enterpriseUrl : undefined,
   };
+}
+
+function extractCredentialExtra(creds: OAuthCredential): Record<string, unknown> | undefined {
+  const { type: _type, access: _access, refresh: _refresh, expires: _expires, ...extra } = creds;
+  return Object.keys(extra).length > 0 ? extra : undefined;
+}
+
+export interface LoginPromptOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface LoginPrompt {
+  type: AuthPrompt["type"];
+  message: string;
+  placeholder?: string;
+  options?: LoginPromptOption[];
+}
+
+export interface LoginDeviceCode {
+  userCode: string;
+  verificationUri: string;
+  intervalSeconds?: number;
+  expiresInSeconds?: number;
+}
+
+/** Convert pi-ai prompts into a serializable, app-facing contract. */
+export function normalizeLoginPrompt(prompt: AuthPrompt): LoginPrompt {
+  return {
+    type: prompt.type,
+    message: prompt.message,
+    placeholder: prompt.type === "select" ? undefined : prompt.placeholder,
+    options: prompt.type === "select"
+      ? prompt.options.map((option) => ({ ...option }))
+      : undefined,
+  };
+}
+
+function promptMessage(prompt: LoginPrompt): { message: string; placeholder?: string } {
+  if (prompt.type !== "select") {
+    return { message: prompt.message, placeholder: prompt.placeholder };
+  }
+  const choices = (prompt.options ?? [])
+    .map((option) => `${option.id}: ${option.label}${option.description ? ` — ${option.description}` : ""}`)
+    .join("\n");
+  return { message: `${prompt.message}\n${choices}` };
+}
+
+function notifyLogin(callbacks: LoginCallbacks, event: AuthEvent): void {
+  switch (event.type) {
+    case "auth_url":
+      callbacks.onAuthUrl(event.url, event.instructions);
+      break;
+    case "device_code":
+      if (callbacks.onDeviceCode) {
+        callbacks.onDeviceCode({
+          userCode: event.userCode,
+          verificationUri: event.verificationUri,
+          intervalSeconds: event.intervalSeconds,
+          expiresInSeconds: event.expiresInSeconds,
+        });
+      } else {
+        callbacks.onAuthUrl(event.verificationUri, `Enter device code ${event.userCode}`);
+      }
+      break;
+    case "info":
+      callbacks.onProgress?.(event.message);
+      if (event.links?.[0]) callbacks.onAuthUrl(event.links[0].url, event.links[0].label);
+      break;
+    case "progress":
+      callbacks.onProgress?.(event.message);
+      break;
+  }
 }
 
 // ─── Login Callbacks ────────────────────────────────
@@ -107,7 +152,9 @@ export interface LoginCallbacks {
   /** Called when the user needs to open a URL (browser auth) */
   onAuthUrl: (url: string, instructions?: string) => void;
   /** Called when the user needs to enter a code or respond to a prompt */
-  onPrompt: (message: string, placeholder?: string) => Promise<string>;
+  onPrompt: (message: string, placeholder?: string, prompt?: LoginPrompt) => Promise<string>;
+  /** Called for device authorization flows that require a URL and one-time code. */
+  onDeviceCode?: (deviceCode: LoginDeviceCode) => void;
   /** Called for progress messages */
   onProgress?: (message: string) => void;
 }
@@ -121,70 +168,19 @@ export async function oauthLogin(
   provider: OAuthProviderName,
   callbacks: LoginCallbacks,
 ): Promise<string> {
-  let creds: OAuthCredentials;
+  const oauth = getPiOAuthRuntime(provider);
+  if (!oauth) throw new Error(`Unknown OAuth provider: ${provider}`);
 
-  switch (provider) {
-    case "anthropic":
-      creds = await loginAnthropic({
-        onAuth: (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        onPrompt: (prompt) => callbacks.onPrompt(prompt.message, prompt.placeholder),
-        onProgress: callbacks.onProgress,
-        onManualCodeInput: () =>
-          callbacks.onPrompt(
-            "Paste the authorization code from the browser (format: code#state)",
-            "code#state",
-          ),
-      });
-      break;
-
-    case "openai-codex":
-      creds = await loginOpenAICodex({
-        onAuth: (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        onPrompt: (prompt) => callbacks.onPrompt(prompt.message, prompt.placeholder),
-        onProgress: callbacks.onProgress,
-        onManualCodeInput: () =>
-          callbacks.onPrompt(
-            "Paste the redirect URL or authorization code",
-            "http://localhost:1455/auth/callback?code=...",
-          ),
-      });
-      break;
-
-    case "github-copilot":
-      creds = await loginGitHubCopilot({
-        onAuth: (url, instructions) => callbacks.onAuthUrl(url as string, instructions),
-        onPrompt: (prompt) => callbacks.onPrompt(prompt.message, prompt.placeholder),
-        onProgress: callbacks.onProgress,
-      });
-      break;
-
-    case "google-gemini-cli":
-      creds = await loginGeminiCli(
-        (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        callbacks.onProgress,
-        () =>
-          callbacks.onPrompt(
-            "Paste the redirect URL or authorization code",
-            "http://localhost:8085/oauth2callback?...",
-          ),
-      );
-      break;
-
-    case "google-antigravity":
-      creds = await loginAntigravity(
-        (info) => callbacks.onAuthUrl(info.url, info.instructions),
-        callbacks.onProgress,
-        () =>
-          callbacks.onPrompt(
-            "Paste the redirect URL or authorization code",
-            "http://localhost:51121/oauth-callback?...",
-          ),
-      );
-      break;
-
-    default:
-      throw new Error(`Unknown OAuth provider: ${provider}`);
-  }
+  const signal = new AbortController().signal;
+  const creds = await oauth.login({
+    signal,
+    prompt: async (prompt) => {
+      const normalized = normalizeLoginPrompt(prompt);
+      const display = promptMessage(normalized);
+      return callbacks.onPrompt(display.message, display.placeholder, normalized);
+    },
+    notify: (event) => notifyLogin(callbacks, event),
+  });
 
   // Extract extended fields safely (no `as any`)
   const ext = extractExtendedFields(creds);
@@ -192,11 +188,7 @@ export async function oauthLogin(
   const id = profileId(provider, identifier);
 
   // Build extra fields
-  const extra: Record<string, unknown> = {};
-  if (ext.accountId) extra.accountId = ext.accountId;
-  if (ext.projectId) extra.projectId = ext.projectId;
-  if (ext.enterpriseUrl) extra.enterpriseUrl = ext.enterpriseUrl;
-  if (ext.email) extra.email = ext.email;
+  const extra = extractCredentialExtra(creds);
 
   // Save profile
   const profile: OAuthProfile = {
@@ -206,7 +198,7 @@ export async function oauthLogin(
     refresh: creds.refresh,
     expires: creds.expires,
     email: ext.email,
-    extra: Object.keys(extra).length > 0 ? extra : undefined,
+    extra,
     createdAt: new Date().toISOString(),
     lastUsed: new Date().toISOString(),
   };
@@ -234,69 +226,36 @@ export async function refreshProfile(
     );
   }
 
-  let creds: OAuthCredentials;
-
   try {
-    switch (profile.provider) {
-      case "anthropic":
-        creds = await refreshAnthropicToken(profile.refresh);
-        break;
+    const oauth = getPiOAuthRuntime(profile.provider);
+    if (!oauth) throw new Error(`Unknown OAuth provider: ${profile.provider}`);
+    const creds = await oauth.refresh(
+      oauthCredentialFromProfile(profile),
+      new AbortController().signal,
+    );
 
-      case "openai-codex":
-        creds = await refreshOpenAICodexToken(profile.refresh);
-        break;
+    const extra = extractCredentialExtra(creds);
+    updateProfileCredentials(
+      id,
+      creds.access,
+      creds.expires,
+      creds.refresh || profile.refresh,
+      extra,
+    );
 
-      case "github-copilot":
-        creds = await refreshGitHubCopilotToken(
-          profile.refresh,
-          profile.extra?.enterpriseUrl as string | undefined,
-        );
-        break;
-
-      case "google-gemini-cli":
-        creds = await refreshGoogleCloudToken(
-          profile.refresh,
-          (profile.extra?.projectId as string) || "",
-        );
-        break;
-
-      case "google-antigravity":
-        creds = await refreshAntigravityToken(
-          profile.refresh,
-          (profile.extra?.projectId as string) || "",
-        );
-        break;
-
-      default:
-        throw new Error(`Unknown OAuth provider: ${profile.provider}`);
-    }
+    return {
+      ...profile,
+      access: creds.access,
+      expires: creds.expires,
+      refresh: creds.refresh || profile.refresh,
+      email: typeof creds.email === "string" ? creds.email : profile.email,
+      extra: { ...profile.extra, ...extra },
+    };
   } catch (err) {
     // Sanitize the error message before re-throwing
     const safeMsg = sanitizeErrorMessage(err);
     throw new Error(`Token refresh failed for ${profile.provider}: ${safeMsg}`);
   }
-
-  // Extract extended fields safely
-  const ext = extractExtendedFields(creds);
-  const extra: Record<string, unknown> = {};
-  if (ext.accountId) extra.accountId = ext.accountId;
-  if (ext.projectId) extra.projectId = ext.projectId;
-
-  updateProfileCredentials(
-    id,
-    creds.access,
-    creds.expires,
-    creds.refresh || profile.refresh,
-    Object.keys(extra).length > 0 ? extra : undefined,
-  );
-
-  return {
-    ...profile,
-    access: creds.access,
-    expires: creds.expires,
-    refresh: creds.refresh || profile.refresh,
-    extra: { ...profile.extra, ...extra },
-  };
 }
 
 // ─── API Key Resolution ─────────────────────────────
@@ -319,11 +278,11 @@ export async function refreshProfile(
  *
  * Returns the API key string or undefined if no usable profiles exist.
  */
-export async function getOAuthApiKeyForProvider(
+export async function getOAuthModelAuthForProvider(
   provider: string,
   pinnedProfileId?: string,
   pinnedSource?: "auto" | "user",
-): Promise<{ apiKey: string; profileId: string } | undefined> {
+): Promise<{ auth: ModelAuth; profileId: string } | undefined> {
   // Use profile rotation to select the best profile
   const selection = selectProfileForProvider(provider, pinnedProfileId, pinnedSource);
   if (!selection) return undefined;
@@ -345,7 +304,7 @@ export async function getOAuthApiKeyForProvider(
         // If user-pinned, don't try other profiles
         if (pinnedSource === "user") return undefined;
         // Try to find the next available profile (exclude this one by recursing with no pin)
-        return getOAuthApiKeyForProviderExcluding(provider, id);
+        return getOAuthModelAuthForProviderExcluding(provider, id);
       }
 
       // Try refresh
@@ -357,44 +316,49 @@ export async function getOAuthApiKeyForProvider(
         );
         recordProfileError(id, "refresh_failed");
         if (pinnedSource === "user") return undefined;
-        return getOAuthApiKeyForProviderExcluding(provider, id);
+        return getOAuthModelAuthForProviderExcluding(provider, id);
       }
     }
 
-    // Get the API key using the provider's getApiKey method
-    const piProvider = getOAuthProvider(provider);
-    if (piProvider) {
-      const apiKey = piProvider.getApiKey({
-        access: current.access,
-        refresh: current.refresh || "",
-        expires: current.expires || 0,
-        ...current.extra,
-      });
+    const oauth = getPiOAuthRuntime(provider);
+    if (oauth) {
+      const auth = await oauth.toAuth(oauthCredentialFromProfile(current));
       recordProfileSuccess(id);
-      return { apiKey, profileId: id };
+      return { auth, profileId: id };
     }
 
     // Fallback: use raw access token
     recordProfileSuccess(id);
-    return { apiKey: current.access, profileId: id };
+    return { auth: { apiKey: current.access }, profileId: id };
   } catch (err) {
     process.stderr.write(
       `[polpo/auth] Profile "${id}" failed: ${sanitizeErrorMessage(err)}\n`,
     );
     recordProfileError(id, "unknown");
     if (pinnedSource === "user") return undefined;
-    return getOAuthApiKeyForProviderExcluding(provider, id);
+    return getOAuthModelAuthForProviderExcluding(provider, id);
   }
+}
+
+/** Backward-compatible API-key-only view for older Polpo integrations. */
+export async function getOAuthApiKeyForProvider(
+  provider: string,
+  pinnedProfileId?: string,
+  pinnedSource?: "auto" | "user",
+): Promise<{ apiKey: string; profileId: string } | undefined> {
+  const resolved = await getOAuthModelAuthForProvider(provider, pinnedProfileId, pinnedSource);
+  if (!resolved?.auth.apiKey) return undefined;
+  return { apiKey: resolved.auth.apiKey, profileId: resolved.profileId };
 }
 
 /**
  * Try to get an API key from a provider, excluding a specific profile.
  * Used when the primary selection fails and we need to rotate.
  */
-async function getOAuthApiKeyForProviderExcluding(
+async function getOAuthModelAuthForProviderExcluding(
   provider: string,
   excludeId: string,
-): Promise<{ apiKey: string; profileId: string } | undefined> {
+): Promise<{ auth: ModelAuth; profileId: string } | undefined> {
   const profiles = getProfilesForProvider(provider);
   const remaining = profiles.filter(p => p.id !== excludeId);
   if (remaining.length === 0) return undefined;
@@ -414,19 +378,14 @@ async function getOAuthApiKeyForProviderExcluding(
         }
       }
 
-      const piProvider = getOAuthProvider(provider);
-      if (piProvider) {
-        const apiKey = piProvider.getApiKey({
-          access: current.access,
-          refresh: current.refresh || "",
-          expires: current.expires || 0,
-          ...current.extra,
-        });
+      const oauth = getPiOAuthRuntime(provider);
+      if (oauth) {
+        const auth = await oauth.toAuth(oauthCredentialFromProfile(current));
         recordProfileSuccess(id);
-        return { apiKey, profileId: id };
+        return { auth, profileId: id };
       }
       recordProfileSuccess(id);
-      return { apiKey: current.access, profileId: id };
+      return { auth: { apiKey: current.access }, profileId: id };
     } catch {
       continue;
     }

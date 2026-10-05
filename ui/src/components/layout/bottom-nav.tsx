@@ -21,7 +21,7 @@ const PRIMARY_NAV = [
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
 ];
 
-const HIDDEN_ON: (string | RegExp)[] = [/^\/chat(\/|$)/, /^\/coding(\/|$)/];
+const HIDDEN_ON: (string | RegExp)[] = [/^\/chat(\/|$)/];
 
 export function BottomNav() {
   const { pathname } = useLocation();

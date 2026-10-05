@@ -35,8 +35,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && tsc",
-    "build:all": "./node_modules/.bin/tsc && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
+    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build && ./node_modules/.bin/tsc",
+    "build:all": "pnpm build && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
     "dev": "tsc --watch",
@@ -53,7 +53,7 @@
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",
-    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths')})\""
+    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths');process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "keywords": [
     "ai",
@@ -74,13 +74,13 @@
   "author": "OpenPolpo Contributors",
   "packageManager": "pnpm@10.29.3",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
-    "@mariozechner/pi-agent-core": "^0.70.6",
-    "@mariozechner/pi-ai": "^0.70.6",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@polpo-ai/core": "workspace:*",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",

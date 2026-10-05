@@ -112,12 +112,12 @@ export function CodingSidebar(props: SidebarProps) {
         terminals={props.terminals}
         workspaces={props.workspaces}
       />
-      <div className="flex h-9 shrink-0 items-center px-3">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+      <div className="flex h-10 shrink-0 items-center px-3">
+        <span className="text-[10px] font-semibold uppercase text-muted-foreground">
           Projects
         </span>
         {props.workspaces.length > 0 && (
-          <span className="ml-1.5 text-[10px] tabular-nums text-white/25">{props.workspaces.length}</span>
+          <span className="ml-1.5 text-[10px] tabular-nums text-muted-foreground/60">{props.workspaces.length}</span>
         )}
       </div>
 
@@ -158,7 +158,7 @@ export function CodingSidebar(props: SidebarProps) {
         })}
       </div>
 
-      <div className="flex shrink-0 items-center gap-0.5 border-t border-white/[0.06] px-1 py-1.5">
+      <div className="flex shrink-0 items-center gap-0.5 border-t border-border/70 px-1 py-1.5">
         <NewWorkspacePopover
           root={props.workDir}
           extraRoots={extraRoots}
@@ -209,19 +209,19 @@ function ProjectGroup({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <header
-            className="group/header flex items-center gap-1 rounded-md px-1.5 py-1 cursor-pointer hover:bg-white/[0.025]"
+            className="group/header flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted/50"
             onClick={onToggle}
           >
             <span
               aria-hidden
-              className="flex h-5 w-5 shrink-0 items-center justify-center text-white/35 group-hover/header:text-white/60"
+              className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground group-hover/header:text-foreground"
             >
               {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </span>
 
             <span
               title={project.cwd}
-              className="flex-1 truncate text-left text-[12.5px] font-medium tracking-tight text-white/40"
+              className="flex-1 truncate text-left text-[12.5px] font-medium text-muted-foreground"
             >
               {projectLabel(project)}
             </span>
@@ -245,7 +245,7 @@ function ProjectGroup({
             onClick={onAddWorkspace}
             aria-label="Add workspace"
             title="New workspace (worktree)"
-            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11.5px] font-medium text-white/55 hover:bg-white/[0.04] hover:text-white"
+            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11.5px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Plus className="h-3.5 w-3.5" />
             <span className="flex-1">Add workspace</span>
@@ -313,15 +313,15 @@ function WorkspaceRow({
           onClick={onSelect}
           className={cn(
             "group/ws relative rounded-md px-2 py-1.5 cursor-pointer transition-colors",
-            active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]",
+            active ? "bg-muted text-foreground" : "hover:bg-muted/50",
           )}
         >
           <div className="flex items-center gap-1.5">
-            <GitBranch className={cn("h-3 w-3 shrink-0", active ? "text-white/65" : "text-white/40")} />
+            <GitBranch className={cn("h-3 w-3 shrink-0", active ? "text-foreground/70" : "text-muted-foreground")} />
             <span
               className={cn(
                 "min-w-0 flex-1 truncate text-left font-mono text-[11.5px] font-medium",
-                active ? "text-white" : "text-white/85",
+                active ? "text-foreground" : "text-foreground/85",
               )}
               title={branchLabel}
             >
@@ -332,7 +332,7 @@ function WorkspaceRow({
                 empty
               </span>
             ) : (
-              <span className="shrink-0 rounded bg-white/[0.04] px-1.5 py-px text-[9.5px] tabular-nums text-white/55">
+              <span className="shrink-0 rounded bg-background/70 px-1.5 py-px text-[9.5px] tabular-nums text-muted-foreground">
                 {workspace.terminals.length}
               </span>
             )}
@@ -341,7 +341,7 @@ function WorkspaceRow({
               onClick={(e) => { e.stopPropagation(); onCloseAll(); }}
               aria-label="Archive workspace"
               title="Archive (terminates all sessions on this branch)"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/30 opacity-0 hover:bg-white/[0.08] hover:text-white group-hover/ws:opacity-100"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/ws:opacity-100"
             >
               <Archive className="h-3.5 w-3.5" />
             </button>
@@ -350,9 +350,9 @@ function WorkspaceRow({
           {/* Second line: workspace label (city) + PR + git stats.
               Hidden when label == branch and the tree is clean. */}
           {hasSecondLine && (
-            <div className="mt-1 flex items-center gap-2 pl-[18px] text-[10px] text-white/45">
+            <div className="mt-1 flex items-center gap-2 pl-[18px] text-[10px] text-muted-foreground">
               {wsLabel && (
-                <span className="font-medium text-white/70" title={wsLabel}>{wsLabel}</span>
+                <span className="font-medium text-foreground/70" title={wsLabel}>{wsLabel}</span>
               )}
               {git?.pr && <PrPill state={git.pr.state} number={git.pr.number} url={git.pr.url} />}
               {git && (git.insertions > 0 || git.deletions > 0) && (
@@ -413,7 +413,7 @@ function FooterIconButton({ label, children, onClick }: { label: string; childre
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/40 hover:bg-white/10 hover:text-white"
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
     >
       {children}
     </button>

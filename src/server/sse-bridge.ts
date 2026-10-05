@@ -3,7 +3,7 @@ import type { PolpoEvent } from "../core/events.js";
 
 /** All Polpo events to subscribe to. */
 const ALL_EVENTS: PolpoEvent[] = [
-  "task:created", "task:transition", "task:updated", "task:removed",
+  "task:created", "task:transition", "task:updated", "task:removed", "task:direction",
   "agent:spawned", "agent:finished", "agent:activity",
   "agent:created", "agent:updated", "agent:removed",
   "team:created", "team:updated", "team:removed",
@@ -15,20 +15,24 @@ const ALL_EVENTS: PolpoEvent[] = [
   "task:timeout", "agent:stale",
   "task:recovered",
   "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
-  "session:created", "message:added",
+  "session:created", "session:updated", "session:deleted", "message:added",
+  "background-wait:created", "background-wait:ready", "background-wait:running",
+  "background-wait:completed", "background-wait:failed", "background-wait:cancelled",
   "approval:requested", "approval:resolved", "approval:rejected", "approval:timeout",
   "escalation:triggered", "escalation:resolved", "escalation:human",
   "sla:warning", "sla:violated", "sla:met",
   "checkpoint:reached", "checkpoint:resumed",
   "delay:started", "delay:expired",
   "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
-  "schedule:triggered", "schedule:created", "schedule:completed",
+  "schedule:triggered", "schedule:created", "schedule:completed", "schedule:expired",
   "notification:sent", "notification:failed",
+  "config:reloaded",
   "gateway:started", "gateway:stopped",
   "peer:paired", "peer:message", "peer:blocked", "peer:presence",
   "watcher:created", "watcher:fired", "watcher:removed",
   "action:triggered",
   "file:changed",
+  "app:changed", "data-source:changed", "data-view:changed", "skill:changed", "token-usage:recorded",
   "log",
 ];
 

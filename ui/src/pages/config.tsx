@@ -66,13 +66,15 @@ import {
   Upload,
   Download,
   EyeOff,
+  Image as ImageIcon,
+  Copy,
   type LucideIcon,
 } from "lucide-react";
-import { useConfig } from "@/hooks/use-polpo";
+import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react";
-import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig } from "@polpo-ai/react";
+import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig, BrandingConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
@@ -89,16 +91,25 @@ import type { Provider as AuthProvider, OAuthProvider } from "@/components/share
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ModelPicker } from "@/components/shared/model-picker";
 import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/rule-form-dialog";
+import { summarizeRule } from "@/lib/rule-summary";
+import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
 import { useAppearance } from "@/lib/appearance";
 import { PALETTES, usePalette } from "@/lib/palette";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/shared/brand-mark";
+import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
+import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
+import { useAgentNames } from "@/hooks/use-agent-names";
+import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 
 // ── API helper (same pattern as setup.tsx) ──
 
 const api = async (path: string, init?: RequestInit) => {
   try {
     const headers: Record<string, string> = { ...init?.headers as Record<string, string> };
+    if (appConfig.apiKey) headers.Authorization = `Bearer ${appConfig.apiKey}`;
     // Only set Content-Type for requests with a body
     if (init?.body) headers["Content-Type"] = "application/json";
     const res = await fetch(`${appConfig.baseUrl}/api/v1${path}`, {
@@ -201,12 +212,16 @@ type SectionId = SectionIdBase;
 // ── Reusable display components ──
 
 /** Key-value row — label left, value right, dotted filler in between */
-function Row({ label, value, mono }: { label: React.ReactNode; value: React.ReactNode; mono?: boolean }) {
+function Row({ label, value, mono, wrap }: { label: React.ReactNode; value: React.ReactNode; mono?: boolean; wrap?: boolean }) {
   return (
     <div className="flex items-baseline gap-2 py-1.5 min-w-0">
       <span className="text-xs text-muted-foreground shrink-0">{label}</span>
       <span className="flex-1 border-b border-dotted border-border/30 min-w-4 self-end mb-[3px]" />
-      <span className={cn("text-xs text-foreground shrink-0 text-right max-w-[60%] truncate", mono && "font-mono text-[11px]")}>{value}</span>
+      <span className={cn(
+        "text-xs text-foreground shrink-0 text-right max-w-[60%]",
+        wrap ? "break-words [overflow-wrap:anywhere]" : "truncate",
+        mono && "font-mono text-[11px]",
+      )}>{value}</span>
     </div>
   );
 }
@@ -428,7 +443,7 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
   slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-green-500",   hue: "green",   description: "Post to a Slack channel via webhook" },
   whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-emerald-500", hue: "emerald", description: "Send notifications to a WhatsApp chat (unofficial)" },
   email:    { label: "Email",    icon: Mail,            color: "border-l-amber-500",   hue: "amber",   description: "Send email via Resend, SendGrid, or SMTP" },
-  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "POST JSON to any HTTP endpoint" },
+  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint" },
   push:     { label: "Push",     icon: Monitor,         color: "border-l-fuchsia-500", hue: "fuchsia", description: "Send PWA push notifications to subscribed browsers" },
 };
 
@@ -451,7 +466,7 @@ function defaultChannelConfig(type: NotificationChannelType): NotificationChanne
     case "whatsapp": return { type, chatId: "", profileDir: "default", gateway: { enableInbound: false, dmPolicy: "pairing" } };
     case "slack":    return { type, webhookUrl: "" };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
-    case "webhook":  return { type, url: "" };
+    case "webhook":  return { type, gateway: { enableInbound: false, dmPolicy: "open" } };
     case "push":     return { type, vapidSubject: "mailto:hello@polpo.ai", ttl: 3600, urgency: "normal" };
     default:         return { type };
   }
@@ -490,8 +505,111 @@ interface WhatsAppLoginSessionInfo {
   expiresAt: string;
 }
 
+/** "Continue web chat · never expires" / "Separate · 60 min" */
+function describeSession(mode?: string, idleMinutes?: number): string {
+  const conversation = mode === "shared" ? "Continue web chat" : "Separate";
+  const idle = idleMinutes === 0 ? "never expires" : `${idleMinutes ?? 60} min`;
+  return `${conversation} · ${idle}`;
+}
+
+/** Bot, interlocutor, conversation and menu summary on a Telegram channel card. */
+function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChannelConfig }) {
+  const gateway = ch.gateway;
+  const info = useTelegramChannelInfo(api, name, gateway?.enableInbound ? gateway.agent : undefined);
+  const overrides = Object.entries(gateway?.agentSessions ?? {});
+  return (
+    <>
+      <Row label="Bot" value={info.botUsername ? `@${info.botUsername}` : "—"} mono wrap />
+      {gateway?.enableInbound && (
+        <>
+          <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+          {gateway.replyTo && <Row label="Replies" value={`→ ${gateway.replyTo.channel}`} mono wrap />}
+          <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
+          {overrides.map(([agent, s]) => (
+            <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
+          ))}
+          <Row
+            label="Menu"
+            value={gateway.agent
+              ? `${info.suggestionCount ?? "…"} suggestion${info.suggestionCount === 1 ? "" : "s"} + /new /help`
+              : "/agent /polpo /new /status … (9)"}
+            wrap
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 function channelSupportsInbound(type: NotificationChannelType): boolean {
-  return type === "telegram" || type === "whatsapp";
+  return type === "telegram" || type === "whatsapp" || type === "webhook";
+}
+
+/** Random secret for inbound webhooks (64 hex chars). */
+function generateInboundSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function webhookInboundUrl(channelName: string): string {
+  return new URL(apiUrl(`/api/v1/channels/${encodeURIComponent(channelName)}/inbound`), window.location.origin).toString();
+}
+
+/** Endpoint, secret and a ready-to-copy example for an inbound webhook channel. */
+function WebhookInboundSetup({ config, onChange, channelName }: {
+  config: NotificationChannelConfig;
+  onChange: (config: NotificationChannelConfig) => void;
+  channelName?: string;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = (label: string, value: string) => {
+    void navigator.clipboard?.writeText(value).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
+  const url = channelName ? webhookInboundUrl(channelName) : "";
+  const secret = config.inboundSecret ?? "";
+  const example = `curl -X POST '${url || "<url>"}' \\\n  -H 'Authorization: Bearer ${secret ? "<secret>" : "<generate a secret>"}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"sender":"my-iphone","text":"Hi!"}'`;
+
+  return (
+    <div className="space-y-2 rounded-md border border-violet-500/20 bg-violet-500/5 px-2.5 py-2.5">
+      <Field label="Endpoint" hint={channelName ? "POST messages here. The reply comes back in the response." : "Save the channel to get its URL."}>
+        <div className="flex gap-1.5">
+          <Input readOnly className="h-8 text-xs font-mono" value={url || "available after saving"} />
+          {url && (
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("url", url)}>
+              <Copy className="h-3 w-3" /> {copied === "url" ? "Copied" : "Copy"}
+            </Button>
+          )}
+        </div>
+      </Field>
+      <Field label="Secret" hint="Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel.">
+        <div className="flex gap-1.5">
+          <Input className="h-8 text-xs font-mono" placeholder="Generate one" value={secret}
+            onChange={(e) => onChange({ ...config, inboundSecret: e.target.value || undefined })} />
+          {secret && (
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("secret", secret)}>
+              <Copy className="h-3 w-3" /> {copied === "secret" ? "Copied" : "Copy"}
+            </Button>
+          )}
+          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]"
+            onClick={() => onChange({ ...config, inboundSecret: generateInboundSecret() })}>
+            <RefreshCw className="h-3 w-3" /> {secret ? "New" : "Generate"}
+          </Button>
+        </div>
+      </Field>
+      <div className="grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+        <span className="font-medium text-foreground">iOS Shortcuts</span>
+        <span>1. Ask for Input (text or dictation).</span>
+        <span>2. Get Contents of URL: the endpoint above with <code>?format=text</code>, method POST, header <code>Authorization</code> = <code>Bearer &lt;secret&gt;</code>, request body JSON with <code>text</code> = the input and <code>sender</code> = a name for your device. Use Form with a file field to send photos or documents.</span>
+        <span>3. Show Result or Speak Text — or set <b>Replies go to</b> below (or <code>replyTo</code> in the body) to get the answer on Telegram instead: the request returns at once and the reply arrives there.</span>
+        <span>Commands work as on Telegram: /agent NAME, /polpo, /new, /help and the agent's suggestions. Without <code>?format=text</code> the response is JSON with messages, buttons and files (base64).</span>
+      </div>
+      <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-[10px] font-mono leading-relaxed">{example}</pre>
+    </div>
+  );
 }
 
 function splitList(value: string): string[] {
@@ -534,9 +652,9 @@ function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
       <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5">
         <p className="text-xs font-medium">Telegram setup</p>
         <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
-          <span>1. Create a bot with @BotFather and paste the bot token.</span>
-          <span>2. Add the bot to the target chat or group and set the chat ID.</span>
-          <span>3. Enable inbound only if users should talk to Polpo from Telegram.</span>
+          <span>1. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">@BotFather</a>, send /newbot and paste the token below.</span>
+          <span>2. Press <b>Find my chat</b> and send any message to your bot — the chat ID fills in after you confirm.</span>
+          <span>3. To talk to Polpo from Telegram, turn on the inbound gateway. Save.</span>
         </div>
       </div>
     );
@@ -779,10 +897,15 @@ function WhatsAppProfileSetup({ config, onChange }: {
   );
 }
 
-function DeliveryFields({ config, onChange }: {
+function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBotToken }: {
   config: NotificationChannelConfig;
   onChange: (patch: Partial<NotificationChannelConfig>) => void;
+  gatewayRunning: boolean;
+  channelName?: string;
+  /** Bot token of the saved channel; while it is unchanged the bot is already polled by the server. */
+  savedBotToken?: string;
 }) {
+  const botActive = !!savedBotToken && savedBotToken.trim() === (config.botToken ?? "").trim();
   const set = onChange;
 
   return (
@@ -797,9 +920,26 @@ function DeliveryFields({ config, onChange }: {
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <Field label="Chat ID" hint="Numeric chat or group ID used for outbound notifications">
+          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning ? channelName : undefined} />
+          <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
+          {botActive ? (
+            <TelegramConnect
+              api={api}
+              channel={channelName}
+              gatewayRunning={gatewayRunning}
+              currentChatId={config.chatId}
+              onPaired={(chatId) => { if (!config.chatId) set({ chatId }); }}
+            />
+          ) : (
+            <TelegramChatFinder
+              api={api}
+              botToken={config.botToken}
+              currentChatId={config.chatId}
+              onConfirm={(chat) => set({ chatId: chat.chatId })}
+            />
+          )}
         </>
       )}
 
@@ -866,8 +1006,8 @@ function DeliveryFields({ config, onChange }: {
 
       {config.type === "webhook" && (
         <>
-          <Field label="URL" hint="JSON POST endpoint">
-            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value })} />
+          <Field label="Notification URL" hint="Optional: Polpo POSTs notifications here as JSON. Leave empty for an inbound-only webhook.">
+            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
           </Field>
           <Field label="Headers" hint="key:value pairs, one per line">
             <textarea
@@ -919,22 +1059,30 @@ function DeliveryFields({ config, onChange }: {
   );
 }
 
-function InboundGatewayForm({ config, onChange }: {
+function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
+  channelName?: string;
+  otherChannels?: { name: string; type: NotificationChannelType }[];
 }) {
+  const agentNames = useAgentNames(api);
   const gateway = config.gateway ?? {};
   const enabled = gateway.enableInbound === true;
-  const policy = gateway.dmPolicy ?? "pairing";
+  const isWebhook = config.type === "webhook";
+  // A webhook is authenticated by its secret, so it defaults to open.
+  const defaultPolicy: GatewayPolicy = isWebhook ? "open" : "pairing";
+  const policy = gateway.dmPolicy ?? defaultPolicy;
   const updateGateway = (patch: Partial<GatewayConfig>) => {
-    onChange({
+    const next: NotificationChannelConfig = {
       ...config,
       gateway: {
-        dmPolicy: "pairing",
+        dmPolicy: defaultPolicy,
         ...gateway,
         ...patch,
       },
-    });
+    };
+    if (isWebhook && patch.enableInbound && !next.inboundSecret) next.inboundSecret = generateInboundSecret();
+    onChange(next);
   };
 
   return (
@@ -963,6 +1111,7 @@ function InboundGatewayForm({ config, onChange }: {
 
       {enabled ? (
         <>
+          {isWebhook && <WebhookInboundSetup config={config} onChange={onChange} channelName={channelName} />}
           <div className="grid grid-cols-2 gap-2">
             <Field label="DM Policy" hint="Controls who can start a Polpo session.">
               <Select value={policy} onValueChange={(v) => updateGateway({ dmPolicy: v as GatewayPolicy })}>
@@ -977,28 +1126,106 @@ function InboundGatewayForm({ config, onChange }: {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Idle Timeout" hint="Minutes before a session expires.">
+            <Field label="Idle Timeout" hint="Minutes of inactivity before a new conversation starts. 0 = never.">
               <Input
                 className="h-8 text-xs font-mono"
                 type="number"
-                min={1}
+                min={0}
                 placeholder="60"
                 value={gateway.sessionIdleMinutes ?? ""}
                 onChange={(e) => updateGateway({ sessionIdleMinutes: e.target.value ? Number(e.target.value) : undefined })}
               />
             </Field>
           </div>
+          {(config.type === "telegram" || isWebhook) && (
+            <Field label="Dedicated agent" hint={isWebhook
+              ? "Send every message to one agent, without /agent. Leave on Polpo to talk to the orchestrator and switch with /agent."
+              : "Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot."}>
+              <Select value={gateway.agent ?? "__polpo__"} onValueChange={(v) => updateGateway({ agent: v === "__polpo__" ? undefined : v })}>
+                <SelectTrigger className="h-8 text-xs w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__polpo__" className="text-xs">Polpo (orchestrator, /agent to switch)</SelectItem>
+                  {agentNames.map((name) => <SelectItem key={name} value={name} className="text-xs">{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          <Field label="Replies go to" hint="Conversation pipe: answer here, or deliver replies through another channel (e.g. in from Shortcuts, out on Telegram).">
+            <Select
+              value={gateway.replyTo?.channel ?? "__origin__"}
+              onValueChange={(v) => updateGateway({ replyTo: v === "__origin__" ? undefined : { ...gateway.replyTo, channel: v } })}
+            >
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__origin__" className="text-xs">This channel</SelectItem>
+                {otherChannels.map((c) => (
+                  <SelectItem key={c.name} value={c.name} className="text-xs">{c.name} ({CHANNEL_META[c.type]?.label ?? c.type})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {gateway.replyTo && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Chat ID" hint="Optional. Default: the target's chat ID, or its only paired person.">
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="auto"
+                  value={gateway.replyTo.chatId ?? ""}
+                  onChange={(e) => updateGateway({ replyTo: { ...gateway.replyTo!, chatId: e.target.value.trim() || undefined } })}
+                />
+              </Field>
+              <Field label="Show the message" hint="Echo the incoming message on the target before the reply.">
+                <Select
+                  value={gateway.replyTo.echoInbound === false ? "no" : "yes"}
+                  onValueChange={(v) => updateGateway({ replyTo: { ...gateway.replyTo!, echoInbound: v === "no" ? false : undefined } })}
+                >
+                  <SelectTrigger className="h-8 text-xs w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes" className="text-xs">Yes</SelectItem>
+                    <SelectItem value="no" className="text-xs">No, only the reply</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          )}
+          <Field label="Conversation" hint="How chats from this channel relate to the web chat.">
+            <Select value={gateway.sessionMode ?? "per-peer"} onValueChange={(v) => updateGateway({ sessionMode: v as GatewayConfig["sessionMode"] })}>
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="per-peer" className="text-xs">Separate from web chat</SelectItem>
+                <SelectItem value="shared" className="text-xs">Continue the web chat</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <p className="-mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+            {(gateway.sessionMode ?? "per-peer") === "shared"
+              ? "Messages continue the latest conversation with the same interlocutor (Polpo or the agent chosen with /agent), the one the web chat resumes."
+              : "Each person gets their own conversations here, one per interlocutor. They appear in the web chat list but are not resumed automatically."}
+          </p>
+          <AgentSessionOverrides
+            api={api}
+            value={gateway.agentSessions}
+            onChange={(agentSessions) => updateGateway({ agentSessions })}
+          />
           <Field
             label="Allow From"
             hint={policy === "allowlist"
               ? "Comma-separated external IDs allowed to message Polpo."
               : policy === "open"
                 ? "Optional. Leave empty for open access, or document expected IDs."
-                : "Optional. Pairing policy normally uses /pair CODE instead."}
+                : "Optional. With pairing, connect people with an invite link or approve their requests on the channel card."}
           >
             <Input
               className="h-8 text-xs font-mono"
-              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : "123456789, -1001234567890"}
+              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : isWebhook ? "my-iphone, office-script" : "123456789, -1001234567890"}
               value={(gateway.allowFrom ?? []).join(", ")}
               onChange={(e) => {
                 const allowFrom = splitList(e.target.value);
@@ -1007,9 +1234,11 @@ function InboundGatewayForm({ config, onChange }: {
             />
           </Field>
           <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
-            {policy === "pairing" && "Pairing requires the user to send /pair with a valid code before free text is routed to Polpo."}
+            {policy === "pairing" && "Unknown people receive a pairing code. Approve them from the channel card, or send them an invite link that pairs them automatically."}
             {policy === "allowlist" && "Allowlist accepts only configured IDs. Use this for production channels with known operators."}
-            {policy === "open" && "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints."}
+            {policy === "open" && (isWebhook
+              ? "Open accepts any caller that knows the secret. Use Allowlist to also restrict the sender names."
+              : "Open allows any direct message that reaches the channel. Use only for controlled or disposable endpoints.")}
             {policy === "disabled" && "Disabled keeps the gateway block configured but rejects inbound messages."}
           </div>
         </>
@@ -1023,9 +1252,15 @@ function InboundGatewayForm({ config, onChange }: {
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange }: {
+function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken, otherChannels = [] }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
+  /** The saved version of this channel has inbound enabled. */
+  gatewayRunning: boolean;
+  channelName?: string;
+  savedBotToken?: string;
+  /** Other configured channels, possible targets of the conversation pipe. */
+  otherChannels?: { name: string; type: NotificationChannelType }[];
 }) {
   const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
@@ -1033,9 +1268,9 @@ function ChannelForm({ config, onChange }: {
     <div className="space-y-3">
       <ChannelConceptPanel type={config.type} />
       <ChannelSetupGuide type={config.type} />
-      <DeliveryFields config={config} onChange={set} />
+      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} />
       {channelSupportsInbound(config.type) && (
-        <InboundGatewayForm config={config} onChange={onChange} />
+        <InboundGatewayForm config={config} onChange={onChange} channelName={channelName} otherChannels={otherChannels} />
       )}
     </div>
   );
@@ -1101,6 +1336,9 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                   <Zap className="h-2 w-2" /> Inbound
                 </Badge>
               )}
+              {gateway?.agent && (
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">→ {gateway.agent}</Badge>
+              )}
             </div>
             <p className="text-[10.5px] text-muted-foreground/80 mt-0.5 flex items-center gap-1.5">
               <span className={cn("inline-block h-1.5 w-1.5 rounded-full", hue.pip)} />
@@ -1128,6 +1366,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
             <>
               <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
               <Row label="Chat ID" value={ch.chatId || "not set"} mono />
+              <TelegramCardDetails name={name} ch={ch} />
             </>
           )}
           {ch.type === "slack" && (
@@ -1154,7 +1393,18 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           )}
           {ch.type === "webhook" && (
             <>
-              <Row label="URL" value={ch.url || "not set"} mono />
+              <Row label="Notifications" value={ch.url || "off"} mono />
+              {gateway?.enableInbound && (
+                <>
+                  <Row label="Inbound" value={`/api/v1/channels/${name}/inbound${ch.inboundSecret ? "" : " · no secret"}`} mono wrap />
+                  <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+                  <Row label="Replies" value={gateway.replyTo ? `→ ${gateway.replyTo.channel}` : "in the HTTP response"} mono wrap />
+                  <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
+                  {Object.entries(gateway.agentSessions ?? {}).map(([agent, s]) => (
+                    <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
+                  ))}
+                </>
+              )}
               {ch.headers && Object.keys(ch.headers).length > 0 && (
                 <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
               )}
@@ -1180,6 +1430,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                 value={gateway.dmPolicy ?? "allowlist"}
                 mono
               />
+              {(ch.type === "telegram" || ch.type === "whatsapp") && <ChannelAccessPanel api={api} channel={ch.type} />}
             </div>
           )}
         </div>
@@ -1583,7 +1834,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
                 />
               </Field>
             )}
-            <ChannelForm config={editConfig} onChange={setEditConfig} />
+            <ChannelForm
+              config={editConfig}
+              onChange={setEditConfig}
+              gatewayRunning={!isNew && channels[editName]?.gateway?.enableInbound === true}
+              channelName={isNew ? undefined : editName}
+              savedBotToken={isNew ? undefined : channels[editName]?.botToken}
+              otherChannels={Object.entries(channels).filter(([n]) => n !== editName).map(([n, c]) => ({ name: n, type: c.type }))}
+            />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>
             )}
@@ -1619,7 +1877,8 @@ const REASONING_LEVELS: { value: ReasoningLevel; label: string; description: str
   { value: "low", label: "Low", description: "Basic extended thinking" },
   { value: "medium", label: "Medium", description: "Balanced reasoning depth" },
   { value: "high", label: "High", description: "Deep analysis — slower, better results" },
-  { value: "xhigh", label: "Extra High", description: "Maximum reasoning — slowest, highest quality" },
+  { value: "xhigh", label: "Extra High", description: "Very deep reasoning for supported models" },
+  { value: "max", label: "Maximum", description: "Highest native reasoning level for supported models" },
 ];
 
 // ── Agent Tab ──
@@ -1680,9 +1939,18 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
-function AppearanceTab() {
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo }: {
+  branding?: BrandingConfig;
+  onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
+  onUploadLogo: (file: File) => Promise<void>;
+  onRemoveLogo: () => Promise<void>;
+}) {
   const { palette, setPalette } = usePalette();
   const { appearance, setAppearance, resetAppearance } = useAppearance();
+  const [productName, setProductName] = useState(branding?.productName ?? "");
+  const [tagline, setTagline] = useState(branding?.tagline ?? "");
+  const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
+  const [brandingBusy, setBrandingBusy] = useState(false);
   const [mode, setMode] = useState<"light" | "dark">("light");
   const activeTheme = appearance[mode];
   const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
@@ -1741,6 +2009,94 @@ function AppearanceTab() {
   return (
     <div className="space-y-6">
       <section>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-muted-foreground">
+            <ImageIcon className="h-3.5 w-3.5" /> Instance branding
+          </h3>
+          <span className="text-[10px] text-muted-foreground">Shared with every user</span>
+        </div>
+        <div className="grid gap-3 border-y border-border/60 py-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium">Product name</span>
+              <Input value={productName} maxLength={80} onChange={(event) => setProductName(event.target.value)} placeholder={DEFAULT_PRODUCT_NAME} />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium">Tagline</span>
+              <Input value={tagline} maxLength={120} onChange={(event) => setTagline(event.target.value)} placeholder={DEFAULT_PRODUCT_TAGLINE} />
+            </label>
+            <label className="grid gap-1.5 sm:col-span-2">
+              <span className="text-xs font-medium">Logo URL</span>
+              <div className="flex min-w-0 gap-2">
+                <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
+                <Button
+                  variant="outline"
+                  disabled={brandingBusy}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = "image/png,image/jpeg,image/webp,image/gif";
+                    input.onchange = () => {
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      setBrandingBusy(true);
+                      void onUploadLogo(file)
+                        .then(() => setLogoUrl("/api/v1/config/branding/logo"))
+                        .catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"))
+                        .finally(() => setBrandingBusy(false));
+                    };
+                    input.click();
+                  }}
+                >
+                  <Upload className="h-3.5 w-3.5" /> Upload
+                </Button>
+              </div>
+              <span className="text-[10px] text-muted-foreground">Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB.</span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+              <Button
+                disabled={brandingBusy}
+                onClick={() => {
+                  setBrandingBusy(true);
+                  void onUpdateBranding({
+                    productName: productName.trim() || undefined,
+                    tagline: tagline.trim() || undefined,
+                    logoUrl: logoUrl.trim() || undefined,
+                  }).catch((error) => toast.error(error instanceof Error ? error.message : "Failed to update branding"))
+                    .finally(() => setBrandingBusy(false));
+                }}
+              >
+                {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
+              </Button>
+              {branding?.logoUrl && (
+                <Button
+                  variant="ghost"
+                  disabled={brandingBusy}
+                  onClick={() => {
+                    setBrandingBusy(true);
+                    void onRemoveLogo().then(() => setLogoUrl(""))
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to remove logo"))
+                      .finally(() => setBrandingBusy(false));
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove logo
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="flex min-h-36 items-center justify-center border border-border/50 bg-muted/15 p-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <BrandMark branding={{ productName, tagline, logoUrl }} className="h-12 w-12 rounded-lg text-xl" />
+              <div className="min-w-0">
+                <div className="max-w-40 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
+                <div className="max-w-40 truncate text-[10px] uppercase text-muted-foreground">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
           <PaletteIcon className="h-3.5 w-3.5" /> Palette
         </h3>
@@ -1770,6 +2126,7 @@ function AppearanceTab() {
             </button>
           ))}
         </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">Theme, palette, and overrides are saved in this browser and scoped to this Polpo instance.</p>
       </section>
 
       <section>
@@ -3081,7 +3438,42 @@ export function ConfigPage() {
 
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (
-          <AppearanceTab />
+          <AppearanceTab
+            branding={settings.branding}
+            onUpdateBranding={async (branding) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ branding }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to update branding");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Branding updated");
+            }}
+            onUploadLogo={async (file) => {
+              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": file.type,
+                  ...(appConfig.apiKey ? { Authorization: `Bearer ${appConfig.apiKey}` } : {}),
+                },
+                credentials: "include",
+                body: file,
+              });
+              const result = await response.json().catch(() => null);
+              if (!response.ok || !result?.ok) throw new Error(result?.error ?? `Logo upload failed (${response.status})`);
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Logo uploaded");
+            }}
+            onRemoveLogo={async () => {
+              const result = await api("/config/instance-logo", { method: "DELETE" });
+              if (!result.ok) throw new Error(result.error ?? "Failed to remove logo");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              notifyBrandingChanged();
+              toast.success("Logo removed");
+            }}
+          />
         )}
 
         {/* ═══ MEMBERS ═══ */}
@@ -3155,11 +3547,64 @@ export function ConfigPage() {
                 <Plus className="h-3.5 w-3.5 mr-1" /> New rule
               </Button>
             </div>
+
+            {/* Event glossary — collapsible reference grouped by category */}
+            <details className="mb-3 rounded-md border border-border/30 bg-muted/10 group">
+              <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground select-none flex items-center gap-2">
+                <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                Event glossary
+                <span className="ml-2 text-[10px] font-normal normal-case tracking-normal text-muted-foreground/70">
+                  ({HOOK_EVENT_CATALOG.length} events, {HOOK_EVENT_GLOBS.length} glob shortcuts)
+                </span>
+              </summary>
+              <div className="px-3 pb-3 pt-1 space-y-3">
+                {(() => {
+                  const byCategory = new Map<string, typeof HOOK_EVENT_CATALOG>();
+                  for (const ev of HOOK_EVENT_CATALOG) {
+                    const list = byCategory.get(ev.category) ?? [];
+                    list.push(ev);
+                    byCategory.set(ev.category, list);
+                  }
+                  return [...byCategory.entries()].map(([cat, evs]) => (
+                    <div key={cat}>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                        {cat} ({evs.length})
+                      </p>
+                      <ul className="space-y-0.5 pl-1">
+                        {evs.map(ev => (
+                          <li key={ev.name} className="text-[10.5px] leading-snug">
+                            <code className="font-mono text-foreground">{ev.name}</code>
+                            <span className="text-muted-foreground"> — {ev.description}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ));
+                })()}
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                    Glob shortcuts ({HOOK_EVENT_GLOBS.length})
+                  </p>
+                  <ul className="space-y-0.5 pl-1">
+                    {HOOK_EVENT_GLOBS.map(g => (
+                      <li key={g.pattern} className="text-[10.5px] leading-snug">
+                        <code className="font-mono text-foreground">{g.pattern}</code>
+                        <span className="text-muted-foreground"> — {g.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </details>
+
             {rules.length > 0 ? (
               <div className="space-y-2">
                 {rules.map((rule) => (
                   <Card key={rule.id} className="bg-card/80 border-border/40 py-0 gap-0">
                     <CardContent className="pt-3 pb-3">
+                      <p className="text-[11px] leading-relaxed text-muted-foreground mb-2.5">
+                        {summarizeRule(rule)}
+                      </p>
                       <div className="flex items-center gap-2 mb-2">
                         <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-sm font-semibold">{rule.name ?? rule.id}</span>

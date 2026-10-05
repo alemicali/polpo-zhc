@@ -1,5 +1,5 @@
-import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
-import { pgTable, text as pgText, index as pgIndex } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { pgTable, text as pgText, boolean as pgBoolean, index as pgIndex } from "drizzle-orm/pg-core";
 
 // ── SQLite schema ──────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ export const sessionsSqlite = sqliteTable("sessions", {
   agent: text("agent"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  starred: integer("starred", { mode: "boolean" }),
 });
 
 export const messagesSqlite = sqliteTable("messages", {
@@ -31,6 +32,7 @@ export const sessionsPg = pgTable("sessions", {
   agent: pgText("agent"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
+  starred: pgBoolean("starred"),
 });
 
 export const messagesPg = pgTable("messages", {

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -6,10 +6,32 @@ import { redactPolpoConfig } from "../security.js";
 import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders } from "../../setup/index.js";
-import { FileAgentStore } from "../../stores/file-agent-store.js";
-import { FileTeamStore } from "../../stores/file-team-store.js";
+import { createCliStores } from "../../cli/stores.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
+
+const MANAGED_LOGO_URL = "/api/v1/config/branding/logo";
+const BRANDING_LOGO_TYPES: Record<string, { extension: string; contentType: string }> = {
+  "image/png": { extension: "png", contentType: "image/png" },
+  "image/jpeg": { extension: "jpg", contentType: "image/jpeg" },
+  "image/webp": { extension: "webp", contentType: "image/webp" },
+  "image/gif": { extension: "gif", contentType: "image/gif" },
+};
+
+function findManagedLogo(polpoDir: string): { path: string; contentType: string } | null {
+  for (const logo of Object.values(BRANDING_LOGO_TYPES)) {
+    const path = join(polpoDir, "branding", `logo.${logo.extension}`);
+    if (existsSync(path)) return { path, contentType: logo.contentType };
+  }
+  return null;
+}
+
+function clearManagedLogos(polpoDir: string): void {
+  for (const logo of Object.values(BRANDING_LOGO_TYPES)) {
+    const path = join(polpoDir, "branding", `logo.${logo.extension}`);
+    if (existsSync(path)) unlinkSync(path);
+  }
+}
 
 // ── Authed route definitions ──────────────────────────────────────────
 
@@ -169,6 +191,66 @@ const updateSettingsRoute = createRoute({
   },
 });
 
+const uploadBrandingLogoRoute = createRoute({
+  method: "post",
+  path: "/instance-logo",
+  tags: ["Config"],
+  summary: "Upload the managed instance logo",
+  request: {
+    headers: z.object({ "content-type": z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Logo uploaded and configuration reloaded",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Empty image",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "No configuration loaded",
+    },
+    413: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Image exceeds the size limit",
+    },
+    415: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Unsupported image type",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to persist configuration",
+    },
+  },
+});
+
+const deleteBrandingLogoRoute = createRoute({
+  method: "delete",
+  path: "/instance-logo",
+  tags: ["Config"],
+  summary: "Remove the managed instance logo",
+  request: {
+    headers: z.object({ "x-polpo-operation": z.string().optional() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "Logo removed and configuration reloaded",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "No configuration loaded",
+    },
+    500: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Failed to persist configuration",
+    },
+  },
+});
+
 // ── Channel CRUD route definitions ────────────────────────────────────
 
 const upsertChannelRoute = createRoute({
@@ -279,6 +361,68 @@ async function mutateConfig(
   return { ok: true, config: deps.getConfig()! };
 }
 
+type BrandingConfigRouteDeps = {
+  getConfig: () => any;
+  reloadConfig: () => Promise<boolean>;
+  getPolpoDir: () => string;
+};
+
+function registerBrandingConfigRoutes(
+  app: OpenAPIHono,
+  getDeps: () => BrandingConfigRouteDeps,
+): void {
+  app.openapi(uploadBrandingLogoRoute, async (c) => {
+    const deps = getDeps();
+    const contentType = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
+    const logoType = BRANDING_LOGO_TYPES[contentType];
+    if (!logoType) {
+      return c.json({ ok: false, error: "Logo must be a PNG, JPEG, WebP, or GIF image" }, 415);
+    }
+    const bytes = Buffer.from(await c.req.arrayBuffer());
+    if (bytes.length === 0) return c.json({ ok: false, error: "Logo file is empty" }, 400);
+    if (bytes.length > 4 * 1024 * 1024) return c.json({ ok: false, error: "Logo must be smaller than 4 MB" }, 413);
+
+    const polpoDir = deps.getPolpoDir();
+    const brandingDir = join(polpoDir, "branding");
+    mkdirSync(brandingDir, { recursive: true });
+    clearManagedLogos(polpoDir);
+    writeFileSync(join(brandingDir, `logo.${logoType.extension}`), bytes);
+
+    const result = await mutateConfig(deps, (fileConfig) => {
+      const settings = fileConfig.settings ?? {} as any;
+      settings.branding = { ...(settings.branding ?? {}), logoUrl: MANAGED_LOGO_URL };
+      fileConfig.settings = settings;
+    });
+    if (!result.ok) {
+      if (result.status === 404) return c.json({ ok: false, error: result.error }, 404);
+      return c.json({ ok: false, error: result.error }, 500);
+    }
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
+  });
+
+  app.openapi(deleteBrandingLogoRoute, async (c) => {
+    const deps = getDeps();
+    clearManagedLogos(deps.getPolpoDir());
+    const result = await mutateConfig(deps, (fileConfig) => {
+      const settings = fileConfig.settings ?? {} as any;
+      settings.branding = { ...(settings.branding ?? {}) };
+      delete settings.branding.logoUrl;
+      fileConfig.settings = settings;
+    });
+    if (!result.ok) {
+      if (result.status === 404) return c.json({ ok: false, error: result.error }, 404);
+      return c.json({ ok: false, error: result.error }, 500);
+    }
+    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
+  });
+}
+
+export function brandingConfigRoutes(getDeps: () => BrandingConfigRouteDeps): OpenAPIHono {
+  const app = new OpenAPIHono();
+  registerBrandingConfigRoutes(app, getDeps);
+  return app;
+}
+
 /**
  * Config management routes (requires orchestrator).
  * GET    /config              — return current config (redacted)
@@ -296,6 +440,7 @@ export function configRoutes(getDeps: () => {
   getNotificationRouter: () => any;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+  registerBrandingConfigRoutes(app, getDeps);
 
   app.openapi(reloadConfigRoute, async (c) => {
     const deps = getDeps();
@@ -324,6 +469,7 @@ export function configRoutes(getDeps: () => {
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
+      if (body.branding !== undefined) settings.branding = body.branding;
       fileConfig.settings = settings;
     });
 
@@ -424,6 +570,24 @@ export function publicConfigRoutes(
 ): OpenAPIHono {
   const app = new OpenAPIHono();
 
+  app.get("/branding", (c) => {
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const branding = loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings?.branding ?? {};
+    return c.json({ ok: true, data: branding });
+  });
+
+  app.get("/branding/logo", (c) => {
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const logo = findManagedLogo(getPolpoDir(activeWorkDir));
+    if (!logo) return c.json({ ok: false, error: "No managed logo configured" }, 404);
+    return new Response(readFileSync(logo.path), {
+      headers: {
+        "content-type": logo.contentType,
+        "cache-control": "no-cache",
+      },
+    });
+  });
+
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {
     const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
@@ -482,9 +646,14 @@ export function publicConfigRoutes(
       const teams = config.teams;
 
       try {
+        // polpo.json carries only project/settings/providers — teams live in
+        // the configured store (sqlite by default). Strip teams before save.
         savePolpoConfig(targetPolpoDir, { ...config, teams: [] });
-        const teamStore = new FileTeamStore(targetPolpoDir);
-        const agentStore = new FileAgentStore(targetPolpoDir);
+        // Honour storage backend (sqlite / postgres / file) for the seed.
+        // Previously this hardcoded FileTeamStore/FileAgentStore, which on a
+        // sqlite project silently wrote agents.json/teams.json that nobody
+        // reads at runtime — losing the wizard's agentName/agentRole input.
+        const { teamStore, agentStore } = await createCliStores(targetPolpoDir);
         await teamStore.seed(teams);
         await agentStore.seed(teams.flatMap((team) =>
           team.agents.map((agent) => ({ ...agent, teamName: team.name })),

@@ -9,6 +9,10 @@ import type { TeamStore } from "../core/team-store.js";
  */
 export class FileTeamStore implements TeamStore {
   private readonly filePath: string;
+  // Tiny file, but `useAgents()` calls `getTeams()` in parallel with
+  // `getAgents()` on every page mount — caching it removes one syscall
+  // per request and lets the route handler stay synchronous-ish.
+  private cache: Team[] | undefined;
 
   constructor(polpoDir: string) {
     this.filePath = join(polpoDir, "teams.json");
@@ -17,18 +21,24 @@ export class FileTeamStore implements TeamStore {
   // ── helpers ──────────────────────────────────────────────────────────
 
   private readAll(): Team[] {
-    if (!existsSync(this.filePath)) return [];
-    try {
-      return JSON.parse(readFileSync(this.filePath, "utf-8")) as Team[];
-    } catch {
-      return [];
+    if (this.cache) return this.cache;
+    if (!existsSync(this.filePath)) {
+      this.cache = [];
+      return this.cache;
     }
+    try {
+      this.cache = JSON.parse(readFileSync(this.filePath, "utf-8")) as Team[];
+    } catch {
+      this.cache = [];
+    }
+    return this.cache;
   }
 
   private writeAll(teams: Team[]): void {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(this.filePath, JSON.stringify(teams, null, 2), "utf-8");
+    this.cache = teams;
   }
 
   // ── TeamStore implementation ─────────────────────────────────────────

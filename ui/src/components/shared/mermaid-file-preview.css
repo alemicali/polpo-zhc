@@ -1,0 +1,39 @@
+/* Streamdown sets will-change inline on its zoom surface. That keeps a cached
+   raster at the original scale, blurring SVG labels on zoom. Override it so
+   the browser repaints at the new scale; avoid interpolated raster frames too.
+   Scope to Mermaid (including its fullscreen portal), not other app canvases. */
+[data-streamdown="mermaid"] [role="application"] {
+  will-change: auto !important;
+  transition: none !important;
+}
+
+/* A file is a full-size canvas, not the compact diagram card used in chat. */
+.mermaid-file-canvas [data-streamdown="mermaid-block"] {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 320px;
+  margin: 0;
+}
+
+.mermaid-file-canvas [data-streamdown="mermaid"] {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.mermaid-file-canvas [data-streamdown="mermaid"] > div {
+  height: 100%;
+  margin: 0;
+}
+
+.mermaid-file-canvas [role="application"] > div {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+
+.mermaid-file-canvas [role="application"] > div > svg {
+  width: 100%;
+  height: 100%;
+}

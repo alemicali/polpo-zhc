@@ -1,0 +1,21 @@
+[Unit]
+Description=Polpo Shoplix UI production server (:5175)
+After=polpo-shoplix-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alessio/dev/oss/polpo-zhc
+Environment=POLPO_API_URL=https://lumea-dev.tailaf83e5.ts.net:3000
+ExecStart=/usr/bin/node /home/alessio/dev/oss/polpo-zhc/ui/server.mjs --port 5175 --host 127.0.0.1
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=10
+StartLimitIntervalSec=60s
+MemoryMax=512M
+CPUQuota=100%
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

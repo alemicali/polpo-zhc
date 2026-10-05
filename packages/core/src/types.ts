@@ -1,7 +1,7 @@
 // === Reasoning / Thinking ===
 
 /** Reasoning level for LLM calls (maps to pi-ai ThinkingLevel). */
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 // === Task ===
 
@@ -321,7 +321,7 @@ export interface AgentConfig {
   role?: string;
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
-  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"]).
+  /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "whatsapp_*", "phone_*"]).
    *  Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list. */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
@@ -364,7 +364,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*, data_*.
   // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
@@ -385,6 +385,15 @@ export interface AgentConfig {
   /** Searchable tags for registry discovery (e.g. ["frontend", "react", "testing"]). */
   tags?: string[];
 }
+
+/**
+ * Mutable agent fields accepted by the orchestration layer.
+ * `team` is a relationship managed by AgentStore.moveAgent(), not part of
+ * the persisted AgentConfig payload.
+ */
+export type AgentUpdate = Partial<Omit<AgentConfig, "name">> & {
+  team?: string;
+};
 
 export type AgentSuggestion = string | AgentSuggestionConfig;
 
@@ -749,10 +758,21 @@ export interface PolpoConfig {
   providers?: Record<string, ProviderConfig>;
 }
 
+export interface BrandingConfig {
+  /** Primary product name shown in navigation chrome. */
+  productName?: string;
+  /** Short secondary label shown below the product name. */
+  tagline?: string;
+  /** HTTPS image URL or the managed `/api/v1/config/branding/logo` asset. */
+  logoUrl?: string;
+}
+
 export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
+  /** Instance-wide UI branding. Unlike themes, this is shared by every user. */
+  branding?: BrandingConfig;
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;
@@ -918,7 +938,7 @@ export interface ApprovalRequest {
 // === Channel Gateway & Peer Identity ===
 
 /** Supported messaging channel types for inbound message routing. */
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat";
+export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook";
 
 /**
  * Peer identity — represents a person talking to the bot from a messaging channel.
@@ -985,7 +1005,47 @@ export interface ChannelGatewayConfig {
   allowFrom?: string[];
   /** Enable inbound message routing (chat with orchestrator). Default: false. */
   enableInbound?: boolean;
-  /** Session idle timeout in minutes before creating a new session. Default: 60. */
+  /** Minutes of inactivity before a new session starts. 0 = never expire. Default: 60. */
+  sessionIdleMinutes?: number;
+  /**
+   * How channel conversations map to chat sessions. Default: "per-peer".
+   * - "per-peer": each peer keeps its own sessions, one per interlocutor
+   *   (orchestrator or agent), separate from the web UI.
+   * - "shared": the channel continues the latest session of the same
+   *   interlocutor, the same one the web UI resumes.
+   */
+  sessionMode?: ChannelSessionMode;
+  /** Per-agent overrides of sessionMode / sessionIdleMinutes, keyed by agent name. */
+  agentSessions?: Record<string, ChannelSessionSettings>;
+  /**
+   * Dedicate this channel (e.g. its own Telegram bot) to one agent: every message
+   * goes to that agent and /agent is disabled. Unset = orchestrator with /agent.
+   */
+  agent?: string;
+  /**
+   * Conversation pipe: deliver chat replies through another channel instead of this one
+   * (e.g. messages in from a webhook, replies out on Telegram). Unset = reply here.
+   */
+  replyTo?: ChannelReplyTarget;
+}
+
+/** Channel a conversation reply is delivered through. */
+export interface ChannelReplyTarget {
+  /** Channel name (key of notifications.channels). */
+  channel: string;
+  /** Chat on the target channel; default: the channel's chat ID, or its only paired person (Telegram). */
+  chatId?: string;
+  /** Show the incoming message on the target before the reply. Default: true. */
+  echoInbound?: boolean;
+}
+
+/** Session mapping strategy for inbound channel conversations. */
+export type ChannelSessionMode = "per-peer" | "shared";
+
+/** Session behaviour for one interlocutor on a channel. */
+export interface ChannelSessionSettings {
+  sessionMode?: ChannelSessionMode;
+  /** 0 = never expire. */
   sessionIdleMinutes?: number;
 }
 
@@ -1030,6 +1090,11 @@ export interface NotificationChannelConfig {
   url?: string;
   /** Webhook: custom headers. */
   headers?: Record<string, string>;
+  /**
+   * Webhook: shared secret for inbound messages (direct value or "${ENV_VAR}").
+   * Callers send it as "Authorization: Bearer <secret>" to POST /api/v1/channels/<name>/inbound.
+   */
+  inboundSecret?: string;
   /** Push: VAPID public key. Defaults to the generated project key. */
   vapidPublicKey?: string;
   /** Push: VAPID private key. Defaults to the generated project key. */

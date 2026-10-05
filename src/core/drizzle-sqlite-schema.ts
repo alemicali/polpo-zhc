@@ -39,6 +39,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_group ON tasks("group");
     CREATE INDEX IF NOT EXISTS idx_tasks_assign_to ON tasks(assign_to);
     CREATE INDEX IF NOT EXISTS idx_tasks_mission_id ON tasks(mission_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS missions (
       id TEXT PRIMARY KEY,
@@ -90,12 +91,56 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
     CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 
+    CREATE TABLE IF NOT EXISTS task_directions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT,
+      mode TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      applied_at TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_directions_task ON task_directions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_directions_run_status ON task_directions(run_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+      task_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      messages TEXT NOT NULL DEFAULT '[]',
+      saved_at TEXT NOT NULL,
+      turn_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS background_waits (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      target_status TEXT,
+      state TEXT NOT NULL DEFAULT 'waiting',
+      last_task_status TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      triggered_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_background_waits_session_state ON background_waits(session_id, state);
+    CREATE INDEX IF NOT EXISTS idx_background_waits_task_state ON background_waits(task_id, state);
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT,
+      agent TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      starred INTEGER
     );
+    CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent);
 
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -107,6 +152,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       segments TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
@@ -142,6 +188,7 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       data TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_log_entries_session ON log_entries(session_id);
+    CREATE INDEX IF NOT EXISTS idx_log_entries_session_id ON log_entries(session_id);
     CREATE INDEX IF NOT EXISTS idx_log_entries_ts ON log_entries(ts);
 
     CREATE TABLE IF NOT EXISTS approvals (
@@ -239,7 +286,89 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      message_id TEXT,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_session_id ON attachments(session_id);
+
+    CREATE TABLE IF NOT EXISTS coding_sessions (
+      id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      initialized INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS expo_tokens (
+      token TEXT PRIMARY KEY,
+      platform TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      disabled INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_expo_tokens_device_id ON expo_tokens(device_id);
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      expiration_time INTEGER,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_success_at TEXT,
+      last_failure_at TEXT,
+      failure_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS push_vapid (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      subject TEXT NOT NULL
+    );
   `);
+
+  // ── Additive index migrations (idempotent) ───────────────────────────
+  // These run after the CREATE block so they apply to pre-existing DBs that
+  // were built against older schema versions.
+  for (const stmt of [
+    `CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent)`,
+    `CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_log_entries_session_id ON log_entries(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_notifications_rule_id ON notifications(rule_id)`,
+    // Hot indices added in the post-migration audit pass.
+    `CREATE INDEX IF NOT EXISTS idx_agents_team_name ON agents(team_name)`,
+    `CREATE INDEX IF NOT EXISTS idx_processes_agent_name ON processes(agent_name)`,
+    `CREATE INDEX IF NOT EXISTS idx_processes_task_id ON processes(task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_peer_sessions_session_id ON peer_sessions(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_vault_agent ON vault(agent)`,
+    `CREATE INDEX IF NOT EXISTS idx_log_sessions_started_at ON log_sessions(started_at DESC)`,
+  ]) {
+    try { db.exec(stmt); } catch { /* index already present */ }
+  }
+
+  // Additive column migrations for pre-existing databases.
+  for (const stmt of [
+    `ALTER TABLE sessions ADD COLUMN agent TEXT`,
+    `ALTER TABLE sessions ADD COLUMN starred INTEGER`,
+  ]) {
+    try { db.exec(stmt); } catch { /* column already present */ }
+  }
 
   try {
     db.exec(`ALTER TABLE messages ADD COLUMN segments TEXT;`);
@@ -257,5 +386,57 @@ export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
     db.exec(`ALTER TABLE vault ADD COLUMN allowed_agents TEXT;`);
   } catch {
     // Column already exists on databases created after this migration.
+  }
+
+  // ── FTS5 full-text search on tasks ────────────────────────────────────
+  // Virtual table mirrors title + description from `tasks`. Triggers keep
+  // it in sync on INSERT / UPDATE / DELETE. Backfill is idempotent: the
+  // NOT IN subquery skips rows already indexed, so re-running on every
+  // boot is cheap (a single index scan).
+  //
+  // Wrapped in try/catch because some SQLite builds may ship without FTS5.
+  // If it fails the rest of the app keeps working — the route falls back to
+  // an in-memory LIKE filter when `tasks_fts` is missing.
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+        title, description,
+        content='tasks',
+        content_rowid='rowid'
+      );
+    `);
+    db.exec(`
+      INSERT INTO tasks_fts(rowid, title, description)
+        SELECT rowid, title, description FROM tasks
+        WHERE rowid NOT IN (SELECT rowid FROM tasks_fts);
+    `);
+    // DROP + CREATE so trigger bodies stay up to date if we ever tweak them.
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_insert;`);
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_delete;`);
+    db.exec(`DROP TRIGGER IF EXISTS tasks_fts_update;`);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_insert AFTER INSERT ON tasks BEGIN
+        INSERT INTO tasks_fts(rowid, title, description)
+        VALUES (new.rowid, new.title, new.description);
+      END;
+    `);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_delete AFTER DELETE ON tasks BEGIN
+        INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+        VALUES('delete', old.rowid, old.title, old.description);
+      END;
+    `);
+    db.exec(`
+      CREATE TRIGGER tasks_fts_update AFTER UPDATE ON tasks BEGIN
+        INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+        VALUES('delete', old.rowid, old.title, old.description);
+        INSERT INTO tasks_fts(rowid, title, description)
+        VALUES (new.rowid, new.title, new.description);
+      END;
+    `);
+  } catch (err) {
+    // FTS5 not available — search routes will fall back to in-memory LIKE.
+    // eslint-disable-next-line no-console
+    console.warn("[sqlite] FTS5 setup failed, search will use fallback:", (err as Error).message);
   }
 }

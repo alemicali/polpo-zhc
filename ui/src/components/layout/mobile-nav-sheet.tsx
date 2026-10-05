@@ -5,6 +5,8 @@ import {
   Bot,
   Brain,
   Code2,
+  AppWindow,
+  Boxes,
   LayoutDashboard,
   ListChecks,
   MessageCircle,
@@ -16,6 +18,11 @@ import {
   Terminal,
   Settings2,
   Workflow,
+  MousePointerClick,
+  CalendarClock,
+  Database,
+  ChartNoAxesCombined,
+  BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -43,7 +50,13 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     title: "Build",
     items: [
       { to: "/coding", icon: Code2, label: "Coding" },
+      { to: "/apps", icon: Boxes, label: "Apps" },
+      { to: "/data", icon: Database, label: "Data" },
+      { to: "/views", icon: ChartNoAxesCombined, label: "Views" },
+      { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
+      { to: "/browser", icon: AppWindow, label: "App Preview" },
+      { to: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
     ],
   },
@@ -52,6 +65,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
+      { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },
     ],

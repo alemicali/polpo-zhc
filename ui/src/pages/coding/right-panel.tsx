@@ -66,12 +66,14 @@ export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTer
   return (
     <div className="@container flex h-full w-full flex-col">
       <Tabs value={tab} onValueChange={(v) => setTab(v as RightTab)} className="contents">
-        <TabsList className="h-9 shrink-0 rounded-none border-b border-white/[0.08] bg-[#0d0d0d] p-0 gap-0 justify-start">
-          <RightTabTrigger value="changes" icon={<FileText className="h-3.5 w-3.5" />} label="Changes" />
-          <RightTabTrigger value="browser" icon={<Globe className="h-3.5 w-3.5" />} label="Browser" />
-          <RightTabTrigger value="terminal" icon={<TerminalSquare className="h-3.5 w-3.5" />} label="Terminal" />
-          <RightTabTrigger value="vscode" icon={<Code2 className="h-3.5 w-3.5" />} label="VS Code" />
-        </TabsList>
+        <div className="flex h-12 shrink-0 items-center border-b border-border/70 px-2">
+          <TabsList className="h-8 max-w-full justify-start">
+            <RightTabTrigger value="changes" icon={<FileText className="h-3.5 w-3.5" />} label="Changes" />
+            <RightTabTrigger value="browser" icon={<Globe className="h-3.5 w-3.5" />} label="Browser" />
+            <RightTabTrigger value="terminal" icon={<TerminalSquare className="h-3.5 w-3.5" />} label="Terminal" />
+            <RightTabTrigger value="vscode" icon={<Code2 className="h-3.5 w-3.5" />} label="VS Code" />
+          </TabsList>
+        </div>
       </Tabs>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -161,15 +163,7 @@ function RightTabTrigger({ value, icon, label }: { value: RightTab; icon: React.
     <TabsTrigger
       value={value}
       title={label}
-      className={cn(
-        // Match the SessionTabs aesthetic: squared, classic, neutral
-        // underline beneath the active item — no rounded pill, no
-        // emerald accent.
-        "relative h-9 gap-1.5 rounded-none border-r border-white/[0.04] bg-transparent px-3 text-[11px] font-medium",
-        "text-white/45 hover:text-white/85 hover:bg-white/[0.02]",
-        "data-[state=active]:text-white data-[state=active]:bg-transparent data-[state=active]:shadow-none",
-        "data-[state=active]:after:absolute data-[state=active]:after:inset-x-0 data-[state=active]:after:bottom-0 data-[state=active]:after:h-[2px] data-[state=active]:after:bg-white/85",
-      )}
+      className="h-6 flex-none gap-1.5 px-2 text-[11px]"
     >
       {icon}
       {/* Container query: only render the label when the right panel is wide
@@ -183,8 +177,8 @@ function PlaceholderTab({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="flex h-full items-center justify-center p-6">
       <div className="text-center">
-        <p className="text-[12px] font-medium text-white/70">{title}</p>
-        <p className="mt-1 text-[11px] text-white/40">{detail}</p>
+        <p className="text-xs font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>
       </div>
     </div>
   );
@@ -286,15 +280,15 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
-        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/45">{cwd}</div>
+      <div className="flex shrink-0 items-center gap-1 border-b border-border/70 px-2 py-1.5">
+        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{cwd}</div>
         {externalUrl && (
           <a
             href={externalUrl}
             target="_blank"
             rel="noreferrer"
             title="Open in new tab"
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-white/45 hover:bg-white/[0.06] hover:text-white"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
@@ -306,7 +300,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
             size="sm"
             disabled={busy}
             onClick={stop}
-            className="h-6 rounded px-2 text-[10px] font-medium text-white/55 hover:bg-white/[0.06] hover:text-white disabled:opacity-60"
+            className="h-6 rounded px-2 text-[10px] font-medium text-muted-foreground disabled:opacity-60"
           >
             <Square className="h-3 w-3" />
             Stop
@@ -318,7 +312,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
           size="sm"
           disabled={busy}
           onClick={start}
-          className="h-6 rounded px-2 text-[10px] font-medium text-white/70 hover:bg-white/[0.06] hover:text-white disabled:opacity-60"
+          className="h-6 rounded px-2 text-[10px] font-medium disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           {url ? "Restart" : "Start"}
@@ -337,11 +331,11 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
       ) : (
         <div className="flex h-full items-center justify-center p-6">
           <div className="max-w-[18rem] text-center">
-            <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.05] text-white/70">
+            <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <Code2 className="h-5 w-5" />
             </span>
-            <p className="mt-3 text-[12px] font-medium text-white/75">VS Code for this workspace</p>
-            <p className="mt-1 text-[11px] text-white/40">Start a code-server instance rooted at the selected workspace.</p>
+            <p className="mt-3 text-xs font-medium text-foreground">VS Code for this workspace</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Start a code-server instance rooted at the selected workspace.</p>
             <Button
               type="button"
               size="sm"

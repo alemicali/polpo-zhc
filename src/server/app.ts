@@ -1,7 +1,8 @@
+import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimple } from "@mariozechner/pi-ai";
+import { streamSimpleWithAuth } from "../llm/pi-client.js";
 import { buildSystemPrompt } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -31,24 +32,41 @@ import {
   configRoutes,
   attachmentRoutes,
   countsRoutes,
+  streamRegistry,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
-import { publicConfigRoutes } from "./routes/config.js";
+import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
+import { webhookInboundRoutes } from "./routes/webhook-inbound.js";
 import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
+import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { syncRoutes } from "./routes/sync.js";
+import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
+import { appPreviewRoutes } from "./routes/app-preview.js";
+import { backgroundWaitRoutes } from "./routes/background-waits.js";
+import { tokenUsageRoutes } from "./routes/token-usage.js";
+import { appsRoutes } from "./routes/apps.js";
+import { dataRoutes } from "./routes/data.js";
+import { dataViewRoutes } from "./routes/data-views.js";
+import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
+import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
+import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
+import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
+import { getAppRegistryRuntime } from "./app-runtime-manager.js";
+import { getDataRegistryRuntime } from "./data-runtime.js";
+import { getCompanyBrainRuntime } from "./company-brain-runtime.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
@@ -81,6 +99,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
   const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
+  const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir(), (event) => orchestrator.emit("app:changed", event));
+  const activeDataRegistry = () => getDataRegistryRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (event) => {
+    if (event.type === "source") {
+      const { type: _type, ...payload } = event;
+      orchestrator.emit("data-source:changed", payload);
+    } else {
+      const { type: _type, ...payload } = event;
+      orchestrator.emit("data-view:changed", payload);
+    }
+  });
+  const activeCompanyBrain = () => getCompanyBrainRuntime(activePolpoDir(), activeDataRegistry(), (event) => {
+    orchestrator.emit("brain:changed" as any, event);
+  });
 
   // Global middleware
   app.use("*", errorMiddleware());
@@ -88,7 +119,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("/api/*", rateLimitMiddleware());
   app.use("/v1/*", rateLimitMiddleware());
 
-  const corsExposeHeaders = ["x-session-id"];
+  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
@@ -110,6 +141,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // ── Public routes (no auth) ───────────────────────────────────────────
 
   app.route("/api/v1/health", healthRoutes());
+
+  // Inbound webhook channels authenticate with their own secret (e.g. iOS Shortcuts).
+  app.route("/api/v1/channels", webhookInboundRoutes({
+    isInitialized: () => !!orchestrator?.isInitialized,
+    getChannelConfig: (name) => orchestrator?.getConfig()?.settings?.notifications?.channels?.[name],
+    getAdapter: (name) => orchestrator?.getWebhookGateway(name),
+  }));
 
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
@@ -154,19 +192,26 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
-  app.route("/v1/chat/completions", completionRoutes(() => ({
+  const completionApp = completionRoutes(() => ({
+    contextCheckpoints: new FileContextCheckpointStore(o.getPolpoDir()),
+    resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
+    saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
+      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
+    recordTokenUsage: async (usage) => {
+      await new FileTokenUsageStore(activePolpoDir()).record(usage);
+      o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+    },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
-      const { resolveModel, resolveApiKeyAsync, buildStreamOpts } = await import("../llm/pi-client.js");
+      const { resolveModel, buildStreamOpts } = await import("../llm/pi-client.js");
       const m = resolveModel(agentConfig.model);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
       const r = agentConfig.reasoning ?? reasoning;
-      return { model: m, streamOpts: buildStreamOpts(apiKey, r, m.maxTokens) };
+      return { model: m, streamOpts: buildStreamOpts(undefined, r, m.maxTokens) };
     },
     buildAgentPrompt: async (agentConfig: any) => {
       // Pull the agent's mailboxes from vault so the prompt enumerates
@@ -183,12 +228,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     resolveAgentTools: async (agentConfig: any) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
+      const { createDataAgentTools } = await import("../tools/data-tools.js");
+      const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
       const {
         CLIENT_SIDE_CHAT_TOOLS,
         isClientSideChatTool,
         isSideEffectGated,
         renderWidgetTool,
+        askUserTool,
         validateRenderWidgetArgs,
         setSessionTitleTool,
       } = await import("../llm/orchestrator-tools.js");
@@ -245,6 +293,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
+      tools.push(...createDataAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
+        if (event.type === "source") {
+          const { type: _type, ...payload } = event;
+          o.emit("data-source:changed", payload);
+        } else {
+          const { type: _type, ...payload } = event;
+          o.emit("data-view:changed", payload);
+        }
+      }));
+      tools.push(...createCompanyBrainAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
+        o.emit("brain:changed" as any, event);
+      }));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
@@ -256,6 +316,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // is invoked. See: orchestrator-tools.ts:setSessionTitleTool.
       if (!existingToolNames.has("set_session_title")) {
         tools.push(setSessionTitleTool);
+      }
+      // Structured clarification is a chat capability, not an
+      // orchestrator-only capability. It is intentionally registered here
+      // (agent-direct chat) and not in createAllTools, so autonomous task
+      // runners remain non-interactive.
+      if (!existingToolNames.has("ask_user")) {
+        tools.push(askUserTool);
       }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
@@ -306,30 +373,30 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // actually goes out. The TASK runner is unaffected — tasks are
       // pre-authorised by the user when they're queued. See
       // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
-      const isInteractive = (name: string) => isClientSideChatTool(name) || isSideEffectGated(name);
+      const isInteractive = (name: string) => name === "ask_user" || isClientSideChatTool(name) || isSideEffectGated(name);
       return { tools, executor, isInteractive };
     },
-    streamLLM: streamSimple as any,
+    streamLLM: streamSimpleWithAuth as any,
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
-      const { resolveModel, resolveApiKeyAsync, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
+      const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
       const { ALL_ORCHESTRATOR_TOOLS, executeOrchestratorTool, isInteractive } = await import("../llm/orchestrator-tools.js");
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
       const systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
-      const apiKey = await resolveApiKeyAsync(m.provider as string);
       return {
         systemPrompt,
         model: m,
-        streamOpts: buildStreamOpts(apiKey, settings?.reasoning, m.maxTokens),
+        streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
         tools: ALL_ORCHESTRATOR_TOOLS,
-        executor: (name: string, args: Record<string, unknown>) => executeOrchestratorTool(name, args, o),
+        executor: (name: string, args: Record<string, unknown>, context) => executeOrchestratorTool(name, args, o, context),
         isInteractive,
       };
     },
-  }), opts?.apiKeys));
+  }), opts?.apiKeys);
+  app.route("/v1/chat/completions", completionApp);
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
 
@@ -343,6 +410,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Gate: orchestrator must be initialized for these routes
   authed.use("*", async (c, next) => {
+    // The build-time OpenAPI generator intentionally creates the app without
+    // a runtime orchestrator. Serving the static schema must remain possible.
+    if (c.req.path.endsWith("/openapi.json")) return next();
     if (!orchestrator.isInitialized) {
       return c.json({ ok: false, error: "Polpo is not initialized. Complete setup first." }, 503);
     }
@@ -358,11 +428,73 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   const o = orchestrator; // short alias
 
+  o?.setBackgroundWaitContinuation(async (wait, task, signal) => {
+    if (streamRegistry.getActiveTurnForSession(wait.sessionId)) return "deferred";
+    const session = await o.getSessionStore()?.getSession(wait.sessionId);
+    if (!session) throw new Error(`Chat session "${wait.sessionId}" no longer exists`);
+
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": wait.sessionId,
+      "x-polpo-internal-continuation": "background-wait",
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      signal,
+      body: JSON.stringify({
+        stream: false,
+        messages: [
+          ...history.map((message) => ({ role: message.role, content: message.content })),
+          {
+            role: "system",
+            content: [
+              `Background wait ${wait.id} is complete.`,
+              `Task "${task.title}" (${task.id}) reached status "${task.status}".`,
+              "Resume the conversation proactively: report the result, inspect the task if useful, and continue any work that was deferred while waiting.",
+            ].join("\n"),
+          },
+        ],
+      }),
+    }));
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as any;
+      throw new Error(payload?.error?.message ?? payload?.error ?? `Continuation failed (${response.status})`);
+    }
+    return "completed";
+  });
+
+  // Messaging channels (Telegram, WhatsApp) run agent turns, and any turn with
+  // media, through the same completions pipeline as the web UI: prompt, memory,
+  // tools, compaction, attachment storage and persistence stay identical.
+  o?.setChannelChatRunner(async ({ agent, sessionId, messages }) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": sessionId,
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages }),
+    }));
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok) {
+      throw new Error(payload?.error?.message ?? payload?.error ?? `Agent chat failed (${response.status})`);
+    }
+    // Only the agents' workspace is shareable — never the project root (.polpo holds config and tokens).
+    return interpretChannelCompletion(payload?.choices?.[0], [o.getAgentWorkDir()]);
+  });
+
   authed.route("/counts", countsRoutes(() => ({
     getAllTasks: () => o.getStore().getAllTasks(),
     getAllMissions: () => o.getAllMissions(),
     getAgents: () => o.getAgents(),
   })));
+
+  authed.route("/token-usage", tokenUsageRoutes(activePolpoDir, () => o.getRunStore()));
 
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),
@@ -371,6 +503,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     deleteTask: (id: string) => o.deleteTask(id),
     retryTask: (id: string) => o.retryTask(id),
     killTask: (id: string) => o.killTask(id),
+    sendDirection: (id: string, message: string, directionOpts?: any) => o.sendDirection(id, message, directionOpts),
+    listDirections: (id: string) => o.listDirections(id),
     reassessTask: (id: string) => o.reassessTask(id),
     forceFailTask: (id: string) => o.forceFailTask(id),
     updateTaskDescription: (id: string, desc: string) => o.updateTaskDescription(id, desc),
@@ -429,13 +563,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/events", eventRoutes(sseBridge));
 
   authed.route("/chat", chatRoutes(() => ({
+    attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     sessionStore: o.getSessionStore(),
+    emit: (event: string, data: unknown) => o.emit(event as any, data),
   })));
 
   authed.route("/skills", skillRoutes(() => ({
     polpoDir: o.getPolpoDir(),
     workDir: o.getWorkDir(),
     getAgents: () => o.getAgents(),
+    emit: (event, data) => o.emit(event, data),
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({
@@ -465,16 +602,35 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/config", configRoutes(() => ({
     getConfig: () => o.getConfig(),
     reloadConfig: () => o.reloadConfig(),
+    getPolpoDir: () => o.getPolpoDir(),
     saveConfig: async (config: any) => {
       const { savePolpoConfig } = await import("../core/config.js");
       savePolpoConfig(o.getPolpoDir(), config);
     },
     getNotificationRouter: () => o.getNotificationRouter(),
   })));
-
-  authed.route("/peers", peerRoutes(() => ({
-    peerStore: o.getPeerStore(),
+  authed.route("/config", brandingConfigRoutes(() => ({
+    getConfig: () => o.getConfig(),
+    reloadConfig: () => o.reloadConfig(),
+    getPolpoDir: () => o.getPolpoDir(),
   })));
+
+  authed.route("/peers", peerRoutes(() => {
+    const channels: Record<string, any> = o.getConfig()?.settings?.notifications?.channels ?? {};
+    return {
+      peerStore: o.getPeerStore(),
+      getGateway: (channel?: string) => o.getChannelGateway(channel),
+      getConfiguredTelegramTokens: () => Object.values(channels)
+        .filter((ch) => ch?.type === "telegram" && ch.botToken)
+        .map((ch) => String(ch.botToken).trim()),
+      getTelegramBotToken: (channel?: string) => {
+        if (channel) return channels[channel]?.type === "telegram" ? channels[channel].botToken : undefined;
+        // Primary bot: the first Telegram channel not dedicated to an agent (as in the orchestrator).
+        const telegram = Object.values(channels).filter((ch) => ch?.type === "telegram" && ch.botToken);
+        return (telegram.find((ch) => !ch.gateway?.agent) ?? telegram[0])?.botToken;
+      },
+    };
+  }));
 
   authed.route("/schedules", scheduleRoutes(() => ({
     getScheduler: () => o.getScheduler(),
@@ -486,6 +642,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getWatcherManager: () => o.getWatcherManager(),
     taskStore: o.getStore(),
   })));
+
+  authed.route("/background-waits", backgroundWaitRoutes(o));
+  authed.route("/apps", appsRoutes(() => ({ ...activeAppRegistry(), polpoDir: activePolpoDir() })));
+  authed.route("/data", dataRoutes(() => {
+    const runtime = activeDataRegistry();
+    return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
+  }));
+  authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
+  authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),
@@ -504,6 +669,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/audio", audioRoutes());
+  authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
+
+  authed.route("/browser-dashboard", browserDashboardRoutes());
+  authed.route("/app-preview", appPreviewRoutes(() => ({
+    codingSessionStore: o.getCodingSessionStore(),
+    codeServerManager: opts?.codeServerManager,
+    agentWorkDir: o.getAgentWorkDir(),
+  })));
 
   authed.route("/git", gitRoutes(() => ({
     workDir: o.getWorkDir(),
@@ -545,7 +718,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/attachments", attachmentRoutes(() => ({
-    attachmentStore: new FileAttachmentStore(o.getPolpoDir()),
+    // Prefer the Drizzle-backed AttachmentStore when storage is sqlite/postgres.
+    // Falls back to the file-based store so projects on `storage: "file"`
+    // keep working unchanged.
+    attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     fs: new NodeFileSystem(),
     workDir: o.getWorkDir(),
   })));

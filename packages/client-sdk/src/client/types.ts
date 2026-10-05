@@ -127,6 +127,34 @@ export interface Task {
   updatedAt: string;
 }
 
+/**
+ * Slim projection returned by `GET /tasks?slim=true`. Drops the heavy
+ * tail (outcomes, stdout/stderr, expectations, metrics, maxRetries) so
+ * list rows over Tailscale stay sub-100KB even with hundreds of tasks.
+ * The full record is still served by `GET /tasks/:id`.
+ */
+export interface TaskSlim {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  phase?: TaskPhase;
+  assignTo: string;
+  group?: string;
+  missionId?: string;
+  dependsOn: string[];
+  retries: number;
+  createdAt: string;
+  updatedAt: string;
+  descriptionPreview?: string;
+  result?: {
+    assessment?: {
+      globalScore?: number;
+      passed?: boolean;
+      checksCount?: number;
+    };
+  };
+}
+
 export interface TaskResult {
   exitCode: number;
   stdout: string;
@@ -269,7 +297,7 @@ export interface AgentConfig {
   volatile?: boolean;
   missionGroup?: string;
 
-  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
+  // Tool categories are activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*", "whatsapp_*", "phone_*"])
   // Note: HTTP tools (http_fetch, http_download) and vault tools (vault_get, vault_list) are always available as core tools.
   /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
@@ -413,6 +441,26 @@ export interface Mission {
   updatedAt: string;
 }
 
+/**
+ * Slim projection returned by `GET /missions?slim=true`. Drops the
+ * potentially-multi-KB `data` JSON blob and the full `prompt`; surfaces
+ * derived `taskCount` so list rows can render the badge without parsing
+ * `data` themselves. The full record is still served by `GET /missions/:id`.
+ */
+export interface MissionSlim {
+  id: string;
+  name: string;
+  status: MissionStatus;
+  schedule?: string;
+  deadline?: string;
+  endDate?: string;
+  qualityThreshold?: number;
+  createdAt: string;
+  updatedAt: string;
+  taskCount?: number;
+  promptPreview?: string;
+}
+
 // === Mission Document Types (parsed from Mission.data JSON) ===
 
 /** Checkpoint defined within a mission — planned stopping point for human review.
@@ -512,7 +560,16 @@ export interface ChannelGatewayConfig {
   dmPolicy?: DmPolicy;
   allowFrom?: string[];
   enableInbound?: boolean;
+  /** Minutes of inactivity before a new session starts. 0 = never expire. */
   sessionIdleMinutes?: number;
+  /** "per-peer" (default) keeps channel chats separate; "shared" continues the web UI session. */
+  sessionMode?: "per-peer" | "shared";
+  /** Per-agent overrides, keyed by agent name. */
+  agentSessions?: Record<string, { sessionMode?: "per-peer" | "shared"; sessionIdleMinutes?: number }>;
+  /** Dedicate the channel to one agent (no /agent switching). */
+  agent?: string;
+  /** Conversation pipe: deliver chat replies through another channel (e.g. in from a webhook, out on Telegram). */
+  replyTo?: { channel: string; chatId?: string; echoInbound?: boolean };
 }
 
 export interface NotificationChannelConfig {
@@ -526,6 +583,8 @@ export interface NotificationChannelConfig {
   profileDir?: string;
   url?: string;
   headers?: Record<string, string>;
+  /** Webhook: secret for POST /api/v1/channels/<name>/inbound (Authorization: Bearer <secret>). */
+  inboundSecret?: string;
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidSubject?: string;
@@ -701,7 +760,7 @@ export type TemplateRunResult = PlaybookRunResult;
 // === Config ===
 
 /** Reasoning level for LLM calls. */
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Primary model with ordered fallbacks. */
 export interface ModelConfig {
@@ -737,10 +796,17 @@ export interface CustomModelDef {
   maxTokens?: number;
 }
 
+export interface BrandingConfig {
+  productName?: string;
+  tagline?: string;
+  logoUrl?: string;
+}
+
 export interface PolpoSettings {
   maxRetries: number;
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
+  branding?: BrandingConfig;
   taskTimeout?: number;
   staleThreshold?: number;
   defaultRetryPolicy?: RetryPolicy;
@@ -849,6 +915,33 @@ export interface UpdateTaskRequest {
   assignTo?: string;
   status?: TaskStatus;
   expectations?: TaskExpectation[];
+}
+
+export type TaskDirectionMode = "steer" | "follow_up" | "continue";
+export type TaskDirectionStatus = "queued" | "delivered" | "applied" | "failed";
+
+export interface TaskDirection {
+  id: string;
+  taskId: string;
+  runId?: string;
+  mode: TaskDirectionMode;
+  message: string;
+  status: TaskDirectionStatus;
+  createdAt: string;
+  deliveredAt?: string;
+  appliedAt?: string;
+  error?: string;
+}
+
+export interface SendTaskDirectionRequest {
+  message: string;
+  mode?: "auto" | TaskDirectionMode;
+  confirmSideEffects?: boolean;
+}
+
+export interface SendTaskDirectionResult {
+  action: TaskDirectionMode;
+  direction: TaskDirection;
 }
 
 export interface CreateMissionRequest {
@@ -1023,6 +1116,7 @@ export interface UpdateSettingsRequest {
   orchestratorModel?: string | ModelConfig;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
+  branding?: BrandingConfig;
 }
 
 // === SSE ===
@@ -1049,6 +1143,30 @@ export interface TaskFilters {
   status?: TaskStatus | string;
   group?: string;
   assignTo?: string;
+}
+
+/**
+ * Page of tasks returned by {@link PolpoClient.getTasksPage}.
+ * - `tasks` is `TaskSlim[]` when `slim: true` was passed, otherwise `Task[]`.
+ * - `nextCursor` is the `updated_at` of the last item — pass it back as
+ *   `cursor` to fetch the next page. `null` when there are no more pages.
+ * - `hasMore` is true when the server has at least one more row beyond
+ *   the requested limit.
+ */
+export interface TasksPageResponse<T = Task | TaskSlim> {
+  tasks: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface TasksPageRequest {
+  limit?: number;
+  cursor?: string | null;
+  q?: string;
+  status?: TaskStatus | string;
+  group?: string;
+  assignTo?: string;
+  slim?: boolean;
 }
 
 // === Execution results ===
@@ -1165,9 +1283,12 @@ export interface ChatSession {
   messageCount: number;
   /** Agent name when this session targets a specific agent (agent-direct mode). Absent for orchestrator sessions. */
   agent?: string;
+  /** True when the user starred this session — surfaced in the sidebar "Starred" section. */
+  starred?: boolean;
 }
 
 export interface ChatMessage {
+  attachments?: Array<{ id: string; sessionId: string; messageId?: string; filename: string; mimeType: string; size: number; path: string; createdAt: string }>;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -1195,7 +1316,7 @@ export interface ImageUrlContentPart {
   };
 }
 
-export type ContentPart = TextContentPart | ImageUrlContentPart;
+export type ContentPart = TextContentPart | ImageUrlContentPart | { type: "file"; file: { filename: string; file_data: string } };
 
 export interface ChatCompletionMessage {
   role: "system" | "user" | "assistant";
@@ -1264,6 +1385,13 @@ export interface ChatCompletionChunkDelta {
 
 export type ToolCallState = "preparing" | "calling" | "completed" | "error" | "interrupted";
 
+export interface ToolCallProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
 export type ChatMessageSegment =
   | { type: "text"; content: string }
   | { type: "thinking"; content: string }
@@ -1280,6 +1408,8 @@ export interface ToolCallEvent {
   arguments?: Record<string, unknown>;
   /** Tool execution result (present when state is "completed" or "error") */
   result?: string;
+  /** Best-effort progress while a long-running tool remains in "calling" state. */
+  progress?: ToolCallProgress;
   /** Current state of the tool call */
   state: ToolCallState;
 }
@@ -1454,7 +1584,7 @@ export interface OpenFilePayload {
 }
 
 export interface NavigateToPayload {
-  /** Target page: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, activity, chat, memory, settings */
+  /** Target page: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, app_preview, activity, chat, memory, settings */
   target: string;
   /** Entity ID for detail pages (task, mission) */
   id?: string;
@@ -1464,6 +1594,8 @@ export interface NavigateToPayload {
   path?: string;
   /** File to highlight/select for files target */
   highlight?: string;
+  /** Public preview URL for the app_preview target */
+  url?: string;
 }
 
 /** Payload for open_tab — opens a URL in a new browser tab. */

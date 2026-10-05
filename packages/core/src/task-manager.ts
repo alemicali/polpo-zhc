@@ -2,6 +2,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
+import type { TaskDirection } from "./task-control-store.js";
 
 /**
  * Task CRUD: add, update, retry, reassess, kill, abort, clear.
@@ -123,6 +124,80 @@ export class TaskManager {
     if (!task) throw new Error("Task not found");
     if (task.status !== "failed") throw new Error(`Cannot retry task in "${task.status}" state`);
     await this.ctx.registry.transition(taskId, "pending");
+  }
+
+  async sendDirection(
+    taskId: string,
+    message: string,
+    opts: {
+      mode?: "auto" | "steer" | "follow_up" | "continue";
+      confirmSideEffects?: boolean;
+    } = {},
+  ): Promise<{ action: TaskDirection["mode"]; direction: TaskDirection }> {
+    const store = this.ctx.taskControlStore;
+    if (!store) throw new Error("Task steering is not available for this runtime");
+
+    const task = await this.ctx.registry.getTask(taskId);
+    if (!task) throw new Error("Task not found");
+
+    const normalized = message.trim();
+    if (!normalized) throw new Error("Direction message cannot be empty");
+    if (normalized.length > 8_000) throw new Error("Direction message exceeds 8000 characters");
+
+    const requestedMode = opts.mode ?? "auto";
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
+    const activeRun = run?.status === "running" ? run : undefined;
+    const liveMode = requestedMode === "steer" || requestedMode === "follow_up"
+      ? requestedMode
+      : requestedMode === "auto" && activeRun && (task.status === "in_progress" || task.status === "assigned")
+        ? "steer"
+        : undefined;
+
+    if (liveMode) {
+      if (!activeRun) throw new Error("Task has no active runner to steer");
+      const direction = await store.enqueueDirection({
+        taskId,
+        runId: activeRun.id,
+        mode: liveMode,
+        message: normalized,
+      });
+      this.ctx.emitter.emit("task:direction", { taskId, action: liveMode, direction });
+      return { action: liveMode, direction };
+    }
+
+    if (activeRun) {
+      throw new Error("Task runner is still stopping; wait before continuing");
+    }
+    if (task.sideEffects && !opts.confirmSideEffects) {
+      throw new Error("Continuing this task may repeat side effects; explicit confirmation is required");
+    }
+    if (task.status === "draft" || task.status === "awaiting_approval") {
+      throw new Error(`Cannot continue task in "${task.status}" state`);
+    }
+
+    const direction = await store.enqueueDirection({
+      taskId,
+      mode: "continue",
+      message: normalized,
+    });
+    try {
+      if (task.status !== "pending" && task.status !== "assigned") {
+        await this.ctx.registry.unsafeSetStatus(taskId, "pending", "manual continuation from human direction");
+      }
+      await this.ctx.registry.updateTask(taskId, { phase: "execution" });
+    } catch (error) {
+      await store.failDirection(direction.id, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+    this.ctx.emitter.emit("task:direction", { taskId, action: "continue", direction });
+    return { action: "continue", direction };
+  }
+
+  async listDirections(taskId: string): Promise<TaskDirection[]> {
+    const store = this.ctx.taskControlStore;
+    if (!store) throw new Error("Task steering is not available for this runtime");
+    if (!await this.ctx.registry.getTask(taskId)) throw new Error("Task not found");
+    return store.listDirections(taskId);
   }
 
   async reassessTask(taskId: string): Promise<void> {

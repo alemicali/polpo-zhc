@@ -1,4 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
+import type { AttachmentStore } from "@polpo-ai/core";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -11,6 +13,9 @@ const listSessionsRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "List of sessions",
+    },
+    304: {
+      description: "Not modified — client has the current list per ETag",
     },
   },
 });
@@ -48,17 +53,28 @@ const renameSessionRoute = createRoute({
   method: "patch",
   path: "/sessions/{id}",
   tags: ["Chat Sessions"],
-  summary: "Rename session",
+  summary: "Update session (rename and/or star)",
   request: {
     params: z.object({ id: z.string() }),
     body: {
-      content: { "application/json": { schema: z.object({ title: z.string().min(1) }) } },
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              title: z.string().min(1).optional(),
+              starred: z.boolean().optional(),
+            })
+            .refine((v) => v.title !== undefined || v.starred !== undefined, {
+              message: "Provide at least one of: title, starred",
+            }),
+        },
+      },
     },
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Session renamed",
+      description: "Session updated",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -101,7 +117,7 @@ const deleteSessionRoute = createRoute({
  * Chat session management routes.
  * Conversational AI is handled by /v1/chat/completions (see completions.ts).
  */
-export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
+export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?: AttachmentStore; emit?: (event: string, data: unknown) => void }): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // GET /chat/sessions — list chat sessions
@@ -111,6 +127,10 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
       return c.json({ ok: true, data: { sessions: [] } });
     }
     const sessions = await sessionStore.listSessions();
+    // Conditional GET — sidebar is the hottest list in the app (refreshed
+    // on every chat tab/route change). 304 short-circuit is huge here.
+    const etag = buildETag(quickFingerprint(sessions));
+    if (handleConditional(c, etag)) return c.body(null, 304);
     return c.json({ ok: true, data: { sessions } });
   });
 
@@ -125,7 +145,19 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
-    const allMessages = await sessionStore.getMessages(id);
+    const [rawMessages, attachments] = await Promise.all([
+      sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
+    ]);
+    const byMessage = new Map<string, typeof attachments>();
+    for (const attachment of attachments) {
+      if (!attachment.messageId) continue;
+      const list = byMessage.get(attachment.messageId) ?? [];
+      list.push(attachment);
+      byMessage.set(attachment.messageId, list);
+    }
+    const allMessages = rawMessages.map((message: any) => ({ ...message,
+      ...(byMessage.has(message.id) ? { attachments: byMessage.get(message.id) } : {}),
+    }));
     // Incremental sync: ?after=<msgId> returns only messages strictly newer
     // than that id. Big win for clients with a warm cache — they only pay
     // for the delta instead of the whole transcript (long chats persist
@@ -171,19 +203,45 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     return c.json({ ok: true, data: { session, messages: safeMessages, incremental } }, 200);
   });
 
-  // PATCH /chat/sessions/:id — rename a session
+  // PATCH /chat/sessions/:id — rename and/or (un)star a session.
+  // Either field is optional but at least one must be present (enforced by zod
+  // .refine). Renaming bumps updatedAt; starring deliberately does NOT, so
+  // the sidebar's "recent" ordering survives pinning.
   app.openapi(renameSessionRoute, async (c) => {
     const { sessionStore } = getDeps();
     if (!sessionStore) {
       return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
     }
     const { id } = c.req.valid("param");
-    const { title } = c.req.valid("json");
-    const renamed = await sessionStore.renameSession(id, title);
-    if (!renamed) {
-      return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    const body = c.req.valid("json");
+
+    const result: { renamed?: boolean; starred?: boolean } = {};
+    let touched = false;
+
+    if (body.title !== undefined) {
+      const renamed = await sessionStore.renameSession(id, body.title);
+      if (!renamed) {
+        return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+      }
+      result.renamed = true;
+      touched = true;
     }
-    return c.json({ ok: true, data: { renamed: true } }, 200);
+    if (body.starred !== undefined) {
+      const starred = await sessionStore.setStarred(id, body.starred);
+      if (!starred) {
+        return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+      }
+      result.starred = body.starred;
+      touched = true;
+    }
+
+    // Defensive: the refine above should make this unreachable, but keep a
+    // safety net so we never return a 200 for a no-op request.
+    if (!touched) {
+      return c.json({ ok: false, error: "Nothing to update", code: "VALIDATION_ERROR" }, 404);
+    }
+    getDeps().emit?.("session:updated", { sessionId: id, ...(body.title !== undefined ? { title: body.title } : {}), ...(body.starred !== undefined ? { starred: body.starred } : {}) });
+    return c.json({ ok: true, data: result }, 200);
   });
 
   // DELETE /chat/sessions/:id — delete a session
@@ -197,6 +255,7 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     if (!deleted) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    getDeps().emit?.("session:deleted", { sessionId: id });
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
 
@@ -223,10 +282,12 @@ export function chatRoutes(getDeps: () => { sessionStore?: any }): OpenAPIHono {
     }
 
     const sessionId = await sessionStore.create(body.title, body.agent);
+    getDeps().emit?.("session:created", { sessionId, title: body.title });
     let imported = 0;
 
     for (const msg of body.messages) {
       const added = await sessionStore.addMessage(sessionId, msg.role, msg.content);
+      getDeps().emit?.("message:added", { sessionId, messageId: added.id, role: msg.role });
       if ((msg.toolCalls && msg.toolCalls.length > 0) || (msg.segments && msg.segments.length > 0)) {
         await sessionStore.updateMessage(sessionId, added.id, msg.content, msg.toolCalls as any, msg.segments as any);
       }

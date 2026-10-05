@@ -13,7 +13,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sparkles,
   Search,
@@ -30,6 +29,7 @@ import {
   LayoutList,
   LayoutGrid,
   Check,
+  Users,
 } from "lucide-react";
 import { useSkills, useAgents } from "@polpo-ai/react";
 import type { SkillWithAssignment, Team } from "@polpo-ai/react";
@@ -86,14 +86,14 @@ function MultiFilter({
       <PopoverTrigger asChild>
         <button
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-md border px-2.5 h-8 text-xs transition-colors",
+            "inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors",
             count > 0
               ? "border-primary/40 bg-primary/10 text-primary"
               : "border-border/40 bg-card/80 text-muted-foreground hover:text-foreground hover:border-border/60",
           )}
         >
-          {icon}
-          <span>{label}</span>
+          <span className="shrink-0">{icon}</span>
+          <span className="truncate">{label}</span>
           {count > 0 && (
             <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground px-1">
               {count}
@@ -101,7 +101,11 @@ function MultiFilter({
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-52 p-0">
+      <PopoverContent
+        align="start"
+        collisionPadding={12}
+        className="max-h-[var(--radix-popover-content-available-height)] w-60 max-w-[calc(100vw-1.5rem)] overflow-hidden p-0"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
           <span className="text-xs font-medium">{label}</span>
@@ -115,7 +119,7 @@ function MultiFilter({
           )}
         </div>
         {/* Options */}
-        <ScrollArea className="max-h-56">
+        <div className="max-h-[min(14rem,calc(var(--radix-popover-content-available-height)-2.5rem))] overflow-y-auto overscroll-contain">
           <div className="py-1">
             {options.map((opt) => {
               const isSelected = selected.has(opt);
@@ -124,7 +128,7 @@ function MultiFilter({
                   key={opt}
                   onClick={() => toggle(opt)}
                   className={cn(
-                    "flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left transition-colors",
+                    "flex min-w-0 items-center gap-2 w-full px-3 py-1.5 text-xs text-left transition-colors",
                     isSelected
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
@@ -142,12 +146,12 @@ function MultiFilter({
                       <Check className="h-2.5 w-2.5 text-primary-foreground" />
                     )}
                   </span>
-                  <span className="truncate">{opt}</span>
+                  <span className="min-w-0 flex-1 truncate">{opt}</span>
                 </button>
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -469,6 +473,7 @@ export function SkillsPage() {
   const { skills, isLoading, error, refetch } = useSkills();
   const { agents, teams } = useAgents();
   const [search, setSearch] = useState("");
+  const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -498,6 +503,11 @@ export function SkillsPage() {
     [agents],
   );
 
+  const allTeamNames = useMemo(
+    () => teams.map((team) => team.name).sort(),
+    [teams],
+  );
+
   // Filtered skills
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -515,6 +525,13 @@ export function SkillsPage() {
       if (selectedAgents.size > 0) {
         if (!skill.assignedTo.some((a) => selectedAgents.has(a))) return false;
       }
+      // Team filter (OR — skill must be assigned to an agent in a selected team)
+      if (selectedTeams.size > 0) {
+        if (!skill.assignedTo.some((agent) => {
+          const team = agentTeamMap.get(agent);
+          return team !== undefined && selectedTeams.has(team);
+        })) return false;
+      }
       // Category filter (OR — skill must match at least one selected category)
       if (selectedCategories.size > 0) {
         if (!skill.category || !selectedCategories.has(skill.category))
@@ -526,7 +543,7 @@ export function SkillsPage() {
       }
       return true;
     });
-  }, [skills, search, selectedAgents, selectedCategories, selectedTags]);
+  }, [skills, search, selectedAgents, selectedTeams, selectedCategories, selectedTags, agentTeamMap]);
 
   // Stats
   const stats = useMemo(() => {
@@ -551,12 +568,14 @@ export function SkillsPage() {
 
   const isFiltered =
     search.trim() !== "" ||
+    selectedTeams.size > 0 ||
     selectedAgents.size > 0 ||
     selectedCategories.size > 0 ||
     selectedTags.size > 0;
 
   const clearAllFilters = () => {
     setSearch("");
+    setSelectedTeams(new Set());
     setSelectedAgents(new Set());
     setSelectedCategories(new Set());
     setSelectedTags(new Set());
@@ -659,6 +678,15 @@ export function SkillsPage() {
           />
         </div>
 
+        {/* Team filter */}
+        <MultiFilter
+          icon={<Users className="h-3 w-3" />}
+          label="Teams"
+          options={allTeamNames}
+          selected={selectedTeams}
+          onChange={setSelectedTeams}
+        />
+
         {/* Agent filter */}
         <MultiFilter
           icon={<Bot className="h-3 w-3" />}
@@ -699,10 +727,21 @@ export function SkillsPage() {
               onClear={() => setSearch("")}
             />
           )}
+          {[...selectedTeams].map((team) => (
+            <FilterPill
+              key={`team-${team}`}
+              label={`Team: ${team}`}
+              onClear={() => {
+                const next = new Set(selectedTeams);
+                next.delete(team);
+                setSelectedTeams(next);
+              }}
+            />
+          ))}
           {[...selectedAgents].map((a) => (
             <FilterPill
               key={`agent-${a}`}
-              label={a}
+              label={`Agent: ${a}`}
               onClear={() => {
                 const next = new Set(selectedAgents);
                 next.delete(a);

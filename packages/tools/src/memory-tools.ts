@@ -7,7 +7,7 @@
  */
 
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { MemoryStore } from "@polpo-ai/core";
 import { agentMemoryScope } from "@polpo-ai/core";
 

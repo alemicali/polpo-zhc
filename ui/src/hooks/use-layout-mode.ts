@@ -9,6 +9,7 @@
 import { useSyncExternalStore } from "react";
 
 export type LayoutMode = "sidebar" | "chat-first";
+export type ChatFirstNavMode = "inline" | "grouped" | "more";
 
 const STORAGE_KEY = "polpo-layout-mode";
 
@@ -45,6 +46,48 @@ export function toggleLayoutMode() {
 /** Hook to read the current layout mode. Only re-renders when mode changes. */
 export function useLayoutMode(): LayoutMode {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Chat-first page navigation mode
+// ═══════════════════════════════════════════════════════
+
+const CHAT_FIRST_NAV_STORAGE_KEY = "polpo-chat-first-nav-mode";
+
+let _chatFirstNavMode: ChatFirstNavMode;
+try {
+  const stored = localStorage.getItem(CHAT_FIRST_NAV_STORAGE_KEY);
+  _chatFirstNavMode = stored === "inline" || stored === "grouped" || stored === "more"
+    ? stored
+    : "more";
+} catch {
+  _chatFirstNavMode = "more";
+}
+
+const chatFirstNavListeners = new Set<() => void>();
+
+function chatFirstNavSubscribe(cb: () => void) {
+  chatFirstNavListeners.add(cb);
+  return () => { chatFirstNavListeners.delete(cb); };
+}
+
+function getChatFirstNavSnapshot(): ChatFirstNavMode {
+  return _chatFirstNavMode;
+}
+
+export function setChatFirstNavMode(mode: ChatFirstNavMode) {
+  if (_chatFirstNavMode === mode) return;
+  _chatFirstNavMode = mode;
+  try { localStorage.setItem(CHAT_FIRST_NAV_STORAGE_KEY, mode); } catch { /* ignore */ }
+  chatFirstNavListeners.forEach((cb) => cb());
+}
+
+export function useChatFirstNavMode(): ChatFirstNavMode {
+  return useSyncExternalStore(
+    chatFirstNavSubscribe,
+    getChatFirstNavSnapshot,
+    getChatFirstNavSnapshot,
+  );
 }
 
 // ═══════════════════════════════════════════════════════

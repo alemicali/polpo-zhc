@@ -1,4 +1,5 @@
 import { useState, useMemo, memo, createContext, use } from "react";
+import { Virtuoso } from "react-virtuoso";
 import {
   Card,
   CardContent,
@@ -52,7 +53,6 @@ import {
   Layers,
   ChevronRight,
   ChevronDown,
-  Calendar,
   Settings2,
 } from "lucide-react";
 import {
@@ -74,11 +74,10 @@ import type {
   GroupByKey,
   ColumnByKey,
   SortKey,
-  TimeField,
-  TimeFilterState,
-  TimeRange,
   CardFieldVisibility,
 } from "@/hooks/use-tasks-page";
+import { TimeRangeFilter } from "@/components/shared/time-range-filter";
+import { getTimeRangeLabel } from "@/lib/time-filter";
 
 // ── Card settings context (avoids prop drilling) ──
 
@@ -387,108 +386,6 @@ const sortOptions: { value: SortKey; label: string }[] = [
   { value: "priority", label: "Priority" },
   { value: "score", label: "Score" },
 ];
-
-// ── Time filter ──
-
-const timeFieldOptions: { value: TimeField; label: string }[] = [
-  { value: "createdAt", label: "Created" },
-  { value: "updatedAt", label: "Updated" },
-];
-
-const timeRangePresets: { value: TimeRange; label: string; ms: number }[] = [
-  { value: "1h", label: "Last hour", ms: 60 * 60 * 1000 },
-  { value: "6h", label: "Last 6 hours", ms: 6 * 60 * 60 * 1000 },
-  { value: "24h", label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
-  { value: "7d", label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: "30d", label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-];
-
-
-
-function TimeFilter({
-  value,
-  onChange,
-  onClear,
-}: {
-  value: TimeFilterState | null;
-  onChange: (v: TimeFilterState) => void;
-  onClear: () => void;
-}) {
-  const hasFilter = value !== null;
-  const [field, setField] = useState<TimeField>(value?.field ?? "updatedAt");
-
-  const applyPreset = (preset: (typeof timeRangePresets)[number]) => {
-    onChange({ field, range: preset.value, after: Date.now() - preset.ms });
-  };
-
-  const activePresetLabel = value
-    ? timeRangePresets.find(p => p.value === value.range)?.label ?? value.range
-    : null;
-  const activeFieldLabel = value
-    ? timeFieldOptions.find(f => f.value === value.field)?.label ?? value.field
-    : null;
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant={hasFilter ? "default" : "outline"} size="sm" className="gap-1.5">
-          <Calendar className="h-3.5 w-3.5" />
-          {hasFilter ? `${activeFieldLabel}: ${activePresetLabel}` : "Time"}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-56 p-2" align="start">
-        {/* Field selector */}
-        <div className="flex items-center gap-1 mb-2">
-          {timeFieldOptions.map((opt) => (
-            <Button
-              key={opt.value}
-              variant={field === opt.value ? "default" : "ghost"}
-              size="sm"
-              className="h-6 text-[10px] flex-1"
-              onClick={() => setField(opt.value)}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
-
-        {/* Range presets */}
-        <div className="space-y-0.5">
-          {timeRangePresets.map((preset) => (
-            <button
-              key={preset.value}
-              className={cn(
-                "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-muted",
-              )}
-              onClick={() => applyPreset(preset)}
-            >
-              <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                value?.range === preset.value && value?.field === field
-                  ? "bg-primary border-primary"
-                  : "border-muted-foreground/30",
-              )}>
-                {value?.range === preset.value && value?.field === field && (
-                  <Check className="h-2.5 w-2.5 text-primary-foreground" />
-                )}
-              </div>
-              <span>{preset.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {hasFilter && (
-          <Button variant="ghost" size="sm" className="w-full mt-1 text-xs" onClick={onClear}>
-            Clear
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 // ── Task card ──
 
@@ -1046,20 +943,30 @@ function KanbanBoard({
 function ListView({
   tasks,
   processes,
+  hasMore,
+  fetchNextPage,
+  isLoadingMore,
 }: {
   tasks: Task[];
   processes: AgentProcess[];
+  hasMore: boolean;
+  fetchNextPage: () => Promise<void> | void;
+  isLoadingMore: boolean;
 }) {
   const [tab, setTab] = useState("all");
 
-  const filtered = tasks
-    .filter((t) => {
+  const filtered = useMemo(
+    () => tasks.filter((t) => {
       if (tab === "pending") return t.status === "pending" || t.status === "assigned";
       if (tab !== "all" && t.status !== tab) return false;
       return true;
-    });
+    }),
+    [tasks, tab],
+  );
 
-  // Single-pass count reduction instead of 5 separate .filter() calls
+  // Single-pass count reduction instead of 5 separate .filter() calls.
+  // Note: counts reflect the LOADED page, not the global total — with
+  // cursor pagination we don't know the total until we've fetched it.
   const counts = useMemo(() => {
     const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0 };
     for (const t of tasks) {
@@ -1081,6 +988,14 @@ function ListView({
     { value: "pending", label: "Queued", count: counts.pending },
   ];
 
+  // Pre-build a Map for O(1) process lookups in itemContent — re-rendered
+  // on every fetched page; cheap relative to the list.
+  const processByTask = useMemo(() => {
+    const m = new Map<string, AgentProcess>();
+    for (const p of processes) m.set(p.taskId, p);
+    return m;
+  }, [processes]);
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
       {/* Tab bar */}
@@ -1099,35 +1014,58 @@ function ListView({
         ))}
       </div>
 
-      {/* Task list */}
-      <ScrollArea className="flex-1 min-h-0 -mx-1">
-        <div className="space-y-1.5 px-1 pr-5 pb-1">
-          {filtered.length === 0 ? (
-            <Card className="bg-card/60 backdrop-blur-sm">
-              <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <ListChecks className="h-10 w-10 mb-3 opacity-40" />
-                <p className="text-sm font-medium">
-                  {tab !== "all" ? "No tasks in this category" : "No tasks yet"}
-                </p>
-                {tab === "all" && (
-                  <p className="text-xs mt-1 text-center max-w-xs">
-                    Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            filtered.map((task) => (
+      {/* Task list — virtualised. Virtuoso handles windowing so we can
+          render a 1000+ row list without paying the React reconciliation
+          tax. `endReached` fires when the user scrolls within `overscan`
+          px of the bottom; we use it as the cursor-pagination trigger. */}
+      {filtered.length === 0 ? (
+        <Card className="bg-card/60 backdrop-blur-sm">
+          <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <ListChecks className="h-10 w-10 mb-3 opacity-40" />
+            <p className="text-sm font-medium">
+              {tab !== "all" ? "No tasks in this category" : "No tasks yet"}
+            </p>
+            {tab === "all" && (
+              <p className="text-xs mt-1 text-center max-w-xs">
+                Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <Virtuoso
+          style={{ height: "100%" }}
+          className="flex-1 min-h-0 -mx-1"
+          data={filtered}
+          endReached={() => {
+            if (hasMore && !isLoadingMore) {
+              void fetchNextPage();
+            }
+          }}
+          overscan={300}
+          computeItemKey={(_, task) => task.id}
+          itemContent={(_, task) => (
+            <div className="px-1 pb-1.5">
               <TaskRow
-                key={task.id}
                 task={task}
-                process={processes.find(p => p.taskId === task.id)}
+                process={processByTask.get(task.id)}
                 allTasks={tasks}
               />
-            ))
+            </div>
           )}
-        </div>
-      </ScrollArea>
+          components={{
+            Footer: () =>
+              isLoadingMore ? (
+                <div className="flex items-center justify-center py-4 text-muted-foreground/60">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
+                  <span className="text-xs">Loading more…</span>
+                </div>
+              ) : hasMore ? (
+                <div className="h-2" />
+              ) : null,
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1216,6 +1154,7 @@ export function TasksPage() {
     showEmptyColumns, toggleEmptyColumns,
     cardFields, toggleCardField,
     taskActions, handleRefresh, isRefreshing,
+    hasMore, fetchNextPage, isLoadingMore,
     agentTeamMap, agentConfigMap,
   } = state;
 
@@ -1265,7 +1204,7 @@ export function TasksPage() {
               onClear={() => setSelectedTeams(new Set())}
               isLoading={teamsLoading}
             />
-            <TimeFilter
+            <TimeRangeFilter
               value={timeFilter}
               onChange={setTimeFilter}
               onClear={() => setTimeFilter(null)}
@@ -1304,7 +1243,7 @@ export function TasksPage() {
                     className="text-[10px] gap-0.5 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20 py-0 h-5"
                     onClick={() => setTimeFilter(null)}
                   >
-                    {timeRangePresets.find(p => p.value === timeFilter.range)?.label ?? timeFilter.range}
+                    {getTimeRangeLabel(timeFilter.range)}
                     <XCircle className="h-2.5 w-2.5" />
                   </Badge>
                 )}
@@ -1316,7 +1255,9 @@ export function TasksPage() {
           )}
           <div className="flex items-center justify-between gap-2 sm:ml-auto">
             <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">
-              {filtered.length}{hasActiveFilters ? `/${tasks.length}` : ""} task{filtered.length !== 1 ? "s" : ""}
+              {search
+                ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""}`
+                : `${filtered.length}${hasActiveFilters ? `/${tasks.length}` : ""}${hasMore ? "+" : ""} task${filtered.length !== 1 ? "s" : ""}`}
             </span>
             <Button variant="outline" size="sm" className="h-7 px-2 shrink-0" onClick={handleRefresh} disabled={isRefreshing}>
               <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
@@ -1470,6 +1411,9 @@ export function TasksPage() {
           <ListView
             tasks={filtered}
             processes={processes}
+            hasMore={hasMore}
+            fetchNextPage={fetchNextPage}
+            isLoadingMore={isLoadingMore}
           />
         )}
       </div>

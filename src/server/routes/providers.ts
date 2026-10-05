@@ -9,6 +9,8 @@ import {
   removeFromEnvFile,
   getOAuthProviderList,
   startOAuthLogin,
+  type LoginDeviceCode,
+  type LoginPrompt,
 } from "../../setup/index.js";
 
 // ── Route definitions ─────────────────────────────────────────────
@@ -137,6 +139,15 @@ const oauthStatusRoute = createRoute({
               instructions: z.string().optional(),
               promptMessage: z.string().optional(),
               promptPlaceholder: z.string().optional(),
+              promptType: z.enum(["text", "secret", "select", "manual_code"]).optional(),
+              promptOptions: z.array(z.object({
+                id: z.string(),
+                label: z.string(),
+                description: z.string().optional(),
+              })).optional(),
+              deviceCode: z.string().optional(),
+              deviceVerificationUri: z.string().optional(),
+              deviceCodeExpiresAt: z.number().optional(),
               progressMessage: z.string().optional(),
               profileId: z.string().optional(),
               error: z.string().optional(),
@@ -322,11 +333,16 @@ const disconnectRoute = createRoute({
 
 interface OAuthFlowState {
   provider: string;
-  status: "pending" | "awaiting_browser" | "awaiting_input" | "in_progress" | "complete" | "error";
+  status: "pending" | "awaiting_browser" | "awaiting_device" | "awaiting_input" | "in_progress" | "complete" | "error";
   authUrl?: string;
   instructions?: string;
   promptMessage?: string;
   promptPlaceholder?: string;
+  promptType?: LoginPrompt["type"];
+  promptOptions?: LoginPrompt["options"];
+  deviceCode?: string;
+  deviceVerificationUri?: string;
+  deviceCodeExpiresAt?: number;
   progressMessage?: string;
   profileId?: string;
   error?: string;
@@ -393,13 +409,25 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
             flow.instructions = instructions;
             flow.status = "awaiting_browser";
           },
-          onPrompt: (message: string, placeholder?: string): Promise<string> => {
-            flow.promptMessage = message;
-            flow.promptPlaceholder = placeholder;
+          onPrompt: (message: string, placeholder?: string, prompt?: LoginPrompt): Promise<string> => {
+            flow.promptMessage = prompt?.message ?? message;
+            flow.promptPlaceholder = prompt?.placeholder ?? placeholder;
+            flow.promptType = prompt?.type ?? "text";
+            flow.promptOptions = prompt?.options;
             flow.status = "awaiting_input";
             return new Promise<string>((resolve) => {
               flow.promptResolve = resolve;
             });
+          },
+          onDeviceCode: (device: LoginDeviceCode) => {
+            flow.deviceCode = device.userCode;
+            flow.deviceVerificationUri = device.verificationUri;
+            flow.deviceCodeExpiresAt = device.expiresInSeconds
+              ? Date.now() + (device.expiresInSeconds * 1_000)
+              : undefined;
+            flow.authUrl = device.verificationUri;
+            flow.instructions = undefined;
+            flow.status = "awaiting_device";
           },
           onProgress: (message: string) => {
             flow.progressMessage = message;
@@ -409,6 +437,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
           },
         });
         flow.profileId = profileId;
+        flow.promptResolve = undefined;
         flow.status = "complete";
       } catch (err: unknown) {
         flow.error = err instanceof Error ? err.message : "Unknown error";
@@ -433,6 +462,11 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
         instructions: flow.instructions,
         promptMessage: flow.promptMessage,
         promptPlaceholder: flow.promptPlaceholder,
+        promptType: flow.promptType,
+        promptOptions: flow.promptOptions,
+        deviceCode: flow.deviceCode,
+        deviceVerificationUri: flow.deviceVerificationUri,
+        deviceCodeExpiresAt: flow.deviceCodeExpiresAt,
         progressMessage: flow.progressMessage,
         profileId: flow.profileId,
         error: flow.error,
@@ -450,6 +484,10 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
     if (flow.promptResolve) {
       flow.promptResolve(value);
       flow.promptResolve = undefined;
+      flow.promptMessage = undefined;
+      flow.promptPlaceholder = undefined;
+      flow.promptType = undefined;
+      flow.promptOptions = undefined;
       flow.status = "in_progress";
     }
     return c.json({ ok: true });

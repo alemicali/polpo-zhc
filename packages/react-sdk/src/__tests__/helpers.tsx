@@ -4,7 +4,7 @@ import type { PolpoContextValue } from "../provider/polpo-context.js";
 import type { PolpoClient } from "@polpo-ai/sdk";
 import type { PolpoStore } from "@polpo-ai/sdk";
 import type { StoreState } from "@polpo-ai/sdk";
-import type { Task, Mission, AgentConfig, AgentProcess, Team, ApprovalRequest } from "@polpo-ai/sdk";
+import type { Task, Mission, AgentConfig, AgentProcess, Team, ApprovalRequest, SSEEvent } from "@polpo-ai/sdk";
 
 // ---------------------------------------------------------------------------
 // Fake data factories
@@ -79,6 +79,7 @@ function createInitialState(): StoreState {
     missions: new Map(),
     missionReports: new Map(),
     agents: [],
+    teams: [],
     processes: [],
     stats: null,
     connectionStatus: "disconnected",
@@ -121,6 +122,10 @@ export function createMockStore(initialState?: Partial<StoreState>): PolpoStore 
       state = { ...state, agents };
       listeners.forEach((l) => l());
     },
+    setTeams: (teams: Team[]) => {
+      state = { ...state, teams };
+      listeners.forEach((l) => l());
+    },
     setProcesses: (processes: AgentProcess[]) => {
       state = { ...state, processes };
       listeners.forEach((l) => l());
@@ -143,8 +148,14 @@ export function createMockStore(initialState?: Partial<StoreState>): PolpoStore 
       state = { ...state, activeDelays: delays };
       listeners.forEach((l) => l());
     },
-    applyEvent: () => {},
-    applyEventBatch: () => {},
+    applyEvent: (event: SSEEvent) => {
+      state = { ...state, recentEvents: [...state.recentEvents, event].slice(-500) };
+      listeners.forEach((l) => l());
+    },
+    applyEventBatch: (events: SSEEvent[]) => {
+      state = { ...state, recentEvents: [...state.recentEvents, ...events].slice(-500) };
+      listeners.forEach((l) => l());
+    },
   } as unknown as PolpoStore;
 
   return store;

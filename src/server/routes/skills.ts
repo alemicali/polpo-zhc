@@ -27,6 +27,7 @@ export function skillRoutes(getDeps: () => {
   polpoDir: string;
   workDir: string;
   getAgents: () => Promise<any[]>;
+  emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string }) => void;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -108,6 +109,7 @@ export function skillRoutes(getDeps: () => {
       global: body.global,
       force: body.force,
     });
+    if (result.installed.length > 0) deps.emit("skill:changed", { scope: "agent", action: "installed", timestamp: new Date().toISOString() });
 
     const hasErrors = result.errors.length > 0 && result.installed.length === 0;
     return c.json({
@@ -164,6 +166,7 @@ export function skillRoutes(getDeps: () => {
       allowedTools: body.allowedTools,
       global: body.global,
     });
+    deps.emit("skill:changed", { scope: "agent", action: "created", skillName: body.name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name: body.name, path: skillPath } }, 201);
   });
 
@@ -200,6 +203,8 @@ export function skillRoutes(getDeps: () => {
     if (!removed) {
       return c.json({ ok: false, error: "Skill not found", code: "NOT_FOUND" }, 404);
     }
+
+    deps.emit("skill:changed", { scope: "agent", action: "deleted", skillName: name, timestamp: new Date().toISOString() });
 
     return c.json({ ok: true, data: { removed: name } }, 200);
   });
@@ -247,6 +252,7 @@ export function skillRoutes(getDeps: () => {
     }
 
     assignSkillToAgent(polpoDir, agent, skillName, skill.path);
+    deps.emit("skill:changed", { scope: "agent", action: "assigned", skillName, agentName: agent, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { skill: skillName, agent } }, 200);
   });
 
@@ -288,6 +294,7 @@ export function skillRoutes(getDeps: () => {
     if (!removed) {
       return c.json({ ok: false, error: "Assignment not found", code: "NOT_FOUND" }, 404);
     }
+    deps.emit("skill:changed", { scope: "agent", action: "unassigned", skillName, agentName: agent, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { skill: skillName, agent } }, 200);
   });
 
@@ -394,6 +401,7 @@ export function skillRoutes(getDeps: () => {
     const skillPath = createOrchestratorSkill(polpoDir, body.name, body.description, body.content, {
       allowedTools: body.allowedTools,
     });
+    deps.emit("skill:changed", { scope: "orchestrator", action: "created", skillName: body.name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name: body.name, path: skillPath } }, 201);
   });
 
@@ -439,6 +447,7 @@ export function skillRoutes(getDeps: () => {
     if (!ok) {
       return c.json({ ok: false, error: `Skill "${name}" not found`, code: "NOT_FOUND" }, 404);
     }
+    deps.emit("skill:changed", { scope: "orchestrator", action: "updated", skillName: name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name } }, 200);
   });
 
@@ -472,6 +481,7 @@ export function skillRoutes(getDeps: () => {
     if (!removed) {
       return c.json({ ok: false, error: "Skill not found", code: "NOT_FOUND" }, 404);
     }
+    deps.emit("skill:changed", { scope: "orchestrator", action: "deleted", skillName: name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { removed: name } }, 200);
   });
 
@@ -549,6 +559,7 @@ export function skillRoutes(getDeps: () => {
       skillNames: body.skillNames,
       force: body.force,
     });
+    if (result.installed.length > 0) deps.emit("skill:changed", { scope: "orchestrator", action: "installed", timestamp: new Date().toISOString() });
 
     const hasErrors = result.errors.length > 0 && result.installed.length === 0;
     return c.json({ ok: !hasErrors, data: result }, hasErrors ? 400 : 201);
@@ -613,10 +624,10 @@ export function skillRoutes(getDeps: () => {
     const body = c.req.valid("json");
 
     updateSkillIndex(polpoDir, name, body);
+    deps.emit("skill:changed", { scope: "agent", action: "indexed", skillName: name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { skill: name, ...body } });
   });
 
   return app;
 }
-
 

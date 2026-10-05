@@ -124,7 +124,7 @@ export interface ChatStateValue {
   isLoading: boolean;
   messagesLoading: boolean;
   sessionId: string | null;
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string }[];
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean }[];
   sessionsLoading: boolean;
   streamingSessionIds: string[];
   pendingQuestions: AskUserQuestion[] | null;
@@ -142,7 +142,7 @@ export interface ChatStateValue {
 
 /** Stable action callbacks — never change identity (wrapped in useCallback upstream) */
 export interface ChatActionsValue {
-  send: (message: string, images?: { url: string; mimeType: string }[]) => Promise<void>;
+  send: (message: string, images?: { url: string; mimeType: string }[], context?: string, options?: { onAccepted?: () => void }) => Promise<void>;
   stop: () => void;
   answerQuestions: (answers: AskUserAnswer[]) => Promise<void>;
   respondToMission: (action: MissionPreviewAction, feedback?: string) => Promise<{ missionId?: string; error?: string }>;
@@ -157,11 +157,26 @@ export interface ChatActionsValue {
   loadSession: (id: string) => Promise<void>;
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
+  /** Rename a session (PATCH title). Silent catch — dialog handles the error UX. */
+  renameSession: (id: string, title: string) => Promise<void>;
+  /** Toggle the star flag (PATCH starred). Does NOT bump updatedAt. */
+  setStarred: (id: string, starred: boolean) => Promise<void>;
   setSelectedAgent: (agent: string | null) => void;
 }
 
 const ChatStateContext = createContext<ChatStateValue | null>(null);
 const ChatActionsContext = createContext<ChatActionsValue | null>(null);
+
+export type ChatSessionStateValue = Pick<ChatStateValue,
+  | "sessionId"
+  | "sessions"
+  | "sessionsLoading"
+  | "streamingSessionIds"
+  | "messagesLoading"
+  | "selectedAgent"
+>;
+
+const ChatSessionStateContext = createContext<ChatSessionStateValue | null>(null);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const chat = useChat();
@@ -210,6 +225,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     loadSession: chat.loadSession,
     newSession: chat.newSession,
     deleteSession: chat.deleteSession,
+    renameSession: chat.renameSession,
+    setStarred: chat.setStarred,
     setSelectedAgent: chat.setSelectedAgent,
   }), [
     chat.send, chat.stop, chat.answerQuestions,
@@ -218,15 +235,36 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.consumeOpenFile, chat.consumeNavigateTo,
     chat.consumeOpenTab, chat.consumeSetDesign,
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
+    chat.renameSession, chat.setStarred,
     chat.setSelectedAgent,
   ]);
 
+  // Session chrome must not re-render for every streamed token. Keep this
+  // narrow context independent from the message-heavy state context.
+  const sessionState: ChatSessionStateValue = useMemo(() => ({
+    sessionId: chat.sessionId,
+    sessions: chat.sessions,
+    sessionsLoading: chat.sessionsLoading,
+    streamingSessionIds: chat.streamingSessionIds,
+    messagesLoading: chat.messagesLoading,
+    selectedAgent: chat.selectedAgent,
+  }), [
+    chat.sessionId,
+    chat.sessions,
+    chat.sessionsLoading,
+    chat.streamingSessionIds,
+    chat.messagesLoading,
+    chat.selectedAgent,
+  ]);
+
   return (
-    <ChatStateContext.Provider value={state}>
-      <ChatActionsContext.Provider value={actions}>
-        {children}
-      </ChatActionsContext.Provider>
-    </ChatStateContext.Provider>
+    <ChatSessionStateContext.Provider value={sessionState}>
+      <ChatStateContext.Provider value={state}>
+        <ChatActionsContext.Provider value={actions}>
+          {children}
+        </ChatActionsContext.Provider>
+      </ChatStateContext.Provider>
+    </ChatSessionStateContext.Provider>
   );
 }
 
@@ -234,6 +272,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 export function useChatState(): ChatStateValue {
   const ctx = use(ChatStateContext);
   if (!ctx) throw new Error("useChatState must be used within a <ChatProvider>");
+  return ctx;
+}
+
+/** Session metadata without subscribing to message/token updates. */
+export function useChatSessionState(): ChatSessionStateValue {
+  const ctx = use(ChatSessionStateContext);
+  if (!ctx) throw new Error("useChatSessionState must be used within a <ChatProvider>");
   return ctx;
 }
 

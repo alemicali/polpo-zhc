@@ -1,4 +1,7 @@
+import { ChatAttachments } from "@/components/chat-attachments";
 import {
+  lazy,
+  Suspense,
   useState,
   useCallback,
   useRef,
@@ -53,7 +56,16 @@ import {
   BarChart3,
   Compass,
   Palette,
+  List,
   ListPlus,
+  Pencil,
+  Star,
+  StarOff,
+  MoreHorizontal,
+  ClockArrowUp,
+  AppWindow,
+  Database,
+  Table2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +84,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Virtuoso, type VirtuosoHandle, type StateSnapshot } from "react-virtuoso";
 import {
   Message,
@@ -95,16 +121,18 @@ import {
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
-import { MissionPreviewDialog } from "@/components/mission-preview-dialog";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
 import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
+import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { Queue } from "@/components/ai-elements/queue";
+import { BackgroundWaits } from "@/components/ai-elements/background-waits";
 import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
+import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
@@ -114,6 +142,17 @@ import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
+import {
+  clearAppPreviewContext,
+  formatAppPreviewContext,
+  setAppPreviewContext,
+  useAppPreviewContext,
+} from "@/hooks/use-app-preview-context";
+import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
+
+const MissionPreviewDialog = lazy(() =>
+  import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
+);
 
 /** Like formatDistanceToNow but returns "just now" for < 30 s */
 function chatTimeAgo(date: Date): string {
@@ -305,8 +344,9 @@ function MicButton({
 
 // ── Attachment preview strip (lives inside PromptInput) ──
 
-function AttachmentPreview() {
+function AttachmentPreview({ onCount }: { onCount?: (count: number) => void }) {
   const { files, remove } = usePromptInputAttachments();
+  useEffect(() => { onCount?.(files.length); return () => onCount?.(0); }, [files.length, onCount]);
   if (files.length === 0) return null;
 
   return (
@@ -529,11 +569,15 @@ function MissionPreviewCard({
         </Badge>
       </div>
 
-      <MissionPreviewDialog
-        preview={preview}
-        open={fullViewOpen}
-        onOpenChange={setFullViewOpen}
-      />
+      {fullViewOpen ? (
+        <Suspense fallback={null}>
+          <MissionPreviewDialog
+            preview={preview}
+            open
+            onOpenChange={setFullViewOpen}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Task list — interleaved with checkpoints, delays, quality gates at correct positions */}
       <div className="max-h-56 space-y-0.5 overflow-y-auto px-3 py-2 sm:max-h-80 sm:space-y-1 sm:px-4 sm:py-3">
@@ -1920,7 +1964,7 @@ const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
 const SESSION_SIDEBAR_MIN_WIDTH = 320;
 const SESSION_SIDEBAR_MAX_WIDTH = 520;
 
-type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string };
+type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean };
 type SidebarView = "drill" | "flat";
 
 const clampSessionSidebarWidth = (value: number) => {
@@ -1936,13 +1980,24 @@ const readStoredSessionSidebarWidth = () => {
   return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
 };
 
-/** Shared session row — used by both drill-down and flat views */
+/** Shared session row — used by both drill-down and flat views.
+ *
+ *  Wraps the row in a <ContextMenu> so a right-click anywhere on the row
+ *  exposes Rename / Star|Unstar / Delete. The trailing kebab dropdown
+ *  exposes the same actions for users who don't expect right-click on the
+ *  web. Both surfaces call the same callbacks — single source of truth.
+ *
+ *  A small amber star (lucide Star, filled) appears next to the title when
+ *  `session.starred` is truthy.
+ */
 function SessionRow({
   session,
   isActive,
   isStreaming,
   onSelect,
   onDelete,
+  onRename,
+  onToggleStar,
 }: {
   session: SessionItem;
   isActive: boolean;
@@ -1950,51 +2005,136 @@ function SessionRow({
   isStreaming?: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isStarred = !!session.starred;
+  const title = session.title || "Untitled";
+
+  const handleRename = () => onRename(session.id, title);
+  const handleToggleStar = () => onToggleStar(session.id, !isStarred);
+  const handleDelete = () => onDelete(session.id);
+
   return (
-    <div
-      className={cn(
-        "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
-        isActive
-          ? "bg-accent/80 text-accent-foreground"
-          : "hover:bg-accent/30 text-muted-foreground"
-      )}
-      onClick={() => onSelect(session.id)}
-    >
-      <div className="flex-1 min-w-0">
-        <p className={cn(
-          "whitespace-normal break-words text-[13px] font-medium leading-snug",
-          isActive ? "text-accent-foreground" : "text-foreground"
-        )}>
-          {session.title || "Untitled"}
-        </p>
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
-          {isStreaming ? (
-            <span className="flex items-center gap-1 font-medium text-primary/70">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-              </span>
-              Streaming...
-            </span>
-          ) : (
-            <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
+            isActive
+              ? "bg-accent/80 text-accent-foreground"
+              : "hover:bg-accent/30 text-muted-foreground"
           )}
-          <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+          onClick={() => onSelect(session.id)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isStarred && (
+                <Star
+                  className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+                  aria-label="Starred"
+                />
+              )}
+              <p className={cn(
+                "whitespace-normal break-words text-[13px] font-medium leading-snug min-w-0",
+                isActive ? "text-accent-foreground" : "text-foreground"
+              )}>
+                {title}
+              </p>
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+              {isStreaming ? (
+                <span className="flex items-center gap-1 font-medium text-primary/70">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                  </span>
+                  Streaming...
+                </span>
+              ) : (
+                <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
+              )}
+              <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
+            </div>
+          </div>
+          {/* Kebab dropdown — visible on hover/focus, or while open so it
+              doesn't vanish under the cursor. Mirrors the context menu. */}
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Session actions"
+                className={cn(
+                  "-mr-1 h-5 w-5 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
+                  menuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onSelect={handleRename}>
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleToggleStar}>
+                {isStarred ? (
+                  <>
+                    <StarOff className="mr-2 h-3.5 w-3.5" />
+                    Unstar
+                  </>
+                ) : (
+                  <>
+                    <Star className="mr-2 h-3.5 w-3.5" />
+                    Star
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={handleDelete}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="-mr-1 h-5 w-5 shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(session.id);
-        }}
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={handleRename}>
+          <Pencil className="mr-2 h-3.5 w-3.5" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={handleToggleStar}>
+          {isStarred ? (
+            <>
+              <StarOff className="mr-2 h-3.5 w-3.5" />
+              Unstar
+            </>
+          ) : (
+            <>
+              <Star className="mr-2 h-3.5 w-3.5" />
+              Star
+            </>
+          )}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={handleDelete}
+          className="text-destructive focus:text-destructive"
+        >
+          <Trash2 className="mr-2 h-3.5 w-3.5" />
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -2005,6 +2145,8 @@ function SessionSidebar({
   onSelect,
   onNew,
   onDelete,
+  onRename,
+  onToggleStar,
   onBack,
   fullWidth,
   mobileFullWidth,
@@ -2017,6 +2159,8 @@ function SessionSidebar({
   onSelect: (id: string) => void;
   onNew: (agent?: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, currentTitle: string) => void;
+  onToggleStar: (id: string, starred: boolean) => void;
   /** Callback to close the sidebar (used in compact/overlay mode) */
   onBack?: () => void;
   /** When true, sidebar takes full width instead of fixed w-72 */
@@ -2266,6 +2410,8 @@ function SessionSidebar({
           isStreaming={streamingSessionIds.includes(s.id)}
           onSelect={onSelect}
           onDelete={onDelete}
+          onRename={onRename}
+          onToggleStar={onToggleStar}
         />
       ))}
     </div>
@@ -2416,6 +2562,8 @@ function SessionSidebar({
                       isStreaming={streamingSessionIds.includes(s.id)}
                       onSelect={onSelect}
                       onDelete={onDelete}
+                      onRename={onRename}
+                      onToggleStar={onToggleStar}
                     />
                   ))}
                   {(hidden > 0 || showAll) && (
@@ -2442,6 +2590,48 @@ function SessionSidebar({
   const activeGroupSessions = activeGroup
     ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
     : [];
+
+  // ── Starred sessions — surfaced above the main list in every view ──
+  // Order: most-recently-updated first (consistent with the grouped lists
+  // below). The section is conditionally rendered: zero starred → nothing.
+  // Keys are namespaced with a "starred-" prefix so React doesn't collide
+  // with the same SessionRow reappearing in its group below.
+  const starredSessions = useMemo(
+    () => sessions
+      .filter((s) => s.starred)
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [sessions],
+  );
+
+  const renderStarred = () => {
+    if (starredSessions.length === 0) return null;
+    return (
+      <div className="p-1.5 pb-2 border-b border-border/30">
+        <div className="px-3 pt-1.5 pb-1 flex items-center gap-1.5">
+          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Starred
+          </span>
+        </div>
+        <div className="space-y-0.5">
+          {starredSessions.map((s) => (
+            <SessionRow
+              key={`starred-${s.id}`}
+              session={s}
+              isActive={activeSessionId === s.id}
+              isStreaming={streamingSessionIds.includes(s.id)}
+              onSelect={onSelect}
+              onDelete={onDelete}
+              onRename={onRename}
+              onToggleStar={onToggleStar}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const sidebarStyle = fullWidth
     ? undefined
     : ({ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties);
@@ -2480,12 +2670,17 @@ function SessionSidebar({
               between both interfaces.
             </p>
           </div>
-        ) : view === "flat" ? (
-          renderFlat()
-        ) : activeGroup ? (
-          renderSessionList(activeGroupSessions)
         ) : (
-          renderGroups()
+          <>
+            {/* Starred section — sits above the normal list in every view.
+                Auto-hides when the user has zero starred sessions. */}
+            {renderStarred()}
+            {view === "flat"
+              ? renderFlat()
+              : activeGroup
+                ? renderSessionList(activeGroupSessions)
+                : renderGroups()}
+          </>
         )}
       </div>
     </div>
@@ -2974,9 +3169,10 @@ function ChatMessages() {
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
                       <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        <ChatAttachments attachments={msg.attachments} />
+                        <CollapsibleUserMessage key={msg.id} text={msg.content}>
                           <MentionText text={msg.content} variant="inverted" />
-                        </p>
+                        </CollapsibleUserMessage>
                       </div>
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
@@ -3249,15 +3445,55 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
-  const { isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
+  const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
   const { send, stop } = useChatActions();
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
+  const previewContext = useAppPreviewContext();
+  const activePreviewContext = previewContext?.sessionId === sessionId ? previewContext : null;
+  const dataContext = useDataPromptContext();
+  const activeDataContext = dataContext?.sessionId === sessionId ? dataContext : null;
+  const [expandedPreviewImage, setExpandedPreviewImage] = useState<{ url: string; label: string } | null>(null);
+
+  const removePreviewSelection = useCallback((index: number) => {
+    if (!activePreviewContext) return;
+    const selections = (activePreviewContext.selections ?? []).filter((_, selectionIndex) => selectionIndex !== index);
+    if (selections.length === 0 && !activePreviewContext.screenshotDataUrl) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, selections: selections.length > 0 ? selections : undefined });
+  }, [activePreviewContext]);
+
+  const removePreviewScreenshot = useCallback(() => {
+    if (!activePreviewContext) return;
+    if (!activePreviewContext.selections?.length) {
+      clearAppPreviewContext();
+      return;
+    }
+    setAppPreviewContext({ ...activePreviewContext, screenshotDataUrl: undefined });
+  }, [activePreviewContext]);
 
   const inputWrapperRef = useRef<HTMLDivElement>(null);
+  const attachmentCountRef = useRef(0);
+  const setAttachmentCount = useCallback((count: number) => { attachmentCountRef.current = count; }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
+  // Tracks whether the composer textarea currently has a non-empty draft.
+  // Drives the streaming-time CTA swap: with a draft we show the queue
+  // action (Enter enqueues); empty, we show Stop (Enter is a no-op).
+  const [hasDraft, setHasDraft] = useState(false);
+  const historyIndexRef = useRef<number | null>(null);
+  const historyDraftRef = useRef("");
+  const applyingHistoryRef = useRef(false);
+
+  const promptHistory = useMemo(
+    () => messages
+      .filter((message) => message.role === "user" && message.content.trim().length > 0)
+      .map((message) => message.content),
+    [messages],
+  );
 
   // Per-session prompt queue. Keyed by sessionId (or the new-session
   // sentinel until the server assigns one). The Queue panel renders
@@ -3269,6 +3505,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // on reload), CLOSED otherwise. The user can always close via the X in
   // the panel header — items survive the close (re-open via ListPlus).
   const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
+  const backgroundWaits = useBackgroundWaits(sessionId);
+  const [backgroundWaitsOpen, setBackgroundWaitsOpen] = useState(false);
   // Clear confirmation modal (avoid accidental wipes of queued prompts).
   const [queueClearConfirm, setQueueClearConfirm] = useState(false);
   const copySessionId = useCallback(async () => {
@@ -3337,26 +3575,43 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   }, [client]);
 
   const handleSubmit = useCallback(
-    async (message: PromptInputMessage) => {
+    async (message: PromptInputMessage, _event: unknown, acknowledge: () => void) => {
       if (isLoading) {
         throw new Error("Cannot submit while a response is streaming.");
       }
-      if (!message.text.trim()) return;
+      if (!message.text.trim() && !message.files.length) return;
       // Resolve display mentions → wire mentions
       const resolvedText = mentionRef.current?.resolveMessage(message.text.trim()) ?? message.text.trim();
       const images = message.files
-        .filter((f) => f.url && f.mediaType?.startsWith("image/"))
-        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "image/png" }));
-      // PromptInput resets the form on successful submit — drop any cached
-      // draft for this session so a later tab-switch does not rehydrate it.
-      // We clear both the current id key and the new-session sentinel to
-      // cover the first-send-from-new-session case where sessionId is still
-      // null at this point and only flips after the stream returns.
-      chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
-      chatInputDrafts.delete(NEW_SESSION_DRAFT_KEY);
-      await send(resolvedText, images.length > 0 ? images : undefined);
+        .filter((f) => f.url)
+        .map((f) => ({ url: f.url!, mimeType: f.mediaType ?? "application/octet-stream", filename: f.filename }));
+      if (images.some(f => !f.url.startsWith("data:"))) throw new Error("Could not read an attachment. Please select it again.");
+      const previewImages = [
+        activePreviewContext?.screenshotDataUrl,
+        ...(activePreviewContext?.selections?.map((selection) => selection.screenshotDataUrl) ?? []),
+      ].filter((url): url is string => Boolean(url));
+      for (const url of previewImages) {
+        if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png", filename: undefined });
+      }
+      const context = [
+        activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
+        activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
+      ].filter(Boolean).join("\n\n");
+      await send(
+        resolvedText,
+        images.length > 0 ? images : undefined,
+        context || undefined,
+        { onAccepted: () => {
+          const key = sessionId ?? NEW_SESSION_DRAFT_KEY;
+          // A switched-away draft may have been edited independently.
+          if (chatInputDrafts.get(key) === message.text) chatInputDrafts.delete(key);
+          acknowledge();
+        } },
+      );
+      if (activePreviewContext) clearAppPreviewContext();
+      if (activeDataContext) clearDataPromptContext();
     },
-    [isLoading, send, sessionId]
+    [activeDataContext, activePreviewContext, isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -3366,7 +3621,54 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     nativeSetter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    setHasDraft(text.trim().length > 0);
   }, []);
+
+  const applyHistoryValue = useCallback((textarea: HTMLTextAreaElement, text: string) => {
+    applyingHistoryRef.current = true;
+    setTextareaValue(text);
+    applyingHistoryRef.current = false;
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    });
+  }, [setTextareaValue]);
+
+  const handlePromptHistoryKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.defaultPrevented || e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+    const textarea = e.currentTarget;
+    if (e.key === "ArrowUp") {
+      if (promptHistory.length === 0) return;
+      const selectionStart = textarea.selectionStart ?? 0;
+      const selectionEnd = textarea.selectionEnd ?? selectionStart;
+      const cursorIsOnFirstLine = !textarea.value.slice(0, selectionStart).includes("\n");
+      if (selectionStart !== selectionEnd || !cursorIsOnFirstLine) return;
+
+      e.preventDefault();
+      if (historyIndexRef.current === null) {
+        historyDraftRef.current = textarea.value;
+        historyIndexRef.current = promptHistory.length - 1;
+      } else {
+        historyIndexRef.current = Math.max(0, historyIndexRef.current - 1);
+      }
+      applyHistoryValue(textarea, promptHistory[historyIndexRef.current]);
+      return;
+    }
+
+    if (historyIndexRef.current === null) return;
+    e.preventDefault();
+    const nextIndex = historyIndexRef.current + 1;
+    if (nextIndex >= promptHistory.length) {
+      historyIndexRef.current = null;
+      applyHistoryValue(textarea, historyDraftRef.current);
+      historyDraftRef.current = "";
+      return;
+    }
+    historyIndexRef.current = nextIndex;
+    applyHistoryValue(textarea, promptHistory[nextIndex]);
+  }, [applyHistoryValue, promptHistory]);
 
   // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
 
@@ -3377,6 +3679,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   //    to the manager (Auto-send switch, edit/delete existing items)
   //    even on an empty queue without forcing them to type first.
   const enqueueCurrentDraft = useCallback(() => {
+    if (attachmentCountRef.current > 0) {
+      toast.info("Attachments stay in this draft. Send it when the current response finishes.");
+      return;
+    }
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     const raw = textarea?.value ?? "";
     const text = raw.trim();
@@ -3393,9 +3699,25 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     // Clear the composer (mirrors PromptInput.form.reset post-submit).
     setTextareaValue("");
     chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
+    setHasDraft(false);
     setQueueOpen(true); // ensure manager is visible right after enqueueing
     textarea?.focus();
   }, [queue, sessionId, setTextareaValue]);
+
+  // Manual per-item send: pulls the prompt out of the queue and dispatches
+  // it through the same `send` path used by the composer + auto-send.
+  // Guarded by inputDisabled + isLoading so the user can't double-fire
+  // while a stream is already in flight.
+  const handleManualSend = useCallback((id: string) => {
+    if (isLoading || inputDisabled) return;
+    const item = queue.items.find((i) => i.id === id);
+    if (!item) return;
+    queue.remove(id);
+    void send(item.text).catch((err) => {
+      console.warn("[queue] manual send failed:", err);
+      toast.error("Failed to send queued prompt");
+    });
+  }, [queue, isLoading, inputDisabled, send]);
 
   // Migrate the `__new__` queue to the real sessionId once the server
   // assigns one (first stream completes). Until then the queue lives
@@ -3432,8 +3754,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       // Re-check guards at flush time — user may have toggled autoSend
       // off or cleared the queue during the wait.
       if (!queue.autoSend || queue.items.length === 0 || inputDisabled) return;
+      const isLastQueuedItem = queue.items.length === 1;
       const next = queue.shift();
       if (!next) return;
+      if (isLastQueuedItem) setQueueOpen(false);
       void send(next.text).catch((err) => {
         // Re-queue at the head on failure so the user doesn't silently
         // lose work, and surface a toast.
@@ -3452,14 +3776,15 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // The composer is uncontrolled. When the user switches tabs we need to
   // (a) snapshot the current draft under the OUTGOING session id, and
   // (b) hydrate the textarea with the INCOMING session id's draft (if any).
-  // The submit path triggers form.reset() in PromptInput, which clears the
-  // textarea after a successful send — `chatInputDrafts.delete` in
-  // handleSubmit keeps our cache aligned. The cleanup also saves on
+  // PromptInput clears only the acknowledged draft, before new-session
+  // migration; handleSubmit keeps the cached draft aligned. Cleanup saves on
   // unmount (e.g. compact-mode sidebar takeover).
   const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
   const prevDraftKeyRef = useRef<string>(draftKey);
   useEffect(() => {
     const prevKey = prevDraftKeyRef.current;
+    historyIndexRef.current = null;
+    historyDraftRef.current = "";
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
     if (textarea && prevKey !== draftKey) {
       // Save outgoing draft (only if non-empty — keeps the map small)
@@ -3475,6 +3800,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       )?.set;
       nativeSetter?.call(textarea, incoming);
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      setHasDraft(incoming.trim().length > 0);
     }
     prevDraftKeyRef.current = draftKey;
     return () => {
@@ -3544,6 +3870,24 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       ref={inputWrapperRef}
     >
       <div className="mx-auto max-w-3xl">
+        {backgroundWaitsOpen && (
+          <div className="mb-2">
+            <BackgroundWaits
+              waits={backgroundWaits.waits}
+              loading={backgroundWaits.loading}
+              currentSessionId={sessionId}
+              onCancel={async (id) => {
+                try {
+                  await backgroundWaits.cancel(id);
+                  toast.success("Background wait cancelled");
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not cancel wait");
+                }
+              }}
+              onClose={() => setBackgroundWaitsOpen(false)}
+            />
+          </div>
+        )}
         {/* Prompt queue panel — `queueOpen` is the single source of truth.
             User opens via ListPlus button (auto-opens when enqueueing a
             draft); closes via the X in the header. Items survive close —
@@ -3555,6 +3899,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               autoSend={queue.autoSend}
               onUpdate={(id, text) => { queue.update(id, text); }}
               onRemove={(id) => { queue.remove(id); }}
+              onSend={handleManualSend}
+              sendDisabled={isLoading || inputDisabled}
               onClear={() => setQueueClearConfirm(true)}
               onAutoSendChange={queue.setAutoSend}
               onReorder={queue.reorder}
@@ -3574,6 +3920,109 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             setQueueClearConfirm(false);
           }}
         />
+        {activePreviewContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <AppWindow className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">App Preview</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{activePreviewContext.url}</span>
+              <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+                {activePreviewContext.viewport.width} × {activePreviewContext.viewport.height}
+              </span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearAppPreviewContext} aria-label="Remove all App Preview context" title="Remove all">
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activePreviewContext.selections?.map((selection, index) => (
+                <div key={`${selection.node.selector}-${index}`} className="flex h-9 min-w-0 max-w-[260px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  {selection.screenshotDataUrl ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                          onClick={() => setExpandedPreviewImage({ url: selection.screenshotDataUrl!, label: selection.node.selector })}
+                          aria-label={`Enlarge ${selection.node.selector} screenshot`}
+                        >
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element" className="h-full w-full object-cover" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" sideOffset={8} className="w-[420px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                        <div className="flex min-h-24 items-center overflow-auto border border-border/50 bg-muted/40 p-2">
+                          <img src={selection.screenshotDataUrl} alt="Selected DOM element preview" className="mx-auto max-h-72 max-w-none object-contain" />
+                        </div>
+                        <p className="mt-1.5 truncate px-1 font-mono text-[10px] text-muted-foreground">{selection.node.selector}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <div className="h-7 w-9 shrink-0 animate-pulse bg-muted" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={selection.node.selector}>{selection.node.selector}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePreviewSelection(index)} aria-label={`Remove ${selection.node.selector}`}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              {activePreviewContext.screenshotDataUrl && (
+                <div className="flex h-9 min-w-0 max-w-[220px] items-center gap-1.5 border border-border/60 bg-background pl-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="h-7 w-9 shrink-0 cursor-zoom-in overflow-hidden bg-muted"
+                        onClick={() => setExpandedPreviewImage({ url: activePreviewContext.screenshotDataUrl!, label: "App Preview screenshot" })}
+                        aria-label="Enlarge App Preview screenshot"
+                      >
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot" className="h-full w-full object-cover" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="start" sideOffset={8} className="w-[520px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                      <div className="flex min-h-32 items-center justify-center border border-border/50 bg-muted/40 p-2">
+                        <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot preview" className="max-h-80 max-w-full object-contain" />
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                  <span className="min-w-0 flex-1 truncate text-[10px]">Screenshot</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={removePreviewScreenshot} aria-label="Remove App Preview screenshot">
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {activeDataContext && (
+          <div className="mb-1 min-w-0 border border-border/70 bg-muted/30 text-xs">
+            <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
+              <Database className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-medium">Data context</span>
+              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{activeDataContext.items.length} selected reference{activeDataContext.items.length === 1 ? "" : "s"}</span>
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearDataPromptContext} aria-label="Remove all data context"><X className="h-3 w-3" /></Button>
+            </div>
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
+              {activeDataContext.items.map((item, index) => (
+                <div key={`${item.sourceId}-${item.dataset}-${index}`} className="flex h-8 min-w-0 max-w-[280px] items-center gap-1.5 border border-border/60 bg-background pl-2">
+                  <Table2 className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1 truncate text-[10px]" title={`${item.sourceId}/${item.dataset}`}>{item.label}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeDataPromptItem(index)} aria-label={`Remove ${item.label}`}><X className="h-3 w-3" /></Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <Dialog open={Boolean(expandedPreviewImage)} onOpenChange={(open) => { if (!open) setExpandedPreviewImage(null); }}>
+          <DialogContent className="flex h-[86vh] w-[92vw] max-w-[1280px] flex-col gap-0 overflow-hidden p-0">
+            <div className="flex h-11 shrink-0 items-center border-b border-border px-3 pr-12">
+              <DialogTitle className="truncate text-sm">{expandedPreviewImage?.label ?? "App Preview screenshot"}</DialogTitle>
+            </div>
+            <div className="min-h-0 flex-1 bg-muted/40 p-4">
+              {expandedPreviewImage && (
+                <img src={expandedPreviewImage.url} alt="Enlarged App Preview context" className="h-full w-full bg-background object-contain shadow-lg" />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
         <MentionPopover
           ref={mentionRef}
           textareaRef={textareaRef}
@@ -3587,7 +4036,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         >
           <PromptInput
             onSubmit={handleSubmit}
-            accept="image/*"
+            submissionKey={draftKey}
+            accept="*/*"
             multiple
             globalDrop
             maxFiles={5}
@@ -3595,13 +4045,14 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             onError={(err) => toast.error(err.message)}
             className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
-            <AttachmentPreview />
+            <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
               ref={textareaRef}
               placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
               onKeyDown={(e) => {
                 mentionRef.current?.handleTextareaKeyDown(e);
+                handlePromptHistoryKeyDown(e);
                 if (
                   !e.defaultPrevented &&
                   isLoading &&
@@ -3609,12 +4060,24 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   !e.shiftKey &&
                   !e.nativeEvent.isComposing
                 ) {
+                  // During streaming Enter never goes to the form: with a
+                  // draft it enqueues (same as the queue CTA); empty, it's a
+                  // no-op so the user can't accidentally hit Stop with the
+                  // keyboard — Stop only fires from an explicit click.
                   e.preventDefault();
+                  if (e.currentTarget.value.trim().length > 0) {
+                    enqueueCurrentDraft();
+                  }
                 }
               }}
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
                 mentionRef.current?.handleInput();
+                if (!applyingHistoryRef.current) {
+                  historyIndexRef.current = null;
+                  historyDraftRef.current = "";
+                }
+                setHasDraft(e.currentTarget.value.trim().length > 0);
               }}
             />
             <PromptInputFooter>
@@ -3642,17 +4105,44 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   <span className="font-mono text-sm font-semibold">/</span>
                 </button>
               </div>
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 items-center gap-1">
                 <MicButton
                   onTranscript={setTextareaValue}
                   disabled={inputDisabled}
                   onListeningChange={setIsRecording}
                 />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => setBackgroundWaitsOpen((value) => !value)}
+                      aria-label="Background waits"
+                    >
+                      <ClockArrowUp className="h-4 w-4" />
+                      {backgroundWaits.activeCount > 0 && (
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white">
+                          {backgroundWaits.activeCount}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    Background waits ({backgroundWaits.activeCount} active)
+                  </TooltipContent>
+                </Tooltip>
                 {/* Queue button — stash current draft instead of sending.
                     Disabled while a stream is in progress would defeat the
                     point (the whole reason to queue is to pile up sends
                     while busy), so we only honour `inputDisabled` (which
-                    excludes the loading flag here). */}
+                    excludes the loading flag here).
+
+                    Icon = bare `List` (manager/toggle role). The streaming
+                    CTA uses `ListPlus` (action role: add). Keeping the two
+                    icons distinct prevents confusion when both render side
+                    by side during a streamed reply with a pending draft. */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -3664,7 +4154,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       disabled={inputDisabled}
                       aria-label="Add to queue"
                     >
-                      <ListPlus className="h-4 w-4" />
+                      <List className="h-4 w-4" />
                       {queue.items.length > 0 && (
                         <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold leading-none text-primary-foreground">
                           {queue.items.length}
@@ -3678,21 +4168,48 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
                   </TooltipContent>
                 </Tooltip>
-                {isRecording ? (
-                  <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                    </span>
-                    Recording
-                  </div>
-                ) : (
-                  <PromptInputSubmit
-                    status={isLoading ? "streaming" : undefined}
-                    disabled={isLoading ? false : inputDisabled}
-                    onStop={stop}
-                  />
-                )}
+                {/* ml-2 here adds breathing room ONLY between the Queue
+                    button and the Send/Stop action — Mic↔Queue stays at
+                    the tight gap-1 of the parent container. */}
+                <div className="ml-2 flex items-center">
+                  {isRecording ? (
+                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                      </span>
+                      Recording
+                    </div>
+                  ) : isLoading && hasDraft ? (
+                    // Streaming + draft non vuoto: il CTA principale diventa
+                    // "enqueue" (stesso effetto del bottone Queue + Enter).
+                    // Stop resta accessibile svuotando il textarea — lo
+                    // switch avviene automaticamente.
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="icon"
+                          className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
+                          onClick={enqueueCurrentDraft}
+                          aria-label="Add to queue"
+                        >
+                          <ListPlus className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        Add to queue (Enter)
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <PromptInputSubmit
+                      status={isLoading ? "streaming" : undefined}
+                      disabled={isLoading ? false : inputDisabled}
+                      onStop={stop}
+                    />
+                  )}
+                </div>
               </div>
             </PromptInputFooter>
           </PromptInput>
@@ -3772,7 +4289,7 @@ function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
 
 export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: boolean } = {}) {
   const { sessions, sessionsLoading, sessionId, streamingSessionIds, messages, messagesLoading } = useChatState();
-  const { loadSession, newSession, deleteSession, setSelectedAgent } = useChatActions();
+  const { loadSession, newSession, deleteSession, renameSession, setStarred, setSelectedAgent } = useChatActions();
 
   // In embedded mode, session sidebar is controlled externally
   const externalSessionsOpen = useChatFirstSessionsOpen();
@@ -3784,6 +4301,19 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
     : compact
       ? setCompactSidebarOpen
       : setChatPageSessionsOpen;
+
+  // Rename dialog state — when non-null, the dialog is open, prepopulated
+  // with `title`. Submitting calls renameSession; closing clears the target.
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const openRename = useCallback((id: string, currentTitle: string) => {
+    setRenameTarget({ id, title: currentTitle });
+  }, []);
+
+  // Toggle handler — fire-and-forget. Errors are swallowed by useChat's
+  // silent catch; the optimistic update keeps the UI snappy.
+  const handleToggleStar = useCallback((id: string, starred: boolean) => {
+    void setStarred(id, starred);
+  }, [setStarred]);
 
   // Filter out empty/orphan sessions
   const visibleSessions = sessions.filter(
@@ -3827,6 +4357,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onDelete={deleteSession}
+          onRename={openRename}
+          onToggleStar={handleToggleStar}
           onBack={() => setSidebarOpen(false)}
           fullWidth
         />
@@ -3846,6 +4378,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
                 onDelete={deleteSession}
+                onRename={openRename}
+                onToggleStar={handleToggleStar}
                 onBack={embedded || !compact ? () => setSidebarOpen(false) : undefined}
                 mobileFullWidth={!embedded && !compact}
                 mobileOnlyBack={!embedded && !compact}
@@ -3867,6 +4401,98 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
           </div>
         </>
       )}
+      {/* Rename dialog — controlled by `renameTarget`. Lives at the page
+          root (outside the sidebar) so it survives sidebar close/open
+          transitions and remains anchored to the viewport. */}
+      <RenameSessionDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={async (id, title) => {
+          await renameSession(id, title);
+        }}
+      />
     </div>
+  );
+}
+
+// ── RenameSessionDialog ──
+//
+// Controlled by a `{id, title} | null` target prop. Pre-populates the input
+// with the existing title, Enter submits, Escape (or Cancel) closes without
+// saving. We early-out when the trimmed value is empty or unchanged so the
+// user never wastes a round-trip on a no-op rename.
+function RenameSessionDialog({
+  target,
+  onClose,
+  onSubmit,
+}: {
+  target: { id: string; title: string } | null;
+  onClose: () => void;
+  onSubmit: (id: string, title: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset the input whenever a new target opens — so reopening on a
+  // different session doesn't leak the previous draft.
+  useEffect(() => {
+    if (target) setValue(target.title);
+  }, [target]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!target || submitting) return;
+    const next = value.trim();
+    if (!next || next === target.title.trim()) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(target.id, next);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [onClose, onSubmit, submitting, target, value]);
+
+  const open = target !== null;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !submitting) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Rename session</DialogTitle>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleSubmit();
+            } else if (e.key === "Escape") {
+              if (!submitting) onClose();
+            }
+          }}
+          placeholder="Session title"
+          disabled={submitting}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSubmit()} disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

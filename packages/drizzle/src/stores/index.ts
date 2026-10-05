@@ -1,6 +1,7 @@
 export { DrizzleTaskStore } from "./task-store.js";
 export type { TaskStoreSchema } from "./task-store.js";
 export { DrizzleRunStore } from "./run-store.js";
+export { DrizzleTaskControlStore } from "./task-control-store.js";
 export { DrizzleSessionStore } from "./session-store.js";
 export { DrizzleNotificationStore } from "./notification-store.js";
 export { DrizzleLogStore } from "./log-store.js";
@@ -15,3 +16,9 @@ export { DrizzleAgentStore } from "./agent-store.js";
 export { DrizzleVaultStore } from "./vault-store.js";
 export { DrizzlePlaybookStore } from "./playbook-store.js";
 export { DrizzleAttachmentStore } from "./attachment-store.js";
+export { DrizzleCodingSessionStore } from "./coding-session-store.js";
+export type { CodingSessionState, CodingSessionStoreLike } from "./coding-session-store.js";
+export { DrizzleExpoTokenStore } from "./expo-token-store.js";
+export type { ExpoTokenRecord } from "./expo-token-store.js";
+export { DrizzlePushSubscriptionStore } from "./push-subscription-store.js";
+export type { PushSubscriptionRecord, PushSubscriptionKeys, PushVapidConfig } from "./push-subscription-store.js";

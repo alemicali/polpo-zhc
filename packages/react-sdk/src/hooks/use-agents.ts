@@ -1,12 +1,34 @@
-import { useSyncExternalStore, useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useMutation } from "./use-mutation.js";
-import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest } from "@polpo-ai/sdk";
+import { readCached, writeCached } from "./use-swr-cache.js";
+import type { AgentConfig, Team, AddAgentRequest, UpdateAgentRequest, AddTeamRequest, PolpoClient, PolpoStore } from "@polpo-ai/sdk";
+
+const inflightAgentFetches = new WeakMap<PolpoStore, Promise<void>>();
+
+function fetchAgentData(client: PolpoClient, store: PolpoStore): Promise<void> {
+  const inflight = inflightAgentFetches.get(store);
+  if (inflight) return inflight;
+
+  const request = Promise.all([client.getAgents(), client.getTeams()]).then(([agents, teams]) => {
+    store.setAgents(agents);
+    store.setTeams(teams);
+    writeCached("agents", agents);
+    writeCached("teams", teams);
+  });
+  inflightAgentFetches.set(store, request);
+  const clear = () => {
+    if (inflightAgentFetches.get(store) === request) inflightAgentFetches.delete(store);
+  };
+  void request.then(clear, clear);
+  return request;
+}
 
 export interface UseAgentsReturn {
   agents: AgentConfig[];
   teams: Team[];
   isLoading: boolean;
+  isRefreshing: boolean;
   error: Error | null;
   addAgent: (req: AddAgentRequest, teamName?: string) => Promise<void>;
   isAddingAgent: boolean;
@@ -27,6 +49,26 @@ export interface UseAgentsReturn {
 export function useAgents(): UseAgentsReturn {
   const { client, store } = usePolpoContext();
 
+  // SWR hydrate — agents/teams are touched by almost every page (avatars,
+  // assignTo dropdowns), so a stale-paint here removes a 200-400ms gap
+  // before the page can render its team-related chrome. Done BEFORE the
+  // useSyncExternalStore calls so the first render already sees cached data.
+  const hydratedRef = useRef(false);
+  if (!hydratedRef.current) {
+    const snap = store.getSnapshot();
+    if (snap.agents.length === 0 && snap.teams.length === 0) {
+      const cachedAgents = readCached<AgentConfig[]>("agents");
+      const cachedTeams = readCached<Team[]>("teams");
+      if (cachedAgents?.data && cachedAgents.data.length > 0) {
+        store.setAgents(cachedAgents.data);
+      }
+      if (cachedTeams?.data && cachedTeams.data.length > 0) {
+        store.setTeams(cachedTeams.data);
+      }
+    }
+    hydratedRef.current = true;
+  }
+
   const agents = useSyncExternalStore(
     store.subscribe,
     () => store.getSnapshot().agents,
@@ -39,22 +81,28 @@ export function useAgents(): UseAgentsReturn {
     () => store.getServerSnapshot().teams,
   );
 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(agents.length === 0 && teams.length === 0);
+  const [isRefreshing, setIsRefreshing] = useState(agents.length > 0 || teams.length > 0);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [a, t] = await Promise.all([client.getAgents(), client.getTeams()]);
-      store.setAgents(a);
-      store.setTeams(t);
+      await fetchAgentData(client, store);
     } catch (err) {
       setError(err as Error);
     }
   }, [client, store]);
 
   useEffect(() => {
-    setIsLoading(true);
-    fetchAll().finally(() => setIsLoading(false));
+    const hasStale = agents.length > 0 || teams.length > 0;
+    if (hasStale) setIsRefreshing(true);
+    else setIsLoading(true);
+    fetchAll().finally(() => {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    });
+    // Initial-mount staleness check only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchAll]);
 
   const { mutate: addAgent, isPending: isAddingAgent } = useMutation(
@@ -123,6 +171,7 @@ export function useAgents(): UseAgentsReturn {
     agents,
     teams,
     isLoading,
+    isRefreshing,
     error,
     addAgent,
     isAddingAgent,

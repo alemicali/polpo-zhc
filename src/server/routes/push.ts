@@ -1,3 +1,8 @@
+// Web Push subscription routes. The subscription store is always file-based
+// (`.polpo/push.json`) regardless of the `storage` setting — same policy as
+// the vault. The Drizzle equivalent in @polpo-ai/drizzle is unused at runtime
+// (kept only so the schema stays in sync with what other stores look like).
+// Single source of truth = the file; no migration runs for these rows.
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "zod";
 import { FilePushSubscriptionStore } from "../../stores/file-push-subscription-store.js";

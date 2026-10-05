@@ -18,10 +18,18 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
-import { agentMemoryScope } from "@polpo-ai/core";
+import {
+  agentMemoryScope,
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
+import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
 
-const MAX_TURNS = 20;
+const DEFAULT_MAX_TURNS = 200;
 
 type MessageSegment =
   | { type: "text"; content: string }
@@ -137,10 +145,11 @@ async function persistAssistantMessage(
 /** OpenAI-compatible content part (text or image_url). */
 const contentPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("file"), file: z.object({ filename: z.string().min(1).max(255), file_data: z.string().max(22 * 1024 * 1024) }) }),
   z.object({
     type: z.literal("image_url"),
     image_url: z.object({
-      url: z.string().openapi({ description: "Data URL (data:image/…;base64,…) or HTTPS URL" }),
+      url: z.string().max(22 * 1024 * 1024).openapi({ description: "Base64 data URL for a persistent image attachment" }),
       detail: z.enum(["auto", "low", "high"]).optional(),
     }),
   }),
@@ -267,6 +276,7 @@ function extractText(content: z.infer<typeof messageSchema>["content"]): string 
 /** Convert OpenAI-format content to pi-ai UserMessage content. */
 function toPiContent(content: z.infer<typeof messageSchema>["content"]): string | ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
   if (typeof content === "string") return content;
+  content = content.map(p => p.type === "file" ? { type: "text" as const, text: `[file: ${p.file.filename}]` } : p);
 
   // Check if there are any image parts
   const hasImages = content.some((p) => p.type === "image_url");
@@ -277,8 +287,8 @@ function toPiContent(content: z.infer<typeof messageSchema>["content"]): string 
 
   // Mixed content → convert to pi-ai TextContent | ImageContent array
   return content.map((p) => {
-    if (p.type === "text") {
-      return { type: "text" as const, text: p.text };
+    if (p.type !== "image_url") {
+      return { type: "text" as const, text: p.type === "text" ? p.text : p.file.filename };
     }
     // image_url → ImageContent
     const url = p.image_url.url;
@@ -292,13 +302,33 @@ function toPiContent(content: z.infer<typeof messageSchema>["content"]): string 
   });
 }
 
+/**
+ * Marker prefix used by the UI when it acknowledges a client-side tool
+ * (open_file, navigate_to, open_tab). The client posts these as `role: "system"`
+ * because they're system-generated, not human-typed; but the LLM must see them
+ * in the conversation as a "tool result" turn — otherwise it observes its own
+ * un-resulted tool_call and re-emits the same call, looping forever.
+ *
+ * See ui/src/hooks/use-polpo.ts → consumeOpenFile/NavigateTo/OpenTab.
+ */
+const CLIENT_TOOL_ACK_PREFIX = "Client-side tool ";
+
 function convertMessages(messages: z.infer<typeof messageSchema>[]): { piMessages: any[]; extraSystemParts: string[] } {
   const piMessages: any[] = [];
   const extraSystemParts: string[] = [];
 
   for (const msg of messages) {
     if (msg.role === "system") {
-      extraSystemParts.push(extractText(msg.content));
+      const text = extractText(msg.content);
+      if (text.startsWith(CLIENT_TOOL_ACK_PREFIX)) {
+        // Tool-result acknowledgement from the UI — must live IN the
+        // conversation (as a user turn) so the model sees "the tool ran",
+        // not in extraSystemParts where it would only flavor the system
+        // prompt and the model would see an un-resulted tool_call.
+        piMessages.push({ role: "user", content: text, timestamp: Date.now() });
+      } else {
+        extraSystemParts.push(text);
+      }
     } else if (msg.role === "user") {
       piMessages.push({ role: "user", content: toPiContent(msg.content), timestamp: Date.now() });
     } else if (msg.role === "assistant") {
@@ -398,6 +428,10 @@ export interface CompletionRouteDeps {
   getConfig: () => any;
   getMemoryStore: () => any;
   getSessionStore: () => any;
+  contextCheckpoints?: ContextCheckpointStore;
+  /** Host persists binary parts and links them to the authoritative message id. */
+  saveUserMessage?: (sessionId: string, content: any) => Promise<any>;
+  resolveAttachmentReferences?: (text: string) => string;
   getStore: () => any;
   emit: (event: string, data: any) => void;
   /** Resolve agent model + streaming options. */
@@ -407,20 +441,51 @@ export interface CompletionRouteDeps {
   /** Create tools + executor for the agent. Return empty arrays for chat-only. */
   resolveAgentTools: (agentConfig: any) => Promise<{
     tools: any[];
-    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive?: (name: string) => boolean;
   }>;
   /** LLM streaming function (streamSimple from pi-ai). */
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
+  /** Persist provider-reported token usage for dashboard aggregation. */
+  recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
   /** Orchestrator mode support (optional — returns 501 if not provided). */
   resolveOrchestratorContext?: () => Promise<{
     systemPrompt: string;
     model: any;
     streamOpts: any;
     tools: any[];
-    executor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive: (name: string) => boolean;
   }>;
+}
+
+export interface TokenUsageRecord {
+  timestamp: string;
+  source: "orchestrator_chat" | "agent_chat" | "background_wait";
+  provider?: string;
+  model?: string;
+  sessionId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface ToolExecutionProgress {
+  message: string;
+  taskId?: string;
+  status?: string;
+  elapsedMs?: number;
+}
+
+export interface ToolExecutionContext {
+  signal?: AbortSignal;
+  onProgress?: (progress: ToolExecutionProgress) => void | Promise<void>;
+  turnId?: string;
+  toolCallId?: string;
+  sessionId?: string;
 }
 
 export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: string[]): OpenAPIHono {
@@ -442,12 +507,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     const body = c.req.valid("json");
     const agentMode = !!body.agent;
 
+    // Per-request tool-loop cap. Defaults to DEFAULT_MAX_TURNS; agent-direct
+    // mode can override via agentConfig.maxTurns (positive integer).
+    let maxTurns = DEFAULT_MAX_TURNS;
+
     // ── Resolve effective context (orchestrator vs agent-direct) ──
     let fullSystemPrompt: string;
     let m: any;
     let streamOpts: any;
     let effectiveTools: any[];
-    let effectiveToolExecutor: (name: string, args: Record<string, unknown>) => Promise<string>;
+    let effectiveToolExecutor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     let isInteractiveFn: ((name: string) => boolean) | undefined;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
@@ -460,6 +529,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }
 
+      // Per-agent maxTurns override
+      if (typeof agentConfig.maxTurns === "number" && agentConfig.maxTurns > 0) {
+        maxTurns = Math.floor(agentConfig.maxTurns);
+      }
+
       // Build system prompt via dep
       const agentSystemPrompt = await deps.buildAgentPrompt(agentConfig);
       const conversationalPreamble = [
@@ -467,13 +541,18 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         "Unlike task execution, you should engage in dialogue: ask clarifying questions,",
         "explain your reasoning, and wait for user input when needed.",
         "You still have access to all your coding tools to help the user.",
+        "When you genuinely need a clarification or preference, use the structured ask_user tool",
+        "so the user can answer through the chat controls. Do not use it for questions you can resolve yourself.",
         "You may also use the client-side UI tools open_file, navigate_to, and open_tab when",
         "the user asks to view a file, move to a Polpo page, or open an external URL.",
         "After one of those client-side tools completes, the UI sends a system acknowledgement;",
         "treat it as the tool result and do not repeat the same UI action for the same request.",
       ].join("\n");
 
-      const basePrompt = `${conversationalPreamble}\n\n${agentSystemPrompt}`;
+      // Keep the chat-mode rules last: buildAgentPrompt is shared with
+      // autonomous task execution and intentionally tells runners not to ask
+      // questions. In a direct chat, this later block overrides that rule.
+      const basePrompt = `${agentSystemPrompt}\n\n${conversationalPreamble}`;
       fullSystemPrompt = extraSystemParts.length > 0
         ? `${basePrompt}\n\n## Additional context from caller\n\n${extraSystemParts.join("\n\n")}`
         : basePrompt;
@@ -542,6 +621,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         if (forceNewSession) {
           // Client explicitly requested a new session — skip recency heuristic
           sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+          deps.emit("session:created", { sessionId, title: sessionTitle });
           isFirstTurn = true;
         } else {
           // Reuse latest session if recent (< 30 min), scoped by agent
@@ -551,6 +631,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             sessionId = latest.id;
           } else {
             sessionId = await sessionStore.create(sessionTitle, agentScope ?? undefined);
+            deps.emit("session:created", { sessionId, title: sessionTitle });
             isFirstTurn = true;
           }
         }
@@ -564,9 +645,39 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         } catch { /* non-fatal */ }
       }
       // Persist user message (only the last one — earlier messages are already persisted)
-      const lastUserMsg = [...body.messages].reverse().find(m => m.role === "user");
+      const skipUserPersistence = c.req.header("x-polpo-internal-continuation") === "background-wait";
+      const lastUserMsg = skipUserPersistence
+        ? undefined
+        : [...body.messages].reverse().find(m => m.role === "user");
       if (lastUserMsg && sessionId) {
-        await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
+        let userMessage;
+        try {
+          userMessage = deps.saveUserMessage
+            ? await deps.saveUserMessage(sessionId, lastUserMsg.content)
+            : await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
+        } catch (error) {
+          return c.json({ error: { message: error instanceof Error ? error.message : "Attachment persistence failed", type: "invalid_request_error", code: "attachment_save_failed" } }, 400 as any);
+        }
+        if (userMessage.modelContent) {
+          let index = piMessages.length - 1;
+          while (index >= 0 && piMessages[index].role !== "user") index--;
+          if (index >= 0) piMessages[index].content = toPiContent(userMessage.modelContent);
+        }
+        c.header("x-user-message-id", userMessage.id);
+        deps.emit("message:added", { sessionId, messageId: userMessage.id, role: "user" });
+      }
+    }
+
+    // Resolve durable references for both the new upload and previous turns.
+    // File tools may use a different cwd from the API's project-relative paths.
+    if (deps.resolveAttachmentReferences) {
+      for (const message of piMessages) {
+        if (typeof message.content === "string") {
+          message.content = deps.resolveAttachmentReferences(message.content);
+        } else if (Array.isArray(message.content)) {
+          message.content = message.content.map((part: any) => part.type === "text"
+            ? { ...part, text: deps.resolveAttachmentReferences!(part.text) } : part);
+        }
       }
     }
 
@@ -583,6 +694,104 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     if (sessionId) {
       c.header("x-session-id", sessionId);
     }
+
+    const contextBudget = contextBudgetForModel(m ?? {});
+    const usageSource: TokenUsageRecord["source"] = c.req.header("x-polpo-internal-continuation") === "background-wait"
+      ? "background_wait"
+      : agentMode ? "agent_chat" : "orchestrator_chat";
+
+    const session = sessionId && sessionStore ? await sessionStore.getSession(sessionId) : undefined;
+    const projection = await contextCheckpointProjection(
+      session ? deps.contextCheckpoints : undefined, sessionId,
+      JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]), piMessages,
+    );
+
+    const prepareContext = async (current: any[], force = false) => {
+      const beforeTokens = estimateContextTokens({
+        systemPrompt: fullSystemPrompt,
+        messages: current,
+        tools: effectiveTools,
+      });
+      if (!force && beforeTokens <= contextBudget.softLimit) {
+        return { messages: current, info: null };
+      }
+
+      const cut = selectCompactionCut(
+        current,
+        force ? Math.floor(contextBudget.keepRecentTokens / 2) : contextBudget.keepRecentTokens,
+      );
+      const prefix = cut > 0 ? current.slice(0, cut) : current;
+      let checkpointPrefix = prefix;
+      const summary = summarizeContextMessages(prefix);
+      let compacted = cut > 0
+        ? compactContextMessages(current, cut, summary)
+        : [{
+            role: "user",
+            content: `[Context checkpoint: earlier conversation compacted]\n\n${summary}\n\n[End context checkpoint]`,
+            timestamp: Date.now(),
+          }];
+      let afterTokens = estimateContextTokens({
+        systemPrompt: fullSystemPrompt,
+        messages: compacted,
+        tools: effectiveTools,
+      });
+
+      // A single oversized recent tool result can still exceed the budget.
+      // Collapse the projection further while leaving the persisted transcript untouched.
+      if (afterTokens > contextBudget.softLimit) {
+        checkpointPrefix = current;
+        compacted = [{
+          role: "user",
+          content: `[Context checkpoint: earlier conversation compacted]\n\n${summarizeContextMessages(current)}\n\n[End context checkpoint]`,
+          timestamp: Date.now(),
+        }];
+        afterTokens = estimateContextTokens({
+          systemPrompt: fullSystemPrompt,
+          messages: compacted,
+          tools: effectiveTools,
+        });
+      }
+
+      // Keep only the stable caller-history prefix in durable storage. A
+      // storage failure must not prevent an otherwise valid completion.
+      await projection.remember(checkpointPrefix, compacted[0])
+        .catch(error => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
+      return {
+        messages: compacted,
+        info: {
+          beforeTokens,
+          afterTokens,
+          hardLimit: contextBudget.hardLimit,
+          removedMessages: Math.max(0, current.length - compacted.length),
+          reason: force ? "overflow_recovery" : "budget",
+        },
+      };
+    };
+
+    const recordResponseUsage = async (response: any): Promise<void> => {
+      const usage = response?.usage;
+      if (!usage || !deps.recordTokenUsage) return;
+      try {
+        await deps.recordTokenUsage({
+          timestamp: new Date().toISOString(),
+          source: usageSource,
+          provider: typeof m?.provider === "string" ? m.provider : undefined,
+          model: typeof m?.id === "string" ? m.id : typeof m?.name === "string" ? m.name : undefined,
+          sessionId: sessionId ?? undefined,
+          inputTokens: Number(usage.input) || 0,
+          outputTokens: Number(usage.output) || 0,
+          cacheReadTokens: Number(usage.cacheRead) || 0,
+          cacheWriteTokens: Number(usage.cacheWrite) || 0,
+          totalTokens: Number(usage.totalTokens) || 0,
+          cost: Number(usage.cost?.total) || 0,
+        });
+      } catch {
+        // Metrics persistence must never fail the user-facing completion.
+      }
+    };
+
+    const isContextOverflowError = (message: string): boolean =>
+      /context.{0,20}(overflow|length|window)|prompt is too long|too many tokens|maximum context/i.test(message);
 
     if (body.stream) {
       // ── Streaming mode ──
@@ -625,21 +834,31 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           assistantMsgId = placeholder.id;
         }
 
-        const messages: any[] = [...piMessages];
+        let messages: any[] = [...projection.messages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
         const segmentsAccum: MessageSegment[] = [];
+        let overflowRetries = 0;
 
         try {
-          for (let turn = 0; turn < MAX_TURNS; turn++) {
+          for (let turn = 0; turn < maxTurns; turn++) {
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
 
-            const piStream = deps.streamLLM(m, {
+            const prepared = await prepareContext(messages);
+            messages = prepared.messages;
+            if (prepared.info) {
+              await emit(sseChunk(completionId, {}, null, { context_compaction: prepared.info }));
+            }
+
+            const streamResult = deps.streamLLM(m, {
               systemPrompt: fullSystemPrompt,
               messages,
               tools: effectiveTools,
             }, { ...streamOpts, signal: abortController.signal });
+            const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
+              ? streamResult
+              : await streamResult;
 
             let turnText = "";
             let streamError: string | undefined;
@@ -699,12 +918,23 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             }
 
             if (streamError) {
+              if (overflowRetries === 0 && isContextOverflowError(streamError)) {
+                overflowRetries += 1;
+                const recovered = await prepareContext(messages, true);
+                messages = recovered.messages;
+                if (recovered.info) {
+                  await emit(sseChunk(completionId, {}, null, { context_compaction: recovered.info }));
+                }
+                continue;
+              }
               finalText += `\n\nError: ${streamError}`;
+              appendTextSegment(segmentsAccum, `\n\nError: ${streamError}`);
               await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }));
-              break;
+              throw new Error(streamError);
             }
 
             const response = await piStream.result();
+            await recordResponseUsage(response);
             messages.push(response);
             finalText += turnText;
 
@@ -778,6 +1008,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     name: args.name as string | undefined,
                     path: args.path as string | undefined,
                     highlight: args.highlight as string | undefined,
+                    url: args.url as string | undefined,
                   },
                 }));
               } else if (interactiveCall.name === "open_tab") {
@@ -892,6 +1123,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     const ok = await sessionStore.renameSession(sessionId, title);
                     if (ok) {
                       resultText = `Session title set to: "${title}".`;
+                      deps.emit("session:updated", { sessionId, title });
                       await emit(sseChunk(completionId, {}, null, {
                         session_title: { sessionId, title },
                       }));
@@ -927,7 +1159,24 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 continue;
               }
 
-              const result = await effectiveToolExecutor(call.name, call.arguments);
+              const result = await effectiveToolExecutor(call.name, call.arguments, {
+                signal: abortController.signal,
+                turnId,
+                toolCallId: call.id,
+                sessionId: sessionId ?? undefined,
+                onProgress: async (progress) => {
+                  if (abortController.signal.aborted) return;
+                  await emit(sseChunk(completionId, {}, null, {
+                    tool_call: {
+                      id: call.id,
+                      name: call.name,
+                      arguments: call.arguments,
+                      progress,
+                      state: "calling",
+                    },
+                  }));
+                },
+              });
               const isError = result.startsWith("Error:");
               emitFileChanged(call.name, call.arguments, result, deps.emit);
 
@@ -985,8 +1234,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // Suppress AbortError — expected when explicit user abort fires
           if (!(err instanceof DOMException && err.name === "AbortError") && !abortController.signal.aborted) {
             // Surface to subscribers so resume clients see the failure
-            streamRegistry.error(turnId, (err as Error)?.message ?? "stream failed");
-            throw err;
+            const message = (err as Error)?.message ?? "stream failed";
+            await emit(JSON.stringify({ error: { message, code: "model_stream_failed" } }));
+            streamRegistry.error(turnId, message);
           }
         } finally {
           // Mark the registry entry as done so resume subscribers terminate
@@ -999,6 +1249,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
           if (sessionStore && sessionId && assistantMsgId) {
             await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
+            deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
           }
         }
       }) as any;
@@ -1011,18 +1262,24 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         assistantMsgId = placeholder.id;
       }
 
-      const messages: any[] = [...piMessages];
+      let messages: any[] = [...projection.messages];
       let finalText = "";
       const toolCallsAccum: any[] = [];
       const segmentsAccum: MessageSegment[] = [];
+      let overflowRetries = 0;
 
       try {
-        for (let turn = 0; turn < MAX_TURNS; turn++) {
-          const piStream = deps.streamLLM(m, {
+        for (let turn = 0; turn < maxTurns; turn++) {
+          const prepared = await prepareContext(messages);
+          messages = prepared.messages;
+          const streamResult = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
             messages,
             tools: effectiveTools,
           }, streamOpts);
+          const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
+            ? streamResult
+            : await streamResult;
 
           let turnText = "";
           let streamError: string | undefined;
@@ -1038,10 +1295,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           }
 
           if (streamError) {
+            if (overflowRetries === 0 && isContextOverflowError(streamError)) {
+              overflowRetries += 1;
+              messages = (await prepareContext(messages, true)).messages;
+              continue;
+            }
             return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
           }
 
           const response = await piStream.result();
+          await recordResponseUsage(response);
           messages.push(response);
           finalText += turnText;
 
@@ -1189,6 +1452,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                     name: args.name as string | undefined,
                     path: args.path as string | undefined,
                     highlight: args.highlight as string | undefined,
+                    url: args.url as string | undefined,
                   },
                 }],
               });
@@ -1318,7 +1582,12 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for (const call of toolCalls) {
             if (skipIds.has(call.id)) continue;
             ensureToolSegment(segmentsAccum, call.id);
-            const result = await effectiveToolExecutor(call.name, call.arguments);
+            const result = await effectiveToolExecutor(call.name, call.arguments, {
+              signal: c.req.raw.signal,
+              turnId: completionId,
+              toolCallId: call.id,
+              sessionId: sessionId ?? undefined,
+            });
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);
 
@@ -1351,6 +1620,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
         if (sessionStore && sessionId && assistantMsgId) {
           await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
+          deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
         }
       }
     }

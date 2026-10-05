@@ -31,8 +31,16 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChevronDown, ChevronRight, Loader2, X, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, X, Plus, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  HOOK_EVENT_CATALOG,
+  HOOK_EVENT_GLOBS,
+  getHookEventDef,
+  isCanonicalHookEvent,
+  type HookEventDef,
+} from "@polpo-ai/core/hook-events";
+import { summarizeRule } from "@/lib/rule-summary";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -66,30 +74,84 @@ interface RuleFormDialogProps {
 
 // ── Constants ────────────────────────────────────────────────────────
 
-const KNOWN_HOOK_EVENTS: string[] = [
-  "task:create",
-  "task:spawn",
-  "task:transition",
-  "task:complete",
-  "task:fail",
-  "task:retry",
-  "mission:execute",
-  "mission:complete",
-  "assessment:run",
-  "assessment:complete",
-  "quality:gate",
-  "quality:sla",
-  "schedule:trigger",
-  "orchestrator:tick",
-  "orchestrator:shutdown",
-  // Common glob shortcuts
-  "task:*",
-  "mission:*",
-  "assessment:*",
-  "quality:*",
-];
+/**
+ * High-signal events surfaced first when the search input is empty.
+ * These are the ones humans actually want to subscribe to 90% of the time —
+ * not the noisy ones (tick, activity) and not the redundant ones (transition
+ * + created + updated all overlap heavily).
+ */
+const DEFAULT_SUGGESTED_EVENT_NAMES = new Set<string>([
+  "task:maxRetries",
+  "task:timeout",
+  "task:question",
+  "mission:completed",
+  "schedule:triggered",
+  "approval:requested",
+  "sla:violated",
+  "quality:gate:failed",
+  "escalation:human",
+  "orchestrator:deadlock",
+]);
 
 const OUTCOME_TYPES: string[] = ["file", "text", "url", "json", "media"];
+
+/** Rich suggestion row — either a catalog event or a glob shortcut. */
+interface EventSuggestion {
+  name: string;
+  label: string;
+  description: string;
+  isGlob?: boolean;
+}
+
+/** Build the suggestion pool once (catalog + globs). Stable identity. */
+const ALL_SUGGESTIONS: EventSuggestion[] = [
+  ...HOOK_EVENT_CATALOG.map((e: HookEventDef): EventSuggestion => ({
+    name: e.name,
+    label: e.label,
+    description: e.description,
+  })),
+  ...HOOK_EVENT_GLOBS.map((g): EventSuggestion => ({
+    name: g.pattern,
+    label: g.label,
+    description: g.description,
+    isGlob: true,
+  })),
+];
+
+/**
+ * Build the union of allowed top-level payload keys across `events`.
+ * Used to warn about typos in {{placeholder}} tokens — if the user types
+ * {{task}} but none of the selected events emit a `task` key, we flag it.
+ */
+function availablePlaceholdersForEvents(events: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const ev of events) {
+    const def = getHookEventDef(ev);
+    if (def) {
+      for (const p of def.placeholders) set.add(p);
+    }
+  }
+  // Always-available context keys injected by the router.
+  set.add("event");
+  set.add("severity");
+  set.add("data");
+  return set;
+}
+
+/**
+ * Extract top-level {{placeholder}} tokens from a template string.
+ * "{{task.title}} failed: {{error}}" → ["task", "error"].
+ * Dotted paths only return their leading segment (the top-level key).
+ */
+function extractTemplatePlaceholders(template: string): string[] {
+  const out = new Set<string>();
+  const re = /\{\{\s*([a-zA-Z_$][\w$]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(template)) !== null) {
+    out.add(m[1]);
+  }
+  return [...out];
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -157,13 +219,45 @@ export function RuleFormDialog({
     setSaveError(null);
   }, [open, initial]);
 
-  const eventSuggestions = useMemo(() => {
+  const eventSuggestions = useMemo<EventSuggestion[]>(() => {
     const q = eventInput.trim().toLowerCase();
-    if (!q) return KNOWN_HOOK_EVENTS.filter((e) => !draft.events.includes(e)).slice(0, 8);
-    return KNOWN_HOOK_EVENTS.filter(
-      (e) => e.toLowerCase().includes(q) && !draft.events.includes(e),
-    ).slice(0, 8);
+    const taken = new Set(draft.events);
+    if (!q) {
+      // Default: show the curated high-signal subset + the glob shortcuts.
+      const high = ALL_SUGGESTIONS.filter(
+        s => !taken.has(s.name) && (s.isGlob || DEFAULT_SUGGESTED_EVENT_NAMES.has(s.name)),
+      );
+      return high.slice(0, 12);
+    }
+    return ALL_SUGGESTIONS.filter(
+      s =>
+        !taken.has(s.name)
+        && (
+          s.name.toLowerCase().includes(q)
+          || s.label.toLowerCase().includes(q)
+          || s.description.toLowerCase().includes(q)
+        ),
+    ).slice(0, 14);
   }, [eventInput, draft.events]);
+
+  // ── Live warnings (non-blocking) ──
+  const warnings = useMemo(() => {
+    const unknownEvents = draft.events.filter(e => !isCanonicalHookEvent(e));
+    const allowed = availablePlaceholdersForEvents(draft.events);
+    const unknownPlaceholders: string[] = [];
+    if (draft.template) {
+      for (const p of extractTemplatePlaceholders(draft.template)) {
+        if (!allowed.has(p)) unknownPlaceholders.push(p);
+      }
+    }
+    return { events: unknownEvents, placeholders: unknownPlaceholders };
+  }, [draft.events, draft.template]);
+
+  // Catalog-driven placeholder chips for the currently selected events.
+  const availablePlaceholderList = useMemo(
+    () => [...availablePlaceholdersForEvents(draft.events)].sort(),
+    [draft.events],
+  );
 
   const addEvent = (value: string) => {
     const v = value.trim();
@@ -311,6 +405,14 @@ export function RuleFormDialog({
 
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-6 pb-2 space-y-5">
+            {/* Live summary — always visible, top of the form */}
+            <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/80 mb-1">
+                Summary
+              </p>
+              <p className="text-xs leading-relaxed">{summarizeRule(draft as unknown as Parameters<typeof summarizeRule>[0])}</p>
+            </div>
+
             {/* Section 1 — Identity */}
             <Section title="Identity">
               <Field label="ID" error={errors.id} required>
@@ -350,25 +452,60 @@ export function RuleFormDialog({
             </Section>
 
             {/* Section 2 — Events */}
-            <Section title="Events" description="Lifecycle hooks or glob patterns to match.">
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {draft.events.map((e) => (
-                  <Badge key={e} variant="secondary" className="text-[10px] font-mono gap-1">
-                    {e}
-                    <button
-                      type="button"
-                      onClick={() => removeEvent(e)}
-                      className="hover:text-destructive cursor-pointer"
-                      aria-label={`Remove ${e}`}
+            <Section title="When (events)" description="Lifecycle hooks or glob patterns to match.">
+              {/* Selected events — card-style rows with label, desc, glob badge */}
+              <div className="space-y-1.5 mb-2">
+                {draft.events.map((e) => {
+                  const def = getHookEventDef(e);
+                  const glob = HOOK_EVENT_GLOBS.find(g => g.pattern === e);
+                  const canonical = isCanonicalHookEvent(e);
+                  const label = def?.label ?? glob?.label ?? "Custom pattern";
+                  const desc = def?.description ?? glob?.description ?? "User-typed event pattern.";
+                  return (
+                    <div
+                      key={e}
+                      className={cn(
+                        "flex items-start gap-2 rounded-md border px-2.5 py-1.5",
+                        canonical
+                          ? "border-border/40 bg-muted/15"
+                          : "border-amber-500/40 bg-amber-500/5",
+                      )}
                     >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </Badge>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <code className="text-[11px] font-mono font-medium">{e}</code>
+                          <span className="text-[10px] text-muted-foreground">·</span>
+                          <span className="text-[11px] font-medium">{label}</span>
+                          {glob && (
+                            <Badge variant="outline" className="text-[9px] h-4 px-1">glob</Badge>
+                          )}
+                          {!canonical && (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-[10px] text-amber-600"
+                              title="This event name is not in the canonical catalog. Save still works, but it may never fire."
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5" /> unknown
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">{desc}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeEvent(e)}
+                        className="text-muted-foreground hover:text-destructive cursor-pointer shrink-0"
+                        aria-label={`Remove ${e}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
                 {draft.events.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground italic">No events yet</span>
+                  <span className="text-[11px] text-muted-foreground italic">No events yet — pick from suggestions below.</span>
                 )}
               </div>
+
               <div className="flex gap-2">
                 <Input
                   value={eventInput}
@@ -379,7 +516,7 @@ export function RuleFormDialog({
                       addEvent(eventInput);
                     }
                   }}
-                  placeholder="task:fail or mission:* (Enter to add)"
+                  placeholder="Search by name, label, or description... (Enter to add custom)"
                   className="font-mono text-xs"
                 />
                 <Button
@@ -392,26 +529,50 @@ export function RuleFormDialog({
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
               </div>
+
               {eventSuggestions.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
+                <div className="border border-border/30 rounded-md max-h-56 overflow-y-auto mt-2 divide-y divide-border/20">
                   {eventSuggestions.map((s) => (
                     <button
-                      key={s}
+                      key={s.name}
                       type="button"
-                      onClick={() => addEvent(s)}
-                      className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border/40 hover:bg-accent cursor-pointer"
+                      onClick={() => addEvent(s.name)}
+                      className="w-full flex items-start gap-2 text-left px-2.5 py-1.5 hover:bg-accent cursor-pointer"
                     >
-                      {s}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <code className="text-[11px] font-mono font-medium">{s.name}</code>
+                          <span className="text-[10px] text-muted-foreground">·</span>
+                          <span className="text-[11px] font-medium">{s.label}</span>
+                          {s.isGlob && (
+                            <Badge variant="outline" className="text-[9px] h-4 px-1">glob</Badge>
+                          )}
+                        </div>
+                        <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                      </div>
                     </button>
                   ))}
                 </div>
               )}
+
+              {/* Non-blocking warnings */}
+              {warnings.events.length > 0 && (
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
+                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-amber-700 leading-snug">
+                    {warnings.events.length === 1 ? "1 event is" : `${warnings.events.length} events are`}{" "}
+                    not in the canonical catalog: {warnings.events.map(e => <code key={e} className="font-mono mr-1">{e}</code>)}.
+                    The rule will save, but unknown events may never fire.
+                  </p>
+                </div>
+              )}
+
               {errors.events && <p className="text-[11px] text-destructive mt-1">{errors.events}</p>}
             </Section>
 
             {/* Section 3 — Channels */}
             <Section
-              title="Channels"
+              title="Where (channels)"
               description="Which configured channels receive this notification."
             >
               {channels.length === 0 ? (
@@ -620,6 +781,33 @@ export function RuleFormDialog({
                   className="font-mono text-xs min-h-16"
                 />
               </Field>
+              {availablePlaceholderList.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Placeholders available for selected events
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {availablePlaceholderList.map(p => (
+                      <code
+                        key={p}
+                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted/30 border border-border/30"
+                      >
+                        {`{{${p}}}`}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {warnings.placeholders.length > 0 && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
+                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-amber-700 leading-snug">
+                    Template references {warnings.placeholders.length === 1 ? "a placeholder" : "placeholders"} not emitted by the selected events:{" "}
+                    {warnings.placeholders.map(p => <code key={p} className="font-mono mr-1">{`{{${p}}}`}</code>)}.
+                    They will render as empty strings.
+                  </p>
+                </div>
+              )}
             </CollapsibleSection>
 
             {saveError && (

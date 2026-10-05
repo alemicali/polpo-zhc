@@ -15,21 +15,22 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import {
   createContext,
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+
+const RichStreamdown = lazy(() =>
+  import("./rich-streamdown").then((module) => ({ default: module.RichStreamdown })),
+);
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -320,20 +321,25 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
-
-const streamdownPlugins = { cjk, code, math, mermaid };
+export type MessageResponseProps = ComponentProps<typeof import("streamdown").Streamdown>;
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
+    <Suspense
+      fallback={(
+        <div className={cn("size-full whitespace-pre-wrap", className)}>
+          {typeof props.children === "string" ? props.children : null}
+        </div>
       )}
-      plugins={streamdownPlugins}
-      {...props}
-    />
+    >
+      <RichStreamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        {...props}
+      />
+    </Suspense>
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children && prevProps.mode === nextProps.mode

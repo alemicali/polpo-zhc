@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
 
-export type Palette = "tide" | "brutal" | "editorial" | "cyber" | "mono";
+export type Palette = "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
 
 export interface PaletteMeta {
   id: Palette;
@@ -36,6 +36,27 @@ export const PALETTES: PaletteMeta[] = [
     swatchDark:  ["oklch(0.1 0.025 260)",   "oklch(0.7 0.15 200)",  "oklch(0.68 0.18 330)"],
   },
   {
+    id: "lovable",
+    name: "Lovable",
+    blurb: "Warm workspace · royal blue · generous surfaces",
+    swatchLight: ["#f7f5f2", "#1b1b1b", "#315efb"],
+    swatchDark: ["#171615", "#f5f2ed", "#7590ff"],
+  },
+  {
+    id: "chatgpt",
+    name: "ChatGPT",
+    blurb: "Neutral monochrome · quiet chrome · high contrast",
+    swatchLight: ["#ffffff", "#0d0d0d", "#e7e7e7"],
+    swatchDark: ["#212121", "#ececec", "#2f2f2f"],
+  },
+  {
+    id: "claude",
+    name: "Claude",
+    blurb: "Warm paper · terracotta · editorial type",
+    swatchLight: ["#f7f6f2", "#2f2e2b", "#c96442"],
+    swatchDark: ["#1f1e1b", "#eeeae3", "#e08b6c"],
+  },
+  {
     id: "brutal",
     name: "Brutalist",
     blurb: "Black & white · zero radius · hard shadow",
@@ -48,6 +69,13 @@ export const PALETTES: PaletteMeta[] = [
     blurb: "Warm cream · large radius · ink red",
     swatchLight: ["oklch(0.965 0.022 75)",   "oklch(0.42 0.13 25)",  "oklch(0.66 0.12 75)"],
     swatchDark:  ["oklch(0.165 0.022 50)",   "oklch(0.7 0.13 35)",   "oklch(0.74 0.12 75)"],
+  },
+  {
+    id: "redline",
+    name: "Redline Paper",
+    blurb: "Newsprint white · signal red · zero radius",
+    swatchLight: ["#f5f5f1", "#171717", "#e93f33"],
+    swatchDark: ["#151513", "#f3f3ee", "#ff6257"],
   },
   {
     id: "cyber",

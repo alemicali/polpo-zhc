@@ -11,6 +11,8 @@ import type {
   PolpoConfig,
   HealthResponse,
   TaskFilters,
+  TasksPageRequest,
+  TasksPageResponse,
   CreateTaskRequest,
   UpdateTaskRequest,
   CreateMissionRequest,
@@ -35,6 +37,8 @@ import type {
   ExecuteMissionResult,
   ResumeMissionResult,
   ApiResult,
+  TaskSlim,
+  MissionSlim,
   LogSession,
   LogEntry,
   ChatSession,
@@ -69,6 +73,9 @@ import type {
   PlaybookInfo,
   PlaybookDefinition,
   PlaybookRunResult,
+  TaskDirection,
+  SendTaskDirectionRequest,
+  SendTaskDirectionResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -89,6 +96,7 @@ export interface PolpoClientConfig {
 export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> {
   /** Session ID assigned by the server. Available after the first `next()` call. */
   sessionId: string | null = null;
+  userMessageId: string | null = null;
 
   /**
    * Turn ID assigned by the server (`x-turn-id` header). Identifies this
@@ -195,6 +203,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
 
     // Capture session/turn IDs from response headers
     this.sessionId = res.headers.get("x-session-id");
+    this.userMessageId = res.headers.get("x-user-message-id");
     this.turnId = res.headers.get("x-turn-id");
 
     this.reader = res.body?.getReader() ?? null;
@@ -221,6 +230,7 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
           if (data === "[DONE]") return;
           try {
             const chunk = JSON.parse(data) as ChatCompletionChunk;
+            if ((chunk as any).error) throw new Error((chunk as any).error.message || "Stream failed");
             // Capture ask_user payload from the chunk
             const choice = chunk.choices[0];
             if (choice?.finish_reason === "ask_user" && choice.ask_user) {
@@ -263,8 +273,9 @@ export class ChatCompletionStream implements AsyncIterable<ChatCompletionChunk> 
               this.emailPreview = choice.email_preview;
             }
             yield chunk;
-          } catch {
-            // skip malformed chunks
+          } catch (error) {
+            // A server error is terminal; only malformed JSON is ignorable.
+            if (!(error instanceof SyntaxError)) throw error;
           }
         }
       }
@@ -365,8 +376,47 @@ export class PolpoClient {
     return this.get<Task[]>(`/tasks${qs ? `?${qs}` : ""}`);
   }
 
+  /**
+   * Slim variant of {@link getTasks}. Same filters, but the server returns
+   * only the fields the list rows render (~70-90% smaller payload). Use
+   * this for the Tasks page, Dashboard, and any list view. Fall back to
+   * `getTask(id)` for the full record on detail screens.
+   */
+  getTasksSlim(filters?: TaskFilters): Promise<TaskSlim[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.group) params.set("group", filters.group);
+    if (filters?.assignTo) params.set("assignTo", filters.assignTo);
+    params.set("slim", "true");
+    return this.get<TaskSlim[]>(`/tasks?${params.toString()}`);
+  }
+
   getTask(taskId: string): Promise<Task> {
     return this.get<Task>(`/tasks/${taskId}`);
+  }
+
+  /**
+   * Cursor-paginated task list with optional full-text search.
+   *
+   * Triggers the paginated response envelope (`{ tasks, nextCursor, hasMore }`)
+   * on the server side. Pass `cursor` from a previous page's `nextCursor`
+   * to fetch the next page. Pass `q` to switch the server into FTS5
+   * ranked-search mode (cursor is ignored in that mode).
+   *
+   * Backed by the SQLite FTS5 virtual table when the server uses SQLite
+   * (default). PostgreSQL / file-backed stores fall back to in-memory
+   * filtering — same shape, slower under load.
+   */
+  getTasksPage(opts?: TasksPageRequest): Promise<TasksPageResponse> {
+    const params = new URLSearchParams();
+    params.set("limit", String(opts?.limit ?? 50));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    if (opts?.q) params.set("q", opts.q);
+    if (opts?.status) params.set("status", String(opts.status));
+    if (opts?.group) params.set("group", opts.group);
+    if (opts?.assignTo) params.set("assignTo", opts.assignTo);
+    if (opts?.slim) params.set("slim", "true");
+    return this.get<TasksPageResponse>(`/tasks?${params.toString()}`);
   }
 
   createTask(req: CreateTaskRequest): Promise<Task> {
@@ -389,6 +439,14 @@ export class PolpoClient {
     return this.post<{ killed: boolean }>(`/tasks/${taskId}/kill`);
   }
 
+  sendTaskDirection(taskId: string, req: SendTaskDirectionRequest): Promise<SendTaskDirectionResult> {
+    return this.post<SendTaskDirectionResult>(`/tasks/${taskId}/directions`, req);
+  }
+
+  getTaskDirections(taskId: string): Promise<TaskDirection[]> {
+    return this.get<TaskDirection[]>(`/tasks/${taskId}/directions`);
+  }
+
   reassessTask(taskId: string): Promise<{ reassessed: boolean }> {
     return this.post<{ reassessed: boolean }>(`/tasks/${taskId}/reassess`);
   }
@@ -401,6 +459,15 @@ export class PolpoClient {
 
   getMissions(): Promise<Mission[]> {
     return this.get<Mission[]>("/missions");
+  }
+
+  /**
+   * Slim variant of {@link getMissions}. Drops the `data` blob and the
+   * full `prompt` (often 2-10× smaller). Adds `taskCount`. Use for the
+   * Missions list page, Dashboard, and any list view.
+   */
+  getMissionsSlim(): Promise<MissionSlim[]> {
+    return this.get<MissionSlim[]>("/missions?slim=true");
   }
 
   getResumableMissions(): Promise<Mission[]> {
@@ -787,6 +854,11 @@ export class PolpoClient {
 
   renameSession(sessionId: string, title: string): Promise<{ renamed: boolean }> {
     return this.patch<{ renamed: boolean }>(`/chat/sessions/${sessionId}`, { title });
+  }
+
+  /** Star or unstar a session. Mirrors PATCH /chat/sessions/:id with { starred } payload. */
+  setSessionStarred(sessionId: string, starred: boolean): Promise<{ starred: boolean }> {
+    return this.patch<{ starred: boolean }>(`/chat/sessions/${sessionId}`, { starred });
   }
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {

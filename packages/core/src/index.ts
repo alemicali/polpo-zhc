@@ -4,6 +4,9 @@ export * from "./types.js";
 // ── Events (pure type definitions only, TypedEmitter lives in shell) ─────
 export * from "./events.js";
 
+// ── Hook event catalog (SSOT for lifecycle hook names + glossary) ────────
+export * from "./hook-events.js";
+
 // ── State Machine ────────────────────────────────────────────────────────
 export { VALID_TRANSITIONS, isValidTransition, assertValidTransition } from "./state-machine.js";
 
@@ -62,6 +65,22 @@ export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillInde
 export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";
 export type { ParsedModelSpec } from "./model-spec.js";
 
+// ── Context Budgeting ──────────────────────────────────────────────────
+export {
+  compactContextMessages,
+  contextBudgetForModel,
+  estimateContextTokens,
+  estimateMessageTokens,
+  selectCompactionCut,
+  summarizeContextMessages,
+} from "./context-compaction.js";
+export type {
+  ContextBudget,
+  ContextEstimateInput,
+  ContextMessageLike,
+  ContextModelLimits,
+} from "./context-compaction.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 
@@ -111,6 +130,16 @@ export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 
 // ── Adapter Types ────────────────────────────────────────────────────────
 export type { AgentHandle, SpawnContext } from "./adapter.js";
+export type {
+  AgentConversationCheckpoint,
+  BackgroundWait,
+  BackgroundWaitStore,
+  BackgroundWaitState,
+  TaskControlStore,
+  TaskDirection,
+  TaskDirectionMode,
+  TaskDirectionStatus,
+} from "./task-control-store.js";
 
 // ── Assessment (pure — no Node.js deps) ─────────────────────────────────
 export { assessTask, runCheck, runMetric, type AssessmentDeps, type CheckProgressEvent as AssessorCheckProgressEvent } from "./assessor.js";

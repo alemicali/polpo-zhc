@@ -20,6 +20,9 @@ export {
   getOAuthProviderList,
   startOAuthLogin,
   type LoginCallbacks,
+  type LoginDeviceCode,
+  type LoginPrompt,
+  type LoginPromptOption,
 } from "./oauth-flow.js";
 
 export {

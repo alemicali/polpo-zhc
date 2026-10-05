@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Terminal as TerminalIcon, Loader2, ShieldAlert, RefreshCcw, Plus, X } from "lucide-react";
+import { Loader2, ShieldAlert, RefreshCcw, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
@@ -142,18 +142,10 @@ export function TerminalPage() {
   }
 
   return (
-    <TerminalShell
-      status={
-        <div className="flex min-w-0 items-center gap-3 text-xs text-muted-foreground">
-          <StatusDot state={activeConnection} />
-          <span className="truncate">{activeConnection}</span>
-          <span className="hidden min-w-0 truncate sm:block">{status.agentWorkDir}</span>
-        </div>
-      }
-      action={<Button size="sm" variant="outline" onClick={restartActive}><RefreshCcw className="h-4 w-4" /> Restart</Button>}
-    >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/60 bg-[#101418]">
-        <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b border-white/10 bg-black/20 px-2">
+    <TerminalShell>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101418]">
+        <div className="flex h-9 shrink-0 items-center border-b border-white/10 bg-black/20 px-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const selected = tab.id === activeId;
             return (
@@ -162,7 +154,7 @@ export function TerminalPage() {
                 type="button"
                 onClick={() => setActiveId(tab.id)}
                 className={cn(
-                  "group inline-flex h-8 max-w-[180px] shrink-0 items-center gap-2 rounded-md px-2 text-xs transition-colors",
+                  "group inline-flex h-8 max-w-[180px] shrink-0 items-center gap-2 px-2 text-xs transition-colors",
                   selected ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
                 )}
               >
@@ -183,7 +175,7 @@ export function TerminalPage() {
                     }
                   }}
                   className={cn(
-                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/45 hover:bg-white/10 hover:text-white",
+                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center text-white/45 hover:bg-white/10 hover:text-white",
                     tabs.length <= 1 && "pointer-events-none opacity-30",
                   )}
                   aria-label={`Close ${tab.name}`}
@@ -193,9 +185,23 @@ export function TerminalPage() {
               </button>
             );
           })}
-          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-white/60 hover:bg-white/5 hover:text-white" onClick={addTab}>
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-none text-white/60 hover:bg-white/5 hover:text-white" onClick={addTab}>
             <Plus className="h-4 w-4" />
           </Button>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 pl-2 text-xs text-white/60">
+            <StatusDot state={activeConnection} />
+            <span className="hidden truncate sm:inline">{activeConnection}</span>
+            <button
+              type="button"
+              onClick={restartActive}
+              title="Restart terminal"
+              aria-label="Restart terminal"
+              className="inline-flex h-8 w-8 items-center justify-center text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+            >
+              <RefreshCcw className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -224,32 +230,9 @@ function StatusDot({ state }: { state: ConnectionState }) {
   );
 }
 
-function TerminalShell({
-  children,
-  status,
-  action,
-}: {
-  children: React.ReactNode;
-  status?: React.ReactNode;
-  action?: React.ReactNode;
-}) {
+function TerminalShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex shrink-0 items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50">
-            <TerminalIcon className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold tracking-tight">Terminal</h1>
-            <p className="truncate text-xs text-muted-foreground">Interactive shell in the agent workspace</p>
-          </div>
-        </div>
-        <div className="flex min-w-0 shrink-0 items-center gap-3">
-          {status}
-          {action}
-        </div>
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
       {children}
     </div>
   );

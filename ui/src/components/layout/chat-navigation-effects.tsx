@@ -45,7 +45,7 @@ export function ChatNavigationEffects() {
   // Auto-navigate to any page when navigate_to fires
   useEffect(() => {
     if (!pendingNavigateTo) return;
-    const { target, id, name, path, highlight } = pendingNavigateTo;
+    const { target, id, name, path, highlight, url } = pendingNavigateTo;
 
     let route: string;
     switch (target) {
@@ -64,6 +64,12 @@ export function ChatNavigationEffects() {
       case "notifications":  route = "/notifications"; break;
       case "approvals":      route = "/approvals"; break;
       case "playbooks":      route = "/playbooks"; break;
+      case "apps":           route = "/apps"; break;
+      case "app":            route = id ? `/apps/${encodeURIComponent(id)}` : "/apps"; break;
+      case "data":           route = "/data"; break;
+      case "views":          route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
+      case "view":           route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
+      case "brain":          route = id ? `/brain?entity=${encodeURIComponent(id)}` : "/brain"; break;
       case "config":
       case "settings":       route = "/config"; break;
       case "files": {
@@ -71,6 +77,12 @@ export function ChatNavigationEffects() {
         const params = new URLSearchParams({ path: dir });
         if (highlight) params.set("highlight", highlight);
         route = `/files?${params.toString()}`;
+        break;
+      }
+      case "app_preview": {
+        const params = new URLSearchParams();
+        if (url) params.set("url", url);
+        route = params.size > 0 ? `/browser?${params.toString()}` : "/browser";
         break;
       }
       default:           route = `/${target}`; break;

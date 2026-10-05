@@ -8,11 +8,31 @@ import { config } from "./lib/config";
 import { bootstrapPalette } from "./lib/palette";
 import { bootstrapAppearance } from "./lib/appearance";
 import { bootstrapTheme } from "./hooks/use-theme";
-// iconify packs (`logos`, `vscode-icons`) are lazy-loaded by the components
-// that need them — see `ensureLogosPack` / `ensureVscodeIconsPack` in
-// `./lib/iconify-bootstrap`. Pulling them eagerly added ~11 MB to the entry
-// chunk.
+// Iconify glyphs are generated as small, local subsets and registered by the
+// components that use them. No icon depends on the public Iconify API.
 import "./index.css";
+
+function keepPwaCurrent(): void {
+  if (!("serviceWorker" in navigator)) return;
+
+  const wasControlled = navigator.serviceWorker.controller !== null;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!wasControlled || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+
+  const checkForUpdate = () => {
+    void navigator.serviceWorker.getRegistration().then((registration) => registration?.update()).catch(() => {
+      // Updates are best effort; an offline PWA continues using its current shell.
+    });
+  };
+  window.addEventListener("focus", checkForUpdate);
+  window.setInterval(checkForUpdate, 60 * 60 * 1_000);
+}
+
+keepPwaCurrent();
 
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {

@@ -18,15 +18,24 @@ import type { Orchestrator } from "../core/orchestrator.js";
 // We dynamically set what streamSimple returns per test via `streamSimpleImpl`.
 let streamSimpleImpl: (...args: unknown[]) => unknown;
 
-vi.mock("@mariozechner/pi-ai", async () => {
+async function buildMockPiModule() {
   const { buildPiAiMock, mockTextStream } = await import("./helpers/mock-llm.js");
-  // Default: return a simple text response. Tests override via setStreamImpl().
-  streamSimpleImpl = () => mockTextStream("Default mock response.");
+  streamSimpleImpl ??= () => mockTextStream("Default mock response.");
   const base = buildPiAiMock((...args: unknown[]) => streamSimpleImpl(...args) as any);
   return {
     ...base,
-    // Override streamSimple to delegate to our mutable impl
     streamSimple: (...args: unknown[]) => streamSimpleImpl(...args),
+  };
+}
+
+vi.mock("@earendil-works/pi-ai", buildMockPiModule);
+vi.mock("@earendil-works/pi-ai/compat", buildMockPiModule);
+vi.mock("@earendil-works/pi-ai/providers/all", async () => {
+  const { mockModel } = await import("./helpers/mock-llm.js");
+  return {
+    getBuiltinModel: () => mockModel(),
+    getBuiltinModels: () => [mockModel()],
+    getBuiltinProviders: () => ["anthropic"],
   };
 });
 
@@ -40,6 +49,7 @@ vi.mock("../llm/pi-client.js", async (importOriginal) => {
     resolveModel: () => mockModel(),
     resolveModelSpec: (spec: unknown) => spec ?? "anthropic:mock-model",
     resolveApiKeyAsync: async () => "mock-api-key",
+    streamSimpleWithAuth: (...args: unknown[]) => streamSimpleImpl(...args),
     buildStreamOpts: (apiKey?: string, reasoning?: string, maxTokens?: number) => {
       const opts: Record<string, unknown> = {};
       if (apiKey) opts.apiKey = apiKey;
@@ -113,6 +123,35 @@ async function parseSSE(res: Response): Promise<Record<string, unknown>[]> {
 }
 
 // ── Lifecycle ───────────────────────────────────────────
+
+test("model failures emit a terminal SSE error instead of a success", async () => {
+  setStreamImpl(() => mockStream([{ type: "error", reason: "error", error: { errorMessage: "Could not process image" } }] as any, mockTextResponse("")));
+  const res = await postCompletions({ stream: true, messages: [{ role: "user", content: "QA error" }] }, { "x-session-id": "new" });
+  const body = await res.text();
+  expect(body).toContain('"code":"model_stream_failed"');
+  expect(body).not.toContain('[DONE]');
+});
+
+test("mobile multimodal request persists an attachment receipt readable from another client", async () => {
+  setStreamImpl(() => mockTextStream("Attachment received."));
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA3sAAAAASUVORK5CYII=";
+  const res = await postCompletions({ agent: "agent-1", stream: true, messages: [{ role: "user", content: [
+    { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+    { type: "file", file: { filename: "notes.txt", file_data: "data:text/plain;base64,aGVsbG8=" } },
+  ] }] }, { "x-session-id": "new" });
+  expect(res.status).toBe(200);
+  await res.text();
+  const sid = res.headers.get("x-session-id");
+  const messageId = res.headers.get("x-user-message-id");
+  expect(messageId).toBeTruthy();
+  const history = await (await app.request(`/api/v1/chat/sessions/${sid}/messages`)).json();
+  const user = history.data.messages.find((m: any) => m.id === messageId);
+  expect(user.content).toBe("");
+  expect(user.attachments).toHaveLength(2);
+  const download = await app.request(`/api/v1/attachments/${user.attachments[0].id}/download`);
+  expect(download.status).toBe(200);
+  expect(Buffer.from(await download.arrayBuffer()).toString("base64")).toBe(png);
+});
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "polpo-completions-test-"));
@@ -228,6 +267,119 @@ describe("POST /v1/chat/completions", () => {
       const lastChunk = chunks[chunks.length - 1];
       expect((lastChunk.choices as any[])[0].finish_reason).toBe("stop");
     });
+
+    test("compacts oversized context before calling the provider", async () => {
+      let providerContext: any;
+      setStreamImpl((_model, context) => {
+        providerContext = context;
+        return mockTextStream("Compacted safely.");
+      });
+
+      const large = "context-data ".repeat(18_000);
+      const res = await postCompletions({
+        messages: [
+          { role: "user", content: large },
+          { role: "assistant", content: large },
+          { role: "user", content: large },
+        ],
+        stream: true,
+      }, { "x-session-id": "new" });
+      const chunks = await parseSSE(res);
+
+      const notice = chunks.find((chunk) => (chunk.choices as any[])?.[0]?.context_compaction);
+      const info = (notice?.choices as any[])?.[0]?.context_compaction;
+      expect(info).toBeDefined();
+      expect(info.afterTokens).toBeLessThan(info.beforeTokens);
+      expect(info.afterTokens).toBeLessThanOrEqual(160_000);
+      expect(providerContext.messages[0].content).toContain("Context checkpoint");
+    });
+
+    test("reuses durable compacted context on the next client turn without changing visible history", async () => {
+      const contexts: any[] = [];
+      setStreamImpl((_model, context) => { contexts.push(structuredClone(context)); return mockTextStream("First answer."); });
+      const large = "remember-important-decision ".repeat(10_000);
+      const history = [
+        { role: "user", content: large }, { role: "assistant", content: large },
+        { role: "user", content: "Keep these decisions and answer now." },
+      ];
+      const first = await postCompletions({ messages: history, stream: true }, { "x-session-id": "new" });
+      const sid = first.headers.get("x-session-id")!;
+      const firstChunks = await parseSSE(first);
+      expect(firstChunks.some((c: any) => c.choices?.[0]?.context_compaction)).toBe(true);
+      // Fresh createApp produces fresh dependency/store objects, emulating a
+      // different client and process-level loss of in-memory checkpoint state.
+      const { createApp } = await import("../server/app.js");
+      const { SSEBridge } = await import("../server/sse-bridge.js");
+      const nextApp = createApp(orchestrator, new SSEBridge(orchestrator));
+      const next = await nextApp.request("/v1/chat/completions", { method: "POST",
+        headers: { "Content-Type": "application/json", "x-session-id": sid },
+        body: JSON.stringify({ stream: true, messages: [...history,
+          { role: "assistant", content: "First answer." }, { role: "user", content: "Continue from the decisions." }] }),
+      });
+      const nextChunks = await parseSSE(next);
+      expect(nextChunks.some((c: any) => c.choices?.[0]?.context_compaction)).toBe(false);
+      expect(contexts.at(-1).messages[0].content).toContain("Context checkpoint");
+      expect(contexts.at(-1).messages.at(-1).content).toBe("Continue from the decisions.");
+      const persisted = await orchestrator.getSessionStore()!.getMessages(sid);
+      expect(persisted.filter(m => m.role === "user").map(m => m.content)).toEqual([
+        "Keep these decisions and answer now.", "Continue from the decisions.",
+      ]);
+      expect(persisted.some(m => m.content.includes("Context checkpoint"))).toBe(false);
+    });
+
+    test("retries once with forced compaction after a provider overflow", async () => {
+      let calls = 0;
+      setStreamImpl(() => {
+        calls += 1;
+        if (calls === 1) {
+          const failed = mockTextResponse("");
+          return mockStream([{
+            type: "error",
+            reason: "error",
+            error: { errorMessage: "prompt is too long: 1107869 tokens > 1000000 maximum" },
+          }] as any, failed);
+        }
+        return mockTextStream("Recovered response.");
+      });
+
+      const res = await postCompletions({
+        messages: [
+          { role: "user", content: "Earlier request" },
+          { role: "assistant", content: "Earlier response" },
+          { role: "user", content: "Continue" },
+        ],
+        stream: true,
+      }, { "x-session-id": "new" });
+      const chunks = await parseSSE(res);
+      const text = chunks.map((chunk) => (chunk.choices as any[])?.[0]?.delta?.content).filter(Boolean).join("");
+      const recovery = chunks.find((chunk) =>
+        (chunk.choices as any[])?.[0]?.context_compaction?.reason === "overflow_recovery"
+      );
+
+      expect(calls).toBe(2);
+      expect(recovery).toBeDefined();
+      expect(text).toBe("Recovered response.");
+    });
+  });
+
+  describe("token usage", () => {
+    test("records provider usage for dashboard aggregation", async () => {
+      const beforeRes = await app.request("/api/v1/token-usage?range=24h");
+      const before = (await beforeRes.json()).data.totalTokens as number;
+      setStreamImpl(() => mockTextStream("Measured response."));
+
+      const completion = await postCompletions({
+        messages: [{ role: "user", content: "Measure this" }],
+        stream: false,
+      }, { "x-session-id": "new" });
+      expect(completion.status).toBe(200);
+
+      const afterRes = await app.request("/api/v1/token-usage?range=24h");
+      const after = (await afterRes.json()).data;
+      expect(after.totalTokens).toBe(before + 150);
+      expect(after.inputTokens).toBeGreaterThanOrEqual(100);
+      expect(after.outputTokens).toBeGreaterThanOrEqual(50);
+    });
   });
 
   // ── Tool execution ──────────────────────────────────
@@ -314,6 +466,99 @@ describe("POST /v1/chat/completions", () => {
       expect((body.choices as any[])[0].message.content).toBe("There are no tasks yet.");
     });
 
+    test("wait_for_task keeps the stream alive and continues the LLM turn after completion", async () => {
+      const task = await orchestrator.addTask({
+        title: "Wait integration task",
+        description: "Completed externally while the chat turn waits",
+        assignTo: "agent-1",
+        draft: true,
+      });
+      const turnSequence = mockTurnSequence([
+        mockToolCallResponse("wait_for_task", { taskId: task.id, pollIntervalMs: 10_000 }),
+        mockTextResponse("The task finished and I continued the same turn."),
+      ]);
+      setStreamImpl(turnSequence);
+
+      const transition = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          orchestrator.getStore().unsafeSetStatus(task.id, "done", "wait_for_task integration test")
+            .then(() => resolve(), reject);
+        }, 40);
+      });
+
+      try {
+        const res = await postCompletions({
+          messages: [{ role: "user", content: "Wait for that task and report back" }],
+          stream: true,
+        });
+        const chunks = await parseSSE(res);
+        await transition;
+
+        const toolEvents = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.tool_call)
+          .filter(Boolean);
+        expect(toolEvents).toContainEqual(expect.objectContaining({
+          name: "wait_for_task",
+          state: "calling",
+          progress: expect.objectContaining({ status: "draft", taskId: task.id }),
+        }));
+        expect(toolEvents).toContainEqual(expect.objectContaining({
+          name: "wait_for_task",
+          state: "completed",
+        }));
+
+        const text = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.delta?.content)
+          .filter(Boolean)
+          .join("");
+        expect(text).toBe("The task finished and I continued the same turn.");
+      } finally {
+        await orchestrator.deleteTask(task.id);
+      }
+    });
+
+    test("aborting the streaming turn cancels wait_for_task and cleans up its listener", async () => {
+      const task = await orchestrator.addTask({
+        title: "Cancelled wait task",
+        description: "The chat wait is cancelled before this task finishes",
+        assignTo: "agent-1",
+        draft: true,
+      });
+      setStreamImpl(mockTurnSequence([
+        mockToolCallResponse("wait_for_task", { taskId: task.id, pollIntervalMs: 10_000 }),
+        mockTextResponse("This response must not be reached."),
+      ]));
+      const listenersBefore = orchestrator.listenerCount("task:transition");
+
+      try {
+        const res = await postCompletions({
+          messages: [{ role: "user", content: "Wait, then stop" }],
+          stream: true,
+        });
+        const turnId = res.headers.get("x-turn-id");
+        expect(turnId).toBeTruthy();
+        const chunksPromise = parseSSE(res);
+
+        await vi.waitFor(() => {
+          expect(orchestrator.listenerCount("task:transition")).toBeGreaterThan(listenersBefore);
+        });
+        const abortRes = await app.request(`/v1/chat/completions/abort/${turnId}`, { method: "POST" });
+        expect(abortRes.status).toBe(200);
+
+        const chunks = await chunksPromise;
+        await vi.waitFor(() => {
+          expect(orchestrator.listenerCount("task:transition")).toBe(listenersBefore);
+        });
+        const toolEvents = chunks
+          .map((chunk) => (chunk.choices as any[])?.[0]?.tool_call)
+          .filter(Boolean);
+        expect(toolEvents.some((event) => event.name === "wait_for_task" && event.state === "completed")).toBe(false);
+        expect(chunks.some((chunk) => (chunk.choices as any[])?.[0]?.delta?.content === "This response must not be reached.")).toBe(false);
+      } finally {
+        await orchestrator.deleteTask(task.id);
+      }
+    });
+
     test("handles multi-tool turn (2 tool calls in sequence)", async () => {
       // Turn 1: list_tasks
       // Turn 2: list_agents (LLM wants more info)
@@ -380,6 +625,62 @@ describe("POST /v1/chat/completions", () => {
         return choice?.finish_reason === "ask_user";
       });
       expect(askChunk).toBeDefined();
+    });
+
+    test("ask_user is available in direct agent chats", async () => {
+      setStreamImpl((...args: unknown[]) => {
+        const options = args[1] as { systemPrompt: string; tools: Array<{ name: string }> };
+        expect(options.tools.some((tool) => tool.name === "ask_user")).toBe(true);
+        expect(options.systemPrompt).toContain("structured ask_user tool");
+        expect(options.systemPrompt.lastIndexOf("structured ask_user tool"))
+          .toBeGreaterThan(options.systemPrompt.lastIndexOf("proceed without asking questions"));
+        const msg = mockToolCallResponse("ask_user", {
+          questions: [{
+            id: "framework",
+            question: "Which framework should I use?",
+            options: [
+              { label: "React", description: "Use React" },
+              { label: "Vue", description: "Use Vue" },
+            ],
+          }],
+        });
+        return mockStream(mockToolCallStreamEvents(msg), msg);
+      });
+
+      const res = await postCompletions({
+        agent: "agent-1",
+        messages: [{ role: "user", content: "Build the interface" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const body = await parseJson(res);
+      const choice = (body.choices as any[])[0];
+      expect(choice.finish_reason).toBe("ask_user");
+      expect(choice.ask_user.questions[0].id).toBe("framework");
+    });
+
+    test("navigate_to preserves an App Preview URL", async () => {
+      setStreamImpl(() => {
+        const msg = mockToolCallResponse("navigate_to", {
+          target: "app_preview",
+          url: "https://machine.example.ts.net:3020/",
+        });
+        return mockStream(mockToolCallStreamEvents(msg), msg);
+      });
+
+      const res = await postCompletions({
+        messages: [{ role: "user", content: "Open the active app preview" }],
+        stream: false,
+      });
+
+      expect(res.status).toBe(200);
+      const choice = ((await parseJson(res)).choices as any[])[0];
+      expect(choice.finish_reason).toBe("navigate_to");
+      expect(choice.navigate_to).toMatchObject({
+        target: "app_preview",
+        url: "https://machine.example.ts.net:3020/",
+      });
     });
   });
 
@@ -484,6 +785,36 @@ describe("POST /v1/chat/completions", () => {
       );
 
       expect(res2.headers.get("x-session-id")).toBe(sessionId);
+    });
+
+    test("internal background continuation keeps history without duplicating the user message", async () => {
+      setStreamImpl(() => mockTextStream("Initial answer"));
+      const initial = await postCompletions({
+        messages: [{ role: "user", content: "Start an external task" }],
+        stream: false,
+      }, { "x-session-id": "new" });
+      const sessionId = initial.headers.get("x-session-id")!;
+
+      setStreamImpl(() => mockTextStream("The background task finished"));
+      const continuation = await postCompletions({
+        messages: [
+          { role: "user", content: "Start an external task" },
+          { role: "assistant", content: "Initial answer" },
+          { role: "system", content: "The background wait is complete" },
+        ],
+        stream: false,
+      }, {
+        "x-session-id": sessionId,
+        "x-polpo-internal-continuation": "background-wait",
+      });
+
+      expect(continuation.status).toBe(200);
+      const messages = await orchestrator.getSessionStore()!.getMessages(sessionId);
+      expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
+      expect(messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "The background task finished",
+      });
     });
 
     test("creates new session when x-session-id is 'new'", async () => {

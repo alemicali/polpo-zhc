@@ -27,6 +27,10 @@ export interface PeerStore {
   createPairingRequest(channel: ChannelType, externalId: string, displayName?: string): Promise<PairingRequest>;
   resolvePairing(code: string): Promise<PairingRequest | undefined>;
   getPendingPairing(peerId: string): Promise<PairingRequest | undefined>;
+  /** Pending, unexpired pairing requests, newest first. */
+  listPendingPairings(): Promise<PairingRequest[]>;
+  /** Dismiss a pending pairing request without granting access. Returns false if not found. */
+  rejectPairing(code: string): Promise<boolean>;
   cleanExpiredPairings(): Promise<number>;
 
   // Session mapping (peerId → sessionId)

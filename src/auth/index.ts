@@ -1,5 +1,11 @@
-export { oauthLogin, refreshProfile, getOAuthApiKeyForProvider } from "./oauth-manager.js";
-export type { LoginCallbacks } from "./oauth-manager.js";
+export { oauthLogin, refreshProfile, getOAuthApiKeyForProvider, getOAuthModelAuthForProvider } from "./oauth-manager.js";
+export { getPiOAuthRuntime, listPiOAuthProviders, oauthCredentialFromProfile } from "./pi-oauth-runtime.js";
+export type {
+  LoginCallbacks,
+  LoginDeviceCode,
+  LoginPrompt,
+  LoginPromptOption,
+} from "./oauth-manager.js";
 export {
   profileId, saveProfile, getProfile, getProfilesForProvider,
   getAllProfiles, deleteProfile, deleteProviderProfiles,

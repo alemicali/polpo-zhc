@@ -7,6 +7,7 @@ import { createApp } from "./app.js";
 import { SyncScheduler } from "./sync-scheduler.js";
 import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
 import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
+import { attachBrowserDashboardWebSocket } from "./routes/browser-dashboard.js";
 
 import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
@@ -34,6 +35,7 @@ export class PolpoServer {
   private terminalWs: TerminalWebSocketHandle | null = null;
   private codeServerManager: CodeServerManager | null = null;
   private codeServerWs: { close: () => void } | null = null;
+  private browserDashboardWs: { close: () => void } | null = null;
   private syncScheduler: SyncScheduler | null = null;
   private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
@@ -46,18 +48,19 @@ export class PolpoServer {
     const workDir = resolve(overrideWorkDir ?? this.config.workDir);
     const polpoDir = getPolpoDir(workDir);
     const persistedConfig = loadPolpoConfig(polpoDir);
+    // Source of truth at runtime is the configured TeamStore/AgentStore
+    // (sqlite by default, file when storage="file", postgres when configured).
+    // We always pass the first-run defaultTeam to initInteractive — the
+    // orchestrator's populateStores() guards against re-seeding when ANY
+    // team already exists in the store, so this is safe across all
+    // backends and survives explicit user deletes.
     const defaultTeam: Team = {
       name: "default",
       agents: [{ name: "dev-1", role: "developer" }],
     };
-    const hasSeededStores = existsSync(join(polpoDir, "teams.json")) || existsSync(join(polpoDir, "agents.json"));
-    const teams = persistedConfig?.teams?.length
-      ? persistedConfig.teams as Team[]
-      : hasSeededStores
-        ? []
-      : [defaultTeam];
 
-    await this.orchestrator.initInteractive(persistedConfig?.project ?? basename(workDir), teams);
+    await this.orchestrator.initInteractive(
+      persistedConfig?.project ?? basename(workDir), [defaultTeam]);
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -149,6 +152,9 @@ export class PolpoServer {
       apiKeys: this.config.apiKeys,
       workDir,
     });
+    // agent-browser dashboard WebSocket proxy. Path:
+    //   /api/v1/browser-dashboard/view/... → ws://127.0.0.1:<dashboard-port>/...
+    this.browserDashboardWs = attachBrowserDashboardWebSocket(this.server);
 
     const base = `http://${this.config.host}:${this.config.port}`;
 
@@ -172,6 +178,7 @@ export class PolpoServer {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
     this.terminalWs?.close();
+    this.browserDashboardWs?.close();
     this.terminalWs = null;
     this.codeServerWs?.close();
     this.codeServerWs = null;

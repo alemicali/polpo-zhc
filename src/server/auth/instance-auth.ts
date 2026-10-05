@@ -71,12 +71,27 @@ export function getSessionTtlMs(): number {
   return parseDurationMs(process.env.POLPO_AUTH_SESSION_TTL, DEFAULT_SESSION_TTL_MS);
 }
 
+// Per-polpoDir in-memory cache of the parsed auth.json. The file is touched
+// every login and rarely otherwise; without this cache, EVERY authed request
+// pays a disk read + JSON.parse just to validate the session cookie. Over
+// Tailscale that's invisible, but locally it still amounts to 100s of
+// pointless syscalls per page mount. The cache is invalidated on save and
+// can be force-cleared via `invalidateInstanceAuthCache()`.
+const authConfigCache = new Map<string, InstanceAuthConfig>();
+
+export function invalidateInstanceAuthCache(polpoDir?: string): void {
+  if (polpoDir) authConfigCache.delete(polpoDir);
+  else authConfigCache.clear();
+}
+
 export function loadInstanceAuth(polpoDir: string): InstanceAuthConfig | null {
+  const cached = authConfigCache.get(polpoDir);
+  if (cached) return cached;
   const file = getAuthFilePath(polpoDir);
   if (!existsSync(file)) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<InstanceAuthConfig>;
-    return {
+    const config: InstanceAuthConfig = {
       enabled: parsed.enabled ?? true,
       allowedEmails: (parsed.allowedEmails ?? []).map(normalizeEmail).filter(Boolean),
       magicLinks: parsed.magicLinks ?? [],
@@ -84,6 +99,8 @@ export function loadInstanceAuth(polpoDir: string): InstanceAuthConfig | null {
       createdAt: parsed.createdAt ?? new Date().toISOString(),
       updatedAt: parsed.updatedAt ?? new Date().toISOString(),
     };
+    authConfigCache.set(polpoDir, config);
+    return config;
   } catch {
     return null;
   }
@@ -92,6 +109,8 @@ export function loadInstanceAuth(polpoDir: string): InstanceAuthConfig | null {
 export function saveInstanceAuth(polpoDir: string, config: InstanceAuthConfig): void {
   mkdirSync(polpoDir, { recursive: true });
   writeFileSync(getAuthFilePath(polpoDir), JSON.stringify(config, null, 2));
+  // Refresh the cache with the just-written canonical config.
+  authConfigCache.set(polpoDir, config);
 }
 
 export function createInitialInstanceAuth(polpoDir: string, adminEmail: string): InstanceAuthConfig {
