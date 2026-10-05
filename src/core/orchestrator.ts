@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { resolve, join } from "node:path";
 import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
@@ -60,7 +61,7 @@ import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway, type ChannelChatRunner } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
@@ -78,7 +79,7 @@ import { QualityController } from "../quality/quality-controller.js";
 import { Scheduler } from "../scheduling/scheduler.js";
 import { TaskWatcherManager } from "./task-watcher.js";
 import { BackgroundWaitManager, type BackgroundWaitContinuation } from "./background-wait-manager.js";
-import type { ApprovalRequest, ApprovalStatus, NotificationAction } from "./types.js";
+import type { ApprovalRequest, ApprovalStatus, ChannelReplyTarget, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
 import type { PlaybookStore } from "./playbook-store.js";
@@ -153,6 +154,8 @@ export class Orchestrator extends TypedEmitter {
   private telegramBotUsernames = new Map<string, string>();
   /** Bots dedicated to one agent, refreshed (menu, photo, description) when that agent changes. */
   private dedicatedTelegramBots = new Map<string, { agent: string; botToken: string; poller: TelegramCallbackPoller; gateway: ChannelGateway }>();
+  /** Running Telegram pollers by channel name, for replies routed from other channels. */
+  private telegramPollersByChannel = new Map<string, TelegramCallbackPoller>();
   /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
@@ -1525,6 +1528,7 @@ export class Orchestrator extends TypedEmitter {
     }
     this.stopDedicatedTelegramPollers();
     this.channelGateways.clear();
+    this.telegramPollersByChannel.clear();
     this.dedicatedTelegramBots.clear();
     this.telegramBotUsernames.clear();
 
@@ -1570,6 +1574,7 @@ export class Orchestrator extends TypedEmitter {
           onTyping: (chatId) => poller.sendTyping(chatId),
         });
         gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+        gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
         // The main bot's menu is static; dedicated bots get theirs (agent suggestions) once agents are loaded.
         if (!channelConfig.gateway.agent) {
@@ -1586,6 +1591,7 @@ export class Orchestrator extends TypedEmitter {
       }
 
       poller.start(2000); // Poll every 2 seconds
+      this.telegramPollersByChannel.set(key, poller);
       void fetch(`https://api.telegram.org/bot${botToken}/getMe`)
         .then(r => r.json() as Promise<{ ok?: boolean; result?: { username?: string } }>)
         .then(me => { if (me.ok && me.result?.username) this.telegramBotUsernames.set(key, me.result.username); })
@@ -1684,6 +1690,69 @@ export class Orchestrator extends TypedEmitter {
     this.dedicatedTelegramPollers = [];
   }
 
+  // ── Conversation pipe ──
+
+  /**
+   * Deliver a chat turn through another channel (gateway.replyTo). Telegram gets the
+   * whole conversation (echo, partials, reply with buttons and files); other channels
+   * get the final reply as a notification.
+   */
+  private async routeChannelReply(target: ChannelReplyTarget, event: ReplyRouteEvent): Promise<void> {
+    const config = this.config.settings.notifications?.channels?.[target.channel];
+    if (!config) throw new Error(`Unknown channel "${target.channel}"`);
+
+    if (config.type === "telegram") {
+      const poller = this.telegramPollersByChannel.get(target.channel);
+      if (!poller) throw new Error(`Telegram channel "${target.channel}" is not running`);
+      const chatId = target.chatId || config.chatId || await this.onlyPairedTelegramChat();
+      if (!chatId) throw new Error(`No chat for "${target.channel}": set replyTo.chatId or the channel's chat ID`);
+      if (event.kind === "echo") {
+        await poller.sendMarkdown(chatId, `_↪ ${event.from} · ${event.via}_\n${event.text}`);
+      } else if (event.kind === "partial") {
+        await poller.sendPartial(chatId, event.text);
+      } else {
+        const { reply } = event;
+        if (reply.text.trim() || reply.buttons || reply.forceReply) {
+          await poller.sendMarkdown(chatId, reply.text, reply.buttons, reply.forceReply);
+        }
+        for (const file of reply.files ?? []) await poller.sendDocument(chatId, file.path, file.filename);
+      }
+      return;
+    }
+
+    if (event.kind !== "reply") return;
+    const channel = this.notificationRouter?.getChannel(target.channel);
+    if (!channel) throw new Error(`Channel "${target.channel}" is not running`);
+    const notification = {
+      id: nanoid(),
+      channel: target.channel,
+      title: "Polpo reply",
+      body: event.reply.text,
+      severity: "info" as const,
+      sourceEvent: "channel:reply",
+      sourceData: { chatId: target.chatId },
+      ruleId: "conversation-pipe",
+      timestamp: new Date().toISOString(),
+    };
+    const files = event.reply.files ?? [];
+    if (files.length > 0 && channel.sendWithAttachments) {
+      const { readFile } = await import("node:fs/promises");
+      const attachments = await Promise.all(files.map(async (f) => {
+        const content = await readFile(f.path);
+        return { label: f.filename, type: "file" as const, filePath: f.path, size: content.length, content };
+      }));
+      await channel.sendWithAttachments(notification, attachments);
+    } else {
+      await channel.send(notification);
+    }
+  }
+
+  /** Private chat of the only person allowed on Telegram (chat id = user id), if exactly one. */
+  private async onlyPairedTelegramChat(): Promise<string | undefined> {
+    const allowed = (await this.peerStore?.getAllowlist() ?? []).filter(id => id.startsWith("telegram:"));
+    return allowed.length === 1 ? allowed[0].slice("telegram:".length) : undefined;
+  }
+
   // ── Inbound webhooks ──
 
   /**
@@ -1703,6 +1772,7 @@ export class Orchestrator extends TypedEmitter {
         channelConfig: { ...channelConfig, gateway: { dmPolicy: "open", ...channelConfig.gateway } },
         approvalResolver: this.createApprovalResolver(),
       });
+      gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
       this.webhookGateways.set(key, { gateway, adapter: new WebhookGatewayAdapter(gateway) });
       const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
       this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
@@ -1792,6 +1862,7 @@ export class Orchestrator extends TypedEmitter {
       this.channelGateway.setPartialResponseHandler((chatId, text) =>
         waChannel.sendText(chatId, text),
       );
+      this.channelGateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
 
       // Attach gateway adapter to bridge
       const adapter = new WhatsAppGatewayAdapter(this.channelGateway);

@@ -526,6 +526,8 @@ export interface ChannelGatewayConfig {
   agentSessions?: Record<string, { sessionMode?: "per-peer" | "shared"; sessionIdleMinutes?: number }>;
   /** Dedicate the channel to one agent (no /agent switching). */
   agent?: string;
+  /** Conversation pipe: deliver chat replies through another channel (e.g. in from a webhook, out on Telegram). */
+  replyTo?: { channel: string; chatId?: string; echoInbound?: boolean };
 }
 
 export interface NotificationChannelConfig {

@@ -523,6 +523,7 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
       {gateway?.enableInbound && (
         <>
           <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+          {gateway.replyTo && <Row label="Replies" value={`→ ${gateway.replyTo.channel}`} mono wrap />}
           <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
           {overrides.map(([agent, s]) => (
             <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
@@ -603,7 +604,7 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
         <span className="font-medium text-foreground">iOS Shortcuts</span>
         <span>1. Ask for Input (text or dictation).</span>
         <span>2. Get Contents of URL: the endpoint above with <code>?format=text</code>, method POST, header <code>Authorization</code> = <code>Bearer &lt;secret&gt;</code>, request body JSON with <code>text</code> = the input and <code>sender</code> = a name for your device. Use Form with a file field to send photos or documents.</span>
-        <span>3. Show Result or Speak Text.</span>
+        <span>3. Show Result or Speak Text — or set <b>Replies go to</b> below (or <code>replyTo</code> in the body) to get the answer on Telegram instead: the request returns at once and the reply arrives there.</span>
         <span>Commands work as on Telegram: /agent NAME, /polpo, /new, /help and the agent's suggestions. Without <code>?format=text</code> the response is JSON with messages, buttons and files (base64).</span>
       </div>
       <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-[10px] font-mono leading-relaxed">{example}</pre>
@@ -1058,10 +1059,11 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
   );
 }
 
-function InboundGatewayForm({ config, onChange, channelName }: {
+function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
   channelName?: string;
+  otherChannels?: { name: string; type: NotificationChannelType }[];
 }) {
   const agentNames = useAgentNames(api);
   const gateway = config.gateway ?? {};
@@ -1150,6 +1152,48 @@ function InboundGatewayForm({ config, onChange, channelName }: {
               </Select>
             </Field>
           )}
+          <Field label="Replies go to" hint="Conversation pipe: answer here, or deliver replies through another channel (e.g. in from Shortcuts, out on Telegram).">
+            <Select
+              value={gateway.replyTo?.channel ?? "__origin__"}
+              onValueChange={(v) => updateGateway({ replyTo: v === "__origin__" ? undefined : { ...gateway.replyTo, channel: v } })}
+            >
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__origin__" className="text-xs">This channel</SelectItem>
+                {otherChannels.map((c) => (
+                  <SelectItem key={c.name} value={c.name} className="text-xs">{c.name} ({CHANNEL_META[c.type]?.label ?? c.type})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {gateway.replyTo && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Chat ID" hint="Optional. Default: the target's chat ID, or its only paired person.">
+                <Input
+                  className="h-8 text-xs font-mono"
+                  placeholder="auto"
+                  value={gateway.replyTo.chatId ?? ""}
+                  onChange={(e) => updateGateway({ replyTo: { ...gateway.replyTo!, chatId: e.target.value.trim() || undefined } })}
+                />
+              </Field>
+              <Field label="Show the message" hint="Echo the incoming message on the target before the reply.">
+                <Select
+                  value={gateway.replyTo.echoInbound === false ? "no" : "yes"}
+                  onValueChange={(v) => updateGateway({ replyTo: { ...gateway.replyTo!, echoInbound: v === "no" ? false : undefined } })}
+                >
+                  <SelectTrigger className="h-8 text-xs w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes" className="text-xs">Yes</SelectItem>
+                    <SelectItem value="no" className="text-xs">No, only the reply</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          )}
           <Field label="Conversation" hint="How chats from this channel relate to the web chat.">
             <Select value={gateway.sessionMode ?? "per-peer"} onValueChange={(v) => updateGateway({ sessionMode: v as GatewayConfig["sessionMode"] })}>
               <SelectTrigger className="h-8 text-xs w-full">
@@ -1208,13 +1252,15 @@ function InboundGatewayForm({ config, onChange, channelName }: {
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken }: {
+function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken, otherChannels = [] }: {
   config: NotificationChannelConfig;
   onChange: (config: NotificationChannelConfig) => void;
   /** The saved version of this channel has inbound enabled. */
   gatewayRunning: boolean;
   channelName?: string;
   savedBotToken?: string;
+  /** Other configured channels, possible targets of the conversation pipe. */
+  otherChannels?: { name: string; type: NotificationChannelType }[];
 }) {
   const set = (patch: Partial<NotificationChannelConfig>) => onChange({ ...config, ...patch });
 
@@ -1224,7 +1270,7 @@ function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotTo
       <ChannelSetupGuide type={config.type} />
       <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} />
       {channelSupportsInbound(config.type) && (
-        <InboundGatewayForm config={config} onChange={onChange} channelName={channelName} />
+        <InboundGatewayForm config={config} onChange={onChange} channelName={channelName} otherChannels={otherChannels} />
       )}
     </div>
   );
@@ -1352,6 +1398,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                 <>
                   <Row label="Inbound" value={`/api/v1/channels/${name}/inbound${ch.inboundSecret ? "" : " · no secret"}`} mono wrap />
                   <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
+                  <Row label="Replies" value={gateway.replyTo ? `→ ${gateway.replyTo.channel}` : "in the HTTP response"} mono wrap />
                   <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
                   {Object.entries(gateway.agentSessions ?? {}).map(([agent, s]) => (
                     <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
@@ -1793,6 +1840,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
               gatewayRunning={!isNew && channels[editName]?.gateway?.enableInbound === true}
               channelName={isNew ? undefined : editName}
               savedBotToken={isNew ? undefined : channels[editName]?.botToken}
+              otherChannels={Object.entries(channels).filter(([n]) => n !== editName).map(([n, c]) => ({ name: n, type: c.type }))}
             />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>

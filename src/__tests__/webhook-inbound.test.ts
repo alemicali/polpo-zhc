@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ChannelGateway, type ChannelChatRunner } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ReplyRouter } from "../notifications/channel-gateway.js";
 import { WebhookGatewayAdapter, normalizeWebhookSender } from "../notifications/webhook-gateway-adapter.js";
 import { webhookInboundRoutes } from "../server/routes/webhook-inbound.js";
 import type { PeerStore } from "../core/peer-store.js";
@@ -38,7 +38,7 @@ function createSessionStore(): SessionStore {
   } as unknown as SessionStore;
 }
 
-function setup(gateway: ChannelGatewayConfig = { enableInbound: true, dmPolicy: "open", agent: "health-coach" }, runnerResult?: Awaited<ReturnType<ChannelChatRunner>>) {
+function setup(gateway: ChannelGatewayConfig = { enableInbound: true, dmPolicy: "open", agent: "health-coach" }, runnerResult?: Awaited<ReturnType<ChannelChatRunner>>, router?: ReplyRouter) {
   const runner = vi.fn<ChannelChatRunner>().mockResolvedValue(runnerResult ?? { text: "ciao!" });
   const orchestrator = {
     getAgents: vi.fn().mockResolvedValue([{ name: "health-coach", role: "Coach" }, { name: "backend", role: "Backend" }]),
@@ -46,9 +46,11 @@ function setup(gateway: ChannelGatewayConfig = { enableInbound: true, dmPolicy: 
     getChannelChatRunner: vi.fn().mockReturnValue(runner),
   } as unknown as Orchestrator;
   const channel: NotificationChannelConfig = { type: "webhook", inboundSecret: SECRET, gateway };
-  const adapter = new WebhookGatewayAdapter(new ChannelGateway({
+  const channelGateway = new ChannelGateway({
     orchestrator, peerStore: createPeerStore(), sessionStore: createSessionStore(), channelConfig: channel,
-  }));
+  });
+  if (router) channelGateway.setReplyRouter(router);
+  const adapter = new WebhookGatewayAdapter(channelGateway);
   const app = webhookInboundRoutes({
     isInitialized: () => true,
     getChannelConfig: (name) => (name === "shortcuts" ? channel : undefined),
@@ -153,5 +155,48 @@ describe("WebhookGatewayAdapter", () => {
     expect(normalizeWebhookSender(undefined)).toBe("default");
     expect(normalizeWebhookSender(" alessio-iphone ")).toBe("alessio-iphone");
     expect(normalizeWebhookSender("a b")).toBeUndefined();
+  });
+});
+
+describe("conversation pipe", () => {
+  const flush = () => new Promise(r => setTimeout(r, 20));
+
+  it("delivers echo and reply to the configured channel and answers 202 at once", async () => {
+    const router = vi.fn<ReplyRouter>().mockResolvedValue(undefined);
+    const { post, runner } = setup(
+      { enableInbound: true, dmPolicy: "open", agent: "health-coach", replyTo: { channel: "coach-bot" } },
+      { text: "ottima scelta", files: [{ path: "/w/plan.md", filename: "plan.md" }] },
+      router,
+    );
+    const res = await post(JSON.stringify({ text: "ho mangiato un'insalata", sender: "iphone", name: "Alessio" }), { "content-type": "application/json" });
+    expect(res.status).toBe(202);
+    expect((await res.json() as any).data).toEqual({ status: "accepted", deliveredTo: "coach-bot" });
+    await flush();
+    expect(runner).toHaveBeenCalledOnce();
+    expect(router.mock.calls.map(c => c[1].kind)).toEqual(["echo", "reply"]);
+    expect(router.mock.calls[0]).toEqual([{ channel: "coach-bot" }, { kind: "echo", text: "ho mangiato un'insalata", from: "Alessio", via: "webhook" }]);
+    expect(router.mock.calls[1][1]).toEqual({ kind: "reply", reply: { text: "ottima scelta", files: [{ path: "/w/plan.md", filename: "plan.md" }] } });
+  });
+
+  it("lets a request pick the target, skip the echo, or force the origin", async () => {
+    const router = vi.fn<ReplyRouter>().mockResolvedValue(undefined);
+    const { post } = setup(undefined, undefined, router);
+
+    const piped = await post(JSON.stringify({ text: "hi", replyTo: { channel: "tg", chatId: 42, echoInbound: false } }), { "content-type": "application/json" }, "/shortcuts/inbound?wait=1");
+    expect((await piped.json() as any).data).toMatchObject({ deliveredTo: "tg", messages: [] });
+    expect(router.mock.calls.map(c => c[0])).toEqual([{ channel: "tg", chatId: "42", echoInbound: false }]);
+
+    const here = await post(JSON.stringify({ text: "hi", replyTo: "origin" }), { "content-type": "application/json" });
+    expect((await here.json() as any).data.text).toBe("ciao!");
+    expect(router).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps command replies on the origin channel", async () => {
+    const router = vi.fn<ReplyRouter>().mockResolvedValue(undefined);
+    const { post } = setup({ enableInbound: true, dmPolicy: "open", replyTo: { channel: "tg" } }, undefined, router);
+    const res = await post(JSON.stringify({ text: "/help" }), { "content-type": "application/json" });
+    expect(res.status).toBe(200);
+    expect((await res.json() as any).data.text).toContain("/agent");
+    expect(router).not.toHaveBeenCalled();
   });
 });

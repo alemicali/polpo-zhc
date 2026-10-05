@@ -5,10 +5,15 @@
  * POST /api/v1/channels/:name/inbound
  *   Auth: "Authorization: Bearer <inboundSecret>" (or "X-Polpo-Secret: <inboundSecret>").
  *   Body, any of:
- *     - application/json  { text, sender?, name?, messageId?, callback?, attachments?: [{ filename, mimeType, data (base64) }] }
+ *     - application/json  { text, sender?, name?, messageId?, callback?, replyTo?, attachments?: [{ filename, mimeType, data (base64) }] }
  *     - multipart/form-data or x-www-form-urlencoded with the same fields; file fields become attachments
  *     - text/plain        the message itself (sender/name from the query string)
  *   Query: ?format=text returns the reply as plain text (handy for iOS Shortcuts).
+ *
+ * Conversation pipe: with gateway.replyTo (or replyTo in the request: a channel name,
+ * { channel, chatId?, echoInbound? }, or "origin") the reply leaves from another channel,
+ * e.g. Telegram. The request is then answered at once with 202 and the turn runs in the
+ * background (?wait=1 waits for it); no Shortcuts timeout on long turns.
  *
  * Mounted before the instance auth gate: the channel's own secret authenticates the caller.
  */
@@ -77,6 +82,27 @@ function toAttachment(filename: string, mimeType: string, data: Buffer): Inbound
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/** "telegram-coach", "origin", or { channel, chatId?, echoInbound? }. */
+function parseReplyTo(value: unknown): WebhookInboundMessage["replyTo"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{")) {
+      try { return parseReplyTo(JSON.parse(trimmed)); } catch { throw new InboundError("replyTo is not valid JSON", 400); }
+    }
+    return trimmed === "origin" ? "origin" : { channel: trimmed };
+  }
+  if (typeof value === "object" && typeof (value as any).channel === "string" && (value as any).channel) {
+    const v = value as Record<string, unknown>;
+    return {
+      channel: v.channel as string,
+      ...(str(v.chatId) || typeof v.chatId === "number" ? { chatId: String(v.chatId) } : {}),
+      ...(typeof v.echoInbound === "boolean" ? { echoInbound: v.echoInbound } : {}),
+    };
+  }
+  throw new InboundError("replyTo must be a channel name, \"origin\" or { channel, chatId?, echoInbound? }", 400);
+}
+
 async function parseInbound(req: Request, query: URLSearchParams): Promise<WebhookInboundMessage> {
   const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
   const fromQuery = { sender: query.get("sender") ?? undefined, name: query.get("name") ?? undefined };
@@ -90,6 +116,7 @@ async function parseInbound(req: Request, query: URLSearchParams): Promise<Webho
       text: str(body.text) ?? str(body.message) ?? "",
       messageId: str(body.messageId),
       callback: str(body.callback),
+      replyTo: parseReplyTo(body.replyTo ?? query.get("replyTo")),
       attachments: files.map((f, i) => {
         const data = str(f.data)?.replace(/^data:[^;]+;base64,/, "");
         if (!data) throw new InboundError(`attachments[${i}].data must be base64`, 400);
@@ -111,11 +138,12 @@ async function parseInbound(req: Request, query: URLSearchParams): Promise<Webho
       text: str(form.get("text")) ?? str(form.get("message")) ?? "",
       messageId: str(form.get("messageId")),
       callback: str(form.get("callback")),
+      replyTo: parseReplyTo(form.get("replyTo") ?? query.get("replyTo")),
       attachments,
     };
   }
 
-  return { ...fromQuery, text: await req.text() };
+  return { ...fromQuery, replyTo: parseReplyTo(query.get("replyTo")), text: await req.text() };
 }
 
 async function encodeFiles(files: { path: string; filename: string }[]) {
@@ -158,6 +186,18 @@ export function webhookInboundRoutes(deps: WebhookInboundDeps): Hono {
       return c.json({ ok: false, error: "Send text, attachments or a callback" }, 400);
     }
 
+    // Piped elsewhere: answer now, run the turn in the background (unless ?wait=1).
+    // Commands (/help, /agent, …) are answered here, so they always wait.
+    const isCommand = !!input.callback || (input.text ?? "").trimStart().startsWith("/");
+    const target = isCommand ? undefined : adapter.replyTarget(input);
+    if (target && query.get("wait") !== "1") {
+      void adapter.handle(input).catch((err) => {
+        console.error(`[polpo/webhook] "${name}" background turn failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+      if (query.get("format") === "text") return c.text(`Sent — the reply will arrive on ${target.channel}.`, 202);
+      return c.json({ ok: true, data: { status: "accepted", deliveredTo: target.channel } }, 202);
+    }
+
     const reply = await adapter.handle(input);
     const messages = reply?.messages ?? [];
     if (query.get("format") === "text") {
@@ -168,6 +208,7 @@ export function webhookInboundRoutes(deps: WebhookInboundDeps): Hono {
       data: {
         text: reply?.text ?? "",
         messages,
+        ...(reply?.deliveredTo ? { deliveredTo: reply.deliveredTo } : {}),
         ...(reply?.buttons ? { buttons: reply.buttons } : {}),
         ...(reply?.forceReply ? { forceReply: reply.forceReply } : {}),
         ...(reply?.files ? { files: await encodeFiles(reply.files) } : {}),

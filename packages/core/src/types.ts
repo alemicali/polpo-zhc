@@ -950,6 +950,21 @@ export interface ChannelGatewayConfig {
    * goes to that agent and /agent is disabled. Unset = orchestrator with /agent.
    */
   agent?: string;
+  /**
+   * Conversation pipe: deliver chat replies through another channel instead of this one
+   * (e.g. messages in from a webhook, replies out on Telegram). Unset = reply here.
+   */
+  replyTo?: ChannelReplyTarget;
+}
+
+/** Channel a conversation reply is delivered through. */
+export interface ChannelReplyTarget {
+  /** Channel name (key of notifications.channels). */
+  channel: string;
+  /** Chat on the target channel; default: the channel's chat ID, or its only paired person (Telegram). */
+  chatId?: string;
+  /** Show the incoming message on the target before the reply. Default: true. */
+  echoInbound?: boolean;
 }
 
 /** Session mapping strategy for inbound channel conversations. */

@@ -366,6 +366,11 @@ const ChannelGatewaySchema = z.object({
     sessionIdleMinutes: z.number().int().min(0).optional(),
   }).strict()).optional(),
   agent: z.string().min(1).optional(),
+  replyTo: z.object({
+    channel: z.string().min(1),
+    chatId: z.string().optional(),
+    echoInbound: z.boolean().optional(),
+  }).strict().optional(),
 }).strict();
 
 export const NotificationChannelConfigSchema = z.object({

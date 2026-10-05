@@ -10,6 +10,7 @@
 
 import type { InboundAttachment } from "./channels/telegram.js";
 import type { ChannelGateway, ChannelOutboundFile, ReplyButton } from "./channel-gateway.js";
+import type { ChannelReplyTarget } from "../core/types.js";
 
 export interface WebhookInboundMessage {
   /** Caller identity (e.g. "alessio-iphone"); one peer, with its own sessions, per sender. */
@@ -22,13 +23,17 @@ export interface WebhookInboundMessage {
   attachments?: InboundAttachment[];
   /** Button press from a previous reply, e.g. "agent:health-coach". */
   callback?: string;
+  /** Deliver the reply through another channel ("origin" = answer in the HTTP response). */
+  replyTo?: ChannelReplyTarget | "origin";
 }
 
 export interface WebhookReply {
   /** Every message of the turn, oldest first (partial responses, then the final reply). */
   messages: string[];
-  /** The final reply. */
+  /** The final reply ("" when it was delivered through another channel). */
   text: string;
+  /** Channel the reply was delivered through, when not this one. */
+  deliveredTo?: string;
   buttons?: ReplyButton[][];
   forceReply?: { placeholder?: string };
   files?: ChannelOutboundFile[];
@@ -55,6 +60,11 @@ export class WebhookGatewayAdapter {
     });
   }
 
+  /** Channel the chat reply of this request goes to, or undefined when it comes back in the response. */
+  replyTarget(input: Pick<WebhookInboundMessage, "replyTo">): ChannelReplyTarget | undefined {
+    return this.gateway.replyTargetFor(input);
+  }
+
   /** Route one inbound request; undefined when the gateway ignores it (inbound off, policy disabled). */
   async handle(input: WebhookInboundMessage): Promise<WebhookReply | undefined> {
     const externalId = normalizeWebhookSender(input.sender) ?? DEFAULT_WEBHOOK_SENDER;
@@ -77,11 +87,13 @@ export class WebhookGatewayAdapter {
         text: input.text ?? "",
         messageId: input.messageId,
         attachments: input.attachments,
+        replyTo: input.replyTo,
       });
       if (!reply) return undefined;
       return {
         messages: [...partials, reply.text].filter(m => m.trim()),
         text: reply.text,
+        ...(reply.deliveredTo ? { deliveredTo: reply.deliveredTo } : {}),
         ...(reply.buttons ? { buttons: reply.buttons } : {}),
         ...(reply.forceReply ? { forceReply: reply.forceReply } : {}),
         ...(reply.files?.length ? { files: reply.files } : {}),

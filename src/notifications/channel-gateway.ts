@@ -13,6 +13,8 @@
  *   - Slash commands (/tasks, /status, /missions, /approve, /new, /agent, /polpo)
  *   - Free-text chat to the orchestrator, or to a single agent via the chat runner
  *   - Approval inline buttons (preserves existing TelegramCallbackPoller behavior)
+ *   - Reply routing ("conversation pipe"): chat replies can leave from another channel
+ *     (gateway.replyTo or per message), e.g. in from a webhook, out on Telegram
  *   - Presence tracking
  *
  * Architecture:
@@ -31,6 +33,7 @@ import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type {
   ChannelGatewayConfig,
+  ChannelReplyTarget,
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
@@ -63,6 +66,8 @@ interface InboundMessage {
   messageId?: string;
   /** Media downloaded from the channel (photos, documents, voice notes, …). */
   attachments?: InboundAttachment[];
+  /** Where the chat reply goes: "origin" forces this channel; unset = gateway.replyTo, else origin. */
+  replyTo?: ChannelReplyTarget | "origin";
 }
 
 interface CommandResult {
@@ -82,7 +87,18 @@ export interface GatewayReply {
   forceReply?: { placeholder?: string };
   /** Files to deliver after the text (channels send them as documents). */
   files?: ChannelOutboundFile[];
+  /** Set when the reply was delivered through another channel (nothing to send here). */
+  deliveredTo?: string;
 }
+
+/** What a reply router delivers to the target channel of a conversation pipe. */
+export type ReplyRouteEvent =
+  | { kind: "echo"; text: string; from: string; via: ChannelType }
+  | { kind: "partial"; text: string }
+  | { kind: "reply"; reply: GatewayReply };
+
+/** Delivers pipe events through another channel; provided by the host (orchestrator). */
+export type ReplyRouter = (target: ChannelReplyTarget, event: ReplyRouteEvent) => Promise<void>;
 
 /** An agent suggestion exposed as a channel command. */
 export interface SuggestionCommand {
@@ -216,6 +232,8 @@ export class ChannelGateway {
   private invites = new Map<string, ChannelInvite>(); // token → invite (in-memory, short-lived)
   private pendingSuggestion = new Map<string, SuggestionCommand>(); // chatId → suggestion awaiting its placeholder
   private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
+  private replyRouter?: ReplyRouter;
+  private partialOverride = new Map<string, (text: string) => Promise<void>>(); // chatId → routed partials
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -232,6 +250,17 @@ export class ChannelGateway {
     try {
       (this.orchestrator as any).emit("log", { level, message: `[gateway] ${message}` });
     } catch { /* emitter may not be available */ }
+  }
+
+  /** Route chat replies through other channels (gateway.replyTo / InboundMessage.replyTo). */
+  setReplyRouter(router: ReplyRouter): void {
+    this.replyRouter = router;
+  }
+
+  /** Target of the chat reply for this message, or undefined to answer on the origin channel. */
+  replyTargetFor(msg: Pick<InboundMessage, "replyTo">): ChannelReplyTarget | undefined {
+    if (msg.replyTo === "origin" || !this.replyRouter) return undefined;
+    return msg.replyTo ?? this.gatewayConfig.replyTo;
   }
 
   /** Set a callback to send partial responses as separate messages (e.g. Telegram messages). */
@@ -750,7 +779,35 @@ export class ChannelGateway {
 
   // ── Chat handler (free-text → orchestrator completions) ───────────
 
+  /**
+   * Chat turn, answered on the origin channel or piped to another one: the inbound
+   * message is echoed there first (unless echoInbound is false), then partials and reply.
+   */
   private async handleChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+    const target = this.replyTargetFor(msg);
+    if (!target || !this.replyRouter) return this.runChat(msg, peerId);
+    const route = this.replyRouter;
+    const deliver = (event: ReplyRouteEvent) => route(target, event).catch(err => {
+      this.log("warn", `Reply route to "${target.channel}" failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+    if (target.echoInbound !== false) {
+      const files = (msg.attachments ?? []).map(a => `[${a.filename}]`).join(" ");
+      await deliver({ kind: "echo", text: [msg.text.trim(), files].filter(Boolean).join(" "), from: msg.displayName ?? msg.externalId, via: msg.channel });
+    }
+    this.partialOverride.set(msg.chatId, text => deliver({ kind: "partial", text }));
+    let reply: string | GatewayReply | undefined;
+    try {
+      reply = await this.runChat(msg, peerId);
+    } finally {
+      this.partialOverride.delete(msg.chatId);
+    }
+    const out = typeof reply === "string" ? { text: reply } : reply;
+    if (out) await deliver({ kind: "reply", reply: out });
+    return { text: "", deliveredTo: target.channel };
+  }
+
+  private async runChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
     try {
       const agent = await this.getActiveAgent(peerId);
       const attachments = msg.attachments ?? [];
@@ -841,8 +898,10 @@ export class ChannelGateway {
         }
 
         // There are tool calls — send partial text as a separate message if present
-        if (turnText.trim() && this.onPartialResponse) {
-          await this.onPartialResponse(msg.chatId, turnText);
+        const partial = this.partialOverride.get(msg.chatId)
+          ?? (this.onPartialResponse ? (text: string) => this.onPartialResponse!(msg.chatId, text) : undefined);
+        if (turnText.trim() && partial) {
+          await partial(turnText);
           sentPartials = true;
           // Don't add to finalText since it was already sent
         } else {
