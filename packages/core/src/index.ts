@@ -189,7 +189,7 @@ export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
 
 // ── Sandboxes and storage mounts ────────────────────────────────────────
 export {
-  resolveSandbox, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+  resolveSandbox, normalizeSandboxSettings, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
 } from "./sandbox.js";
 export type {
   Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProvider, SandboxNetwork,

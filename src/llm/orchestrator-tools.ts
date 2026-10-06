@@ -5215,7 +5215,7 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
   }
 }
 
-function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const command = args.command as string;
   const cwdArg = args.cwd as string | undefined;
   const cwd = cwdArg ? resolveFilePath(polpo, cwdArg) : polpo.getAgentWorkDir();
@@ -5228,21 +5228,14 @@ function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): str
     }
   }
 
+  // Polpo's commands run in its chat sandbox (never with the server's environment)
   try {
-    const result = execSync(command, {
-      cwd,
-      encoding: "utf-8",
-      timeout: 30000,
-      maxBuffer: 1024 * 1024, // 1MB
-    });
-    return result.trim() || "(command completed with no output)";
+    const result = await polpo.chatShell().execute(command, { cwd, timeout: 30_000 });
+    const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim().slice(0, 1024 * 1024);
+    if (result.exitCode !== 0) return `Error: exit code ${result.exitCode}\n${output}`.trim();
+    return output || "(command completed with no output)";
   } catch (err: unknown) {
-    const e = err as { status?: number; stdout?: string; stderr?: string; message?: string };
-    const parts: string[] = [];
-    if (e.stdout) parts.push(e.stdout.trim());
-    if (e.stderr) parts.push(e.stderr.trim());
-    if (parts.length === 0) parts.push(e.message ?? "Command failed");
-    return `Exit code ${e.status ?? 1}:\n${parts.join("\n")}`;
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 

@@ -173,14 +173,14 @@ export function resolveSandbox(
       else denied.push({ level, field: "provider", requested: s.provider, applied: provider });
     }
     if (s.network) {
-      const stricter = NETWORK_STRICTNESS[s.network.mode] > NETWORK_STRICTNESS[network.mode];
-      const sameModeSubset = s.network.mode === "allowlist" && network.mode === "allowlist"
-        && (s.network.allow ?? []).every((d) => domainAllowed(d, network.allow ?? []));
-      const subsetOfOpen = s.network.mode === "allowlist" && network.mode === "open";
-      if (stricter || sameModeSubset || subsetOfOpen || s.network.mode === network.mode && s.network.mode !== "allowlist") {
-        network = s.network.mode === "allowlist" && network.mode === "allowlist"
-          ? { mode: "allowlist", allow: (s.network.allow ?? []).filter((d) => domainAllowed(d, network.allow ?? [])) }
-          : s.network;
+      if (s.network.mode === "allowlist" && (network.mode === "allowlist" || network.mode === "open")) {
+        // An allowlist below an allowlist keeps only the domains the upper level allows.
+        const requested = s.network.allow ?? [];
+        const kept = network.mode === "open" ? requested : requested.filter((d) => domainAllowed(d, network.allow ?? []));
+        if (kept.length < requested.length) denied.push({ level, field: "network", requested: s.network, applied: { mode: "allowlist", allow: kept } });
+        network = { mode: "allowlist", allow: kept };
+      } else if (NETWORK_STRICTNESS[s.network.mode] >= NETWORK_STRICTNESS[network.mode]) {
+        network = s.network;
       } else denied.push({ level, field: "network", requested: s.network, applied: network });
     }
     for (const key of ["cpus", "memoryMb", "diskMb", "timeoutMin"] as const) {
@@ -245,4 +245,37 @@ export interface StorageMountSpec {
 /** What a workspace asks the storage feature: the mounts this agent may see. */
 export interface StorageMountProvider {
   mountsFor(agentName: string | undefined, target: "host" | "remote"): Promise<StorageMountSpec[]>;
+}
+
+/** Keep only well-formed sandbox settings (unknown keys and wrong types are dropped). */
+export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, any>;
+  const providers: SandboxProvider[] = ["local", "bwrap", "docker", "daytona", "e2b"];
+  const isProvider = (v: unknown): v is SandboxProvider => typeof v === "string" && (providers as string[]).includes(v);
+  const out: SandboxSettings = {};
+  if (isProvider(r.provider)) out.provider = r.provider;
+  if (Array.isArray(r.allowedProviders)) {
+    const list = r.allowedProviders.filter(isProvider);
+    if (list.length) out.allowedProviders = list;
+  }
+  if (r.network && typeof r.network === "object" && ["deny", "allowlist", "open"].includes(r.network.mode)) {
+    out.network = { mode: r.network.mode };
+    if (Array.isArray(r.network.allow)) out.network.allow = r.network.allow.filter((d: unknown) => typeof d === "string" && d.trim()).map((d: string) => d.trim());
+  }
+  if (r.resources && typeof r.resources === "object") {
+    const res: Record<string, number> = {};
+    for (const key of ["cpus", "memoryMb", "diskMb", "timeoutMin"]) {
+      if (typeof r.resources[key] === "number" && r.resources[key] > 0) res[key] = r.resources[key];
+    }
+    if (Object.keys(res).length) out.resources = res;
+  }
+  if (typeof r.allowLocal === "boolean") out.allowLocal = r.allowLocal;
+  if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
+  if (r.providers && typeof r.providers === "object") {
+    const opts: SandboxSettings["providers"] = {};
+    for (const p of providers) if (r.providers[p] && typeof r.providers[p] === "object") opts[p] = r.providers[p];
+    if (Object.keys(opts).length) out.providers = opts;
+  }
+  return Object.keys(out).length ? out : undefined;
 }

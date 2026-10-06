@@ -99,6 +99,9 @@ import type { Spawner } from "./spawner.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
+import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
+import { normalizeSandboxSettings, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
+import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -226,6 +229,79 @@ export class Orchestrator extends TypedEmitter {
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
   /** Where chat sessions keep their compaction checkpoint (database when configured, files otherwise). */
+  // ── Sandboxes for chats (Polpo and agents): one workspace per interlocutor, closed when idle ──
+
+  private storageMountProvider?: StorageMountProvider;
+  private chatWorkspaces = new Map<string, { workspace: Promise<Workspace>; timer?: ReturnType<typeof setTimeout> }>();
+
+  /** The storage feature registers what each agent may mount. */
+  setStorageMountProvider(provider: StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
+
+  /**
+   * The shell an interlocutor's chat commands run in (agent tools in chat, Polpo's run_command).
+   * Polpo talks with people on messaging channels, so it counts as reading external content:
+   * it gets at least bubblewrap unless the instance allows local explicitly.
+   */
+  chatShell(agent?: AgentConfig): Shell {
+    const key = agent?.name ?? "polpo";
+    const orchestrator = this;
+    const idleMs = (normalizeSandboxSettings(this.config?.settings?.sandbox)?.chatIdleMinutes ?? 30) * 60_000;
+    const acquire = (): Promise<Workspace> => {
+      const existing = this.chatWorkspaces.get(key);
+      const entry = existing ?? { workspace: this.openChatWorkspace(agent) };
+      if (!existing) this.chatWorkspaces.set(key, entry);
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => void orchestrator.closeChatWorkspace(key, "idle"), idleMs);
+      entry.timer.unref?.();
+      entry.workspace.catch(() => this.chatWorkspaces.delete(key));
+      return entry.workspace;
+    };
+    return {
+      async execute(command, options = {}) {
+        const workspace = await acquire();
+        return new WorkspaceShell(workspace).execute(command, options);
+      },
+    };
+  }
+
+  private async openChatWorkspace(agent?: AgentConfig): Promise<Workspace> {
+    const settings = this.config?.settings;
+    const instanceSandbox = normalizeSandboxSettings(settings?.sandbox);
+    const sandbox = effectiveSandbox({
+      scope: "chat",
+      cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
+      // Polpo reads messages from people on channels: treat it like an agent reading external content
+      agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
+    });
+    const mounts = (await this.storageMountProvider?.mountsFor(agent?.name, "host").catch(() => [])) ?? [];
+    const root = this.getAgentWorkDir();
+    try {
+      const workspace = createWorkspace(sandbox, {
+        root,
+        readable: [join(this.polpoDir, "tmp", "tool-output")],
+        mounts: mounts.filter((m) => m.hostPath),
+      });
+      this.emit("sandbox:created", {
+        workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName: agent?.name ?? "polpo", network: sandbox.network.mode,
+      });
+      return workspace;
+    } catch (error) {
+      this.emit("sandbox:failed", { provider: sandbox.provider, scope: "chat", error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  private async closeChatWorkspace(key: string, reason: "idle" | "shutdown"): Promise<void> {
+    const entry = this.chatWorkspaces.get(key);
+    if (!entry) return;
+    this.chatWorkspaces.delete(key);
+    if (entry.timer) clearTimeout(entry.timer);
+    const workspace = await entry.workspace.catch(() => undefined);
+    if (!workspace) return;
+    await workspace.dispose().catch(() => undefined);
+    this.emit("sandbox:destroyed", { workspaceId: workspace.id, provider: workspace.provider, durationMs: 0, reason });
+  }
+
   getContextCheckpointStore(): ContextCheckpointStore {
     this.contextCheckpointStore ??= databaseStoresFor(this.polpoDir)?.contextCheckpointStore ?? new FileContextCheckpointStore(this.polpoDir);
     return this.contextCheckpointStore;
@@ -659,6 +735,8 @@ export class Orchestrator extends TypedEmitter {
       runStore: this.runStore,
       taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
+      sandboxProviders: () => availableProviders(),
+      storageMounts: (agentName, target) => this.storageMountProvider?.mountsFor(agentName, target) ?? Promise.resolve([]),
       logStore: this.logStore,
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
@@ -1467,6 +1545,7 @@ export class Orchestrator extends TypedEmitter {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
+    for (const key of [...this.chatWorkspaces.keys()]) await this.closeChatWorkspace(key, "shutdown");
     const activeRuns = await this.runStore.getActiveRuns();
     this.emit("orchestrator:stopping", { activeRuns: activeRuns.length });
 

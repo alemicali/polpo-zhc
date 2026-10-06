@@ -358,6 +358,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         whatsappSendMedia,
         whatsappMarkRead,
         polpoDir,
+        // commands (bash, grep, glob) run in this agent's chat sandbox
+        shell: o.chatShell(agentConfig),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -596,6 +598,28 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const payload = await response.json().catch(() => null) as any;
     if (!response.ok) throw new Error(payload?.error?.message ?? `Compaction failed (${response.status})`);
     return payload?.data?.compaction ?? null;
+  });
+
+  // Sandbox status for the UI: what this machine can run, and the resolved defaults
+  authed.get("/sandbox", async (c) => {
+    const { availableProviders, effectiveSandbox } = await import("../sandbox/manager.js");
+    const { normalizeSandboxSettings } = await import("@polpo-ai/core/sandbox");
+    const instance = normalizeSandboxSettings(o.getConfig()?.settings?.sandbox);
+    const agents = await o.getAgents();
+    return c.json({ ok: true, data: {
+      available: [...availableProviders()],
+      settings: instance ?? null,
+      polpo: effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : ["http_fetch"] }),
+      agents: agents.map((agent) => {
+        const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
+        return {
+          name: agent.name,
+          settings: cascade.agent ?? null,
+          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }),
+          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }),
+        };
+      }),
+    } });
   });
 
   authed.route("/counts", countsRoutes(() => ({

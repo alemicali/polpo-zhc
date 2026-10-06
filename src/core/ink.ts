@@ -40,6 +40,8 @@ export function stripInkMetadata(agent: AgentConfig): AgentConfig {
   delete (clean as any).version;
   delete (clean as any).author;
   delete (clean as any).tags;
+  // Where an agent's tools run is decided by whoever installs it, never by a template
+  delete (clean as any).sandbox;
   return clean;
 }
 

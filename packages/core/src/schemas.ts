@@ -207,6 +207,8 @@ const missionTaskSchema = z.object({
   }).optional(),
   notifications: z.any().optional(),
   sideEffects: z.boolean().optional(),
+  /** Sandbox for this task's runs: may only tighten what the mission/agent allow. */
+  sandbox: z.any().optional(),
 });
 
 // ── Mission Document Schema ─────────────────────────────────────────
@@ -218,6 +220,8 @@ export const missionDocumentSchema = z.object({
   checkpoints: z.array(missionCheckpointSchema).optional(),
   delays: z.array(missionDelaySchema).optional(),
   notifications: z.any().optional(),
+  /** Sandbox for the mission's runs: may only tighten what the agents allow. */
+  sandbox: z.any().optional(),
 }).superRefine((doc, ctx) => {
   // Enforce unique task titles within a mission document
   const seen = new Set<string>();

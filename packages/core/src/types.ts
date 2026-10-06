@@ -351,6 +351,8 @@ export interface AgentConfig {
   reasoning?: ReasoningLevel;
   /** Context compaction for this agent's runs and chats (overrides `settings.compaction`). */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Where this agent's tools run (sandbox), set by a person: overrides the instance default. */
+  sandbox?: import("./sandbox.js").SandboxSettings;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -672,6 +674,10 @@ export interface RunnerConfig {
   reasoning?: ReasoningLevel;
   /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /** The sandbox this run uses, already resolved from the cascade by the orchestrator. */
+  sandbox?: import("./sandbox.js").EffectiveSandbox;
+  /** Storage mounts for this run (host paths for local sandboxes, remote specs for remote ones). */
+  mounts?: import("./sandbox.js").StorageMountSpec[];
   /** WhatsApp message DB path (for whatsapp_* agent tools). */
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
@@ -870,6 +876,8 @@ export interface PolpoSettings {
   logRetentionDays?: number;
   /** How long conversations and task runs are compacted when they fill the model's window. */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Where agents' tools run: default sandbox and what lower levels may choose. */
+  sandbox?: import("./sandbox.js").SandboxSettings;
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */

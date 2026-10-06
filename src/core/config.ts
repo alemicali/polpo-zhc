@@ -1,3 +1,4 @@
+import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
@@ -388,6 +389,8 @@ function parseSettings(raw: any): PolpoSettings {
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
   const compaction = normalizeCompactionSettings(raw?.compaction);
   if (compaction) settings.compaction = compaction;
+  const sandbox = normalizeSandboxSettings(raw?.sandbox);
+  if (sandbox) settings.sandbox = sandbox;
 
   // Extended settings: notifications, approval gates, escalation, SLA, scheduling, quality
   if (raw?.approvalGates) settings.approvalGates = raw.approvalGates;
