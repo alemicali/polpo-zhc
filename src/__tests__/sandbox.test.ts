@@ -256,6 +256,15 @@ describe("Polpo's tools", () => {
     expect(polpo.agents[0].sandbox).toEqual({ allowLocal: true });
   });
 
+  test("the update_agent schema Polpo receives has the sandbox parameter", async () => {
+    const { ALL_ORCHESTRATOR_TOOLS } = await import("../llm/orchestrator-tools.js");
+    const updateAgent = ALL_ORCHESTRATOR_TOOLS.find((t) => t.name === "update_agent") as any;
+    expect(Object.keys(updateAgent.parameters.properties)).toContain("sandbox");
+    expect(Object.keys(updateAgent.parameters.properties.sandbox.properties)).toEqual(expect.arrayContaining(["provider", "network", "resources", "inherit"]));
+    expect(updateAgent.parameters.properties.sandbox.properties.allowLocal).toBeUndefined();
+    expect(ALL_ORCHESTRATOR_TOOLS.some((t) => t.name === "sandbox_status")).toBe(true);
+  });
+
   test("sandbox_status explains where commands run", async () => {
     const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
     const out = await executeOrchestratorTool("sandbox_status", {}, fakePolpo({ name: "web", allowedTools: ["http_fetch"] }));

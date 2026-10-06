@@ -792,6 +792,20 @@ const removeAgentTool: Tool = {
   }),
 };
 
+/** An agent's sandbox, as Polpo may set it. "Without isolation" (allowLocal) stays a person's choice in the UI. */
+const agentSandboxParam = Type.Optional(Type.Object({
+  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker/daytona/e2b fall back to bwrap until available." })),
+  network: Type.Optional(Type.Object({
+    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny")]),
+    allow: Type.Optional(Type.Array(Type.String(), { description: "Domains for allowlist mode; *.example.com also covers example.com" })),
+  })),
+  resources: Type.Optional(Type.Object({
+    memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
+  }, { description: "Upper limits per command" })),
+  allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
+  inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
+}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
+
 const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team. Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
@@ -815,22 +829,9 @@ const updateAgentTool: Tool = {
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
+    sandbox: agentSandboxParam,
   }),
 };
-
-/** An agent's sandbox, as Polpo may set it. "Without isolation" (allowLocal) stays a person's choice in the UI. */
-const agentSandboxParam = Type.Optional(Type.Object({
-  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker/daytona/e2b fall back to bwrap until available." })),
-  network: Type.Optional(Type.Object({
-    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny")]),
-    allow: Type.Optional(Type.Array(Type.String(), { description: "Domains for allowlist mode; *.example.com also covers example.com" })),
-  })),
-  resources: Type.Optional(Type.Object({
-    memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
-  }, { description: "Upper limits per command" })),
-  allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
-  inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
-}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 
 const sandboxStatusTool: Tool = {
   name: "sandbox_status",
