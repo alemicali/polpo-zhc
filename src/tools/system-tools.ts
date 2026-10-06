@@ -13,7 +13,8 @@ import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, isPathAllowed } from "./path-sandbox.js";
+import { offloadToolOutput, offloadHint, resolveToolOutputDir, saveToolOutput } from "./tool-output.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
@@ -23,6 +24,8 @@ import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
+/** Per-result cap for `read` (chars). The file is already on disk, so nothing is saved: the result says where to continue. */
+const MAX_READ_CHARS = 30_000;
 
 // === Read Tool ===
 
@@ -47,6 +50,9 @@ function createReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
       const limit = params.limit ?? MAX_READ_LINES;
       const lines = allLines.slice(offset, offset + limit);
       const numbered = lines.map((l, i) => `${offset + i + 1}\t${l}`).join("\n");
+      if (numbered.length > MAX_READ_CHARS) {
+        return capReadResult(filePath, lines, offset, allLines.length);
+      }
       const truncated = allLines.length > offset + limit;
       const suffix = truncated ? `\n... (${allLines.length - offset - limit} more lines)` : "";
       return {
@@ -54,6 +60,38 @@ function createReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
         details: { path: filePath, lines: lines.length, total: allLines.length },
       };
     },
+  };
+}
+
+/**
+ * `read` result above MAX_READ_CHARS: keep whole lines up to the cap and tell
+ * the agent the exact offset to continue from. A single line longer than the
+ * cap is cut (its remainder is reachable with grep or bash).
+ */
+function capReadResult(filePath: string, lines: string[], offset: number, total: number) {
+  let acc = "";
+  let shown = 0;
+  for (const l of lines) {
+    const entry = `${offset + shown + 1}\t${l}`;
+    const sep = acc ? "\n" : "";
+    if (acc.length + sep.length + entry.length > MAX_READ_CHARS) {
+      if (shown === 0) {
+        acc = `${entry.slice(0, MAX_READ_CHARS)}… [line ${offset + 1} truncated: ${l.length} chars; inspect it with grep or bash]`;
+        shown = 1;
+      }
+      break;
+    }
+    acc += sep + entry;
+    shown++;
+  }
+  const lastLine = offset + shown;
+  const remaining = total - lastLine;
+  const footer = remaining > 0
+    ? `\n... (output capped at ${MAX_READ_CHARS} chars: showing lines ${offset + 1}-${lastLine} of ${total}. Continue with offset=${lastLine + 1} and a smaller limit, or search with grep)`
+    : `\n... (output capped at ${MAX_READ_CHARS} chars: showing lines ${offset + 1}-${lastLine} of ${total})`;
+  return {
+    content: [{ type: "text" as const, text: acc + footer }],
+    details: { path: filePath, lines: shown, total, capped: true },
   };
 }
 
@@ -131,7 +169,7 @@ const BashSchema = Type.Object({
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 120000)" })),
 });
 
-function createBashTool(cwd: string, shell: Shell): AgentTool<typeof BashSchema> {
+function createBashTool(cwd: string, shell: Shell, toolOutputDir: string): AgentTool<typeof BashSchema> {
   return {
     name: "bash",
     label: "Execute Shell",
@@ -141,13 +179,15 @@ function createBashTool(cwd: string, shell: Shell): AgentTool<typeof BashSchema>
       const timeout = params.timeout ?? 120_000;
       try {
         const result = await shell.execute(params.command, { cwd, timeout });
-        let output = result.stdout + (result.stderr ? "\n" + result.stderr : "");
-        if (output.length > MAX_OUTPUT_BYTES) {
-          output = output.slice(-MAX_OUTPUT_BYTES) + "\n[truncated to last 30KB]";
-        }
+        const output = result.stdout + (result.stderr ? "\n" + result.stderr : "");
+        // Above the limit: the full output goes to a private file, the model gets
+        // head + tail (the tail weighs more: errors and summaries come last).
+        const off = await offloadToolOutput(output, { tool: "bash", dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3 });
         return {
-          content: [{ type: "text", text: `Exit code: ${result.exitCode}\n${output}` }],
-          details: { command: params.command, exitCode: result.exitCode },
+          content: [{ type: "text", text: `Exit code: ${result.exitCode}\n${off.text}` }],
+          details: off.offloaded
+            ? { command: params.command, exitCode: result.exitCode, outputPath: off.path, outputBytes: off.totalBytes, outputLines: off.totalLines }
+            : { command: params.command, exitCode: result.exitCode },
         };
       } catch (err: any) {
         return {
@@ -224,7 +264,7 @@ const GREP_MAX_LINES = 100;
 const GREP_MAX_LINE_CHARS = 240;
 const GREP_MAX_TOTAL_CHARS = 8_000;
 
-function createGrepTool(cwd: string, sandbox: string[], shell: Shell): AgentTool<typeof GrepSchema> {
+function createGrepTool(cwd: string, sandbox: string[], shell: Shell, toolOutputDir: string): AgentTool<typeof GrepSchema> {
   return {
     name: "grep",
     label: "Search Code",
@@ -266,9 +306,19 @@ function createGrepTool(cwd: string, sandbox: string[], shell: Shell): AgentTool
           included++;
         }
         const wasTruncated = included < totalCount;
-        const text = wasTruncated
+        let text = wasTruncated
           ? `${acc}\n… ${totalCount - included} more match${totalCount - included === 1 ? "" : "es"} truncated; refine pattern or narrow path/include.`
           : acc;
+        // Omitted matches are saved in full (untruncated lines) so they stay
+        // reachable. Not when searching the offload dir itself: that would just
+        // copy an already saved file.
+        let outputPath: string | undefined;
+        if (wasTruncated && !isPathAllowed(searchPath, [toolOutputDir])) {
+          try {
+            outputPath = await saveToolOutput(raw + "\n", "grep", toolOutputDir);
+            text += `\n${offloadHint(outputPath)}`;
+          } catch { /* keep the plain truncated result */ }
+        }
         return {
           content: [{ type: "text", text }],
           details: {
@@ -276,6 +326,7 @@ function createGrepTool(cwd: string, sandbox: string[], shell: Shell): AgentTool
             count: totalCount,
             shown: included,
             truncated: wasTruncated,
+            ...(outputPath ? { outputPath } : {}),
           },
         };
       } catch {
@@ -361,6 +412,15 @@ type SystemToolName = "read" | "write" | "edit" | "bash" | "glob" | "grep" | "ls
 
 const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob", "grep", "ls"];
 
+export interface SystemToolsOptions {
+  /** Where large outputs are offloaded (default: resolveToolOutputDir({ outputDir, polpoDir, agentName })). */
+  toolOutputDir?: string;
+  /** Polpo directory, used for the default offload dir when there is no outputDir. */
+  polpoDir?: string;
+  /** Agent name, used for the default per-agent offload dir. */
+  agentName?: string;
+}
+
 /**
  * Create the standard set of coding tools scoped to a working directory.
  * If allowedTools is provided, only those tools are included.
@@ -371,20 +431,28 @@ const ALL_TOOL_NAMES: SystemToolName[] = ["read", "write", "edit", "bash", "glob
  * - register_outcome
  * - http_fetch, http_download
  * - vault_get, vault_list (when vault is provided)
+ *
+ * Large outputs (bash, grep, http_fetch) are offloaded to `options.toolOutputDir`
+ * (default `<outputDir>/tool-output/`), which read/grep/glob/ls can always read.
  */
-export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
+export function createSystemTools(cwd: string, allowedTools?: string[], allowedPaths?: string[], outputDir?: string, vault?: ResolvedVault, fs?: FileSystem, shell?: Shell, options: SystemToolsOptions = {}): AgentTool<any>[] {
   const _fs = fs ?? new NodeFileSystem();
   const _shell = shell ?? new NodeShell();
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const toolOutputDir = options.toolOutputDir
+    ?? resolveToolOutputDir({ outputDir, polpoDir: options.polpoDir, agentName: options.agentName });
+  // Offloaded outputs must be readable by read/grep/glob/ls even when the
+  // offload dir sits outside the sandbox (read-only: write/edit are unchanged).
+  const readSandbox = isPathAllowed(toolOutputDir, sandbox) ? sandbox : [...sandbox, toolOutputDir];
 
   const factories: Record<SystemToolName, () => AgentTool<any>> = {
-    read: () => createReadTool(cwd, sandbox, _fs),
+    read: () => createReadTool(cwd, readSandbox, _fs),
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
-    bash: () => createBashTool(cwd, _shell),
-    glob: () => createGlobTool(cwd, sandbox, _shell),
-    grep: () => createGrepTool(cwd, sandbox, _shell),
-    ls: () => createLsTool(cwd, sandbox, _fs),
+    bash: () => createBashTool(cwd, _shell, toolOutputDir),
+    glob: () => createGlobTool(cwd, readSandbox, _shell),
+    grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir),
+    ls: () => createLsTool(cwd, readSandbox, _fs),
   };
 
   const names = allowedTools
@@ -397,7 +465,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
   tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir));
 
   // http_fetch + http_download are always included — core tools with SSRF protection
-  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools));
+  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir));
 
   // vault_get + vault_list are always included — core tools for credential access
   if (vault) {
@@ -511,8 +579,10 @@ export interface CreateAllToolsOptions {
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function (for whatsapp_read markRead). */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
-  /** Polpo directory (.polpo/) for Ink tools. */
+  /** Polpo directory (.polpo/) for Ink tools and the default offload dir of large tool outputs. */
   polpoDir?: string;
+  /** Agent name — scopes the offload dir of large tool outputs when there is no outputDir (default: browserSession). */
+  agentName?: string;
   /** FileSystem implementation (default: NodeFileSystem). */
   fs?: FileSystem;
   /** Shell implementation (default: NodeShell). */
@@ -546,7 +616,13 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     allowedTools?.some(a => names.some(n => n === a.toLowerCase()));
 
   // Core coding tools (always included unless filtered out) — includes vault_get/vault_list
-  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell));
+  // Large outputs: <outputDir>/tool-output/ for task runs, else <polpoDir>/tmp/tool-output/<agent>/.
+  const toolOutputDir = resolveToolOutputDir({
+    outputDir: options.outputDir,
+    polpoDir: options.polpoDir,
+    agentName: options.agentName ?? browserSession,
+  });
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir }));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {
@@ -555,12 +631,12 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir));
   }
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
