@@ -118,7 +118,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "",
       "Si imposta a cascata: **istanza → agente → missione → task**. Istanza e agente li decidi tu (Impostazioni → Sandbox, scheda Sandbox dell'agente); missioni e task possono solo **restringere**. Una richiesta più larga viene ignorata e compare in **Events**.",
       "",
-      "Gli agenti che leggono contenuti esterni (web, email, messaggi) girano almeno in bubblewrap, a meno che tu non lo consenta esplicitamente.",
+      "La sandbox è **opzionale**: di base i comandi girano sulla macchina come prima. Con l'interruttore **Isola gli agenti che leggono contenuti esterni** (Impostazioni → Sandbox), Polpo e gli agenti con strumenti web, email o messaggi girano almeno in bubblewrap, salvo eccezioni che decidi tu agente per agente.",
       "",
       "Le sandbox remote (Daytona, poi E2B) per i task arrivano nei prossimi passi.",
     ].join("\n"),

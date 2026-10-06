@@ -96,8 +96,13 @@ export interface SandboxSettings {
   network?: SandboxNetwork;
   resources?: SandboxResources;
   /**
-   * Agent level only, set by a person: allow "local" even though the agent reads external
-   * content (web, email, messaging). Without it such agents get at least "bwrap".
+   * Instance level, opt-in: agents that read external content (web, email, messaging, or no
+   * tool list) and Polpo itself run at least in "bwrap", even when the default is "local".
+   */
+  confineExternalContent?: boolean;
+  /**
+   * Set by a person, only meaningful with confineExternalContent: on an agent, let it run on
+   * "local" anyway; on the instance, the same for Polpo.
    */
   allowLocal?: boolean;
   /** Chat workspaces close after this idle time (instance level). */
@@ -194,8 +199,8 @@ export function resolveSandbox(
     }
   }
 
-  // Agents that read other people's content never run unconfined, unless a person said so.
-  if (provider === "local" && readsExternalContent(context.agentTools) && !agent.allowLocal) {
+  // Opt-in: agents that read other people's content never run unconfined, unless a person said so.
+  if (provider === "local" && instance.confineExternalContent && readsExternalContent(context.agentTools) && !agent.allowLocal) {
     provider = "bwrap";
   }
   // Chats stay on this machine: a remote provider falls back to the best local isolation.
@@ -273,6 +278,7 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
     if (Object.keys(res).length) out.resources = res;
   }
   if (typeof r.allowLocal === "boolean") out.allowLocal = r.allowLocal;
+  if (typeof r.confineExternalContent === "boolean") out.confineExternalContent = r.confineExternalContent;
   if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
   if (r.providers && typeof r.providers === "object") {
     const opts: SandboxSettings["providers"] = {};

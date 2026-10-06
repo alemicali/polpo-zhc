@@ -81,9 +81,11 @@ export interface SandboxEditorProps {
   available: SandboxProvider[];
   /** Agent level: the agent has tools that read external content (web, email, messages). */
   readsExternalContent?: boolean;
+  /** Agent level: the instance isolates agents that read external content. */
+  confineExternal?: boolean;
 }
 
-export function SandboxEditor({ level, value, onChange, available, readsExternalContent }: SandboxEditorProps) {
+export function SandboxEditor({ level, value, onChange, available, readsExternalContent, confineExternal }: SandboxEditorProps) {
   const set = (patch: Partial<SandboxSettings>) => onChange({ ...value, ...patch });
   const resources = value.resources ?? {};
   const setResource = (key: keyof NonNullable<SandboxSettings["resources"]>, n?: number) =>
@@ -105,7 +107,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
           <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={INHERIT} className="text-xs">
-              {inheritable ? "Inherit from instance" : "This machine (default)"}
+              {inheritable ? "Inherit from instance" : "This machine, no isolation (default)"}
             </SelectItem>
             {SANDBOX_PROVIDERS.map((p) => (
               <SelectItem key={p.id} value={p.id} className="text-xs" disabled={!available.includes(p.id) && p.id !== value.provider}>
@@ -188,13 +190,27 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
         </Field>
       )}
 
-      <div className="space-y-1.5">
-        <Toggle
-          checked={!!value.allowLocal}
-          onChange={(next) => set({ allowLocal: next || undefined })}
-          label={level === "instance" ? "Let Polpo run commands without isolation" : "Allow running without isolation"}
-        />
-        {(level === "instance" || readsExternalContent) && (
+      {level === "instance" && (
+        <div className="space-y-1.5">
+          <Toggle
+            checked={!!value.confineExternalContent}
+            onChange={(next) => set({ confineExternalContent: next || undefined, allowLocal: next ? value.allowLocal : undefined })}
+            label="Isolate agents that read external content"
+          />
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            Off: the sandbox applies only where you set it (here, on an agent, in a mission). On: Polpo and agents with web,
+            email, messaging or search tools (or no tool list) run at least in bubblewrap, even when the default is this machine.
+          </p>
+        </div>
+      )}
+
+      {(level === "instance" ? !!value.confineExternalContent : (!!confineExternal && !!readsExternalContent) || !!value.allowLocal) && (
+        <div className="space-y-1.5">
+          <Toggle
+            checked={!!value.allowLocal}
+            onChange={(next) => set({ allowLocal: next || undefined })}
+            label={level === "instance" ? "Let Polpo run commands without isolation" : "Allow running without isolation"}
+          />
           <p className={cn(
             "flex items-start gap-1.5 text-[10px] leading-tight",
             value.allowLocal ? "text-amber-500" : "text-muted-foreground",
@@ -202,11 +218,11 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
             <AlertTriangle className="h-3 w-3 mt-px shrink-0" />
             {level === "instance"
               ? "Polpo reads messages from people and channels. Without isolation, a message crafted to look like an instruction could make it run commands with access to this server's keys and data."
-              : "This agent reads content from outside (web, email or messages). It runs at least in bubblewrap unless you allow this."}
+              : "This agent reads content from outside (web, email or messages). It runs at least in bubblewrap unless you allow this — for example when it needs git push or the gh login."}
           </p>
-        )}
-        {value.allowLocal && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">unconfined</Badge>}
-      </div>
+          {value.allowLocal && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">unconfined</Badge>}
+        </div>
+      )}
     </div>
   );
 }

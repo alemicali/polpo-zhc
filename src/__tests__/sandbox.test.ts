@@ -36,10 +36,14 @@ describe("sandbox cascade", () => {
     expect(readsExternalContent(["email_*"])).toBe(true);
     expect(readsExternalContent(undefined)).toBe(true); // no list: core tools include http_fetch
     expect(readsExternalContent([])).toBe(false);
-    const confined = resolveSandbox({ instance: { provider: "local" } }, { scope: "task", agentTools: ["http_fetch"], available: all });
+    // opt-in: without the instance switch everything stays where it is configured (default: this machine)
+    expect(resolveSandbox({}, { scope: "task", agentTools: ["http_fetch"], available: all }).provider).toBe("local");
+    expect(resolveSandbox({}, { scope: "task", agentTools: undefined, available: all }).provider).toBe("local");
+    const confined = resolveSandbox({ instance: { provider: "local", confineExternalContent: true } }, { scope: "task", agentTools: ["http_fetch"], available: all });
     expect(confined.provider).toBe("bwrap");
-    const allowed = resolveSandbox({ instance: { provider: "local" }, agent: { allowLocal: true } }, { scope: "task", agentTools: ["http_fetch"], available: all });
+    const allowed = resolveSandbox({ instance: { confineExternalContent: true }, agent: { allowLocal: true } }, { scope: "task", agentTools: ["http_fetch"], available: all });
     expect(allowed.provider).toBe("local");
+    expect(resolveSandbox({ instance: { confineExternalContent: true } }, { scope: "task", agentTools: ["read", "bash"], available: all }).provider).toBe("local");
   });
 
   test("chats stay on this machine; unavailable providers fall back to stronger local isolation", () => {

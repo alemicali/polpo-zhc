@@ -14,6 +14,7 @@ export interface SandboxSettings {
   allowedProviders?: SandboxProvider[];
   network?: { mode: SandboxNetworkMode; allow?: string[] };
   resources?: { cpus?: number; memoryMb?: number; diskMb?: number; timeoutMin?: number };
+  confineExternalContent?: boolean;
   allowLocal?: boolean;
   chatIdleMinutes?: number;
 }
@@ -100,6 +101,7 @@ export function compactSandbox(s: SandboxSettings): SandboxSettings {
   const resources = Object.fromEntries(Object.entries(s.resources ?? {}).filter(([, v]) => typeof v === "number" && v > 0));
   if (Object.keys(resources).length) out.resources = resources;
   if (s.allowLocal) out.allowLocal = true;
+  if (s.confineExternalContent) out.confineExternalContent = true;
   if (s.chatIdleMinutes && s.chatIdleMinutes > 0) out.chatIdleMinutes = s.chatIdleMinutes;
   return out;
 }
