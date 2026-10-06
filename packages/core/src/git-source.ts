@@ -23,7 +23,7 @@ export class InvalidSourceError extends Error {
   constructor(input: string, reason?: string) {
     super(
       `Invalid source "${truncate(input)}"${reason ? ` (${reason})` : ""}. ` +
-      `Expected owner/repo, https://github.com/owner/repo, or a local path starting with "/", "./" or "../".`,
+      `Expected owner/repo, https://github.com/owner/repo, or a local path (absolute, "./" or "../").`,
     );
     this.name = "InvalidSourceError";
   }
@@ -91,9 +91,14 @@ export function parseGitHubSource(input: string): { url: string; ownerRepo: stri
   return fromOwnerRepo(segments[0], segments[1]);
 }
 
-/** True when the input looks like an explicit local path. */
+/** True when the input looks like an explicit local path (POSIX or Windows: /x, ./x, ../x, ., .\x, C:\x, UNC paths). */
 export function isLocalSourcePath(input: string): boolean {
-  return input === "." || input.startsWith("/") || input.startsWith("./") || input.startsWith("../");
+  return (
+    input.startsWith("/") ||
+    input.startsWith("\\") ||
+    /^\.{1,2}(?:[\\/]|$)/.test(input) ||
+    /^[A-Za-z]:[\\/]/.test(input)
+  );
 }
 
 /**

@@ -308,3 +308,9 @@ describe("skill frontmatter (local skills)", () => {
     }
   });
 });
+
+describe("Windows local paths", () => {
+  it.each(["C:\\registry", "C:/registry", ".\\registry", "..\\registry", "\\\\server\\share\\registry"])("treats %s as local", (p) => {
+    expect(parseGitSource(p).type).toBe("local");
+  });
+});
