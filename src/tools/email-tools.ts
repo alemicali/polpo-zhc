@@ -22,6 +22,7 @@ import { resolve, basename, join, dirname } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
 import type { ResolvedVault } from "../vault/index.js";
 
 // ─── Tool: email_send ───
@@ -597,7 +598,10 @@ const EmailReadSchema = Type.Object({
   download_attachments: Type.Optional(Type.Boolean({ description: "Download all attachments to the output directory (default: false). Use email_download_attachment for selective download." })),
 });
 
-function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?: string[]): AgentTool<typeof EmailReadSchema> {
+/** email_read bodies above this are saved in full to a file; the model gets head + tail + path. */
+const MAX_EMAIL_BODY_CHARS = 10_000;
+
+function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?: string[], toolOutputDir: string = resolveToolOutputDir({ outputDir })): AgentTool<typeof EmailReadSchema> {
   return {
     name: "email_read",
     label: "Read Email",
@@ -628,13 +632,16 @@ function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?
 
         // Extract text body from source
         let bodyText = "";
+        let bodyOutputPath: string | undefined;
         if (msg.source) {
           const source = msg.source.toString("utf-8");
           const headerEnd = source.indexOf("\r\n\r\n");
           if (headerEnd >= 0) {
             bodyText = source.slice(headerEnd + 4);
-            if (bodyText.length > 10000) {
-              bodyText = bodyText.slice(0, 10000) + "\n... (truncated)";
+            if (bodyText.length > MAX_EMAIL_BODY_CHARS) {
+              const off = await offloadToolOutput(bodyText, { tool: "email_read", dir: toolOutputDir, maxChars: MAX_EMAIL_BODY_CHARS });
+              bodyText = off.text;
+              bodyOutputPath = off.path;
             }
           }
         }
@@ -696,6 +703,7 @@ function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?
             subject: env?.subject,
             attachments: attachments.map(a => ({ part: a.part, filename: a.filename, mimeType: a.mimeType, size: a.size })),
             downloadedFiles: downloadedFiles.length > 0 ? downloadedFiles : undefined,
+            ...(bodyOutputPath ? { outputPath: bodyOutputPath } : {}),
           },
         };
       } finally {
@@ -982,8 +990,9 @@ export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft
  * @param vault - Resolved vault credentials (per-agent SMTP/IMAP)
  * @param emailAllowedDomains - Allowed recipient email domains (omit for unrestricted)
  * @param outputDir - Per-task output directory for downloaded attachments
+ * @param toolOutputDir - Where email bodies above 10,000 chars are saved in full (default: resolveToolOutputDir({ outputDir }))
  */
-export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[], outputDir?: string): AgentTool<any>[] {
+export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[], outputDir?: string, toolOutputDir?: string): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
@@ -991,7 +1000,7 @@ export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTo
     email_draft: () => createEmailDraftTool(cwd, sandbox, vault, emailAllowedDomains),
     email_verify: () => createEmailVerifyTool(vault),
     email_list: () => createEmailListTool(vault),
-    email_read: () => createEmailReadTool(vault, outputDir, sandbox),
+    email_read: () => createEmailReadTool(vault, outputDir, sandbox, toolOutputDir ?? resolveToolOutputDir({ outputDir })),
     email_search: () => createEmailSearchTool(vault),
     email_count: () => createEmailCountTool(vault),
     email_download_attachment: () => createEmailDownloadAttachmentTool(vault, cwd, outputDir, sandbox),
