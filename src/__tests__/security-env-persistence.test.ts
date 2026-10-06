@@ -7,7 +7,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { persistToEnvFile, removeFromEnvFile, copyEnvEntries } from "../setup/env-persistence.js";
+import {
+  persistToEnvFile, removeFromEnvFile, moveEnvEntries, takeApiWrittenEnvKeys,
+} from "../setup/env-persistence.js";
 import { providerRoutes } from "../server/routes/providers.js";
 
 let tmp: string;
@@ -61,11 +63,12 @@ describe("persistToEnvFile", () => {
     expect(envFile()).toBe("OPENAI_API_KEY_2=b\n");
   });
 
-  it("copyEnvEntries copies only the requested keys", () => {
+  it("moveEnvEntries moves only the requested keys and removes them from the source", () => {
     writeFileSync(join(polpoDir, ".env"), "OPENAI_API_KEY=sk-1\nOTHER=x\n");
     const dest = join(tmp, "other", ".polpo");
-    expect(copyEnvEntries(polpoDir, dest, ["OPENAI_API_KEY"])).toEqual(["OPENAI_API_KEY"]);
+    expect(moveEnvEntries(polpoDir, dest, ["OPENAI_API_KEY"])).toEqual(["OPENAI_API_KEY"]);
     expect(readFileSync(join(dest, ".env"), "utf-8")).toBe("OPENAI_API_KEY=sk-1\n");
+    expect(envFile()).toBe("OTHER=x\n");
   });
 });
 
@@ -90,6 +93,22 @@ describe("provider API-key routes", () => {
     expect(res.status).toBe(200);
     expect(envFile()).toContain("OPENAI_API_KEY=sk-test-123");
     expect(existsSync(join(attackerDir, ".polpo", ".env"))).toBe(false);
+    // Recorded so setup can move exactly this key to the chosen project.
+    expect(takeApiWrittenEnvKeys(polpoDir)).toEqual(["OPENAI_API_KEY"]);
+  });
+
+  it("setup flow: a key saved via the API is moved (not copied) to the initialized project", async () => {
+    writeFileSync(join(polpoDir, ".env"), "PRE_EXISTING=keep\n");
+    const app = providerRoutes(polpoDir);
+    await app.request("/openai/api-key", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "sk-setup-1" }),
+    });
+    const target = join(tmp, "chosen", ".polpo");
+    moveEnvEntries(polpoDir, target, takeApiWrittenEnvKeys(polpoDir));
+    expect(readFileSync(join(target, ".env"), "utf-8")).toBe("OPENAI_API_KEY=sk-setup-1\n");
+    expect(envFile()).toBe("PRE_EXISTING=keep\n");
   });
 
   it("rejects API keys with newlines (env line injection)", async () => {

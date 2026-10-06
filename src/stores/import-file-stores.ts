@@ -50,6 +50,10 @@ const IMPORTERS: Record<string, (ctx: ImportContext) => Promise<number>> = {
     if ((await ctx.db.select().from(ctx.schema.vault).limit(1)).length > 0) return 0;
     const { EncryptedVaultStore } = await import("../vault/encrypted-store.js");
     const entries = new EncryptedVaultStore(ctx.polpoDir).exportAll(); // throws if it cannot decrypt
+    // Migrates every entry verbatim, including "$"-prefixed system namespaces
+    // ("$data", "$providers"): vault.enc is written only by Polpo itself, and
+    // dropping those owners here would lose data-source/provider secrets.
+    // Reserved owners are blocked at the user/agent-facing boundaries instead.
     for (const { agent, service, entry } of entries) await ctx.stores.vaultStore.set(agent, service, entry);
     return entries.length;
   },

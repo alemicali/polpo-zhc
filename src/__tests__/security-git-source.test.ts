@@ -6,7 +6,7 @@
  * - git is invoked with an argument array (execFileSync, no shell), so even
  *   a local path containing shell syntax is passed verbatim.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -312,5 +312,62 @@ describe("skill frontmatter (local skills)", () => {
 describe("Windows local paths", () => {
   it.each(["C:\\registry", "C:/registry", ".\\registry", "..\\registry", "\\\\server\\share\\registry"])("treats %s as local", (p) => {
     expect(parseGitSource(p).type).toBe("local");
+  });
+});
+
+describe("orchestrator grep_files robustness", () => {
+  it("keeps matches when grep exits 2 (unreadable file) and skips node_modules/.git", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "polpo-grep-"));
+    try {
+      writeFileSync(join(tmp, "a.ts"), "needle here\n");
+      mkdirSync(join(tmp, "node_modules", "x"), { recursive: true });
+      writeFileSync(join(tmp, "node_modules", "x", "b.ts"), "needle in deps\n");
+      mkdirSync(join(tmp, ".git"), { recursive: true });
+      writeFileSync(join(tmp, ".git", "c.ts"), "needle in git\n");
+      const locked = join(tmp, "locked.ts");
+      writeFileSync(locked, "needle locked\n");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(locked, 0o000);
+      const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+      const polpo = { getAgentWorkDir: () => tmp, getPolpoDir: () => join(tmp, ".polpo") } as any;
+      const out = await executeOrchestratorTool("grep_files", { pattern: "needle" }, polpo);
+      chmodSync(locked, 0o600);
+      expect(out).toContain("a.ts");
+      expect(out).not.toContain("node_modules");
+      expect(out).not.toContain(".git");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("caps output at 100 lines", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "polpo-grep-cap-"));
+    try {
+      writeFileSync(join(tmp, "big.ts"), Array.from({ length: 500 }, (_, i) => `needle ${i}`).join("\n"));
+      const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+      const polpo = { getAgentWorkDir: () => tmp, getPolpoDir: () => join(tmp, ".polpo") } as any;
+      const out = await executeOrchestratorTool("grep_files", { pattern: "needle" }, polpo);
+      expect(out.split("\n")).toHaveLength(100);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("skills index keys", () => {
+  it.each(["__proto__", "constructor", "prototype"])("PUT /skills/%s/index is rejected", async (name) => {
+    const { skillRoutes } = await import("@polpo-ai/server");
+    const fs = { exists: async () => false, readFile: async () => "{}", writeFile: vi.fn(async () => {}) } as any;
+    const app = skillRoutes(() => ({ polpoDir: "/tmp/none/.polpo", fs, getAgents: async () => [] }));
+    const res = await app.request(`/${name}/index`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tags: ["x"] }),
+    });
+    expect(res.status).toBe(400);
+    expect(fs.writeFile).not.toHaveBeenCalled();
+
+    const { isSafeSkillName } = await import("../llm/skills.js");
+    expect(isSafeSkillName(name)).toBe(false);
   });
 });

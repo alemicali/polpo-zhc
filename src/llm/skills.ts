@@ -254,6 +254,7 @@ export function saveSkillIndex(polpoDir: string, index: SkillIndex): void {
  * Merges with existing entry (tags/category are replaced individually).
  */
 export function updateSkillIndex(polpoDir: string, skillName: string, entry: SkillIndexEntry): void {
+  assertSafeSkillName(skillName);
   const index = loadSkillIndex(polpoDir) ?? {};
   index[skillName] = { ...index[skillName], ...entry };
   // Remove empty fields
@@ -268,6 +269,7 @@ export function updateSkillIndex(polpoDir: string, skillName: string, entry: Ski
  * Remove a skill's entry from the skills index.
  */
 export function removeSkillFromIndex(polpoDir: string, skillName: string): void {
+  if (!isSafeSkillName(skillName)) return;
   const index = loadSkillIndex(polpoDir);
   if (!index || !index[skillName]) return;
   delete index[skillName];
@@ -424,8 +426,12 @@ export function parseSkillSource(input: string): ParsedSource {
 /** Skill names become directory names: no separators, no traversal. */
 const SAFE_SKILL_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
+/** Names that would hit Object.prototype when used as keys (skills-index.json). */
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 export function isSafeSkillName(name: unknown): name is string {
-  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".." && name.length <= 128;
+  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".."
+    && name.length <= 128 && !RESERVED_OBJECT_KEYS.has(name);
 }
 
 function assertSafeSkillName(name: unknown): asserts name is string {

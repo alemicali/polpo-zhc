@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 
 /** Valid env var names: letters, digits, underscore; not starting with a digit. */
@@ -79,25 +79,51 @@ export function removeFromEnvFile(polpoDir: string, envVar: string): void {
 }
 
 /**
- * Copy the given keys from one .polpo/.env to another (upsert, values are
- * re-validated). Used when setup picks a project directory other than the
- * one the server started in: keys saved during setup follow the project.
- * Returns the keys copied.
+ * Keys written to a project's .env through the API (provider key routes),
+ * per resolved .polpo dir. Used by setup: when the wizard initializes a
+ * different project directory, exactly these keys are moved there.
  */
-export function copyEnvEntries(fromPolpoDir: string, toPolpoDir: string, keys: Iterable<string>): string[] {
+const apiWrittenKeys = new Map<string, Set<string>>();
+
+export function recordApiWrittenEnvKey(polpoDir: string, key: string): void {
+  const dir = resolve(polpoDir);
+  if (!apiWrittenKeys.has(dir)) apiWrittenKeys.set(dir, new Set());
+  apiWrittenKeys.get(dir)!.add(key);
+}
+
+export function forgetApiWrittenEnvKey(polpoDir: string, key: string): void {
+  apiWrittenKeys.get(resolve(polpoDir))?.delete(key);
+}
+
+/** Return and clear the keys recorded for `polpoDir`. */
+export function takeApiWrittenEnvKeys(polpoDir: string): string[] {
+  const dir = resolve(polpoDir);
+  const keys = [...(apiWrittenKeys.get(dir) ?? [])];
+  apiWrittenKeys.delete(dir);
+  return keys;
+}
+
+/**
+ * Move the given keys from one .polpo/.env to another: upsert into the
+ * destination (values re-validated), then remove them from the source so
+ * secrets saved during setup don't linger in the starting directory.
+ * Returns the keys moved.
+ */
+export function moveEnvEntries(fromPolpoDir: string, toPolpoDir: string, keys: Iterable<string>): string[] {
   const fromPath = join(fromPolpoDir, ".env");
   if (!existsSync(fromPath)) return [];
   const wanted = new Set(keys);
-  const copied: string[] = [];
+  const moved: string[] = [];
   for (const line of readFileSync(fromPath, "utf-8").split("\n")) {
     const key = lineKey(line);
-    if (!key || !wanted.has(key) || copied.includes(key)) continue;
+    if (!key || !wanted.has(key) || moved.includes(key)) continue;
     const trimmed = line.trim();
     const value = trimmed.slice(trimmed.indexOf("=") + 1).trim();
     try {
       persistToEnvFile(toPolpoDir, key, value);
-      copied.push(key);
+      moved.push(key);
     } catch { /* skip invalid entries */ }
   }
-  return copied;
+  for (const key of moved) removeFromEnvFile(fromPolpoDir, key);
+  return moved;
 }

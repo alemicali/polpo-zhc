@@ -18,6 +18,13 @@ import { buildSkillFrontmatter } from "@polpo-ai/core";
 
 /** Skill names become directory names: no separators, no traversal. */
 const SAFE_SKILL_NAME_RE = /^[A-Za-z0-9._-]+$/;
+/** Names that would hit Object.prototype when used as keys (skills-index.json). */
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isSafeSkillName(name: unknown): name is string {
+  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".."
+    && name.length <= 128 && !RESERVED_OBJECT_KEYS.has(name);
+}
 // Dynamic import to work around workspace version resolution.
 // At publish time, @polpo-ai/core@^0.3.5 will be resolved correctly.
 // @ts-ignore — resolved at publish time with @polpo-ai/core@^0.3.5
@@ -153,7 +160,14 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const name = c.req.param("name");
-      const body = await c.req.json();
+      if (!isSafeSkillName(name)) {
+        return c.json({ ok: false, error: "Invalid skill name" }, 400);
+      }
+      const raw = await c.req.json();
+      const body: { tags?: string[]; category?: string } = {
+        ...(Array.isArray(raw?.tags) ? { tags: raw.tags.filter((t: unknown) => typeof t === "string") } : {}),
+        ...(typeof raw?.category === "string" ? { category: raw.category } : {}),
+      };
       const index = (await loadSkillIndex(fs, polpoDir)) ?? {};
       index[name] = { ...index[name], ...body };
       if (index[name].tags?.length === 0) delete index[name].tags;
@@ -190,7 +204,7 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const { name, description, content, allowedTools } = await c.req.json();
-      if (typeof name !== "string" || !SAFE_SKILL_NAME_RE.test(name) || name === "." || name === "..") {
+      if (!isSafeSkillName(name)) {
         return c.json({ ok: false, error: "Invalid skill name — use letters, numbers, \".\", \"_\" or \"-\"" }, 400);
       }
 
@@ -220,7 +234,7 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const name = c.req.param("name");
-      if (!SAFE_SKILL_NAME_RE.test(name) || name === "." || name === "..") {
+      if (!isSafeSkillName(name)) {
         return c.json({ ok: false, error: "Skill not found" }, 404);
       }
       const targetDir = join(polpoDir, "skills", name);
@@ -445,7 +459,7 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
 
         for (const skill of toInstall) {
           // Skill names come from the (untrusted) repo's SKILL.md frontmatter.
-          if (!SAFE_SKILL_NAME_RE.test(skill.name) || skill.name === "." || skill.name === "..") {
+          if (!isSafeSkillName(skill.name)) {
             errors.push(`${skill.name}: unsafe skill name — skipped`);
             continue;
           }

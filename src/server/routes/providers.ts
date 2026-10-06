@@ -6,6 +6,8 @@ import {
   persistToEnvFile,
   removeFromEnvFile,
   assertValidEnvEntry,
+  recordApiWrittenEnvKey,
+  forgetApiWrittenEnvKey,
   getOAuthProviderList,
   startOAuthLogin,
   type LoginDeviceCode,
@@ -523,6 +525,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
 
     const targetDir = resolvePolpoDir(polpoDir);
     persistToEnvFile(targetDir, envVar, apiKey);
+    recordApiWrittenEnvKey(targetDir, envVar);
     process.env[envVar] = apiKey;
 
     return c.json({ ok: true, data: { message: `${envVar} saved to .polpo/.env` } });
@@ -539,6 +542,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
     delete process.env[envVar];
     const targetDir = resolvePolpoDir(polpoDir);
     removeFromEnvFile(targetDir, envVar);
+    forgetApiWrittenEnvKey(targetDir, envVar);
 
     return c.json({ ok: true, data: { message: `${envVar} removed` } });
   });
@@ -556,6 +560,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
       delete process.env[envVar];
       const targetDir = resolvePolpoDir(polpoDir);
       removeFromEnvFile(targetDir, envVar);
+      forgetApiWrittenEnvKey(targetDir, envVar);
       actions.push("API key removed");
     }
 

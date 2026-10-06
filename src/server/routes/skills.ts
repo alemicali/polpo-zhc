@@ -622,6 +622,10 @@ export function skillRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ skill: z.string(), tags: z.array(z.string()).optional(), category: z.string().optional() }) }) } },
         description: "Index entry updated",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Invalid skill name",
+      },
     },
   });
 
@@ -630,10 +634,13 @@ export function skillRoutes(getDeps: () => {
     const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
     const body = c.req.valid("json");
+    if (!isSafeSkillName(name)) {
+      return c.json({ ok: false, error: "Invalid skill name" }, 400);
+    }
 
-    updateSkillIndex(polpoDir, name, body);
+    updateSkillIndex(polpoDir, name, { tags: body.tags, category: body.category });
     deps.emit("skill:changed", { scope: "agent", action: "indexed", skillName: name, timestamp: new Date().toISOString() });
-    return c.json({ ok: true, data: { skill: name, ...body } });
+    return c.json({ ok: true, data: { skill: name, ...body } }, 200);
   });
 
   return app;
