@@ -10,6 +10,14 @@
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { VaultEntry } from "@polpo-ai/core/types";
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
+
+/**
+ * Owners starting with "$" ("$data", "$providers", ...) are system namespaces
+ * written only by internal code. They are not addressable through this API,
+ * and cannot be granted access via allowedAgents.
+ */
+const RESERVED_OWNER_ERROR = 'Vault owners starting with "$" are reserved for system use';
 
 export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -55,6 +63,10 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
         },
         description: "Vault entry saved successfully",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Reserved vault owner",
+      },
       503: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
         description: "Vault store not available",
@@ -69,6 +81,9 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const body = c.req.valid("json");
+    if (isReservedVaultOwner(body.agent) || (body.allowedAgents ?? []).some(isReservedVaultOwner)) {
+      return c.json({ ok: false, error: RESERVED_OWNER_ERROR }, 400);
+    }
     // Defensive: owner can't list themselves in allowedAgents (it would
     // be a no-op anyway since the owner is always implicit).
     const allowedAgents = (body.allowedAgents ?? []).filter((n: string) => n && n !== body.agent);
@@ -127,6 +142,10 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
         },
         description: "Vault entries metadata for the agent",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Reserved vault owner",
+      },
       503: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
         description: "Vault store not available",
@@ -141,6 +160,9 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const { agent } = c.req.valid("param");
+    if (isReservedVaultOwner(agent)) {
+      return c.json({ ok: false, error: RESERVED_OWNER_ERROR }, 400);
+    }
     const entries = await vaultStore.list(agent);
     return c.json({ ok: true, data: entries }, 200);
   });
@@ -192,6 +214,10 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
         description: "Vault entry not found",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Reserved vault owner",
+      },
       503: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
         description: "Vault store not available",
@@ -206,12 +232,18 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const { agent, service } = c.req.valid("param");
+    if (isReservedVaultOwner(agent)) {
+      return c.json({ ok: false, error: RESERVED_OWNER_ERROR }, 400);
+    }
     const existing = await vaultStore.get(agent, service);
     if (!existing) {
       return c.json({ ok: false, error: `No vault entry "${service}" for agent "${agent}".` }, 404);
     }
 
     const body = c.req.valid("json");
+    if ((body.allowedAgents ?? []).some(isReservedVaultOwner)) {
+      return c.json({ ok: false, error: RESERVED_OWNER_ERROR }, 400);
+    }
     const allowedAgents = body.allowedAgents
       ? body.allowedAgents.filter((n: string) => n && n !== agent)
       : undefined;
@@ -252,6 +284,10 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ removed: z.boolean() }) }) } },
         description: "Result",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+        description: "Reserved vault owner",
+      },
       503: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
         description: "Vault store not available",
@@ -266,6 +302,9 @@ export function vaultRoutes(getDeps: () => { vaultStore?: any }): OpenAPIHono {
     }
 
     const { agent, service } = c.req.valid("param");
+    if (isReservedVaultOwner(agent)) {
+      return c.json({ ok: false, error: RESERVED_OWNER_ERROR }, 400);
+    }
     const removed = await vaultStore.remove(agent, service);
     return c.json({ ok: true, data: { removed } }, 200);
   });

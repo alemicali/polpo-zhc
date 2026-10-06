@@ -31,13 +31,14 @@
  *   2. AgentConfig.skills[] names resolved against the pool (soft/config-based)
  */
 
-import { resolve, basename, isAbsolute, join } from "node:path";
+import { resolve, basename, join } from "node:path";
 import {
   readFileSync, writeFileSync, readdirSync, existsSync, lstatSync, realpathSync,
-  mkdirSync, symlinkSync, rmSync, cpSync,
+  mkdirSync, symlinkSync, rmSync, cpSync, mkdtempSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { resolveSource, gitClone } from "../core/git-source.js";
+import { buildSkillFrontmatter } from "@polpo-ai/core";
 import { parse as parseYaml } from "yaml";
 import { getPolpoDir, getGlobalPolpoDir, POLPO_DIR_NAME } from "../core/constants.js";
 
@@ -253,6 +254,7 @@ export function saveSkillIndex(polpoDir: string, index: SkillIndex): void {
  * Merges with existing entry (tags/category are replaced individually).
  */
 export function updateSkillIndex(polpoDir: string, skillName: string, entry: SkillIndexEntry): void {
+  assertSafeSkillName(skillName);
   const index = loadSkillIndex(polpoDir) ?? {};
   index[skillName] = { ...index[skillName], ...entry };
   // Remove empty fields
@@ -267,6 +269,7 @@ export function updateSkillIndex(polpoDir: string, skillName: string, entry: Ski
  * Remove a skill's entry from the skills index.
  */
 export function removeSkillFromIndex(polpoDir: string, skillName: string): void {
+  if (!isSafeSkillName(skillName)) return;
   const index = loadSkillIndex(polpoDir);
   if (!index || !index[skillName]) return;
   delete index[skillName];
@@ -415,33 +418,26 @@ export interface ParsedSource {
 }
 
 export function parseSkillSource(input: string): ParsedSource {
-  // Local path (POSIX or Windows: /x, ./x, ../x, ., C:\x, .\x)
-  if (isAbsolute(input) || /^\.{1,2}(?:[\\/]|$)/.test(input) || /^[A-Za-z]:[\\/]/.test(input)) {
-    return { type: "local", url: resolve(input) };
-  }
+  // Strict: owner/repo, https GitHub URL or local path — anything else throws
+  // (the result is handed to `git clone`).
+  return resolveSource(input);
+}
 
-  // Full GitHub URL
-  const ghUrlMatch = input.match(/github\.com\/([^/]+\/[^/]+)/);
-  if (ghUrlMatch) {
-    const ownerRepo = ghUrlMatch[1].replace(/\.git$/, "");
-    return {
-      type: "github",
-      url: `https://github.com/${ownerRepo}.git`,
-      ownerRepo,
-    };
-  }
+/** Skill names become directory names: no separators, no traversal. */
+const SAFE_SKILL_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
-  // owner/repo shorthand
-  if (/^[^/]+\/[^/]+$/.test(input)) {
-    return {
-      type: "github",
-      url: `https://github.com/${input}.git`,
-      ownerRepo: input,
-    };
-  }
+/** Names that would hit Object.prototype when used as keys (skills-index.json). */
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-  // Assume it's a git URL
-  return { type: "github", url: input };
+export function isSafeSkillName(name: unknown): name is string {
+  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".."
+    && name.length <= 128 && !RESERVED_OBJECT_KEYS.has(name);
+}
+
+function assertSafeSkillName(name: unknown): asserts name is string {
+  if (!isSafeSkillName(name)) {
+    throw new Error(`Invalid skill name "${String(name)}" — use letters, numbers, ".", "_" or "-"`);
+  }
 }
 
 /**
@@ -571,7 +567,13 @@ export function installSkills(
   } = {},
 ): InstallResult {
   const result: InstallResult = { installed: [], skipped: [], errors: [] };
-  const parsed = parseSkillSource(source);
+  let parsed: ParsedSource;
+  try {
+    parsed = parseSkillSource(source);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
 
   let sourceDir: string;
   let clonedTmpDir: string | null = null;
@@ -586,13 +588,15 @@ export function installSkills(
   } else {
     // Clone to tmp
     try {
-      clonedTmpDir = join(tmpdir(), `polpo-skills-${Date.now()}`);
-      execSync(`git clone --depth 1 --quiet "${parsed.url}" "${clonedTmpDir}"`, {
-        stdio: "pipe",
-        timeout: 60_000,
-      });
-      sourceDir = clonedTmpDir;
+      // Unique, private (0700) temp dir — never a predictable /tmp path.
+      clonedTmpDir = mkdtempSync(join(tmpdir(), "polpo-skills-"));
+      const cloneDir = join(clonedTmpDir, "repo");
+      gitClone(parsed.url, cloneDir, { timeout: 60_000, quiet: true });
+      sourceDir = cloneDir;
     } catch (err) {
+      if (clonedTmpDir) {
+        try { rmSync(clonedTmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Failed to clone ${parsed.url}: ${msg}`);
       return result;
@@ -634,6 +638,10 @@ export function installSkills(
 
     // Install each skill
     for (const skill of toInstall) {
+      if (!isSafeSkillName(skill.name)) {
+        result.errors.push(`Skipped skill with unsafe name "${skill.name}"`);
+        continue;
+      }
       const targetDir = join(targetBase, skill.name);
 
       if (existsSync(targetDir) && !options.force) {
@@ -672,6 +680,7 @@ export function removeSkill(polpoDir: string, name: string, global = false): boo
   const targetBase = global
     ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
+  if (!isSafeSkillName(name)) return false;
   const targetDir = join(targetBase, name);
 
   if (!existsSync(targetDir)) return false;
@@ -694,17 +703,13 @@ export function createAgentSkill(
   const targetBase = options?.global
     ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
+  assertSafeSkillName(name);
   const targetDir = join(targetBase, name);
   mkdirSync(targetDir, { recursive: true });
 
-  const fmLines = [`---`, `name: ${name}`, `description: ${description}`];
-  if (options?.allowedTools?.length) {
-    fmLines.push(`allowed-tools:`);
-    for (const t of options.allowedTools) fmLines.push(`  - ${t}`);
-  }
-  fmLines.push(`---`, ``);
-
-  const skillMd = fmLines.join("\n") + content;
+  // Single-line frontmatter values: a newline in the description must not
+  // be able to inject keys such as allowed-tools.
+  const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
   writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
   return targetDir;
 }
@@ -836,7 +841,13 @@ export function installOrchestratorSkills(
   } = {},
 ): InstallResult {
   const result: InstallResult = { installed: [], skipped: [], errors: [] };
-  const parsed = parseSkillSource(source);
+  let parsed: ParsedSource;
+  try {
+    parsed = parseSkillSource(source);
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+    return result;
+  }
 
   let sourceDir: string;
   let clonedTmpDir: string | null = null;
@@ -849,13 +860,15 @@ export function installOrchestratorSkills(
     sourceDir = parsed.url;
   } else {
     try {
-      clonedTmpDir = join(tmpdir(), `polpo-orch-skills-${Date.now()}`);
-      execSync(`git clone --depth 1 --quiet "${parsed.url}" "${clonedTmpDir}"`, {
-        stdio: "pipe",
-        timeout: 60_000,
-      });
-      sourceDir = clonedTmpDir;
+      // Unique, private (0700) temp dir — never a predictable /tmp path.
+      clonedTmpDir = mkdtempSync(join(tmpdir(), "polpo-orch-skills-"));
+      const cloneDir = join(clonedTmpDir, "repo");
+      gitClone(parsed.url, cloneDir, { timeout: 60_000, quiet: true });
+      sourceDir = cloneDir;
     } catch (err) {
+      if (clonedTmpDir) {
+        try { rmSync(clonedTmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Failed to clone ${parsed.url}: ${msg}`);
       return result;
@@ -893,6 +906,10 @@ export function installOrchestratorSkills(
     mkdirSync(targetBase, { recursive: true });
 
     for (const skill of toInstall) {
+      if (!isSafeSkillName(skill.name)) {
+        result.errors.push(`Skipped skill with unsafe name "${skill.name}"`);
+        continue;
+      }
       const targetDir = join(targetBase, skill.name);
 
       if (existsSync(targetDir) && !options.force) {
@@ -928,6 +945,7 @@ export function removeOrchestratorSkill(polpoDir: string, name: string, global =
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
+  if (!isSafeSkillName(name)) return false;
   const targetDir = join(targetBase, name);
 
   if (!existsSync(targetDir)) return false;
@@ -949,17 +967,13 @@ export function createOrchestratorSkill(
   const targetBase = options?.global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
+  assertSafeSkillName(name);
   const targetDir = join(targetBase, name);
   mkdirSync(targetDir, { recursive: true });
 
-  const fmLines = [`---`, `name: ${name}`, `description: ${description}`];
-  if (options?.allowedTools?.length) {
-    fmLines.push(`allowed-tools:`);
-    for (const t of options.allowedTools) fmLines.push(`  - ${t}`);
-  }
-  fmLines.push(`---`, ``);
-
-  const skillMd = fmLines.join("\n") + content;
+  // Single-line frontmatter values: a newline in the description must not
+  // be able to inject keys such as allowed-tools.
+  const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
   writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
   return targetDir;
 }
@@ -977,6 +991,7 @@ export function updateOrchestratorSkill(
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
+  if (!isSafeSkillName(name)) return false;
   const skillFile = join(targetBase, name, "SKILL.md");
 
   if (!existsSync(skillFile)) return false;
@@ -989,13 +1004,6 @@ export function updateOrchestratorSkill(
   const newTools = updates.allowedTools ?? fm?.allowedTools;
   const newBody = updates.content ?? oldBody;
 
-  const fmLines = [`---`, `name: ${name}`, `description: ${newDesc}`];
-  if (newTools?.length) {
-    fmLines.push(`allowed-tools:`);
-    for (const t of newTools) fmLines.push(`  - ${t}`);
-  }
-  fmLines.push(`---`, ``);
-
-  writeFileSync(skillFile, fmLines.join("\n") + newBody, "utf-8");
+  writeFileSync(skillFile, buildSkillFrontmatter(name, newDesc, newTools) + newBody, "utf-8");
   return true;
 }

@@ -12,7 +12,6 @@ import chalk from "chalk";
 import { resolve, join } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import { existsSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import {
@@ -26,7 +25,10 @@ import {
   getInkLockEntry,
   uninstallInkPackages,
   stripInkMetadata,
+  mergeInkSettings,
+  mergeInkProviders,
 } from "../../core/ink.js";
+import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../../core/git-source.js";
 import type { InkPackage, InkLockEntry, InkLockPackage } from "../../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../../core/types.js";
@@ -45,17 +47,19 @@ function cloneOrPull(url: string, cacheKey: string, cacheDir: string): string {
   const repoDir = join(cacheDir, cacheKey);
   mkdirSync(cacheDir, { recursive: true });
 
+  // `url` comes from parseInkSource() (validated https GitHub URL); git runs
+  // without a shell so nothing in it can be interpreted as shell syntax.
   if (existsSync(repoDir)) {
     // Pull latest
     try {
-      execSync("git pull --ff-only", { cwd: repoDir, stdio: "pipe" });
+      gitPullFastForward(repoDir);
     } catch {
       // If pull fails (e.g. diverged), re-clone
       rmSync(repoDir, { recursive: true, force: true });
-      execSync(`git clone --depth 1 ${url} ${repoDir}`, { stdio: "pipe" });
+      gitClone(url, repoDir);
     }
   } else {
-    execSync(`git clone --depth 1 ${url} ${repoDir}`, { stdio: "pipe" });
+    gitClone(url, repoDir);
   }
 
   return repoDir;
@@ -64,7 +68,7 @@ function cloneOrPull(url: string, cacheKey: string, cacheDir: string): string {
 /** Get the current git commit hash for a repo directory. */
 function getCommitHash(repoDir: string): string {
   try {
-    return execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+    return gitHeadCommit(repoDir);
   } catch {
     return "unknown";
   }
@@ -106,6 +110,8 @@ export interface InstallResult {
   installed: string[];
   skipped: string[];
   merged: string[];
+  /** Security-relevant notices (skipped providers/settings) to show the user. */
+  warnings: string[];
 }
 
 /**
@@ -116,12 +122,13 @@ export interface InstallResult {
  * - Companies: full merge — teams/agents into stores, settings/providers into config,
  *   memory appended, skills copied, system-context appended
  */
-async function installPackages(
+export async function installPackages(
   packages: InkPackage[],
   polpoDir: string,
   interactive: boolean,
+  opts: { allowCustomProviders?: boolean } = {},
 ): Promise<InstallResult> {
-  const result: InstallResult = { installed: [], skipped: [], merged: [] };
+  const result: InstallResult = { installed: [], skipped: [], merged: [], warnings: [] };
 
   const { teamStore, agentStore } = await createCliStores(polpoDir);
 
@@ -188,22 +195,46 @@ async function installPackages(
         result.merged.push(...teamMergeResult.merged);
         result.skipped.push(...teamMergeResult.skipped);
 
-        // 2. Merge settings (only fill in missing settings, never overwrite)
+        // 2. Merge settings (only fill in missing, allowlisted settings — never
+        //    notifications, storage/databaseUrl, workDir, ...)
         if (companyContent.settings) {
-          mergeSettings(config, companyContent.settings);
-          configChanged = true;
+          if (!config.settings) config.settings = { maxRetries: 3, workDir: ".", logLevel: "normal" } as any;
+          const { applied, skipped } = mergeInkSettings(
+            config.settings as unknown as Record<string, unknown>,
+            companyContent.settings,
+            // orchestratorModel/imageModel can route orchestrator traffic to a
+            // package-declared provider: only with --allow-custom-providers.
+            { allowModelRouting: opts.allowCustomProviders === true },
+          );
+          if (applied.length > 0) configChanged = true;
+          if (skipped.length > 0) {
+            result.warnings.push(`${pkg.name}: ignored settings ${skipped.join(", ")} (not importable from packages)`);
+          }
         }
 
-        // 3. Merge providers (only add missing providers)
+        // 3. Providers: built-in providers are never touched (a package could
+        //    otherwise redirect e.g. anthropic.baseUrl and receive the user's
+        //    API key). Custom providers require --allow-custom-providers.
         if (companyContent.providers) {
-          if (!config.providers) config.providers = {};
-          for (const [name, providerConfig] of Object.entries(companyContent.providers)) {
-            if (!config.providers[name]) {
-              config.providers[name] = providerConfig;
-              result.installed.push(`provider: ${name}`);
+          const providers = (config.providers ?? {}) as Record<string, unknown>;
+          const decisions = await mergeInkProviders(providers, companyContent.providers, {
+            allowCustom: opts.allowCustomProviders,
+          });
+          for (const d of decisions) {
+            if (d.action === "added") {
+              result.installed.push(`provider: ${d.name}`);
+              configChanged = true;
+            } else if (d.reason !== "already configured") {
+              result.warnings.push(`${pkg.name}: provider "${d.name}" skipped — ${d.reason}`);
             }
           }
-          configChanged = true;
+          if (decisions.some((d) => d.action === "added")) config.providers = providers as any;
+          if (!opts.allowCustomProviders && decisions.some((d) => d.reason?.startsWith("custom providers"))) {
+            result.warnings.push(
+              `Review the package's providers and re-run with --allow-custom-providers to add custom (non built-in) providers. ` +
+              `That flag also imports the package's orchestratorModel/imageModel, which can route orchestrator traffic to the package's endpoint.`,
+            );
+          }
         }
 
         // 4. Append memory.md if present in package (via MemoryStore)
@@ -396,23 +427,6 @@ async function mergeCompanyTeamsViaStore(
 }
 
 /**
- * Merge settings from incoming company — only fill in missing values.
- */
-function mergeSettings(config: PolpoFileConfig, incoming: any): void {
-  if (!config.settings) {
-    config.settings = incoming;
-    return;
-  }
-  const settings = config.settings as unknown as Record<string, unknown>;
-  const inc = incoming as unknown as Record<string, unknown>;
-  for (const [key, value] of Object.entries(inc)) {
-    if (settings[key] == null && value != null) {
-      settings[key] = value;
-    }
-  }
-}
-
-/**
  * Append content to a file. Creates the file if it doesn't exist.
  */
 function appendFileContent(destPath: string, content: string, separator: string): void {
@@ -502,12 +516,23 @@ export function registerInkCommands(program: Command): void {
     .option("-y, --yes", "Skip confirmation prompts", false)
     .option("-n, --name <name>", "Install a specific package by name")
     .option("--list", "List available packages without installing", false)
-    .action(async (source: string, opts: { dir: string; yes: boolean; list: boolean; name?: string }) => {
+    .option(
+      "--allow-custom-providers",
+      "Also add custom (non built-in) providers declared by company packages, and their orchestratorModel/imageModel settings (this can route orchestrator traffic to the package's endpoint)",
+      false,
+    )
+    .action(async (source: string, opts: { dir: string; yes: boolean; list: boolean; name?: string; allowCustomProviders?: boolean }) => {
       const polpoDir = getPolpoDir(opts.dir);
       const cacheDir = getCacheDir(polpoDir);
 
-      // Parse source
-      const parsed = parseInkSource(source);
+      // Parse source (strict: owner/repo, https GitHub URL or local path)
+      let parsed: ReturnType<typeof parseInkSource>;
+      try {
+        parsed = parseInkSource(source);
+      } catch (err: any) {
+        console.error(chalk.red(`\n  ${err.message}\n`));
+        process.exit(1);
+      }
       const sourceLabel = parsed.ownerRepo ?? source;
 
       console.log(chalk.bold(`\n  Ink — adding from ${chalk.white(sourceLabel)}\n`));
@@ -530,7 +555,7 @@ export function registerInkCommands(program: Command): void {
       } else {
         console.log(chalk.dim(`  Cloning ${parsed.url}...`));
         try {
-          const cacheKey = sourceLabel.replace(/\//g, "--");
+          const cacheKey = sourceCacheKey(sourceLabel);
           registryDir = cloneOrPull(parsed.url, cacheKey, cacheDir);
           commitHash = getCommitHash(registryDir);
           console.log(chalk.dim(`  Cloned at ${commitHash.slice(0, 8)}`));
@@ -608,7 +633,9 @@ export function registerInkCommands(program: Command): void {
       // Install packages with merge
       console.log(chalk.bold(`  Installing...\n`));
 
-      const installResult = await installPackages(packages, polpoDir, !opts.yes);
+      const installResult = await installPackages(packages, polpoDir, !opts.yes, {
+        allowCustomProviders: opts.allowCustomProviders,
+      });
 
       for (const item of installResult.installed) {
         console.log(`  ${chalk.green("+")} ${item}`);
@@ -618,6 +645,9 @@ export function registerInkCommands(program: Command): void {
       }
       for (const item of installResult.skipped) {
         console.log(`  ${chalk.dim("-")} skipped ${item}`);
+      }
+      for (const w of installResult.warnings) {
+        console.log(chalk.yellow(`  ! ${w}`));
       }
 
       // Update lock file
@@ -702,7 +732,7 @@ export function registerInkCommands(program: Command): void {
 
       // Remove cached repo
       const cacheDir = getCacheDir(polpoDir);
-      const cacheKey = source.replace(/\//g, "--");
+      const cacheKey = sourceCacheKey(source);
       const cachedRepo = join(cacheDir, cacheKey);
       if (existsSync(cachedRepo)) {
         rmSync(cachedRepo, { recursive: true, force: true });
@@ -748,7 +778,13 @@ export function registerInkCommands(program: Command): void {
       let totalUpdated = 0;
 
       for (const reg of toUpdate) {
-        const parsed = parseInkSource(reg.source);
+        let parsed: ReturnType<typeof parseInkSource>;
+        try {
+          parsed = parseInkSource(reg.source);
+        } catch (err: any) {
+          console.error(chalk.red(`  ${reg.source}: ${err.message}`));
+          continue;
+        }
 
         if (parsed.type === "local") {
           console.log(chalk.dim(`  ${reg.source}: local source, re-scanning...`));
@@ -764,7 +800,7 @@ export function registerInkCommands(program: Command): void {
           newCommitHash = "local";
         } else {
           try {
-            const cacheKey = reg.source.replace(/\//g, "--");
+            const cacheKey = sourceCacheKey(reg.source);
             registryDir = cloneOrPull(parsed.url, cacheKey, cacheDir);
             newCommitHash = getCommitHash(registryDir);
           } catch (err: any) {
@@ -822,7 +858,10 @@ export function registerInkCommands(program: Command): void {
 
         // Uninstall old packages, install new ones
         await uninstallPackages(reg, polpoDir);
-        await installPackages(packages, polpoDir, !opts.yes);
+        const updateResult = await installPackages(packages, polpoDir, !opts.yes);
+        for (const w of updateResult.warnings) {
+          console.log(chalk.yellow(`    ! ${w}`));
+        }
 
         // Update lock
         const lockPackages: InkLockPackage[] = packages.map(p => ({

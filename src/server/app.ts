@@ -248,8 +248,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // here degrade gracefully: prompt is rendered without the section.
       let mailboxes: any[] | undefined;
       try {
-        const entries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
-        const { resolveAgentVault } = await import("../vault/index.js");
+        const { resolveAgentVault, loadAgentVaultEntries } = await import("../vault/index.js");
+        const entries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
         mailboxes = resolveAgentVault(entries).listMailboxes();
       } catch { /* ignore — keep prompt without mailboxes section */ }
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes);
@@ -271,7 +271,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
       const { join } = await import("node:path");
-      const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
+      // System vault namespaces ("$data", ...) are never exposed to an agent.
+      const { loadAgentVaultEntries } = await import("../vault/index.js");
+      const vaultEntries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       // Mirror del path task (src/adapters/engine.ts) — se l'agent dichiara
       // tool estesi (browser_*, email_*, image_*, video_*, audio_*, excel_*,

@@ -126,6 +126,11 @@ const api = async (path: string, init?: RequestInit) => {
 
 // ── Helpers ──
 
+/** Secrets come back from the API masked ("••••1234"); saving them unchanged keeps the stored value. */
+function isMaskedSecret(value?: string): boolean {
+  return !!value && value.includes("••••");
+}
+
 /** Extract provider name from a "provider:model" spec */
 function parseModelSpec(spec: string): { provider: string; model: string } {
   const idx = spec.indexOf(":");
@@ -578,6 +583,8 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
   };
   const url = channelName ? webhookInboundUrl(channelName) : "";
   const secret = config.inboundSecret ?? "";
+  // The server never returns stored secrets ("••••1234"); only a freshly generated one can be copied.
+  const secretHidden = isMaskedSecret(secret);
   const example = `curl -X POST '${url || "<url>"}' \\\n  -H 'Authorization: Bearer ${secret ? "<secret>" : "<generate a secret>"}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"sender":"my-iphone","text":"Hi!"}'`;
 
   return (
@@ -592,11 +599,13 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
           )}
         </div>
       </Field>
-      <Field label="Secret" hint="Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel.">
+      <Field label="Secret" hint={secretHidden
+        ? "Stored secret is hidden. Click New to generate (and copy) a replacement, then save."
+        : "Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel."}>
         <div className="flex gap-1.5">
           <Input className="h-8 text-xs font-mono" placeholder="Generate one" value={secret}
             onChange={(e) => onChange({ ...config, inboundSecret: e.target.value || undefined })} />
-          {secret && (
+          {secret && !secretHidden && (
             <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("secret", secret)}>
               <Copy className="h-3 w-3" /> {copied === "secret" ? "Copied" : "Copy"}
             </Button>
@@ -927,7 +936,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning ? channelName : undefined} />
+          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning || isMaskedSecret(config.botToken) ? channelName : undefined} />
           <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>

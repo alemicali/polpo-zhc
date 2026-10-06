@@ -2,6 +2,7 @@ export {
   resolveEnvVar,
   resolveVaultCredentials,
   resolveAgentVault,
+  loadAgentVaultEntries,
   type ResolvedVault,
   type SmtpCredentials,
   type ImapCredentials,

@@ -69,6 +69,9 @@ export function registerTeamCommands(program: Command): void {
           teamName = teams[0].name;
         }
 
+        if (name.trim().startsWith("$")) {
+          throw new Error(`Invalid agent name "${name}": names starting with "$" are reserved`);
+        }
         const agent: AgentConfig = { name };
         if (opts.model) agent.model = opts.model;
         if (opts.role) agent.role = opts.role;

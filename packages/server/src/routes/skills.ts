@@ -10,9 +10,21 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { resolve, join, basename } from "node:path";
+import { resolve, join, basename, posix } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
 import type { Shell } from "@polpo-ai/core";
+import { parseGitSource, shellQuote } from "@polpo-ai/core/git-source";
+import { buildSkillFrontmatter } from "@polpo-ai/core";
+
+/** Skill names become directory names: no separators, no traversal. */
+const SAFE_SKILL_NAME_RE = /^[A-Za-z0-9._-]+$/;
+/** Names that would hit Object.prototype when used as keys (skills-index.json). */
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isSafeSkillName(name: unknown): name is string {
+  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".."
+    && name.length <= 128 && !RESERVED_OBJECT_KEYS.has(name);
+}
 // Dynamic import to work around workspace version resolution.
 // At publish time, @polpo-ai/core@^0.3.5 will be resolved correctly.
 // @ts-ignore — resolved at publish time with @polpo-ai/core@^0.3.5
@@ -148,7 +160,14 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const name = c.req.param("name");
-      const body = await c.req.json();
+      if (!isSafeSkillName(name)) {
+        return c.json({ ok: false, error: "Invalid skill name" }, 400);
+      }
+      const raw = await c.req.json();
+      const body: { tags?: string[]; category?: string } = {
+        ...(Array.isArray(raw?.tags) ? { tags: raw.tags.filter((t: unknown) => typeof t === "string") } : {}),
+        ...(typeof raw?.category === "string" ? { category: raw.category } : {}),
+      };
       const index = (await loadSkillIndex(fs, polpoDir)) ?? {};
       index[name] = { ...index[name], ...body };
       if (index[name].tags?.length === 0) delete index[name].tags;
@@ -185,6 +204,9 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const { name, description, content, allowedTools } = await c.req.json();
+      if (!isSafeSkillName(name)) {
+        return c.json({ ok: false, error: "Invalid skill name — use letters, numbers, \".\", \"_\" or \"-\"" }, 400);
+      }
 
       const targetDir = join(polpoDir, "skills", name);
       if (await fs.exists(targetDir)) {
@@ -193,14 +215,8 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
 
       await fs.mkdir(targetDir);
 
-      const fmLines = [`---`, `name: ${name}`, `description: ${description}`];
-      if (allowedTools?.length) {
-        fmLines.push(`allowed-tools:`);
-        for (const t of allowedTools) fmLines.push(`  - ${t}`);
-      }
-      fmLines.push(`---`, ``);
-
-      await fs.writeFile(join(targetDir, "SKILL.md"), fmLines.join("\n") + content);
+      // Single-line frontmatter values (no newline injection of extra keys).
+      await fs.writeFile(join(targetDir, "SKILL.md"), buildSkillFrontmatter(name, description, allowedTools) + content);
       return c.json({ ok: true, data: { name, path: targetDir } });
     },
   );
@@ -218,6 +234,9 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
     async (c: any) => {
       const { fs, polpoDir } = getDeps();
       const name = c.req.param("name");
+      if (!isSafeSkillName(name)) {
+        return c.json({ ok: false, error: "Skill not found" }, 404);
+      }
       const targetDir = join(polpoDir, "skills", name);
       if (!(await fs.exists(targetDir))) {
         return c.json({ ok: false, error: "Skill not found" }, 404);
@@ -324,129 +343,148 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
       }
 
       const { source, skillNames, force } = await c.req.json();
-
-      // Parse source
-      let cloneUrl: string | null = null;
-      let sourceDir: string;
-
-      if (source.startsWith("/") || source.startsWith("./") || source.startsWith("../")) {
-        // Local path
-        if (!(await fs.exists(source))) {
-          return c.json({ ok: false, error: `Local path not found: ${source}` }, 400);
-        }
-        sourceDir = source;
-      } else {
-        // GitHub — clone to temp dir
-        const ghMatch = source.match(/github\.com\/([^/]+\/[^/]+)/);
-        const ownerRepo = ghMatch
-          ? ghMatch[1].replace(/\.git$/, "")
-          : /^[^/]+\/[^/]+$/.test(source) ? source : null;
-
-        cloneUrl = ownerRepo
-          ? `https://github.com/${ownerRepo}.git`
-          : source;
-
-        const tmpDir = `/tmp/polpo-skills-${Date.now()}`;
-        const cloneResult = await shell.execute(`git clone --depth 1 --quiet "${cloneUrl}" "${tmpDir}"`, { timeout: 60_000 });
-        if (cloneResult.exitCode !== 0) {
-          return c.json({ ok: false, error: `Failed to clone: ${cloneResult.stderr}` }, 400);
-        }
-        sourceDir = tmpDir;
+      if (typeof source !== "string") {
+        return c.json({ ok: false, error: "source is required" }, 400);
       }
 
-      // Scan for SKILL.md files (up to 3 levels deep)
-      const found: Array<{ name: string; description: string; path: string }> = [];
+      // Parse source — strict: owner/repo, https GitHub URL or local path.
+      // Everything interpolated into shell commands below is validated AND quoted.
+      let parsedSource: ReturnType<typeof parseGitSource>;
+      try {
+        parsedSource = parseGitSource(source);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : "Invalid source" }, 400);
+      }
 
-      async function scanDir(dir: string, depth: number): Promise<void> {
-        if (depth > 3) return;
-        const SKIP = new Set(["node_modules", ".git"]);
-        try {
-          const entries = (fs as any).readdirWithTypes
-            ? await (fs as any).readdirWithTypes(dir)
-            : (await fs.readdir(dir)).map((n: string) => ({ name: n, isDirectory: true, isFile: false }));
+      let tmpRoot: string | null = null;
+      try {
+        let sourceDir: string;
 
-          for (const entry of entries) {
-            if (SKIP.has(entry.name)) continue;
-            if (!entry.isDirectory) continue;
-            const entryPath = resolve(dir, entry.name);
-            const skillMd = join(entryPath, "SKILL.md");
-            if (await fs.exists(skillMd)) {
-              try {
-                const raw = await fs.readFile(skillMd);
-                const core = await coreImport();
-                const fm = core.parseSkillFrontmatter(raw);
-                found.push({ name: fm?.name ?? entry.name, description: fm?.description ?? "", path: entryPath });
-              } catch { /* skip */ }
-            } else {
-              await scanDir(entryPath, depth + 1);
-            }
+        if (parsedSource.type === "local") {
+          // Local path
+          if (!(await fs.exists(parsedSource.path))) {
+            return c.json({ ok: false, error: `Local path not found: ${parsedSource.path}` }, 400);
           }
-        } catch { /* skip */ }
-      }
-
-      // Check root
-      if (await fs.exists(join(sourceDir, "SKILL.md"))) {
-        const raw = await fs.readFile(join(sourceDir, "SKILL.md"));
-        const core = await coreImport();
-        const fm = core.parseSkillFrontmatter(raw);
-        found.push({ name: fm?.name ?? basename(sourceDir), description: fm?.description ?? "", path: sourceDir });
-      }
-
-      // Check standard locations
-      for (const sub of ["skills", ".polpo/skills", ".agents/skills", ".claude/skills"]) {
-        const subDir = join(sourceDir, sub);
-        if (await fs.exists(subDir)) await scanDir(subDir, 0);
-      }
-
-      // Fallback: recursive scan
-      if (found.length === 0) await scanDir(sourceDir, 0);
-
-      if (found.length === 0) {
-        // Cleanup
-        if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
-        return c.json({ ok: false, error: `No skills found in ${source}` }, 400);
-      }
-
-      // Filter by requested names
-      const toInstall = skillNames
-        ? found.filter((s) => skillNames.includes(s.name))
-        : found;
-
-      if (skillNames && toInstall.length === 0) {
-        if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
-        return c.json({
-          ok: false,
-          error: `Requested skills not found: ${skillNames.join(", ")}. Available: ${found.map((s) => s.name).join(", ")}`,
-        }, 400);
-      }
-
-      // Install
-      const targetBase = join(polpoDir, "skills");
-      await fs.mkdir(targetBase).catch(() => {});
-
-      const installed: string[] = [];
-      const skipped: string[] = [];
-      const errors: string[] = [];
-
-      for (const skill of toInstall) {
-        const targetDir = join(targetBase, skill.name);
-        if (await fs.exists(targetDir)) {
-          if (!force) { skipped.push(skill.name); continue; }
-          await fs.remove(targetDir);
-        }
-        // Copy via shell (recursive cp)
-        const cpResult = await shell.execute(`cp -r "${skill.path}" "${targetDir}"`);
-        if (cpResult.exitCode === 0) {
-          installed.push(skill.name);
+          sourceDir = parsedSource.path;
         } else {
-          errors.push(`${skill.name}: ${cpResult.stderr}`);
+          // GitHub — clone into a fresh, unique temp dir (mktemp -d: 0700, never
+          // a predictable /tmp path another user could pre-create or race).
+          const mk = await shell.execute(`mktemp -d "\${TMPDIR:-/tmp}/polpo-skills-XXXXXXXXXX"`);
+          const created = mk.stdout.trim();
+          if (mk.exitCode !== 0 || !/^\/[^\n]*\/polpo-skills-[A-Za-z0-9]+$/.test(created)) {
+            return c.json({ ok: false, error: "Failed to create a temporary directory" }, 400);
+          }
+          tmpRoot = created;
+          // Shell commands here (mktemp, git, rm, cp) target a POSIX shell, and
+        // `created` is a POSIX path from mktemp: build it with posix.join.
+        const cloneDir = posix.join(created, "repo");
+          const cloneResult = await shell.execute(
+            `git -c protocol.ext.allow=never clone --depth 1 --quiet -- ${shellQuote(parsedSource.url)} ${shellQuote(cloneDir)}`,
+            { timeout: 60_000 },
+          );
+          if (cloneResult.exitCode !== 0) {
+            return c.json({ ok: false, error: `Failed to clone: ${cloneResult.stderr}` }, 400);
+          }
+          sourceDir = cloneDir;
         }
+
+        // Scan for SKILL.md files (up to 3 levels deep)
+        const found: Array<{ name: string; description: string; path: string }> = [];
+
+        async function scanDir(dir: string, depth: number): Promise<void> {
+          if (depth > 3) return;
+          const SKIP = new Set(["node_modules", ".git"]);
+          try {
+            const entries = (fs as any).readdirWithTypes
+              ? await (fs as any).readdirWithTypes(dir)
+              : (await fs.readdir(dir)).map((n: string) => ({ name: n, isDirectory: true, isFile: false }));
+
+            for (const entry of entries) {
+              if (SKIP.has(entry.name)) continue;
+              if (!entry.isDirectory) continue;
+              const entryPath = resolve(dir, entry.name);
+              const skillMd = join(entryPath, "SKILL.md");
+              if (await fs.exists(skillMd)) {
+                try {
+                  const raw = await fs.readFile(skillMd);
+                  const core = await coreImport();
+                  const fm = core.parseSkillFrontmatter(raw);
+                  found.push({ name: fm?.name ?? entry.name, description: fm?.description ?? "", path: entryPath });
+                } catch { /* skip */ }
+              } else {
+                await scanDir(entryPath, depth + 1);
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        // Check root
+        if (await fs.exists(join(sourceDir, "SKILL.md"))) {
+          const raw = await fs.readFile(join(sourceDir, "SKILL.md"));
+          const core = await coreImport();
+          const fm = core.parseSkillFrontmatter(raw);
+          found.push({ name: fm?.name ?? basename(sourceDir), description: fm?.description ?? "", path: sourceDir });
+        }
+
+        // Check standard locations
+        for (const sub of ["skills", ".polpo/skills", ".agents/skills", ".claude/skills"]) {
+          const subDir = join(sourceDir, sub);
+          if (await fs.exists(subDir)) await scanDir(subDir, 0);
+        }
+
+        // Fallback: recursive scan
+        if (found.length === 0) await scanDir(sourceDir, 0);
+
+        if (found.length === 0) {
+          return c.json({ ok: false, error: `No skills found in ${source}` }, 400);
+        }
+
+        // Filter by requested names
+        const toInstall = skillNames
+          ? found.filter((s) => skillNames.includes(s.name))
+          : found;
+
+        if (skillNames && toInstall.length === 0) {
+          return c.json({
+            ok: false,
+            error: `Requested skills not found: ${skillNames.join(", ")}. Available: ${found.map((s) => s.name).join(", ")}`,
+          }, 400);
+        }
+
+        // Install
+        const targetBase = join(polpoDir, "skills");
+        await fs.mkdir(targetBase).catch(() => {});
+
+        const installed: string[] = [];
+        const skipped: string[] = [];
+        const errors: string[] = [];
+
+        for (const skill of toInstall) {
+          // Skill names come from the (untrusted) repo's SKILL.md frontmatter.
+          if (!isSafeSkillName(skill.name)) {
+            errors.push(`${skill.name}: unsafe skill name — skipped`);
+            continue;
+          }
+          const targetDir = join(targetBase, skill.name);
+          if (await fs.exists(targetDir)) {
+            if (!force) { skipped.push(skill.name); continue; }
+            await fs.remove(targetDir);
+          }
+          // Copy via shell (recursive cp)
+          const cpResult = await shell.execute(`cp -r -- ${shellQuote(skill.path)} ${shellQuote(targetDir)}`);
+          if (cpResult.exitCode === 0) {
+            installed.push(skill.name);
+          } else {
+            errors.push(`${skill.name}: ${cpResult.stderr}`);
+          }
+        }
+
+
+        return c.json({ ok: true, data: { installed, skipped, errors, source } });
+      } finally {
+        // Always remove the temporary clone, whatever happened above.
+        if (tmpRoot) await shell.execute(`rm -rf -- ${shellQuote(tmpRoot)}`).catch(() => {});
       }
-
-      // Cleanup cloned repo
-      if (cloneUrl) await shell.execute(`rm -rf "${sourceDir}"`).catch(() => {});
-
-      return c.json({ ok: true, data: { installed, skipped, errors, source } });
     },
   );
 

@@ -4,7 +4,7 @@ import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig } from "../security.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
-import { detectProviders } from "../../setup/index.js";
+import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
 import { createCliStores } from "../../cli/stores.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
@@ -379,6 +379,14 @@ export function publicConfigRoutes(
         ));
         if (isInstanceAuthEnabled() && adminEmail) {
           createInitialInstanceAuth(targetPolpoDir, adminEmail);
+        }
+        // Provider keys saved during setup are written to the server's own
+        // project (clients can't choose the .env target). If setup picked a
+        // different directory, move exactly the keys saved through the API
+        // there (pre-existing entries in the starting .env are untouched).
+        const setupPolpoDir = getPolpoDir(workDir);
+        if (resolve(setupPolpoDir) !== resolve(targetPolpoDir)) {
+          moveEnvEntries(setupPolpoDir, targetPolpoDir, takeApiWrittenEnvKeys(setupPolpoDir));
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";

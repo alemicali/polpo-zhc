@@ -11,6 +11,7 @@
  * functions are kept as pass-throughs for API compatibility.
  */
 
+import { redactSecrets, restoreRedactedSecrets, isRedactedValue, REDACTED_MARK } from "@polpo-ai/core/secret-redaction";
 import type { AgentConfig, Team, PolpoState, PolpoConfig, PolpoFileConfig } from "@polpo-ai/core/types";
 
 // ── Constants ──
@@ -44,10 +45,20 @@ export function redactPolpoState(state: PolpoState): PolpoState {
 
 // ── Config Redaction ──
 
-/** Return config as-is — providers no longer contain secrets (API keys resolved via env/OAuth only). */
+/**
+ * Return a deep copy of the config with secrets masked (bot tokens, API keys,
+ * webhook secrets/URLs, header values, passwords in URLs such as
+ * settings.databaseUrl, ...). `${ENV_VAR}` references stay visible.
+ *
+ * Writers that accept objects read back from the API must call
+ * `restoreRedactedSecrets(incoming, stored)` before persisting, so masked
+ * placeholders never overwrite the real secrets.
+ */
 export function redactPolpoConfig<T extends PolpoConfig | PolpoFileConfig>(config: T): T {
-  return config;
+  return redactSecrets(config);
 }
+
+export { redactSecrets, restoreRedactedSecrets, isRedactedValue, REDACTED_MARK };
 
 // ── Transcript Sanitization ──
 

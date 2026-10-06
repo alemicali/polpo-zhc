@@ -40,6 +40,7 @@ export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
 export type { VaultStore } from "./vault-store.js";
+export { isReservedVaultOwner, RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";
 export type { AttachmentStore, Attachment } from "./attachment-store.js";
 
@@ -58,8 +59,20 @@ export type { AgentPromptOptions } from "./agent-prompt.js";
 export {
   discoverSkills, loadAgentSkills, listSkillsWithAssignments,
   buildSkillPrompt, parseSkillFrontmatter, extractSkillBody,
+  sanitizeFrontmatterValue, buildSkillFrontmatter,
 } from "./skills-reader.js";
 export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillIndexEntry } from "./skills-reader.js";
+
+// ── Source parsing & secret redaction (security helpers) ──────────────
+export {
+  parseGitSource, parseGitHubSource, isLocalSourcePath, shellQuote,
+  InvalidSourceError, GITHUB_OWNER_REPO_RE,
+} from "./git-source.js";
+export type { GitSource } from "./git-source.js";
+export {
+  redactSecrets, restoreRedactedSecrets, maskSecret, maskUrlPassword, maskCapabilityUrl,
+  isSecretKey, isRedactedValue, isEnvReference, REDACTED_MARK, UnrestorableSecretError, urlOrigin,
+} from "./secret-redaction.js";
 
 // ── Model Spec Parsing ─────────────────────────────────────────────────
 export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";

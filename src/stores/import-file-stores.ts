@@ -43,6 +43,16 @@ async function markDone(ctx: ImportContext, name: string, imported: number): Pro
     .onConflictDoNothing();
 }
 
+/**
+ * System vault namespaces ("$data", "$providers", ...) are never shared with
+ * agents: drop any allowedAgents on them when migrating file-store entries.
+ */
+export function sanitizeImportedVaultEntry<T extends { allowedAgents?: string[] }>(owner: string, entry: T): T {
+  if (!owner.trim().startsWith("$") || !entry.allowedAgents) return entry;
+  const { allowedAgents: _shared, ...rest } = entry;
+  return rest as T;
+}
+
 /** Each importer returns how many items it copied; it runs only if the target is still empty. */
 const IMPORTERS: Record<string, (ctx: ImportContext) => Promise<number>> = {
   async vault(ctx) {
@@ -50,7 +60,14 @@ const IMPORTERS: Record<string, (ctx: ImportContext) => Promise<number>> = {
     if ((await ctx.db.select().from(ctx.schema.vault).limit(1)).length > 0) return 0;
     const { EncryptedVaultStore } = await import("../vault/encrypted-store.js");
     const entries = new EncryptedVaultStore(ctx.polpoDir).exportAll(); // throws if it cannot decrypt
-    for (const { agent, service, entry } of entries) await ctx.stores.vaultStore.set(agent, service, entry);
+    // Migrates every entry verbatim, including "$"-prefixed system namespaces
+    // ("$data", "$providers"): vault.enc is written only by Polpo itself, and
+    // dropping those owners here would lose data-source/provider secrets.
+    // Reserved owners are blocked at the user/agent-facing boundaries instead;
+    // system entries are never shared with agents, so allowedAgents is dropped.
+    for (const { agent, service, entry } of entries) {
+      await ctx.stores.vaultStore.set(agent, service, sanitizeImportedVaultEntry(agent, entry));
+    }
     return entries.length;
   },
 

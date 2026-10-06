@@ -8,7 +8,7 @@
 
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
-import { resolveAgentVault } from "../vault/index.js";
+import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
 import {
   buildAgentSystemPrompt,
   compactContextMessages,
@@ -674,7 +674,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   handle.done = (async (): Promise<TaskResult> => {
     try {
       // Resolve vault credentials (async) — then rebuild tools with vault included
-      const vaultEntries = await ctx?.vaultStore?.getAllForAgent(agentConfig.name);
+      // Never hand system vault namespaces ("$data", ...) to an agent.
+      const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
