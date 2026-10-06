@@ -71,7 +71,7 @@ export {
 export type { GitSource } from "./git-source.js";
 export {
   redactSecrets, restoreRedactedSecrets, maskSecret, maskUrlPassword, maskCapabilityUrl,
-  isSecretKey, isRedactedValue, isEnvReference, REDACTED_MARK, UnrestorableSecretError,
+  isSecretKey, isRedactedValue, isEnvReference, REDACTED_MARK, UnrestorableSecretError, urlOrigin,
 } from "./secret-redaction.js";
 
 // ── Model Spec Parsing ─────────────────────────────────────────────────

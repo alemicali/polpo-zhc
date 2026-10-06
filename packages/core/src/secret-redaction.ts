@@ -126,15 +126,40 @@ function redactNode(value: unknown, key: string | undefined): unknown {
   return value;
 }
 
-/** Thrown by restoreRedactedSecrets({ strict: true }) when a masked value has no stored counterpart. */
+/** Thrown by restoreRedactedSecrets({ strict: true }) when a masked value cannot be restored. */
 export class UnrestorableSecretError extends Error {
-  constructor(public readonly paths: string[]) {
+  constructor(public readonly paths: string[], reason?: string) {
     super(
-      `Masked secret value(s) cannot be restored: ${paths.join(", ")}. ` +
-      `Re-enter the secret (the hidden "••••" value only works for an unchanged, already saved field).`,
+      reason
+        ? `${reason} Re-enter the secret(s): ${paths.join(", ")}.`
+        : `Masked secret value(s) cannot be restored: ${paths.join(", ")}. ` +
+          `Re-enter the secret (the hidden "••••" value only works for an unchanged, already saved field).`,
     );
     this.name = "UnrestorableSecretError";
   }
+}
+
+/** scheme://[userinfo@]host[:port] → "scheme://host:port" (lowercased), or undefined for non-URLs. */
+export function urlOrigin(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const m = value.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^@/?#\s]*@)?([^/?#\s]+)/i);
+  return m ? `${m[1].toLowerCase()}://${m[2].toLowerCase()}` : undefined;
+}
+
+/** Collect the paths of every masked string in `value`. */
+function maskedPaths(value: unknown, path: string, out: string[]): string[] {
+  if (typeof value === "string") {
+    if (isRedactedValue(value)) out.push(path || "(value)");
+  } else if (Array.isArray(value)) {
+    value.forEach((v, i) => maskedPaths(v, `${path}[${i}]`, out));
+  } else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) maskedPaths(v, path ? `${path}.${k}` : k, out);
+  }
+  return out;
+}
+
+function destinationValue(value: unknown): unknown {
+  return urlOrigin(value) ?? value;
 }
 
 /**
@@ -147,7 +172,35 @@ export class UnrestorableSecretError extends Error {
  * UnrestorableSecretError (callers answer 400); otherwise the field is
  * dropped. Placeholders are never persisted. Returns a new object.
  */
-export function restoreRedactedSecrets<T>(incoming: T, stored: unknown, opts: { strict?: boolean } = {}): T {
+export function restoreRedactedSecrets<T>(
+  incoming: T,
+  stored: unknown,
+  opts: {
+    strict?: boolean;
+    /**
+     * Top-level fields that decide WHERE the secrets are sent (e.g. `url`,
+     * `webhookUrl`, `host`, `provider`). If any of them changes (URLs are
+     * compared by scheme + host + port), no masked value is restored: the
+     * stored secrets must never follow the object to a new destination.
+     * Strict mode throws; otherwise the masked fields are dropped.
+     */
+    destinationKeys?: string[];
+  } = {},
+): T {
+  if (opts.destinationKeys && incoming && typeof incoming === "object" && !Array.isArray(incoming)) {
+    const inObj = incoming as Record<string, unknown>;
+    const stObj = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
+    const changed = opts.destinationKeys.filter((k) => destinationValue(inObj[k]) !== destinationValue(stObj[k]));
+    if (changed.length > 0) {
+      const masked = maskedPaths(incoming, "", []);
+      if (masked.length > 0) {
+        if (opts.strict) {
+          throw new UnrestorableSecretError(masked, `The destination changed (${changed.join(", ")}), so saved secrets are not reused.`);
+        }
+        return restoreNode(incoming, undefined, "", []) as T;
+      }
+    }
+  }
   const missing: string[] = [];
   const out = restoreNode(incoming, stored, "", missing) as T;
   if (opts.strict && missing.length > 0) throw new UnrestorableSecretError(missing);
@@ -162,7 +215,14 @@ function restoreNode(incoming: unknown, stored: unknown, path: string, missing: 
       return undefined;
     }
     if (incoming === stored) return stored;
-    // URL with a masked password: keep the (possibly edited) URL, restore the password.
+    // A masked URL whose scheme/host/port changed must not get the stored
+    // secret (password or capability path) attached to the new destination.
+    const inOrigin = urlOrigin(incoming);
+    if (inOrigin !== undefined && inOrigin !== urlOrigin(stored)) {
+      missing.push(path || "(value)");
+      return undefined;
+    }
+    // URL with a masked password: keep the (possibly edited) path, restore the password.
     const inUrl = incoming.match(URL_WITH_PASSWORD_RE);
     const storedUrl = stored.match(URL_WITH_PASSWORD_RE);
     if (inUrl && storedUrl && isRedactedValue(inUrl[2]) && !isRedactedValue(inUrl[1] + inUrl[3])) {

@@ -93,10 +93,10 @@ describe("redactSecrets / redactPolpoConfig", () => {
     expect("botToken" in orphan).toBe(false);
   });
 
-  it("restores a masked URL password while keeping an edited host", () => {
-    const stored = { databaseUrl: "postgres://u:secretpw@old-host/db" };
-    const incoming = { databaseUrl: "postgres://u:••••@new-host/db" };
-    expect(restoreRedactedSecrets(incoming, stored).databaseUrl).toBe("postgres://u:secretpw@new-host/db");
+  it("restores a masked URL password while keeping an edited path (same host)", () => {
+    const stored = { databaseUrl: "postgres://u:secretpw@db-host/db" };
+    const incoming = { databaseUrl: "postgres://u:••••@db-host/other" };
+    expect(restoreRedactedSecrets(incoming, stored).databaseUrl).toBe("postgres://u:secretpw@db-host/other");
   });
 });
 
@@ -323,5 +323,80 @@ describe("orchestrator get_config", () => {
     const out = await executeOrchestratorTool("get_config", {}, { getConfig: () => makeConfig() } as any);
     for (const secret of [BOT_TOKEN, INBOUND, RESEND, SLACK, "db-p4ssw0rd"]) expect(out).not.toContain(secret);
     expect(out).toContain("${TELEGRAM_BOT_TOKEN}");
+  });
+});
+
+describe("saved secrets never follow a channel to a new destination", () => {
+  function setup() {
+    let config: any = makeConfig();
+    const app = configRoutes(() => ({
+      getConfig: () => config,
+      reloadConfig: async () => true,
+      saveConfig: async (c: any) => { config = c; },
+      getNotificationRouter: () => null,
+    }));
+    return { app, get config() { return config; } };
+  }
+  const put = (app: any, name: string, body: unknown) => app.request(`/channels/${name}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  it("webhook url moved to another host with a masked Authorization header → 400, nothing stored", async () => {
+    const ctx = setup();
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await put(ctx.app, "hook", { ...listed.data.hook, url: "https://attacker.example/collect" });
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toMatch(/destination changed/);
+    const stored = ctx.config.settings.notifications.channels.hook;
+    expect(stored.url).toBe("https://example.com/hook");
+    expect(JSON.stringify(ctx.config)).not.toContain("attacker.example");
+  });
+
+  it("re-entering the secrets for the new destination is accepted", async () => {
+    const ctx = setup();
+    const res = await put(ctx.app, "hook", {
+      type: "webhook",
+      url: "https://new.example/collect",
+      headers: { Authorization: "Bearer brand-new-token" },
+      inboundSecret: "a-brand-new-inbound-secret-123",
+    });
+    expect(res.status).toBe(200);
+    expect(ctx.config.settings.notifications.channels.hook.headers.Authorization).toBe("Bearer brand-new-token");
+  });
+
+  it("same path, same host: masked header is still restored", async () => {
+    const ctx = setup();
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await put(ctx.app, "hook", { ...listed.data.hook, url: "https://example.com/other-path" });
+    expect(res.status).toBe(200);
+    expect(ctx.config.settings.notifications.channels.hook.headers.Authorization).toBe("Bearer abcdefghijklmnopqrstuvwxyz");
+  });
+
+  it("slack webhookUrl host change with masked URL → 400", async () => {
+    const ctx = setup();
+    const res = await put(ctx.app, "slack", { type: "slack", webhookUrl: "https://attacker.example/••••slck" });
+    expect(res.status).toBe(400);
+    expect(ctx.config.settings.notifications.channels.slack.webhookUrl).toBe(SLACK);
+  });
+
+  it("email provider change with a masked apiKey → 400", async () => {
+    const ctx = setup();
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await put(ctx.app, "mail", { ...listed.data.mail, provider: "sendgrid" });
+    expect(res.status).toBe(400);
+    expect(ctx.config.settings.notifications.channels.mail.provider).toBe("resend");
+  });
+
+  it("a basic-auth URL never gets the stored password when its host changes", () => {
+    const stored = { databaseUrl: "postgres://u:secretpw@db.internal/db" };
+    expect(() => restoreRedactedSecrets({ databaseUrl: "postgres://u:••••@attacker.example/db" }, stored, { strict: true }))
+      .toThrow(/databaseUrl/);
+    const lax = restoreRedactedSecrets({ databaseUrl: "https://u:••••@attacker.example/x" }, stored) as any;
+    expect(lax.databaseUrl).toBeUndefined();
+    // same host, other path: password restored
+    expect(restoreRedactedSecrets({ databaseUrl: "postgres://u:••••@db.internal/db2" }, stored).databaseUrl)
+      .toBe("postgres://u:secretpw@db.internal/db2");
   });
 });

@@ -350,7 +350,12 @@ export function configRoutes(getDeps: () => {
     const storedChannel = deps.getConfig()?.settings?.notifications?.channels?.[name];
     let channelConfig: unknown;
     try {
-      channelConfig = restoreRedactedSecrets(incoming, storedChannel, { strict: true });
+      // Fields that decide where the channel's secrets are sent: if any of
+      // them changes, saved secrets (headers, tokens, keys) are not reused.
+      channelConfig = restoreRedactedSecrets(incoming, storedChannel, {
+        strict: true,
+        destinationKeys: ["type", "url", "webhookUrl", "host", "port", "provider"],
+      });
     } catch (err) {
       if (err instanceof UnrestorableSecretError) return c.json({ ok: false, error: err.message }, 400);
       throw err;
