@@ -106,13 +106,25 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm pack
+      # The tarball ships dist/ only, so build before packing.
+      - run: pnpm run build
+      # polpo-ai pins the exact versions of the workspace packages; pack them from this commit
+      # too, so the check covers the packages as they would be published together instead of
+      # whatever older versions are on the registry.
+      - name: Pack polpo-ai and its workspace packages
+        run: |
+          mkdir -p /tmp/pack
+          pnpm pack --pack-destination /tmp/pack
+          for p in core vault-crypto drizzle server; do
+            pnpm --filter "@polpo-ai/$p" pack --pack-destination /tmp/pack
+          done
       - name: Verify npm install from tarball
+        timeout-minutes: 15
         run: |
           mkdir /tmp/install-test && cd /tmp/install-test
           npm init -y
-          npm install $GITHUB_WORKSPACE/polpo-ai-*.tgz
-          node --input-type=module -e "import 'polpo-ai'"
+          npm install /tmp/pack/*.tgz
+          timeout 60 node --input-type=module -e "import 'polpo-ai'"
 
   build:
     name: Build

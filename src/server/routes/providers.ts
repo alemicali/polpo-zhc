@@ -351,13 +351,15 @@ interface OAuthFlowState {
 
 const oauthFlows = new Map<string, OAuthFlowState>();
 
+// unref: this sweep must not keep the process alive. It runs as soon as the module is imported,
+// so without it a plain `import "polpo-ai"` never exits.
 setInterval(() => {
   for (const [id, flow] of oauthFlows) {
     if (flow.status === "complete" || flow.status === "error") {
       oauthFlows.delete(id);
     }
   }
-}, 600_000);
+}, 600_000).unref();
 
 // ── Route handlers ──────────────────────────────────────────────────
 
