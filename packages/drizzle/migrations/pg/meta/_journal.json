@@ -29,6 +29,20 @@
       "when": 1791247866002,
       "tag": "0003_unwrap_jsonb",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791278384950,
+      "tag": "0004_peer_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791278698659,
+      "tag": "0005_session_scope",
+      "breakpoints": true
     }
   ]
 }

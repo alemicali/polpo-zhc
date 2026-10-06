@@ -252,7 +252,13 @@ export interface PeerRouteDeps {
   fetch?: typeof fetch;
 }
 
-interface TelegramBot { id: number; username: string; name: string }
+interface TelegramBot {
+  id: number;
+  username: string;
+  name: string;
+  /** False while privacy mode is on: in groups the bot only sees commands and replies to it. */
+  canReadAllGroupMessages?: boolean;
+}
 
 /** A chat that wrote to the bot, as reported by detect-chat. */
 export interface DetectedChat {
@@ -270,7 +276,12 @@ async function telegramGetMe(botToken: string, fetchImpl: typeof fetch): Promise
     const res = await fetchImpl(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/getMe`);
     const body = await res.json().catch(() => null) as any;
     if (!body?.ok) return { error: body?.description ?? `Telegram rejected the token (${res.status})` };
-    return { id: body.result.id, username: body.result.username, name: body.result.first_name };
+    return {
+      id: body.result.id,
+      username: body.result.username,
+      name: body.result.first_name,
+      canReadAllGroupMessages: body.result.can_read_all_group_messages,
+    };
   } catch (err) {
     return { error: `Telegram unreachable: ${err instanceof Error ? err.message : String(err)}` };
   }

@@ -10,6 +10,8 @@ export const sessionsSqlite = sqliteTable("sessions", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   starred: integer("starred", { mode: "boolean" }),
+  /** Channel conversation (e.g. a Telegram group); scoped sessions are never "the latest" chat. */
+  scope: text("scope"),
 }, (table) => [
   index("idx_sessions_agent").on(table.agent),
   index("idx_sessions_updated_at").on(table.updatedAt),
@@ -36,6 +38,8 @@ export const sessionsPg = pgTable("sessions", {
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   starred: pgBoolean("starred"),
+  /** Channel conversation (e.g. a Telegram group); scoped sessions are never "the latest" chat. */
+  scope: pgText("scope"),
 }, (table) => [
   pgIndex("idx_pg_sessions_agent").on(table.agent),
   pgIndex("idx_pg_sessions_updated_at").on(table.updatedAt.desc()),

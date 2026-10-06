@@ -6,6 +6,8 @@ export interface TelegramChannelInfo {
   botUsername?: string;
   /** Suggestions of the dedicated agent shown in the bot menu. */
   suggestionCount?: number;
+  /** False while privacy mode is on (groups: only commands and replies reach the bot). */
+  canReadAllGroupMessages?: boolean;
 }
 
 /** Bot identity and menu size for a saved Telegram channel card. */
@@ -21,8 +23,10 @@ export function useTelegramChannelInfo(api: PolpoApi, channel: string, dedicated
       const agent = agents?.ok
         ? ((agents.data ?? []) as { name: string; suggestions?: { title?: string; prompt?: string }[] }[]).find((a) => a.name === dedicatedAgent)
         : undefined;
+      const me = bot.ok ? (bot.data as { username: string; canReadAllGroupMessages?: boolean }) : undefined;
       setInfo({
-        botUsername: bot.ok ? (bot.data as { username: string }).username : undefined,
+        botUsername: me?.username,
+        canReadAllGroupMessages: me?.canReadAllGroupMessages,
         suggestionCount: agent ? (agent.suggestions ?? []).filter((s) => s.title && s.prompt).length : undefined,
       });
     });
