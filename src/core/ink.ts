@@ -588,34 +588,49 @@ export async function uninstallInkPackages(
 // ── Import sanitisation (providers / settings) ─────────────────────────
 
 /**
- * Settings keys an Ink company package may fill in (only when missing).
- * Anything else — notifications (webhook URLs/tokens), storage/databaseUrl,
- * workDir, email domains, ... — could redirect data or credentials and is
- * never imported.
+ * Settings keys an Ink company package may fill in (only when missing):
+ * inert numeric limits and toggles only.
+ *
+ * Everything else is never imported, notably:
+ *  - approvalGates (condition.expression is compiled and run server-side),
+ *  - notifications / sla channels (webhook URLs, tokens, data exfiltration),
+ *  - storage / databaseUrl / workDir, emailAllowedDomains,
+ *  - branding (external logo URLs), enableScheduler, orchestratorSkills,
+ *  - defaultRetryPolicy / modelAllowlist (model & agent routing).
  */
 export const INK_IMPORTABLE_SETTINGS = new Set<string>([
-  "maxRetries", "logLevel", "branding", "taskTimeout", "staleThreshold",
-  "defaultRetryPolicy", "enableVolatileTeams", "volatileCleanup", "maxFixAttempts",
+  "maxRetries", "logLevel", "taskTimeout", "staleThreshold",
+  "enableVolatileTeams", "volatileCleanup", "maxFixAttempts",
   "maxQuestionRounds", "maxResolutionAttempts", "autoCorrectExpectations",
-  "orchestratorSkills", "orchestratorModel", "imageModel", "reasoning",
-  "logRetentionDays", "maxAssessmentRetries", "maxConcurrency",
-  "defaultQualityThreshold", "enableScheduler", "approvalGates", "sla",
+  "reasoning", "logRetentionDays", "maxAssessmentRetries", "maxConcurrency",
+  "defaultQualityThreshold",
 ]);
 
 /**
+ * Model-routing settings: they can send orchestrator traffic to a provider
+ * declared by the package, so they are only imported together with custom
+ * providers (`polpo ink add --allow-custom-providers`).
+ */
+export const INK_MODEL_ROUTING_SETTINGS = new Set<string>(["orchestratorModel", "imageModel"]);
+
+/**
  * Merge company settings into `target` (fill-missing only), restricted to
- * INK_IMPORTABLE_SETTINGS. Returns the keys applied and the keys skipped.
+ * INK_IMPORTABLE_SETTINGS (+ INK_MODEL_ROUTING_SETTINGS when
+ * `allowModelRouting`). Returns the keys applied and the keys skipped.
  */
 export function mergeInkSettings(
   target: Record<string, unknown>,
   incoming: unknown,
+  opts: { allowModelRouting?: boolean } = {},
 ): { applied: string[]; skipped: string[] } {
   const applied: string[] = [];
   const skipped: string[] = [];
   if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return { applied, skipped };
   for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
     if (value == null) continue;
-    if (!INK_IMPORTABLE_SETTINGS.has(key)) {
+    const allowed = INK_IMPORTABLE_SETTINGS.has(key)
+      || (opts.allowModelRouting === true && INK_MODEL_ROUTING_SETTINGS.has(key));
+    if (!allowed) {
       skipped.push(key);
       continue;
     }
@@ -687,9 +702,16 @@ export async function mergeInkProviders(
       decisions.push({ name, action: "skipped", reason: "invalid provider config" });
       continue;
     }
-    // Only structural fields; never auth material or headers.
+    // Only structural fields; never auth material or headers. Mark the entry
+    // explicitly as package-imported so it can never be mistaken for a
+    // hand-written (admin) legacy provider — which custom-gateway support
+    // may allow to reach private networks.
     const { baseUrl, api, models } = providerConfig as Record<string, unknown>;
-    const clean: Record<string, unknown> = {};
+    const clean: Record<string, unknown> = {
+      preset: "ink",
+      auth: { type: "none" },
+      allowPrivateNetwork: false,
+    };
     if (typeof baseUrl === "string") clean.baseUrl = baseUrl;
     if (typeof api === "string") clean.api = api;
     if (Array.isArray(models)) clean.models = models;

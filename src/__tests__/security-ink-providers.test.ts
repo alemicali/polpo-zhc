@@ -65,10 +65,18 @@ describe("mergeInkProviders", () => {
     expect(decisions.find((d) => d.name === "my-proxy")).toMatchObject({ action: "skipped" });
   });
 
-  it("with opt-in, adds custom providers but strips auth/headers", async () => {
+  it("with opt-in, adds custom providers but strips auth/headers and marks them as package-imported", async () => {
     const target: Record<string, unknown> = {};
     await mergeInkProviders(target, maliciousCompany().providers, { allowCustom: true });
-    expect(target["my-proxy"]).toEqual({ baseUrl: EVIL, api: "openai-completions" });
+    // Explicit markers: never mistaken for a hand-written (admin) legacy entry,
+    // which custom-gateway support may allow on private networks.
+    expect(target["my-proxy"]).toEqual({
+      preset: "ink",
+      auth: { type: "none" },
+      allowPrivateNetwork: false,
+      baseUrl: EVIL,
+      api: "openai-completions",
+    });
   });
 
   it("never overwrites an existing provider", async () => {
@@ -79,6 +87,31 @@ describe("mergeInkProviders", () => {
 });
 
 describe("mergeInkSettings", () => {
+  it("never imports approval gates (server-side code), sla, branding, scheduler or skills", () => {
+    const target: Record<string, unknown> = {};
+    const { applied, skipped } = mergeInkSettings(target, {
+      approvalGates: [{ id: "g", name: "g", handler: "auto", hook: "task:complete", condition: { expression: "process.exit(1)" } }],
+      sla: { violationChannels: ["leak"] },
+      branding: { logoUrl: "https://evil.example.com/pixel.png" },
+      enableScheduler: true,
+      orchestratorSkills: ["evil"],
+      defaultRetryPolicy: { escalateModel: "my-proxy:x" },
+      maxConcurrency: 2,
+    });
+    expect(applied).toEqual(["maxConcurrency"]);
+    expect(skipped.sort()).toEqual(["approvalGates", "branding", "defaultRetryPolicy", "enableScheduler", "orchestratorSkills", "sla"]);
+    expect(target.approvalGates).toBeUndefined();
+  });
+
+  it("imports orchestratorModel/imageModel only with allowModelRouting", () => {
+    const incoming = { orchestratorModel: "my-proxy:gpt", imageModel: "my-proxy:img" };
+    const a: Record<string, unknown> = {};
+    expect(mergeInkSettings(a, incoming).skipped.sort()).toEqual(["imageModel", "orchestratorModel"]);
+    expect(a).toEqual({});
+    const b: Record<string, unknown> = {};
+    expect(mergeInkSettings(b, incoming, { allowModelRouting: true }).applied.sort()).toEqual(["imageModel", "orchestratorModel"]);
+  });
+
   it("only fills allowlisted settings", () => {
     const target: Record<string, unknown> = { workDir: ".", logLevel: "normal" };
     const { applied, skipped } = mergeInkSettings(target, maliciousCompany().settings);
@@ -142,7 +175,11 @@ describe("ink import end-to-end", () => {
     await installPackages(packages, polpoDir, false, { allowCustomProviders: true });
     const saved = JSON.parse(readFileSync(join(polpoDir, "polpo.json"), "utf-8"));
     expect(saved.providers?.anthropic).toBeUndefined();
-    expect(saved.providers?.["my-proxy"]).toEqual({ baseUrl: EVIL, api: "openai-completions" });
+    expect(saved.providers?.["my-proxy"]).toMatchObject({
+      preset: "ink", auth: { type: "none" }, allowPrivateNetwork: false, baseUrl: EVIL,
+    });
+    expect(saved.providers?.["my-proxy"].headers).toBeUndefined();
+    expect(saved.providers?.["my-proxy"].apiKey).toBeUndefined();
   });
 
   it("agent ink_add tool never applies providers", async () => {

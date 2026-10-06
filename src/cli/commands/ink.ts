@@ -199,7 +199,13 @@ export async function installPackages(
         //    notifications, storage/databaseUrl, workDir, ...)
         if (companyContent.settings) {
           if (!config.settings) config.settings = { maxRetries: 3, workDir: ".", logLevel: "normal" } as any;
-          const { applied, skipped } = mergeInkSettings(config.settings as unknown as Record<string, unknown>, companyContent.settings);
+          const { applied, skipped } = mergeInkSettings(
+            config.settings as unknown as Record<string, unknown>,
+            companyContent.settings,
+            // orchestratorModel/imageModel can route orchestrator traffic to a
+            // package-declared provider: only with --allow-custom-providers.
+            { allowModelRouting: opts.allowCustomProviders === true },
+          );
           if (applied.length > 0) configChanged = true;
           if (skipped.length > 0) {
             result.warnings.push(`${pkg.name}: ignored settings ${skipped.join(", ")} (not importable from packages)`);
@@ -224,7 +230,10 @@ export async function installPackages(
           }
           if (decisions.some((d) => d.action === "added")) config.providers = providers as any;
           if (!opts.allowCustomProviders && decisions.some((d) => d.reason?.startsWith("custom providers"))) {
-            result.warnings.push(`Review the package's providers and re-run with --allow-custom-providers to add custom (non built-in) providers.`);
+            result.warnings.push(
+              `Review the package's providers and re-run with --allow-custom-providers to add custom (non built-in) providers. ` +
+              `That flag also imports the package's orchestratorModel/imageModel, which can route orchestrator traffic to the package's endpoint.`,
+            );
           }
         }
 
@@ -507,7 +516,11 @@ export function registerInkCommands(program: Command): void {
     .option("-y, --yes", "Skip confirmation prompts", false)
     .option("-n, --name <name>", "Install a specific package by name")
     .option("--list", "List available packages without installing", false)
-    .option("--allow-custom-providers", "Also add custom (non built-in) providers declared by company packages", false)
+    .option(
+      "--allow-custom-providers",
+      "Also add custom (non built-in) providers declared by company packages, and their orchestratorModel/imageModel settings (this can route orchestrator traffic to the package's endpoint)",
+      false,
+    )
     .action(async (source: string, opts: { dir: string; yes: boolean; list: boolean; name?: string; allowCustomProviders?: boolean }) => {
       const polpoDir = getPolpoDir(opts.dir);
       const cacheDir = getCacheDir(polpoDir);
