@@ -11,6 +11,7 @@
  * OrchestratorContext and the port interfaces defined below.
  */
 
+import type { PolpoEvent, PolpoEventMap } from "./events.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
@@ -135,7 +136,7 @@ export interface DeadlockFacade {
   getConfig(): PolpoConfig | null;
   getMemory(): Promise<string>;
   getStore(): TaskStore;
-  emit(event: string, payload: unknown): boolean;
+  emit<K extends PolpoEvent>(event: K, payload: PolpoEventMap[K]): boolean;
   forceFailTask(taskId: string): Promise<void>;
   addTask(opts: {
     title: string; description: string; assignTo: string;
@@ -463,7 +464,7 @@ export class OrchestratorEngine {
       getConfig: () => this.getConfig(),
       getMemory: () => this.getMemory(),
       getStore: () => this.getStore(),
-      emit: (event: string, payload: unknown) => this.ctx.emitter.emit(event, payload),
+      emit: (event, payload) => this.ctx.emitter.emit(event, payload),
       forceFailTask: (taskId: string) => this.forceFailTask(taskId),
       addTask: (opts) => this.addTask(opts),
     };

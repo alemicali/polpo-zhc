@@ -2327,7 +2327,7 @@ export async function executeOrchestratorTool(
       case "brain_upsert_entity": case "brain_upsert_relation": case "brain_upsert_claim": case "brain_ingest_data_source":
       case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
         return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
-          polpo.emit("brain:changed" as any, event);
+          polpo.emit("brain:changed", event);
         });
 
       // ── Task ──

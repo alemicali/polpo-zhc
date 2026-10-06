@@ -116,7 +116,7 @@ export class TaskManager {
     const { valid, warnings } = sanitizeExpectations(expectations);
     for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[updateExpectations "${taskId}"] ${w}` });
     await this.ctx.registry.updateTask(taskId, { expectations: valid });
-    this.ctx.emitter.emit("task:updated", { task: (await this.ctx.registry.getTask(taskId))! });
+    this.ctx.emitter.emit("task:updated", { taskId, task: (await this.ctx.registry.getTask(taskId))! });
   }
 
   async retryTask(taskId: string): Promise<void> {

@@ -118,7 +118,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     }
   });
   const activeCompanyBrain = () => getCompanyBrainRuntime(activePolpoDir(), activeDataRegistry(), (event) => {
-    orchestrator.emit("brain:changed" as any, event);
+    orchestrator.emit("brain:changed", event);
   });
 
   // Global middleware
@@ -368,7 +368,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         }
       }));
       tools.push(...createCompanyBrainAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
-        o.emit("brain:changed" as any, event);
+        o.emit("brain:changed", event);
       }));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
