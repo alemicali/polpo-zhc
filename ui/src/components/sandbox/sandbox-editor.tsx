@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { NetworkNotice } from "./network-notice";
 import {
   NETWORK_MODES,
   SANDBOX_PROVIDERS,
@@ -148,7 +149,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
         </div>
       </Field>
 
-      <Field label="Network" hint="Applies to bubblewrap and stronger sandboxes; on this machine without isolation the network is always open.">
+      <Field label="Network" hint="Enforced by bubblewrap and stronger sandboxes, and by the browser tools. On this machine without isolation the network rule cannot be enforced: everything is reachable.">
         <Select
           value={value.network?.mode ?? INHERIT}
           onValueChange={(v) => set({ network: v === INHERIT ? undefined : { mode: v as SandboxNetworkMode, allow: value.network?.allow } })}
@@ -161,10 +162,11 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
             ))}
           </SelectContent>
         </Select>
+        <NetworkNotice mode={value.network?.mode} />
       </Field>
 
       {value.network?.mode === "allowlist" && (
-        <Field label="Allowed domains" hint="One per line. *.example.com also covers example.com.">
+        <Field label="Allowed hosts" hint="One per line: example.com, *.example.com (also covers example.com), or host:port such as github.com:22 for ssh. A name that resolves to a local or private address stays refused unless you write the IP itself.">
           <Textarea
             className="text-xs font-mono min-h-24"
             value={(value.network.allow ?? []).join("\n")}
