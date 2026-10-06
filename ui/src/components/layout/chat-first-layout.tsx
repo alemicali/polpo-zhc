@@ -48,6 +48,7 @@ import {
   ChartNoAxesCombined,
   BrainCircuit,
   Megaphone,
+  Radio,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -140,6 +141,8 @@ const secondaryGroups: TabGroup[] = [
     tabs: [
       { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { path: "/notifications", icon: Bell, label: "Notifications" },
+  { path: "/events", icon: Radio, label: "Events" },
+      { path: "/events", icon: Radio, label: "Events" },
       { path: "/schedules", icon: CalendarClock, label: "Schedules" },
     ],
   },
@@ -724,6 +727,7 @@ function resolvePageTitle(pathname: string): string {
     "/skills": "Skills",
     "/memory": "Memory",
     "/notifications": "Notifications",
+    "/events": "Events",
     "/schedules": "Schedules",
     "/approvals": "Approvals",
     "/playbooks": "Playbooks",

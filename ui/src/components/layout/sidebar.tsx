@@ -24,6 +24,7 @@ import {
   Database,
   ChartNoAxesCombined,
   BrainCircuit,
+  Radio,
 } from "lucide-react";
 import { useEvents, usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -80,6 +81,7 @@ const nav: NavSection[] = [
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
+      { to: "/events", icon: Radio, label: "Events" },
       { to: "/config", icon: Settings2, label: "Configuration" },
     ],
   },

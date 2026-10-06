@@ -60,7 +60,7 @@ export function ChatNavigationEffects() {
       case "agent":      route = name ? `/agents/${encodeURIComponent(name)}` : "/agents"; break;
       case "skills":     route = "/skills"; break;
       case "skill":      route = name ? `/skills/${encodeURIComponent(name)}` : "/skills"; break;
-      case "activity":       route = "/activity"; break;
+      case "activity":       route = "/events"; break;
       case "chat":           route = "/chat"; break;
       case "memory":         route = "/memory"; break;
       case "notifications":  route = "/notifications"; break;

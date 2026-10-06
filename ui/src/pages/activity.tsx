@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,7 +142,7 @@ const categoryConfig: Record<
   },
   log: {
     icon: Info,
-    label: "Logs",
+    label: "System",
     color: "text-zinc-400",
     bg: "bg-zinc-500/10",
   },
@@ -988,11 +989,23 @@ function HistoryView() {
 
 // ── Main page ──
 
-export function ActivityPage() {
+/**
+ * Events: what polpo-zhc emits (tasks, agents, missions, approvals, notifications, system
+ * messages…), live as it happens or from the history kept per server start.
+ */
+export function EventsPage() {
   const { events } = useEvents(undefined, 500);
   const { connectionStatus } = usePolpo();
   const connected = connectionStatus === "connected";
-  const [mode, setMode] = useState<"live" | "history">("live");
+  const [params, setParams] = useSearchParams();
+  const mode: "live" | "history" = params.get("view") === "history" ? "history" : "live";
+  const setMode = (next: "live" | "history") =>
+    setParams((p) => {
+      const out = new URLSearchParams(p);
+      if (next === "history") out.set("view", "history");
+      else out.delete("view");
+      return out;
+    }, { replace: true });
 
   // Normalize SSE events to EventRowData
   const liveEvents: EventRowData[] = useMemo(
@@ -1090,3 +1103,6 @@ export function ActivityPage() {
     </div>
   );
 }
+
+/** @deprecated the page is Events now; kept for old imports. */
+export const ActivityPage = EventsPage;

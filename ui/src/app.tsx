@@ -14,7 +14,7 @@ const MissionsPage = lazy(() => import("@/pages/missions").then(m => ({ default:
 const MissionDetailPage = lazy(() => import("@/pages/mission-detail").then(m => ({ default: m.MissionDetailPage })));
 const AgentsPage = lazy(() => import("@/pages/agents").then(m => ({ default: m.AgentsPage })));
 const AgentDetailPage = lazy(() => import("@/pages/agent-detail").then(m => ({ default: m.AgentDetailPage })));
-const ActivityPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.ActivityPage })));
+const EventsPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.EventsPage })));
 const ChatPage = lazy(() => import("@/pages/chat").then(m => ({ default: m.ChatPage })));
 const ChangelogPage = lazy(() => import("@/pages/changelog").then(m => ({ default: m.ChangelogPage })));
 const MemoryPage = lazy(() => import("@/pages/memory").then(m => ({ default: m.MemoryPage })));
@@ -186,13 +186,14 @@ export function App() {
           <Route path="agents/:name" element={<Suspense fallback={<PageLoader />}><AgentDetailPage /></Suspense>} />
           <Route path="skills" element={<Suspense fallback={<PageLoader />}><SkillsPage /></Suspense>} />
           <Route path="skills/:skillName" element={<Suspense fallback={<PageLoader />}><SkillDetailPage /></Suspense>} />
-          <Route path="activity" element={<Suspense fallback={<PageLoader />}><ActivityPage /></Suspense>} />
+          <Route path="events" element={<Suspense fallback={<PageLoader />}><EventsPage /></Suspense>} />
+          <Route path="activity" element={<Navigate to="/events" replace />} />
           <Route path="chat" element={<Suspense fallback={<PageLoader />}><ChatPage /></Suspense>} />
           <Route path="groups" element={<GroupsRedirect />} />
           <Route path="groups/:roomId" element={<GroupsRedirect />} />
           <Route path="changelog" element={<Suspense fallback={<PageLoader />}><ChangelogPage /></Suspense>} />
           <Route path="memory" element={<Suspense fallback={<PageLoader />}><MemoryPage /></Suspense>} />
-          <Route path="logs" element={<Navigate to="/activity" replace />} />
+          <Route path="logs" element={<Navigate to="/events?view=history" replace />} />
           <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />
           <Route path="approvals" element={<Suspense fallback={<PageLoader />}><ApprovalsPage /></Suspense>} />
           <Route path="playbooks" element={<Suspense fallback={<PageLoader />}><PlaybooksPage /></Suspense>} />
