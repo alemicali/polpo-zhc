@@ -17,12 +17,21 @@ import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react"
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
 import { toast } from "sonner";
+import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, type SteerAppliedEvent } from "./use-chat-steering";
 
 /** Chunk choice fields the server emits beyond the SDK's ChatCompletionChunk type. */
 type ServerChunkChoice = ChatCompletionChunk["choices"][number] & {
   context_compaction?: ContextCompactionNotice;
   session_title?: { sessionId: string; title: string };
+  /** First chunk of a turn: the stored assistant message it fills. */
+  turn?: { id: string; session_id: string | null; assistant_message_id: string | null };
+  /** Steers joined the turn: the answer so far was stored, the rest fills a new message. */
+  steer_applied?: SteerAppliedEvent;
+  /** Steers the turn did not take: sent as the next message (turn_ended) or handed back (aborted). */
+  steer_returned?: SteerReturnedEvent;
 };
+
+type SteerReturnedEvent = { reason: "turn_ended" | "aborted"; scheduled?: boolean; steers: Array<{ id: string; content: string }> };
 
 type ContextCompactionNotice = {
   beforeTokens: number;
@@ -305,6 +314,7 @@ interface SessionPendingState {
 export function useChat() {
   const { client } = usePolpo();
   const { events: messageEvents } = useEvents(["message:added"], 50);
+  const { events: turnEvents } = useEvents(["chat:turn-started"], 20);
   const { events: backgroundWaitEvents } = useEvents([
     "background-wait:completed",
     "background-wait:failed",
@@ -357,6 +367,8 @@ export function useChat() {
   const lastBackgroundWaitEventRef = useRef<string | undefined>(undefined);
   const lastMessageEventRef = useRef<string | undefined>(undefined);
   const remoteRefreshVersionRef = useRef(0);
+  const followServerTurnsRef = useRef<((sid: string) => void) | null>(null);
+  const lastTurnEventRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     activeSessionKeyRef.current = activeSessionKey;
@@ -490,6 +502,7 @@ export function useChat() {
       turnIdsBySessionRef.current.set(toKey, turnId);
       turnIdsBySessionRef.current.delete(fromKey);
     }
+    pendingSteers.migrate(fromKey, toKey);
     const resumeAbort = resumeAbortBySessionRef.current.get(fromKey);
     if (resumeAbort) {
       resumeAbortBySessionRef.current.set(toKey, resumeAbort);
@@ -744,6 +757,8 @@ export function useChat() {
 
     let fullContent = "";
     let thinkingText = "";
+    /** Assistant message being rebuilt; the turn chunk and each steer may move it. */
+    let currentAssistantId = assistantId;
     const toolCalls: ToolCallInfo[] = [];
     const segments: MessageSegment[] = [];
     let currentTextIdx = -1;
@@ -761,7 +776,7 @@ export function useChat() {
     const updateMsg = () => {
       updateSessionMessages(sid, (prev) =>
         prev.map((m) =>
-          m.id === assistantId
+          m.id === currentAssistantId
             ? { ...m, ...messagePatch() }
             : m
         )
@@ -798,6 +813,42 @@ export function useChat() {
           const delta = choice?.delta;
           const contextCompaction = choice?.context_compaction as ContextCompactionNotice | undefined;
           if (contextCompaction) showContextCompaction(contextCompaction);
+          const resetAccumulators = () => {
+            fullContent = "";
+            thinkingText = "";
+            toolCalls.length = 0;
+            segments.length = 0;
+            widgets.length = 0;
+            currentTextIdx = -1;
+            currentThinkingIdx = -1;
+          };
+          // The replay starts from the beginning of the turn: rebuild its stored messages
+          // in place of the snapshot's partial copies (no duplicated content).
+          const turnInfo = choice?.turn;
+          if (turnInfo?.assistant_message_id) {
+            const serverId = turnInfo.assistant_message_id;
+            const placeholderId = currentAssistantId;
+            updateSessionMessages(sid, (prev) => [
+              ...prev.filter((m) => m.id !== serverId && m.id !== placeholderId),
+              { id: serverId, role: "assistant", content: "", ts: new Date().toISOString() },
+            ]);
+            currentAssistantId = serverId;
+            resetAccumulators();
+          }
+          const steerEvent = choice?.steer_applied;
+          if (steerEvent) {
+            pendingSteers.remove(sid, steerEvent.steers.map((st) => st.id));
+            let nextId = currentAssistantId;
+            updateSessionMessages(sid, (prev) => {
+              const applied = applySteerToTranscript(prev, currentAssistantId, steerEvent);
+              nextId = applied.assistantId;
+              return applied.messages;
+            });
+            currentAssistantId = steerEvent.assistant_message_id || nextId;
+            resetAccumulators();
+          }
+          const steerReturned = choice?.steer_returned;
+          if (steerReturned) pendingSteers.remove(sid, steerReturned.steers.map((st) => st.id));
           const thinking = choice?.thinking as string | undefined;
           if (thinking) {
             thinkingText += thinking;
@@ -884,8 +935,58 @@ export function useChat() {
       setSessionStreaming(sid, false);
       turnIdsBySessionRef.current.delete(sid);
       resumeAbortBySessionRef.current.delete(sid);
+      pendingSteers.take(sid);
+      followServerTurnsRef.current?.(sid);
     }
   }, [applyServerMessages, getMessages, setSessionStreaming, updateSessionMessages]);
+
+  /**
+   * Attach to a turn the server runs on this session (queued prompt, undelivered steer, branch
+   * answer, another device): load the stored transcript and tail the turn.
+   */
+  const attachToTurn = useCallback(async (sid: string, turnId: string) => {
+    if (streamsBySessionRef.current.has(sid) || resumeAbortBySessionRef.current.has(sid)) return;
+    loadedSessionsRef.current.delete(sid);
+    let msgs: ChatMessageWithQuestions[] = [];
+    try {
+      msgs = applyServerMessages(sid, await getMessages(sid));
+      loadedSessionsRef.current.add(sid);
+    } catch { /* replay still shows the turn */ }
+    if (streamsBySessionRef.current.has(sid) || resumeAbortBySessionRef.current.has(sid)) return;
+    const trailing = msgs.length > 0 && msgs[msgs.length - 1].role === "assistant" ? msgs[msgs.length - 1] : null;
+    const assistantId = trailing?.id ?? `temp-${Date.now()}-resume`;
+    if (!trailing) {
+      updateSessionMessages(sid, (prev) => [
+        ...prev,
+        { id: assistantId, role: "assistant", content: "", ts: new Date().toISOString() },
+      ]);
+    }
+    await runResume(turnId, assistantId, sid);
+  }, [applyServerMessages, getMessages, runResume, updateSessionMessages]);
+
+  /**
+   * After a local turn ends the server may start the next one itself (queue auto-send, steers
+   * that missed the turn). Look for it shortly after, in case its announcement came while this
+   * client was still busy with the previous stream.
+   */
+  const followServerTurns = useCallback((sid: string) => {
+    if (isLocalNewSessionKey(sid)) return;
+    setTimeout(() => {
+      if (activeSessionKeyRef.current !== sid) return;
+      if (streamsBySessionRef.current.has(sid) || resumeAbortBySessionRef.current.has(sid)) return;
+      const base = appConfig.baseUrl || "";
+      const headers: Record<string, string> = {};
+      if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+      void fetch(`${base}/v1/chat/completions/active-turn?sessionId=${encodeURIComponent(sid)}`, { headers })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { ok?: boolean; data?: { turnId: string | null } } | null) => {
+          if (j?.ok && j.data?.turnId) void attachToTurn(sid, j.data.turnId);
+        })
+        .catch(() => { /* offline — the next event or focus refresh reconciles */ });
+    }, 600);
+  }, [attachToTurn]);
+  useEffect(() => { followServerTurnsRef.current = followServerTurns; }, [followServerTurns]);
+
 
   // Load a specific session's messages
   const loadSession = useCallback(
@@ -1030,6 +1131,27 @@ export function useChat() {
       .catch(() => { /* next reconnect or focus refresh will reconcile */ });
   }, [applyServerMessages, backgroundWaitEvents, getMessages, refetchSessions, sessionId]);
 
+  // The server started a turn on its own (queue auto-send, a steer that missed its turn, a
+  // branch's answer): follow it live in the session being viewed.
+  useEffect(() => {
+    const latest = turnEvents.at(-1);
+    if (!latest || latest.id === lastTurnEventRef.current) return;
+    const previousIndex = turnEvents.findIndex((event) => event.id === lastTurnEventRef.current);
+    const added = turnEvents.slice(previousIndex + 1);
+    lastTurnEventRef.current = latest.id;
+    for (const event of added) {
+      const data = event.data as { sessionId?: string; turnId?: string } | undefined;
+      if (!data?.sessionId || !data.turnId) continue;
+      loadedSessionsRef.current.delete(data.sessionId);
+      if (data.sessionId !== activeSessionKeyRef.current) continue;
+      if (streamsBySessionRef.current.has(data.sessionId) || resumeAbortBySessionRef.current.has(data.sessionId)) {
+        // Busy with the previous stream: look again once it is over.
+        continue;
+      }
+      void attachToTurn(data.sessionId, data.turnId);
+    }
+  }, [attachToTurn, turnEvents]);
+
   // Start a new empty session
   const newSession = useCallback(() => {
     resetToLocalNewSession();
@@ -1055,6 +1177,9 @@ export function useChat() {
 
       let fullContent = "";
       let thinkingText = "";
+      /** Assistant message being filled; a steer moves the rest of the turn to a new one. */
+      let currentAssistantId = assistantId;
+      let steerApplied = false;
       const toolCalls: ToolCallInfo[] = [];
       // Chronologically ordered segments for interleaved rendering
       const segments: MessageSegment[] = [];
@@ -1076,7 +1201,7 @@ export function useChat() {
       const updateMsg = () => {
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch() }
               : m
           )
@@ -1209,6 +1334,41 @@ export function useChat() {
         const delta = choice?.delta;
         const contextCompaction = (choice as ServerChunkChoice | undefined)?.context_compaction;
         if (contextCompaction) showContextCompaction(contextCompaction);
+
+        // Steering: the server stored the answer so far, added the steers as user messages
+        // and continues the turn in a new assistant message.
+        const steerEvent = (choice as ServerChunkChoice | undefined)?.steer_applied;
+        if (steerEvent) {
+          steerApplied = true;
+          if (fullContent) appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
+          for (const steer of steerEvent.steers) appendConversation(streamSessionKey, { role: "user", content: steer.content });
+          pendingSteers.remove(streamSessionKey, steerEvent.steers.map((st) => st.id));
+          let nextId = currentAssistantId;
+          updateSessionMessages(streamSessionKey, (prev) => {
+            const applied = applySteerToTranscript(prev, currentAssistantId, steerEvent);
+            nextId = applied.assistantId;
+            return applied.messages;
+          });
+          currentAssistantId = steerEvent.assistant_message_id || nextId;
+          fullContent = "";
+          thinkingText = "";
+          toolCalls.length = 0;
+          segments.length = 0;
+          widgets.length = 0;
+          currentTextIdx = -1;
+          currentThinkingIdx = -1;
+          liveLastEmitAt.clear();
+          liveLastHtmlByTool.clear();
+          liveWidgetIdxByTool.clear();
+          nextFinalSlot = 0;
+        }
+        const steerReturned = (choice as ServerChunkChoice | undefined)?.steer_returned;
+        if (steerReturned) {
+          const removed = pendingSteers.remove(streamSessionKey, steerReturned.steers.map((st) => st.id));
+          if (steerReturned.scheduled && removed.length > 0) {
+            toast.info(removed.length === 1 ? "Your message will be sent next" : "Your messages will be sent next");
+          }
+        }
         const thinking = choice?.thinking as string | undefined;
 
         if (thinking) {
@@ -1321,7 +1481,7 @@ export function useChat() {
       if (stream.askUser && stream.askUser.questions.length > 0) {
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), askUserQuestions: stream.askUser!.questions }
             : m
           )
@@ -1337,7 +1497,7 @@ export function useChat() {
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), missionPreview: preview }
             : m
           )
@@ -1355,7 +1515,7 @@ export function useChat() {
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), vaultPreview: vaultData }
             : m
           )
@@ -1369,7 +1529,7 @@ export function useChat() {
         const wp = stream.whatsappPreview as WhatsAppPreviewData;
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), whatsappPreview: wp }
             : m
           )
@@ -1382,7 +1542,7 @@ export function useChat() {
         const ep = stream.emailPreview as EmailPreviewData;
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), emailPreview: ep }
             : m
           )
@@ -1397,7 +1557,7 @@ export function useChat() {
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), openFile: openFileData }
             : m
           )
@@ -1417,7 +1577,7 @@ export function useChat() {
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), navigateTo: navData }
             : m
           )
@@ -1433,7 +1593,7 @@ export function useChat() {
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === currentAssistantId
               ? { ...m, ...messagePatch(), openTab: openTabData }
             : m
           )
@@ -1481,7 +1641,7 @@ export function useChat() {
           return [
             ...patched,
             {
-              id: assistantId,
+              id: currentAssistantId,
               role: "assistant",
               ts: new Date().toISOString(),
               ...messagePatch(),
@@ -1530,7 +1690,7 @@ export function useChat() {
           return [
             ...patched,
             {
-              id: assistantId,
+              id: currentAssistantId,
               role: "assistant",
               ts: new Date().toISOString(),
               ...messagePatch(),
@@ -1548,10 +1708,21 @@ export function useChat() {
       streamsBySessionRef.current.delete(streamSessionKey);
       turnIdsBySessionRef.current.delete(streamSessionKey);
       setSessionStreaming(streamSessionKey, false);
+      // The turn is over: steers it never acknowledged cannot be delivered any more.
+      pendingSteers.take(streamSessionKey);
+      if (steerApplied && !isLocalNewSessionKey(streamSessionKey)) {
+        // The answer was split by steering: take the server's transcript (ids, tool calls).
+        const key = streamSessionKey;
+        void getMessages(key).then((raw) => {
+          if (streamsBySessionRef.current.has(key) || resumeAbortBySessionRef.current.has(key)) return;
+          applyServerMessages(key, raw);
+        }).catch(() => { /* keep the streamed transcript */ });
+      }
+      followServerTurns(streamSessionKey);
       refetchSessions();
       return fullContent;
     },
-    [appendConversation, clearSessionPending, client, migrateSessionKey, refetchSessions, setSessionId, setSessionPending, setSessionStreaming, updateSessionMessages, getMessages, setConversation]
+    [appendConversation, applyServerMessages, clearSessionPending, client, followServerTurns, migrateSessionKey, refetchSessions, setSessionId, setSessionPending, setSessionStreaming, updateSessionMessages, getMessages, setConversation]
   );
 
   const appendUserAndStream = useCallback(async (
@@ -1672,13 +1843,21 @@ export function useChat() {
     const stream = streamsBySessionRef.current.get(key);
     const resumeAc = resumeAbortBySessionRef.current.get(key);
 
+    // Stop means "not this": messages still waiting to steer the turn go back to the composer.
+    const local = pendingSteers.take(key);
     if (turnId) {
-      const base = appConfig.baseUrl || "";
-      const headers: Record<string, string> = {};
-      if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
-      // fire-and-forget — best effort
-      void fetch(`${base}/v1/chat/completions/abort/${turnId}`, { method: "POST", headers })
-        .catch(() => { /* server may already be done — ignore */ });
+      void client.abortTurn(turnId)
+        .then(({ returnedSteers }) => {
+          const seen = new Set(returnedSteers.map((st) => st.id));
+          const texts = [
+            ...returnedSteers.map((st) => st.content),
+            ...local.filter((st) => !seen.has(st.id) && st.status === "sending").map((st) => st.content),
+          ];
+          requestComposerRestore(key, texts);
+        })
+        .catch(() => requestComposerRestore(key, local.map((st) => st.content)));
+    } else {
+      requestComposerRestore(key, local.map((st) => st.content));
     }
     if (stream) {
       stream.abort();
@@ -1690,7 +1869,107 @@ export function useChat() {
     }
     turnIdsBySessionRef.current.delete(key);
     setSessionStreaming(key, false);
-  }, [setSessionStreaming]);
+  }, [client, setSessionStreaming]);
+
+  /** Wait (briefly) for the running turn's id — it arrives with the response headers. */
+  const waitForTurnId = useCallback(async (key: string): Promise<string | undefined> => {
+    for (let i = 0; i < 50; i++) {
+      const current = activeSessionKeyRef.current;
+      const turnId = turnIdsBySessionRef.current.get(key) ?? turnIdsBySessionRef.current.get(current);
+      if (turnId) return turnId;
+      if (!streamsBySessionRef.current.has(key) && !streamsBySessionRef.current.has(current)) return undefined;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return undefined;
+  }, []);
+
+  /**
+   * Steer the running turn: the text joins it at its next safe point (after the current round's
+   * tool results, or the turn goes on instead of finishing). Shown as pending until applied.
+   * Resolves to "sent" when the server took it, "restored" when it went back to the composer.
+   */
+  const steer = useCallback(async (text: string): Promise<"sent" | "restored"> => {
+    const content = text.trim();
+    if (!content) return "restored";
+    const key = activeSessionKeyRef.current;
+    const id = newSteerId();
+    pendingSteers.add(key, { id, content, status: "sending" });
+    const turnId = await waitForTurnId(key);
+    const owner = activeSessionKeyRef.current === key || !isLocalNewSessionKey(key) ? key : activeSessionKeyRef.current;
+    if (!turnId) {
+      pendingSteers.remove(owner, [id]);
+      pendingSteers.remove(key, [id]);
+      requestComposerRestore(activeSessionKeyRef.current, [content]);
+      return "restored";
+    }
+    try {
+      const result = await client.steerTurn(turnId, { id, content });
+      const sessionKey = activeSessionKeyRef.current;
+      if (result.status === "scheduled") {
+        // The turn was already over: the server sends it as the next message.
+        pendingSteers.remove(sessionKey, [id]);
+        pendingSteers.remove(key, [id]);
+      } else {
+        pendingSteers.update(sessionKey, id, { status: "pending", turnId });
+        pendingSteers.update(key, id, { status: "pending", turnId });
+      }
+      return "sent";
+    } catch (error) {
+      pendingSteers.remove(activeSessionKeyRef.current, [id]);
+      pendingSteers.remove(key, [id]);
+      // Stopped or unknown turn: give the text back rather than losing it.
+      requestComposerRestore(activeSessionKeyRef.current, [content]);
+      const code = (error as { code?: string }).code;
+      if (code !== "turn_aborted") toast.error(error instanceof Error ? error.message : "Could not send the message");
+      return "restored";
+    }
+  }, [client, waitForTurnId]);
+
+  /** Withdraw a pending steer; if it was already delivered, nothing changes. */
+  const cancelSteer = useCallback(async (id: string) => {
+    const key = activeSessionKeyRef.current;
+    const steerItem = pendingSteers.get(key).find((st) => st.id === id);
+    if (!steerItem) return;
+    if (!steerItem.turnId) {
+      pendingSteers.remove(key, [id]);
+      return;
+    }
+    try {
+      await client.cancelSteer(steerItem.turnId, id);
+      pendingSteers.remove(key, [id]);
+      requestComposerRestore(key, [steerItem.content]);
+    } catch {
+      toast.info("Already delivered to the assistant");
+    }
+  }, [client]);
+
+  /** Branch the conversation at a user message; the assistant answers it again in the branch. */
+  const forkSession = useCallback(async (messageId: string) => {
+    const sid = activeSessionKeyRef.current;
+    if (isLocalNewSessionKey(sid)) return;
+    const result = await client.forkSession(sid, messageId);
+    if (result.turnError) toast.error(`The branch could not answer: ${result.turnError}`);
+    await refetchSessions();
+    return result.session.id;
+  }, [client, refetchSessions]);
+
+  /**
+   * Undo a branch: delete it and go back to the parent. Pass `force` once the user confirmed
+   * losing what they wrote in the branch. Returns "confirm" when that confirmation is needed.
+   */
+  const undoFork = useCallback(async (forkId: string, opts?: { force?: boolean }): Promise<{ parentSessionId: string; forkMessageId: string | null } | "confirm"> => {
+    try {
+      const result = await client.undoFork(forkId, opts);
+      updateSessionMessages(forkId, []);
+      loadedSessionsRef.current.delete(forkId);
+      conversationBySessionRef.current.delete(forkId);
+      await refetchSessions();
+      return { parentSessionId: result.parentSessionId, forkMessageId: result.forkMessageId };
+    } catch (error) {
+      if ((error as { code?: string }).code === "FORK_HAS_MESSAGES") return "confirm";
+      throw error;
+    }
+  }, [client, refetchSessions, updateSessionMessages]);
 
   // Answer pending questions — formats answers as a user message and continues the conversation
   const answerQuestions = useCallback(
@@ -2085,6 +2364,7 @@ export function useChat() {
     messages,
     isLoading,
     messagesLoading,
+    activeSessionKey,
     sessionId,
     sessions,
     sessionsLoading,
@@ -2117,6 +2397,10 @@ export function useChat() {
     setStarred,
     selectedAgent,
     setSelectedAgent,
+    steer,
+    cancelSteer,
+    forkSession,
+    undoFork,
   };
 }
 
