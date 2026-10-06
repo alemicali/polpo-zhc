@@ -4,7 +4,7 @@ import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimpleWithAuth, completeSimpleWithAuth, resolveModel } from "../llm/pi-client.js";
+import { streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
 import { buildSystemPrompt } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -257,7 +257,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   }
   const completionApp = completionRoutes(() => ({
     turnScheduler,
-    contextCheckpoints: databaseStoresFor(o.getPolpoDir())?.contextCheckpointStore ?? new FileContextCheckpointStore(o.getPolpoDir()),
+    contextCheckpoints: o.getContextCheckpointStore(),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
     saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
       o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
@@ -449,7 +449,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     },
     streamLLM: streamSimpleWithAuth as any,
     completeLLM: completeSimpleWithAuth as any,
-    resolveModel: (spec: string) => resolveModel(spec),
+    resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
+      resolveSummaryModel(conversation, configured, promptTokens),
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
@@ -524,7 +525,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
-    const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
+    // the whole conversation: compaction keeps it within the window
+    const history = await o.getSessionStore()?.getMessages(wait.sessionId) ?? [];
     const response = await completionApp.request(new Request("http://polpo.internal/", {
       method: "POST",
       headers,
