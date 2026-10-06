@@ -830,7 +830,7 @@ const agentSandboxParam = Type.Optional(Type.Object({
   }, { description: "Upper limits per command" })),
   allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
   inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
-}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Agents that read external content (web, email, messages, or no tool list) always run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
+}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 
 const sandboxStatusTool: Tool = {
   name: "sandbox_status",

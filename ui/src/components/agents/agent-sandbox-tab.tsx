@@ -82,6 +82,7 @@ export function AgentSandboxTab() {
                 onChange={setDraft}
                 available={overview.available}
                 readsExternalContent={external}
+                confineExternal={!!overview.settings?.confineExternalContent}
               />
               <div className="flex items-center gap-2 mt-5">
                 <Button size="sm" className="h-8 text-xs" disabled={!dirty || saving} onClick={() => void save()}>
