@@ -218,11 +218,13 @@ function QueueItemRow({
     }
   };
 
-  // Keep local draft in sync when the underlying item changes (e.g. from
-  // a reorder, or a parallel update from another tab).
-  useEffect(() => {
-    if (!editing) setDraft(item.text);
-  }, [editing, item.text]);
+  // The draft is only shown while editing: seed it from the latest item text
+  // when entering edit mode, so changes made meanwhile (a reorder, or a
+  // parallel update from another tab) are picked up.
+  const startEditing = () => {
+    setDraft(item.text);
+    setEditing(true);
+  };
 
   // Auto-focus + auto-size on entering edit mode.
   useEffect(() => {
@@ -315,7 +317,7 @@ function QueueItemRow({
       ) : (
         <button
           type="button"
-          onClick={() => setEditing(true)}
+          onClick={startEditing}
           className="min-w-0 flex-1 cursor-text rounded text-left text-sm leading-snug text-foreground/90 hover:text-foreground"
           title="Click to edit"
         >
@@ -361,7 +363,7 @@ function QueueItemRow({
           <button
             type="button"
             aria-label="Edit queued prompt"
-            onClick={() => setEditing(true)}
+            onClick={startEditing}
             className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Pencil className="h-3 w-3" />

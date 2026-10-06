@@ -27,7 +27,7 @@ import type { AgentConfig, AgentProcess } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { RemoveAgentDialog } from "./agents-dialogs";
-import { useAgentsPage } from "./agents-page-provider";
+import { useAgentsPage } from "./agents-page-context";
 import { cn } from "@/lib/utils";
 import { getTeamColor } from "./agents-team-colors";
 

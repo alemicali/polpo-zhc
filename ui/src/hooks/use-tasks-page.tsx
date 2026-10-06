@@ -114,21 +114,8 @@ export interface TaskActions {
   click: (id: string) => void;
 }
 
-const TaskActionsContext = createContext<TaskActions | null>(null);
-
-export function TaskActionsProvider({
-  actions,
-  children,
-}: {
-  actions: TaskActions;
-  children: React.ReactNode;
-}) {
-  return (
-    <TaskActionsContext value={actions}>
-      {children}
-    </TaskActionsContext>
-  );
-}
+/** Provided by <TaskActionsProvider> (see ./task-actions-provider.tsx). */
+export const TaskActionsContext = createContext<TaskActions | null>(null);
 
 export function useTaskActions(): TaskActions {
   const ctx = use(TaskActionsContext);

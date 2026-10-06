@@ -2,13 +2,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTheme } from "@/hooks/use-theme";
 import "./mermaid-file-preview.css";
-
-// Keep file contents inside one code block, even if they contain backticks.
-export function mermaidCodeBlock(source: string): string {
-  const longest = Math.max(2, ...Array.from(source.matchAll(/`+/g), match => match[0].length));
-  const fence = "`".repeat(longest + 1);
-  return `${fence}mermaid\n${source}\n${fence}`;
-}
+import { mermaidCodeBlock } from "./mermaid-code-block";
 
 function DiagramError({ error }: { error: string }) {
   return (

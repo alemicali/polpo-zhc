@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /**
  * useState-like hook that mirrors its value into localStorage. Visual UI
@@ -10,15 +10,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * payloads are tiny and JSON.stringify is fast.
  */
 export function useLocalState<T>(key: string, initial: T): [T, (v: T | ((prev: T) => T)) => void] {
-  const initialRef = useRef(initial);
+  // Lazy initializer: runs once on mount, so `initial` is only read then.
   const [value, setValue] = useState<T>(() => {
-    if (typeof window === "undefined") return initialRef.current;
+    if (typeof window === "undefined") return initial;
     try {
       const raw = window.localStorage.getItem(key);
-      if (raw == null) return initialRef.current;
+      if (raw == null) return initial;
       return JSON.parse(raw) as T;
     } catch {
-      return initialRef.current;
+      return initial;
     }
   });
 

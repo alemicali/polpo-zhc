@@ -13,10 +13,16 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useEvents, usePolpo, useSessions } from "@polpo-ai/react";
 import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/react";
-import type { ChatCompletionStream } from "@polpo-ai/react";
+import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
 import { toast } from "sonner";
+
+/** Chunk choice fields the server emits beyond the SDK's ChatCompletionChunk type. */
+type ServerChunkChoice = ChatCompletionChunk["choices"][number] & {
+  context_compaction?: ContextCompactionNotice;
+  session_title?: { sessionId: string; title: string };
+};
 
 type ContextCompactionNotice = {
   beforeTokens: number;
@@ -530,7 +536,7 @@ export function useChat() {
       if (!isInteractiveInterrupted && !isWidgetCompleted) continue;
 
       if (tc.name === "ask_user" && tc.arguments) {
-        const questions = (tc.arguments as any)?.questions as AskUserQuestion[] ?? [];
+        const questions = (tc.arguments as { questions?: AskUserQuestion[] } | undefined)?.questions ?? [];
         if (questions.length > 0) {
           lastMsg.askUserQuestions = questions;
           setSessionPending(key, { questions });
@@ -786,7 +792,7 @@ export function useChat() {
           if (!trimmed.startsWith("data: ")) continue;
           const data = trimmed.slice(6);
           if (data === "[DONE]") break readLoop;
-          let chunk: any;
+          let chunk: { choices?: ServerChunkChoice[] };
           try { chunk = JSON.parse(data); } catch { continue; }
           const choice = chunk.choices?.[0];
           const delta = choice?.delta;
@@ -856,9 +862,7 @@ export function useChat() {
           // Session title intercept — `set_session_title` tool emits this
           // chunk after the server already persisted the rename. Mirror
           // it locally so sidebar + chat tabs refresh without a refetch.
-          const st = (choice as any)?.session_title as
-            | { sessionId: string; title: string }
-            | undefined;
+          const st = choice?.session_title;
           if (st && typeof st.sessionId === "string" && typeof st.title === "string") {
             updateLocalTitle(st.sessionId, st.title);
           }
@@ -1203,7 +1207,7 @@ export function useChat() {
         syncServerIds();
         const choice = chunk.choices[0];
         const delta = choice?.delta;
-        const contextCompaction = (choice as any)?.context_compaction as ContextCompactionNotice | undefined;
+        const contextCompaction = (choice as ServerChunkChoice | undefined)?.context_compaction;
         if (contextCompaction) showContextCompaction(contextCompaction);
         const thinking = choice?.thinking as string | undefined;
 
@@ -1233,7 +1237,7 @@ export function useChat() {
         }
 
         // Tool call events — insert/update tool segment
-        const tc = (choice as any)?.tool_call as ToolCallInfo | undefined;
+        const tc = choice?.tool_call as ToolCallInfo | undefined;
         if (tc) {
           const existing = toolCalls.find((t) => t.id === tc.id);
             const prevState = existing?.state;
@@ -1285,7 +1289,7 @@ export function useChat() {
 
         // Widget render intercept — same shape as mission_preview/vault_preview
         // but display-only: turn ends, no user response expected.
-        const wr = (choice as any)?.widget_render as
+        const wr = choice?.widget_render as
           | { html: string; title?: string | null; description?: string | null; chrome?: boolean; stream?: boolean }
           | undefined;
         if (wr && typeof wr.html === "string") {
@@ -1305,9 +1309,7 @@ export function useChat() {
         // sessionStore.renameSession. Mirror it into local sessions[]
         // so sidebar + chat tabs reflect the new title in real time
         // (without waiting for a `refetchSessions` round-trip).
-        const st = (choice as any)?.session_title as
-          | { sessionId: string; title: string }
-          | undefined;
+        const st = (choice as ServerChunkChoice | undefined)?.session_title;
         if (st && typeof st.sessionId === "string" && typeof st.title === "string") {
           updateLocalTitle(st.sessionId, st.title);
         }
@@ -1360,11 +1362,11 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { vault: vaultData, questions: null, mission: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).whatsappPreview) {
+      } else if (stream.whatsappPreview) {
         // WhatsApp preview — Side-effect approval gate. Server emitted
         // whatsapp_preview after intercepting whatsapp_send /
         // whatsapp_send_file. UI shows a card with Send/Refine/Cancel.
-        const wp = (stream as any).whatsappPreview as WhatsAppPreviewData;
+        const wp = stream.whatsappPreview as WhatsAppPreviewData;
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -1374,10 +1376,10 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { whatsapp: wp, questions: null, mission: null, vault: null, email: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).emailPreview) {
+      } else if (stream.emailPreview) {
         // Email preview — Side-effect approval gate. Server emitted
         // email_preview after intercepting email_send.
-        const ep = (stream as any).emailPreview as EmailPreviewData;
+        const ep = stream.emailPreview as EmailPreviewData;
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -1387,9 +1389,9 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { email: ep, questions: null, mission: null, vault: null, whatsapp: null, openFile: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).openFile) {
+      } else if (stream.openFile) {
         // Client-side open_file — open file preview dialog
-        const of = (stream as any).openFile;
+        const of = stream.openFile;
         const openFileData: OpenFileData = {
           path: of.path,
         };
@@ -1402,9 +1404,9 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { openFile: openFileData, questions: null, mission: null, vault: null, whatsapp: null, email: null, navigateTo: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).navigateTo) {
+      } else if (stream.navigateTo) {
         // Client-side navigate_to — navigate the UI to a specific page
-        const nav = (stream as any).navigateTo;
+        const nav = stream.navigateTo;
         const navData: NavigateToData = {
           target: nav.target,
           id: nav.id,
@@ -1422,9 +1424,9 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { navigateTo: navData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, openTab: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).openTab) {
+      } else if (stream.openTab) {
         // Client-side open_tab — open URL in new browser tab
-        const tab = (stream as any).openTab;
+        const tab = stream.openTab;
         const openTabData: OpenTabData = {
           url: tab.url,
           label: tab.label,
@@ -1438,9 +1440,9 @@ export function useChat() {
         );
         setSessionPending(streamSessionKey, { openTab: openTabData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, setDesign: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if ((stream as any).setDesign) {
+      } else if (stream.setDesign) {
         // Client-side set_design — show preview card and wait for user confirmation
-        const design = (stream as any).setDesign;
+        const design = stream.setDesign;
         const setDesignData: SetDesignData = {
           enabled: design.enabled,
           light: design.light,
@@ -1489,7 +1491,7 @@ export function useChat() {
         });
         setSessionPending(streamSessionKey, { setDesign: setDesignData, questions: null, mission: null, vault: null, whatsapp: null, email: null, openFile: null, navigateTo: null, openTab: null });
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
-      } else if (widgets.length > 0 || (stream as any).widgetRender) {
+      } else if (widgets.length > 0 || stream.widgetRender) {
         // Widget render — display-only intercept. N widget catturati in
         // ordine durante il chunk loop, OPPURE 1 widget esposto dallo SDK
         // come `stream.widgetRender` (fallback per quando il chunk loop
@@ -1499,7 +1501,7 @@ export function useChat() {
         // text delta, quindi assistantId potrebbe non esistere ancora.
         const allWidgets = widgets.length > 0
           ? [...widgets]
-          : [(stream as any).widgetRender as WidgetRenderData];
+          : [stream.widgetRender as WidgetRenderData];
         updateSessionMessages(streamSessionKey, (prev) => {
           let attached = false;
           const patched = prev.map((m) => {
@@ -2223,11 +2225,12 @@ export function useProjectInfo() {
   const [info, setInfo] = useState<ProjectInfo | null>(() => projectInfoCache.get(client as object) ?? null);
   const [loading, setLoading] = useState(() => !projectInfoCache.has(client as object));
 
-  const refresh = useCallback(async (force = false) => {
-    const value = await loadProjectInfo(client, force);
+  // State is only updated in the promise callback (never synchronously), so
+  // effects can trigger a refresh.
+  const refresh = useCallback((force = false) => loadProjectInfo(client, force).then((value) => {
     if (value) setInfo(value);
     setLoading(false);
-  }, [client]);
+  }), [client]);
 
   useEffect(() => {
     let active = true;

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgentMemory } from "@polpo-ai/react";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 import { toast } from "sonner";
 
 function MemoryStats({ content }: { content: string }) {

@@ -26,7 +26,7 @@ import "@xyflow/react/dist/style.css";
 import { Users, ChevronRight, Zap } from "lucide-react";
 import type { AgentConfig, AgentProcess, Team } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { useAgentsPage } from "./agents-page-provider";
+import { useAgentsPage } from "./agents-page-context";
 import { getTeamColor } from "./agents-team-colors";
 import { cn } from "@/lib/utils";
 

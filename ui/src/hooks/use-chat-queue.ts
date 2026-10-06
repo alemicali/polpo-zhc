@@ -72,7 +72,7 @@ function readInitial(): Map<string, QueueState> {
   return m;
 }
 
-let _store: Map<string, QueueState> = readInitial();
+const _store: Map<string, QueueState> = readInitial();
 const listeners = new Set<() => void>();
 
 function persist() {

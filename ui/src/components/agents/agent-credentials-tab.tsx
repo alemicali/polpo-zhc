@@ -40,7 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 import { usePolpo, useAgents } from "@polpo-ai/react";
 import type { VaultEntryMeta } from "@polpo-ai/react";
 import { toast } from "sonner";

@@ -2,7 +2,8 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { PromptInput, PromptInputTextarea, type PromptInputProps } from "../src/components/ai-elements/prompt-input-core";
-import { PromptInputProvider, usePromptInputAttachments } from "../src/components/ai-elements/prompt-input-provider";
+import { PromptInputProvider } from "../src/components/ai-elements/prompt-input-provider";
+import { usePromptInputAttachments } from "../src/components/ai-elements/prompt-input-context";
 
 let root: Root;
 let container: HTMLDivElement;

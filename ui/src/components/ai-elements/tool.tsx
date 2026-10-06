@@ -8,12 +8,9 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { MessageResponse } from "@/components/ai-elements/message";
-import {
-  FilePreviewDialog,
-  useFilePreview,
-  mimeFromPath,
-  previewCategory,
-} from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath, previewCategory } from "@/components/shared/file-preview-utils";
 import { cn } from "@/lib/utils";
 import { apiUrl, config } from "@/lib/config";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
@@ -380,13 +377,22 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
   const shouldOpenForStreamingInput = cardTools.some((t) => t.state === "preparing" && !!t.argumentsText);
   const [open, setOpen] = useState(hasError || shouldOpenForStreamingInput);
 
-  useEffect(() => {
+  // Auto-open on errors / streaming input, auto-close when calls finish.
+  // Adjusted during render when the inputs change (no effect round-trip);
+  // manual toggles in between are kept until the next change.
+  const [prevAutoOpen, setPrevAutoOpen] = useState({ hasError, isCalling, shouldOpenForStreamingInput });
+  if (
+    prevAutoOpen.hasError !== hasError ||
+    prevAutoOpen.isCalling !== isCalling ||
+    prevAutoOpen.shouldOpenForStreamingInput !== shouldOpenForStreamingInput
+  ) {
+    setPrevAutoOpen({ hasError, isCalling, shouldOpenForStreamingInput });
     if (hasError || shouldOpenForStreamingInput) {
       setOpen(true);
     } else if (!isCalling) {
       setOpen(false);
     }
-  }, [hasError, isCalling, shouldOpenForStreamingInput]);
+  }
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />

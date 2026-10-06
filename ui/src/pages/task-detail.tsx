@@ -64,12 +64,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  FilePreviewDialog,
-  fileReadUrl,
-  previewCategory,
-  useFilePreview,
-} from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { fileReadUrl, previewCategory } from "@/components/shared/file-preview-utils";
+import { useFilePreview } from "@/components/shared/use-file-preview";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
   DropdownMenu,

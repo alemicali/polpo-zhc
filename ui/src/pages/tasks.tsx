@@ -68,8 +68,8 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import {
   useTasksPageState,
   useTaskActions,
-  TaskActionsProvider,
 } from "@/hooks/use-tasks-page";
+import { TaskActionsProvider } from "@/hooks/task-actions-provider";
 import type {
   GroupByKey,
   ColumnByKey,

@@ -1979,12 +1979,21 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo 
     });
   };
 
-  useEffect(() => {
+  // Re-seed the drafts when the underlying theme values change (mode switch,
+  // reset, external update) — adjusted during render, not in an effect.
+  const [draftSource, setDraftSource] = useState(activeTheme);
+  if (
+    draftSource.primary !== activeTheme.primary ||
+    draftSource.secondary !== activeTheme.secondary ||
+    draftSource.text !== activeTheme.text ||
+    draftSource.fontFamily !== activeTheme.fontFamily
+  ) {
+    setDraftSource(activeTheme);
     setPrimaryDraft(activeTheme.primary);
     setSecondaryDraft(activeTheme.secondary);
     setTextDraft(activeTheme.text);
     setFontDraft(activeTheme.fontFamily);
-  }, [activeTheme.fontFamily, activeTheme.primary, activeTheme.secondary, activeTheme.text]);
+  }
 
   const updateHexDraft = (
     value: string,
@@ -4905,8 +4914,31 @@ function SyncProgressBar({ progress }: { progress: SyncProgress }) {
 
 /** Parse one NDJSON line emitted by the /sync streaming endpoints and
  * fold it into the panel's progress state. */
+/** rclone --use-json-log stats payload (fields are checked before use). */
+interface SyncStatsPayload {
+  bytes?: unknown;
+  totalBytes?: unknown;
+  transfers?: unknown;
+  totalTransfers?: unknown;
+  speed?: unknown;
+  eta?: unknown;
+  transferring?: unknown;
+}
+
+/** One NDJSON line from the /sync streaming endpoints. */
+interface SyncStreamEvent extends SyncStatsPayload {
+  type?: string;
+  ok?: unknown;
+  code?: number;
+  error?: string;
+  source?: string;
+  stats?: SyncStatsPayload;
+  object?: unknown;
+  msg?: string;
+}
+
 function handleSyncEvent(line: string, setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>) {
-  let evt: any;
+  let evt: SyncStreamEvent | null;
   try { evt = JSON.parse(line); } catch { return; }
   if (evt?.type === "done") {
     setProgress((p) => ({ ...p, done: { ok: !!evt.ok, code: evt.code ?? -1 }, error: evt.error || p.error, active: null }));
@@ -4915,8 +4947,8 @@ function handleSyncEvent(line: string, setProgress: React.Dispatch<React.SetStat
   if (evt?.type !== "log") return;
   // Stats payload — shape from rclone --use-json-log
   if (evt.source === "accounting/stats" || evt.stats) {
-    const s = evt.stats ?? evt;
-    const tx = Array.isArray(s.transferring) ? s.transferring[0] : null;
+    const s: SyncStatsPayload = evt.stats ?? evt;
+    const tx = Array.isArray(s.transferring) ? (s.transferring[0] as { name?: string } | undefined) : null;
     setProgress((p) => ({
       ...p,
       bytes: typeof s.bytes === "number" ? s.bytes : p.bytes,

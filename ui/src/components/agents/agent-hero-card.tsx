@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
 
