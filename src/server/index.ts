@@ -14,6 +14,7 @@ import { SSEBridge } from "./sse-bridge.js";
 import type { Team } from "../core/types.js";
 import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
+import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 
 /**
  * Polpo HTTP Server.
@@ -41,6 +42,7 @@ export class PolpoServer {
   private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
   private supervisorRun: Promise<void> | null = null;
+  private storage: StorageRuntime | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -63,6 +65,17 @@ export class PolpoServer {
     // Init may run inside the setup request: timers and pollers it starts belong to the system
     await withEventOrigin({ source: "system" }, () => this.orchestrator.initInteractive(
       persistedConfig?.project ?? basename(workDir), [defaultTeam]));
+
+    // Storage buckets: mount the enabled ones on this host (the server is the only process that
+    // mounts) and let workspaces ask which mounts an agent may see.
+    const o = this.orchestrator;
+    const storage = getStorageRuntime(polpoDir, o.getVaultStore(), (payload) => o.emit("storage:changed", payload));
+    if (this.storage && this.storage !== storage) await this.storage.shutdown().catch(() => {});
+    this.storage = storage;
+    o.setStorageMountProvider(storage);
+    void withEventOrigin({ source: "system" }, () => storage.startMounts()).catch((err) => {
+      console.error("[PolpoServer] Storage mounts failed to start:", err instanceof Error ? err.message : err);
+    });
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -201,6 +214,10 @@ export class PolpoServer {
     if (this.orchestrator?.isInitialized) {
       await this.orchestrator.gracefulStop();
     }
+    // Unmount buckets after the runners stopped using them.
+    await this.storage?.shutdown().catch((err) => {
+      console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
+    });
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
     console.log("Polpo Server stopped.");

@@ -34,6 +34,7 @@ const AgentBrowserLivePage = lazy(() => import("@/pages/agent-browser-live").the
 const AppsPage = lazy(() => import("@/pages/apps").then(m => ({ default: m.AppsPage })));
 const DataPage = lazy(() => import("@/pages/data").then(m => ({ default: m.DataPage })));
 const DataViewsPage = lazy(() => import("@/pages/data").then(m => ({ default: m.DataViewsPage })));
+const StoragePage = lazy(() => import("@/pages/storage").then(m => ({ default: m.StoragePage })));
 const CompanyBrainPage = lazy(() => import("@/pages/company-brain").then(m => ({ default: m.CompanyBrainPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
 const LoginPage = lazy(() => import("@/pages/login").then(m => ({ default: m.LoginPage })));
@@ -205,6 +206,7 @@ export function App() {
           <Route path="apps" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
           <Route path="apps/:appId" element={<Suspense fallback={<PageLoader />}><AppsPage /></Suspense>} />
           <Route path="data" element={<Suspense fallback={<PageLoader />}><DataPage /></Suspense>} />
+          <Route path="storage" element={<Suspense fallback={<PageLoader />}><StoragePage /></Suspense>} />
           <Route path="views" element={<Suspense fallback={<PageLoader />}><DataViewsPage /></Suspense>} />
           <Route path="brain" element={<Suspense fallback={<PageLoader />}><CompanyBrainPage /></Suspense>} />
           <Route path="agent-live" element={<Suspense fallback={<PageLoader />}><AgentBrowserLivePage /></Suspense>} />

@@ -89,3 +89,27 @@ export const dataActivityPg = pgTable("data_activity", {
   pgIndex("idx_pg_data_activity_created_at").on(table.createdAt),
   pgIndex("idx_pg_data_activity_source").on(table.sourceId, table.createdAt),
 ]);
+
+// ── Storage (S3-compatible buckets; credentials live in the vault) ─────
+
+export const storageEntriesSqlite = sqliteTable("storage_entries", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  doc: text("doc").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("idx_storage_entries_slug").on(table.slug),
+]);
+
+export const storageEntriesPg = pgTable("storage_entries", {
+  id: pgText("id").primaryKey(),
+  slug: pgText("slug").notNull(),
+  name: pgText("name").notNull(),
+  doc: jsonb("doc").notNull(),
+  createdAt: pgText("created_at").notNull(),
+  updatedAt: pgText("updated_at").notNull(),
+}, (table) => [
+  pgUniqueIndex("idx_pg_storage_entries_slug").on(table.slug),
+]);

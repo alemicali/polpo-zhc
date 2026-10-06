@@ -21,6 +21,7 @@ import {
   LayoutList,
   Search,
   HardDrive,
+  Cloud,
   Loader2,
   FolderOpen,
   ChevronDown,
@@ -93,6 +94,9 @@ interface RootDir {
   icon: string;
   totalFiles?: number;
   totalSize?: number;
+  /** "storage": a mounted bucket (Storage page). */
+  kind?: "storage";
+  readOnly?: boolean;
 }
 
 interface UploadFile {
@@ -758,7 +762,7 @@ function RootItem({
   active: boolean;
   onClick: () => void;
 }) {
-  const Icon = root.id === "polpo" ? HardDrive : FolderOpen;
+  const Icon = root.kind === "storage" ? Cloud : root.id === "polpo" ? HardDrive : FolderOpen;
   return (
     <button
       onClick={onClick}
@@ -911,7 +915,10 @@ export function FilesPage() {
   // Current path from URL
   const currentPath = searchParams.get("path") || ".";
   const highlightParam = searchParams.get("highlight");
-  const activeRoot = roots.find(r => currentPath === r.path || (r.path !== "." && currentPath.startsWith(r.path + "/"))) || roots[0];
+  // The most specific root wins (mounted buckets live inside .polpo).
+  const activeRoot = roots
+    .filter(r => currentPath === r.path || (r.path !== "." && currentPath.startsWith(r.path + "/")))
+    .sort((a, b) => b.path.length - a.path.length)[0] || roots[0];
   const currentAbsolutePath = useMemo(() => {
     if (!activeRoot) return currentPath;
     const relativePath = activeRoot.path === "."
@@ -1550,6 +1557,7 @@ export function FilesPage() {
                 size={uploading ? "sm" : "icon"}
                 className={cn("h-8", uploading ? "gap-1.5 px-2.5" : "w-8")}
                 onClick={() => uploading ? cancelUpload() : fileInputRef.current?.click()}
+                disabled={!uploading && !!activeRoot?.readOnly}
                 aria-label={uploading ? "Stop upload" : "Upload files"}
               >
                 {uploading ? (
@@ -1571,7 +1579,7 @@ export function FilesPage() {
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => folderInputRef.current?.click()}
-                disabled={uploading}
+                disabled={uploading || !!activeRoot?.readOnly}
                 aria-label="Upload folder"
               >
                 <FolderUp className="h-4 w-4" />
@@ -1583,7 +1591,7 @@ export function FilesPage() {
           {/* New folder */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCreatingFolder(true)}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCreatingFolder(true)} disabled={!!activeRoot?.readOnly}>
                 <FolderPlus className="h-4 w-4" />
               </Button>
             </TooltipTrigger>

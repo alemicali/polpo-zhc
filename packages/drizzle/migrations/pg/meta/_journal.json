@@ -64,6 +64,13 @@
       "when": 1791300269948,
       "tag": "0008_rooms",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791321576949,
+      "tag": "0009_storage",
+      "breakpoints": true
     }
   ]
 }

@@ -196,3 +196,13 @@ export type {
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
   StorageMountSpec, StorageMountProvider,
 } from "./sandbox.js";
+export {
+  STORAGE_VAULT_OWNER, STORAGE_SLUG_PATTERN, storageCredentialsService, storageSandboxCredentialsService,
+  normalizeStoragePrefix, normalizeStoragePath, storageGrantFor, storageAccessFor, storagePathAllowed,
+  assertStorageAccess, scopeStorageListing, validateStorageEntry,
+} from "./storage-registry.js";
+export type {
+  StorageProvider, StorageDriver, StorageAccess, StorageGrant, StorageCacheOptions, StorageEntry, CreateStorageEntry,
+  StorageRegistryChangeEvent, StorageRegistryChangeEmitter, StorageRegistryStore, StorageCredentials,
+  StorageCredentialStatus, StorageAccessGrant,
+} from "./storage-registry.js";

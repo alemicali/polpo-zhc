@@ -205,6 +205,10 @@ export class Orchestrator extends TypedEmitter {
   // Pure orchestration engine (delegates tick, run, and all pure-logic methods)
   private engine!: OrchestratorEngine;
 
+  // Storage mounts (buckets) workspaces may show to agents. Stub: feat/sandbox-core owns the real wiring.
+  private storageMountProvider?: import("@polpo-ai/core/sandbox").StorageMountProvider;
+  setStorageMountProvider(provider: import("@polpo-ai/core/sandbox").StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
+
   getWorkDir(): string { return this.workDir; }
   getAgentWorkDir(): string {
     if (!this.cachedAgentWorkDir) {

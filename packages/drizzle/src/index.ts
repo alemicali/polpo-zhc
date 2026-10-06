@@ -58,6 +58,7 @@ import { tokenUsagePg, tokenUsageSqlite, contextCheckpointsPg, contextCheckpoint
 import {
   appsPg, appsSqlite,
   dataSourcesPg, dataSourcesSqlite, dataViewsPg, dataViewsSqlite, dataActivityPg, dataActivitySqlite,
+  storageEntriesPg, storageEntriesSqlite,
 } from "./schema/registries.js";
 import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
 import {
@@ -97,6 +98,7 @@ import { DrizzleTokenUsageStore } from "./stores/token-usage-store.js";
 import { DrizzleContextCheckpointStore } from "./stores/context-checkpoint-store.js";
 import { DrizzleAppRegistryStore } from "./stores/app-registry-store.js";
 import { DrizzleDataRegistryStore } from "./stores/data-registry-store.js";
+import { DrizzleStorageRegistryStore } from "./stores/storage-registry-store.js";
 import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
 import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
 import { DrizzleChatQueueStore } from "./stores/chat-queue-store.js";
@@ -126,6 +128,7 @@ import type { TokenUsageStore } from "@polpo-ai/core/token-usage";
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import type { AppRegistryStore } from "@polpo-ai/core/app-registry";
 import type { DataRegistryStore } from "@polpo-ai/core/data-registry";
+import type { StorageRegistryStore } from "@polpo-ai/core/storage-registry";
 import type { CompanyBrainStore } from "@polpo-ai/core/company-brain";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 
@@ -154,6 +157,7 @@ export interface DrizzleStores {
   contextCheckpointStore: ContextCheckpointStore;
   appRegistryStore: DrizzleAppRegistryStore & AppRegistryStore;
   dataRegistryStore: DrizzleDataRegistryStore & DataRegistryStore;
+  storageRegistryStore: DrizzleStorageRegistryStore & StorageRegistryStore;
   companyBrainStore: CompanyBrainStore;
   whatsappStore: WhatsAppMessageStore;
   chatQueueStore: ChatQueueStore;
@@ -198,6 +202,7 @@ export function createPgStores(db: any): DrizzleStores {
     contextCheckpointStore: new DrizzleContextCheckpointStore(db, contextCheckpointsPg, "pg"),
     appRegistryStore: new DrizzleAppRegistryStore(db, appsPg, "pg"),
     dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesPg, views: dataViewsPg, activity: dataActivityPg }, "pg"),
+    storageRegistryStore: new DrizzleStorageRegistryStore(db, storageEntriesPg, "pg"),
     companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsPg, "pg"),
     whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesPg, contacts: whatsappContactsPg }, "pg"),
     chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsPg, chatQueueSettingsPg, "pg"),
@@ -243,6 +248,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     contextCheckpointStore: new DrizzleContextCheckpointStore(db, contextCheckpointsSqlite, "sqlite"),
     appRegistryStore: new DrizzleAppRegistryStore(db, appsSqlite, "sqlite"),
     dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesSqlite, views: dataViewsSqlite, activity: dataActivitySqlite }, "sqlite"),
+    storageRegistryStore: new DrizzleStorageRegistryStore(db, storageEntriesSqlite, "sqlite"),
     companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsSqlite, "sqlite"),
     whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesSqlite, contacts: whatsappContactsSqlite }, "sqlite"),
     chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsSqlite, chatQueueSettingsSqlite, "sqlite"),
@@ -285,6 +291,7 @@ export const pgSchema = {
   dataSources: dataSourcesPg,
   dataViews: dataViewsPg,
   dataActivity: dataActivityPg,
+  storageEntries: storageEntriesPg,
   brainItems: brainItemsPg,
   whatsappMessages: whatsappMessagesPg,
   whatsappContacts: whatsappContactsPg,
@@ -327,6 +334,7 @@ export const sqliteSchema = {
   dataSources: dataSourcesSqlite,
   dataViews: dataViewsSqlite,
   dataActivity: dataActivitySqlite,
+  storageEntries: storageEntriesSqlite,
   brainItems: brainItemsSqlite,
   whatsappMessages: whatsappMessagesSqlite,
   whatsappContacts: whatsappContactsSqlite,

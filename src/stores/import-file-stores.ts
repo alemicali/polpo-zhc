@@ -1,7 +1,7 @@
 /**
  * One-time import of the data that used to live only in .polpo files, the first time a project
  * runs on a database (SQLite or PostgreSQL): vault, push subscriptions and VAPID keys, Expo tokens,
- * token usage, context checkpoints, apps, data registry, company brain, WhatsApp history.
+ * token usage, context checkpoints, apps, data registry, storage registry, company brain, WhatsApp history.
  *
  * Each part runs once (a marker is kept in the metadata table), only into an empty table, and
  * never deletes or changes the files: they stay as a backup.
@@ -124,6 +124,13 @@ const IMPORTERS: Record<string, (ctx: ImportContext) => Promise<number>> = {
     const data = { sources: file.sources ?? [], views: file.views ?? [], activity: file.activity ?? [] };
     await store.importAll(data);
     return data.sources.length + data.views.length + data.activity.length;
+  },
+
+  async storageRegistry(ctx) {
+    const file = readJson<{ entries?: any[] }>(join(ctx.polpoDir, "storage.json"));
+    if (!file?.entries?.length || (await ctx.stores.storageRegistryStore.list()).length > 0) return 0;
+    await ctx.stores.storageRegistryStore.importEntries(file.entries);
+    return file.entries.length;
   },
 
   async companyBrain(ctx) {
