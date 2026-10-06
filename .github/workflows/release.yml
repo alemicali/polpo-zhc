@@ -29,7 +29,6 @@ jobs:
           pnpm --filter @polpo-ai/vault-crypto build
           pnpm --filter @polpo-ai/core build
           pnpm --filter @polpo-ai/drizzle build
-          pnpm --filter @polpo-ai/tools build
           pnpm --filter @polpo-ai/server build
           pnpm --filter @polpo-ai/sdk build
           ./node_modules/.bin/tsc
@@ -58,7 +57,6 @@ jobs:
             packages/client-sdk/dist/
             packages/react-sdk/dist/
             packages/server/dist/
-            packages/tools/dist/
             packages/vault-crypto/dist/
             ui/dist/
             ui/electron/
