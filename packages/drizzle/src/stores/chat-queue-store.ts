@@ -69,7 +69,8 @@ export class DrizzleChatQueueStore implements ChatQueueStore {
     const rows = await this.rows(sessionId);
     const byId = new Map(rows.map((r) => [r.id, r]));
     const listed = [...new Set(ids)].filter((id) => byId.has(id));
-    const order = [...listed, ...rows.map((r) => r.id).filter((id) => !listed.includes(id))];
+    const listedSet = new Set(listed);
+    const order = [...listed, ...rows.map((r) => r.id).filter((id) => !listedSet.has(id))];
     for (let position = 0; position < order.length; position++) {
       if (Number(byId.get(order[position])!.position) === position) continue;
       await this.db.update(this.items).set({ position }).where(eq(this.items.id, order[position]));
@@ -97,6 +98,11 @@ export class DrizzleChatQueueStore implements ChatQueueStore {
     await this.db.insert(this.settings)
       .values({ sessionId, autoSend })
       .onConflictDoUpdate({ target: this.settings.sessionId, set: { autoSend } });
+  }
+
+  async sessionsWithItems(): Promise<string[]> {
+    const rows: any[] = await this.db.selectDistinct({ sessionId: this.items.sessionId }).from(this.items);
+    return rows.map((r) => r.sessionId);
   }
 
   async deleteSession(sessionId: string): Promise<void> {

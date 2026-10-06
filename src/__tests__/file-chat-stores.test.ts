@@ -57,6 +57,7 @@ describe("FileChatQueueStore", () => {
     expect((await q.remove("s1", a.id))?.content).toBe("A");
     await q.setAutoSend("s1", false);
 
+    expect((await q.sessionsWithItems()).sort()).toEqual(["s1", "s2"]);
     const reloaded = new FileChatQueueStore(dir);
     expect(await reloaded.get("s1")).toMatchObject({ autoSend: false, items: [{ content: "z" }] });
     expect(await reloaded.clear("s1")).toBe(1);

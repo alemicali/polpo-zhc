@@ -68,6 +68,10 @@ interface RegistryEntry {
   steers: PendingSteer[];
   /** False once the loop can no longer take steers (finishing, finished, aborted). */
   steerable: boolean;
+  /** Every steer id this turn ever accepted: a retry after delivery is not injected twice. */
+  seenSteerIds: Set<string>;
+  /** The session was deleted under the turn: it must not record anything any more. */
+  discarded?: boolean;
 }
 
 const REGISTRY = new Map<string, RegistryEntry>();
@@ -96,6 +100,10 @@ export interface ResumableStreamRegistry {
   /** Stop accepting steers; returns those never delivered. Idempotent. */
   closeSteering: (turnId: string) => PendingSteer[];
   isSteerable: (turnId: string) => boolean;
+  hasSeenSteer: (turnId: string, steerId: string) => boolean;
+  /** Abort the turn and mark it as belonging to a deleted session (nothing gets recorded). */
+  discard: (turnId: string) => boolean;
+  isDiscarded: (turnId: string) => boolean;
   getActiveTurnForSession: (sessionId: string) => string | undefined;
   subscribe: (turnId: string, sub: Subscriber) => (() => void) | undefined;
   get: (turnId: string) => RegistryEntry | undefined;
@@ -130,6 +138,7 @@ export const streamRegistry: ResumableStreamRegistry = {
       createdAt: Date.now(),
       steers: [],
       steerable: true,
+      seenSteerIds: new Set(),
     };
     REGISTRY.set(turnId, entry);
     LIVE_BY_SESSION.set(sessionId, turnId);
@@ -202,9 +211,10 @@ export const streamRegistry: ResumableStreamRegistry = {
     if (entry.status !== "live" || !entry.steerable) return { ok: false, reason: "not_steerable" };
     if (entry.steers.length >= MAX_PENDING_STEERS) return { ok: false, reason: "too_many" };
     const steerId = id ?? `steer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    if (entry.steers.some((s) => s.id === steerId)) return { ok: false, reason: "duplicate" };
+    if (entry.seenSteerIds.has(steerId)) return { ok: false, reason: "duplicate" };
     const steer: PendingSteer = { id: steerId, content, createdAt: Date.now() };
     entry.steers.push(steer);
+    entry.seenSteerIds.add(steerId);
     return { ok: true, steer };
   },
 
@@ -228,6 +238,25 @@ export const streamRegistry: ResumableStreamRegistry = {
     if (!entry) return [];
     entry.steerable = false;
     return entry.steers.splice(0);
+  },
+
+  discard(turnId) {
+    const entry = REGISTRY.get(turnId);
+    if (!entry) return false;
+    entry.discarded = true;
+    entry.steers.splice(0);
+    entry.steerable = false;
+    if (entry.status === "live") streamRegistry.abort(turnId);
+    return true;
+  },
+
+  isDiscarded(turnId) {
+    return REGISTRY.get(turnId)?.discarded === true;
+  },
+
+  /** Was this steer id ever accepted by the turn? */
+  hasSeenSteer(turnId: string, steerId: string) {
+    return REGISTRY.get(turnId)?.seenSteerIds.has(steerId) === true;
   },
 
   isSteerable(turnId) {

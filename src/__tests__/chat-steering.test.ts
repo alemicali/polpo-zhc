@@ -131,7 +131,7 @@ beforeAll(async () => {
   const bridge = new SSEBridge(orchestrator);
   bridge.start();
   app = createApp(orchestrator, bridge);
-});
+}, 60_000);
 
 afterAll(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
@@ -361,9 +361,15 @@ describe("branches", () => {
     expect(forkMessages.map((m) => m.content)).toEqual(["question one", "Answer A.", "question two", "Answer B, take two."]);
     expect(forkMessages[2].attachments[0].path).toBe(forkPoint.attachments[0].path);
     expect(forkMessages[2].attachments[0].id).not.toBe(forkPoint.attachments[0].id);
-    // The parent lists its branch at the fork point.
-    const parentView = await (await app.request(`/api/v1/chat/sessions/${sid}/messages`)).json();
-    expect(parentView.data.forks).toEqual([expect.objectContaining({ id: fork.id, forkMessageId: forkPoint.id })]);
+    // The re-answer saw the fork point's image, like the original turn did.
+    const lastCall = calls.at(-1)!;
+    const forkQuestion = lastCall.filter((m: any) => m.role === "user").at(-1);
+    expect(Array.isArray(forkQuestion.content)).toBe(true);
+    expect(forkQuestion.content.some((p: any) => p.type === "image" && p.data === png)).toBe(true);
+    expect(forkQuestion.content.some((p: any) => p.type === "text" && p.text.includes("question two"))).toBe(true);
+    // The branch is listed with its origin (the UI marks the fork point from the session list).
+    const listed = (await (await app.request("/api/v1/chat/sessions")).json()).data.sessions;
+    expect(listed.find((x: any) => x.id === fork.id)).toMatchObject({ parentSessionId: sid, forkMessageId: forkPoint.id });
 
     // Deleting the branch's copy of the attachment keeps the parent's file.
     const file = join(tmpDir, forkPoint.attachments[0].path);

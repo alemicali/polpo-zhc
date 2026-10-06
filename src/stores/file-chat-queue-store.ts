@@ -78,9 +78,10 @@ export class FileChatQueueStore implements ChatQueueStore {
     return this.mutate(sessionId, (entry) => {
       const byId = new Map(entry.items.map((i) => [i.id, i]));
       const listed = [...new Set(ids)].filter((id) => byId.has(id));
+      const listedSet = new Set(listed);
       entry.items = [
         ...listed.map((id) => byId.get(id)!),
-        ...entry.items.filter((i) => !listed.includes(i.id)),
+        ...entry.items.filter((i) => !listedSet.has(i.id)),
       ];
       return [...entry.items];
     });
@@ -100,6 +101,10 @@ export class FileChatQueueStore implements ChatQueueStore {
 
   async setAutoSend(sessionId: string, autoSend: boolean): Promise<void> {
     this.mutate(sessionId, (entry) => { entry.autoSend = autoSend; });
+  }
+
+  async sessionsWithItems(): Promise<string[]> {
+    return Object.entries(this.read()).filter(([, entry]) => entry.items.length > 0).map(([sessionId]) => sessionId);
   }
 
   async deleteSession(sessionId: string): Promise<void> {

@@ -31,7 +31,8 @@ export { skillRoutes, type SkillRouteDeps } from "./routes/skills.js";
 export { attachmentRoutes } from "./routes/attachments.js";
 export { countsRoutes } from "./routes/counts.js";
 export { streamRegistry, type PendingSteer, type SteerResult } from "./stream-registry.js";
-export { TurnScheduler, createTurnScheduler, type TurnSchedulerDeps, type TurnOutcome, type TurnStartReason, type CarriedSteer, type SendNowResult } from "./turn-scheduler.js";
+export { sessionLeases, MAX_LEASE_MS } from "./session-lease.js";
+export { TurnScheduler, SessionBusyError, createTurnScheduler, type TurnSchedulerDeps, type TurnOutcome, type TurnStartReason, type CarriedSteer, type SendNowResult } from "./turn-scheduler.js";
 
 // Dependency types
 export type {

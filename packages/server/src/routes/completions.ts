@@ -28,6 +28,7 @@ import {
 } from "@polpo-ai/core";
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
+import { sessionLeases } from "../session-lease.js";
 import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
@@ -493,11 +494,57 @@ export interface ToolExecutionContext {
   sessionId?: string;
 }
 
+/** Longest a caller may ask to wait for a busy session (x-polpo-lease-wait, ms). */
+const MAX_LEASE_WAIT_MS = 15 * 60 * 1000;
+
+/** The session lease a completion request holds (see session-lease.ts). */
+interface TurnLease {
+  owner: string;
+  sessionId: string | null;
+  /** The streaming callback releases it when the turn is over. */
+  transferred: boolean;
+}
+
 export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: string[]): OpenAPIHono {
   const app = new OpenAPIHono();
 
+  // One turn per session: every request claims the session's lease before doing anything that
+  // could start a turn, and keeps it until the turn is over (streaming: until the stream ends).
   app.openapi(chatCompletionsRoute, async (c) => {
+    const lease: TurnLease = { owner: `lease-${nanoid(12)}`, sessionId: null, transferred: false };
+    try {
+      return await handleCompletion(c, lease);
+    } finally {
+      if (lease.sessionId && !lease.transferred) sessionLeases.release(lease.sessionId, lease.owner);
+    }
+  });
+
+  const handleCompletion = async (c: any, lease: TurnLease): Promise<any> => {
     const deps = getDeps();
+    /**
+     * Claim the session's lease: synchronously when free (or handed over by the scheduler via
+     * x-polpo-lease), otherwise wait only when the caller asked to (x-polpo-lease-wait, ms).
+     */
+    const claimLease = async (sid: string): Promise<boolean> => {
+      const handoff = c.req.header("x-polpo-lease");
+      if ((handoff && sessionLeases.transfer(sid, handoff, lease.owner)) || sessionLeases.tryAcquire(sid, lease.owner)) {
+        lease.sessionId = sid;
+        return true;
+      }
+      const waitMs = Math.min(Number(c.req.header("x-polpo-lease-wait")) || 0, MAX_LEASE_WAIT_MS);
+      if (waitMs > 0 && await sessionLeases.acquire(sid, lease.owner, { waitMs })) {
+        lease.sessionId = sid;
+        return true;
+      }
+      return false;
+    };
+    const sessionBusy = () => c.json({
+      error: { message: "Another response is running in this chat", type: "invalid_request_error", code: "session_busy" },
+    }, 409);
+    const requestedSession = c.req.header("x-session-id");
+    if (requestedSession && requestedSession !== "new" && !(await claimLease(requestedSession))) {
+      return sessionBusy();
+    }
 
     // ── Auth ──
     if (apiKeys && apiKeys.length > 0) {
@@ -509,7 +556,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     }
 
     // ── Parse body ──
-    const body = c.req.valid("json");
+    const body = c.req.valid("json") as z.infer<typeof completionRequestSchema>;
     const agentMode = !!body.agent;
 
     // Per-request tool-loop cap. Defaults to DEFAULT_MAX_TURNS; agent-direct
@@ -649,6 +696,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           const existing = await sessionStore.getSession(sessionId);
           if (existing && (existing.messageCount ?? 0) === 0) isFirstTurn = true;
         } catch { /* non-fatal */ }
+      }
+      // The session was resolved here (reused latest / created): claim it now.
+      if (sessionId && !lease.sessionId && !(await claimLease(sessionId))) {
+        return sessionBusy();
       }
       // Persist user message (only the last one — earlier messages are already persisted)
       // Background-wait continuations and server-started answers (a branch replying to its last
@@ -812,6 +863,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       // Surface the turn id so the client can persist it for resume.
       c.header("x-turn-id", turnId);
 
+      // The stream callback owns the lease from here and releases it when the turn is over.
+      lease.transferred = true;
       return streamSSE(c, async (stream) => {
         // Client-disconnect ≠ LLM-abort. Disconnect just means stop trying to
         // write to this socket; the LLM keeps running and feeds the registry.
@@ -858,7 +911,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
         // Steers that missed the previous turn of this session become messages of this one,
         // right after its own user message.
-        const carried = sessionId ? deps.turnScheduler?.takeCarryOver(sessionId) ?? [] : [];
+        const carried = sessionId && deps.turnScheduler ? await deps.turnScheduler.takeCarryOver(sessionId) : [];
         const carriedApplied: Array<{ id: string; content: string; message_id?: string }> = [];
         for (const steer of carried) carriedApplied.push(await persistSteer(steer));
 
@@ -1364,20 +1417,26 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // is a no-op in that case.
           streamRegistry.complete(turnId);
 
-          // Always persist the assistant response — even on disconnect.
-          // SECURITY: Redact vault credentials before persisting to SQLite
-          const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
-          if (sessionStore && sessionId && assistantMsgId) {
-            await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum)
-              .catch((error) => console.warn("[completions] could not store the answer:", error instanceof Error ? error.message : error));
-            deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
-          }
-          // A stopped turn hands its pending steers back to whoever pressed Stop (see /abort).
-          const leftover = streamRegistry.closeSteering(turnId);
-          if (turnOutcome !== "aborted") undelivered.push(...leftover);
-          if (sessionId && deps.turnScheduler) {
-            deps.turnScheduler.turnFinished(sessionId, turnOutcome,
-              undelivered.map((steer) => ({ id: steer.id, content: steer.content })));
+          // The session was deleted under this turn (e.g. a branch undone): nothing to record.
+          const discarded = streamRegistry.isDiscarded(turnId);
+          try {
+            // Always persist the assistant response — even on disconnect.
+            // SECURITY: Redact vault credentials before persisting to SQLite
+            const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
+            if (!discarded && sessionStore && sessionId && assistantMsgId) {
+              await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum)
+                .catch((error) => console.warn("[completions] could not store the answer:", error instanceof Error ? error.message : error));
+              deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
+            }
+            // A stopped turn hands its pending steers back to whoever pressed Stop (see /abort).
+            const leftover = streamRegistry.closeSteering(turnId);
+            if (turnOutcome !== "aborted") undelivered.push(...leftover);
+            if (!discarded && sessionId && deps.turnScheduler) {
+              await deps.turnScheduler.turnFinished(sessionId, turnOutcome,
+                undelivered.map((steer) => ({ id: steer.id, content: steer.content })));
+            }
+          } finally {
+            if (lease.sessionId) sessionLeases.release(lease.sessionId, lease.owner);
           }
         }
       }) as any;
@@ -1753,10 +1812,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, safeToolCalls, segmentsAccum);
           deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
         }
-        if (sessionId) deps.turnScheduler?.turnFinished(sessionId, turnOutcome);
+        if (sessionId) await deps.turnScheduler?.turnFinished(sessionId, turnOutcome);
       }
     }
-  });
+  };
 
   // ── Resumable streaming endpoints ──────────────────────────────────────
   //
@@ -1876,6 +1935,15 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       return c.json({ ok: false, error: "content (non-empty text) is required", code: "invalid_request" }, 400);
     }
     const { id, content } = parsed.data;
+    const scheduler = getDeps().turnScheduler;
+    // A retry of a steer this turn already took (pending or delivered), or one already carried
+    // over to the next message: never injected twice.
+    if (id && streamRegistry.hasSeenSteer(turnId, id)) {
+      return c.json({ ok: true, data: { id, turnId, status: "pending" } }, 202);
+    }
+    if (id && scheduler?.isCarried(id)) {
+      return c.json({ ok: true, data: { id, turnId, status: "scheduled" } }, 202);
+    }
     const result = streamRegistry.steer(turnId, { id, content });
     if (result.ok) {
       return c.json({ ok: true, data: { id: result.steer.id, turnId, status: "pending" } }, 202);
@@ -1891,12 +1959,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         return c.json({ ok: false, error: "Too many pending messages for this turn", code: "too_many_steers" }, 429);
       case "not_steerable": {
         const sessionId = streamRegistry.get(turnId)?.sessionId;
-        const scheduler = getDeps().turnScheduler;
-        if (!scheduler || !sessionId || sessionId === "anon") {
+        if (!scheduler || !sessionId || sessionId === "anon" || streamRegistry.isDiscarded(turnId)) {
           return c.json({ ok: false, error: "The turn is over", code: "not_steerable" }, 409);
         }
         const steerId = id ?? `steer-${nanoid(12)}`;
-        scheduler.carryOver(sessionId, [{ id: steerId, content }]);
+        await scheduler.carryOver(sessionId, [{ id: steerId, content }]);
         return c.json({ ok: true, data: { id: steerId, turnId, status: "scheduled" } }, 202);
       }
     }
@@ -1911,6 +1978,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       }
     }
     const outcome = streamRegistry.cancelSteer(c.req.param("turnId"), c.req.param("steerId"));
+    // Carried over to the next message but not sent yet: still withdrawable.
+    if (outcome !== "cancelled" && await getDeps().turnScheduler?.cancelCarried(c.req.param("steerId"))) {
+      return c.json({ ok: true, data: { cancelled: true } });
+    }
     if (outcome === "not_found") {
       return c.json({ ok: false, error: "Turn not found or expired", code: "turn_not_found" }, 404);
     }

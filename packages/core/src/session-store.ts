@@ -142,4 +142,6 @@ export interface ChatQueueStore {
   setAutoSend(sessionId: string, autoSend: boolean): Promise<void>;
   /** Drop the queue and its settings (the session was deleted). */
   deleteSession(sessionId: string): Promise<void>;
+  /** Sessions that have queued prompts (to resume auto-send after a restart). */
+  sessionsWithItems?(): Promise<string[]>;
 }

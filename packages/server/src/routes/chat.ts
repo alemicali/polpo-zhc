@@ -3,6 +3,7 @@ import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 import { nanoid } from "nanoid";
 import type { AttachmentStore, ChatQueueStore } from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
+import { withAttachmentLock } from "../attachment-lock.js";
 import type { TurnScheduler } from "../turn-scheduler.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
@@ -134,6 +135,8 @@ export interface ChatRouteDeps {
 
 /** Longest queued prompt accepted (characters). */
 const MAX_QUEUE_ITEM_CHARS = 100_000;
+/** Most prompts one session can have queued. */
+export const MAX_QUEUE_ITEMS = 50;
 
 export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -221,11 +224,7 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
         }),
       };
     });
-    // Branches started from this conversation, so the UI can mark their fork points.
-    const forks = (typeof sessionStore.listSessions === "function" ? await sessionStore.listSessions() as any[] : [])
-      .filter((s) => s.parentSessionId === id)
-      .map((s) => ({ id: s.id, title: s.title, forkMessageId: s.forkMessageId, createdAt: s.createdAt }));
-    return c.json({ ok: true, data: { session, messages: safeMessages, incremental, forks } }, 200);
+    return c.json({ ok: true, data: { session, messages: safeMessages, incremental } }, 200);
   });
 
   // PATCH /chat/sessions/:id — rename and/or (un)star a session.
@@ -280,6 +279,9 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     if (!deleted) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    // A turn still running on it must not write into a deleted conversation.
+    const live = streamRegistry.getActiveTurnForSession(id);
+    if (live) streamRegistry.discard(live);
     await getDeps().chatQueueStore?.deleteSession(id).catch(() => undefined);
     getDeps().turnScheduler?.forget(id);
     getDeps().emit?.("session:deleted", { sessionId: id });
@@ -358,7 +360,10 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
   app.get("/sessions/:id/queue", async (c) => {
     const r = await queueDeps(c);
     if (r.error) return r.error;
-    return c.json({ ok: true, data: await r.queue.get(r.id) });
+    const state = await r.queue.get(r.id);
+    // Someone is looking at a queue that could be sending (e.g. after a restart): let it.
+    if (state.autoSend && state.items.length > 0) getDeps().turnScheduler?.queueChanged(r.id);
+    return c.json({ ok: true, data: state });
   });
 
   app.post("/sessions/:id/queue", async (c) => {
@@ -367,6 +372,9 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     const body = await c.req.json().catch(() => null) as { content?: unknown; front?: unknown } | null;
     const content = queueText(body?.content);
     if (!content) return c.json({ ok: false, error: "content (non-empty text) is required", code: "VALIDATION_ERROR" }, 400);
+    if ((await r.queue.get(r.id)).items.length >= MAX_QUEUE_ITEMS) {
+      return c.json({ ok: false, error: `The queue is full (${MAX_QUEUE_ITEMS} prompts)`, code: "QUEUE_FULL" }, 409);
+    }
     const item = await r.queue.add(r.id, content, { front: body?.front === true });
     queueChanged(r.id);
     getDeps().turnScheduler?.queueChanged(r.id);
@@ -396,8 +404,8 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     const r = await queueDeps(c);
     if (r.error) return r.error;
     const body = await c.req.json().catch(() => null) as { ids?: unknown } | null;
-    if (!Array.isArray(body?.ids) || !body.ids.every((x) => typeof x === "string")) {
-      return c.json({ ok: false, error: "ids (string array) is required", code: "VALIDATION_ERROR" }, 400);
+    if (!Array.isArray(body?.ids) || body.ids.length > MAX_QUEUE_ITEMS * 4 || !body.ids.every((x) => typeof x === "string" && x.length <= 100)) {
+      return c.json({ ok: false, error: "ids (string array, at most 200) is required", code: "VALIDATION_ERROR" }, 400);
     }
     const items = await r.queue.reorder(r.id, body.ids as string[]);
     queueChanged(r.id);
@@ -470,14 +478,17 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     const forkId: string = fork.session.id;
 
     // Attachments: new rows pointing at the same files (deleting one keeps shared files).
+    // Under the attachment lock: a row deleted meanwhile cannot take its file with it.
     if (attachmentStore) {
       try {
-        const rows = await attachmentStore.getBySession(id);
-        for (const row of rows) {
-          const copyOf = row.messageId ? fork.messageIds[row.messageId] : undefined;
-          if (!copyOf) continue;
-          await attachmentStore.save({ ...row, id: nanoid(20), sessionId: forkId, messageId: copyOf });
-        }
+        await withAttachmentLock(async () => {
+          const rows = await attachmentStore.getBySession(id);
+          for (const row of rows) {
+            const copyOf = row.messageId ? fork.messageIds[row.messageId] : undefined;
+            if (!copyOf) continue;
+            await attachmentStore.save({ ...row, id: nanoid(20), sessionId: forkId, messageId: copyOf });
+          }
+        });
       } catch (error) {
         // All or nothing: a branch without its files would answer a different question.
         await attachmentStore.deleteBySession(forkId).catch(() => undefined);
@@ -521,19 +532,19 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
       return c.json({ ok: false, error: "The branch has new messages", code: "FORK_HAS_MESSAGES" }, 409);
     }
 
+    // Its running answer stops and records nothing (the session is going away).
     const live = streamRegistry.getActiveTurnForSession(id);
-    if (live) {
-      streamRegistry.closeSteering(live);
-      streamRegistry.abort(live);
-    }
+    if (live) streamRegistry.discard(live);
     if (attachmentStore) {
-      const rows = await attachmentStore.getBySession(id).catch(() => []);
-      for (const row of rows) {
-        await attachmentStore.delete(row.id).catch(() => undefined);
-        // Only files no other message points at (the parent's stay).
-        const shared = attachmentStore.getByPath ? await attachmentStore.getByPath(row.path).catch(() => [row]) : [row];
-        if (shared.length === 0) await removeAttachmentFile?.(row.path).catch(() => undefined);
-      }
+      await withAttachmentLock(async () => {
+        const rows = await attachmentStore.getBySession(id).catch(() => []);
+        for (const row of rows) {
+          await attachmentStore.delete(row.id).catch(() => undefined);
+          // Only files no other message points at (the parent's stay).
+          const shared = attachmentStore.getByPath ? await attachmentStore.getByPath(row.path).catch(() => [row]) : [row];
+          if (shared.length === 0) await removeAttachmentFile?.(row.path).catch(() => undefined);
+        }
+      });
     }
     await sessionStore.deleteSession(id);
     await chatQueueStore?.deleteSession(id).catch(() => undefined);

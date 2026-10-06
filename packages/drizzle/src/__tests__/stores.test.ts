@@ -602,7 +602,9 @@ describe.each(DIALECTS)("%s", (dialect) => {
       await q.setAutoSend(sid, true);
       expect((await q.get(sid)).autoSend).toBe(true);
 
+      expect((await q.sessionsWithItems!()).sort()).toEqual([sid, other].sort());
       expect(await q.clear(sid)).toBe(2);
+      expect(await q.sessionsWithItems!()).toEqual([other]);
       expect(await q.shift(sid)).toBeUndefined();
       expect((await q.get(other)).items).toHaveLength(1);
     });
