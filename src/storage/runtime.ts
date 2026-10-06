@@ -233,6 +233,7 @@ export class StorageRuntime implements StorageMountProvider {
     try {
       if (secrets.credentials) await this.saveCredentials(storageCredentialsService(entry.id), entry, secrets.credentials);
       if (secrets.sandboxCredentials) await this.saveCredentials(storageSandboxCredentialsService(entry.id), entry, secrets.sandboxCredentials);
+      if (secrets.temporary) await this.update(entry.id, {}, { temporary: secrets.temporary });
     } catch (error) {
       await this.store.delete(entry.id).catch(() => undefined);
       throw error;

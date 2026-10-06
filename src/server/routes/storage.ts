@@ -50,6 +50,8 @@ const EntrySchema = z.object({
   credentials: CredentialsSchema.optional(),
   /** Write-only; null removes them. */
   sandboxCredentials: CredentialsSchema.nullable().optional(),
+  /** Write-only; null goes back to the fixed sandbox key. */
+  temporary: TemporarySchema.optional(),
 });
 
 const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
@@ -133,7 +135,7 @@ const statusRoute = createRoute({
 type EntryInput = z.infer<typeof EntrySchema>;
 
 function toEntry(input: EntryInput): Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> {
-  const { credentials: _c, sandboxCredentials: _s, ...rest } = input;
+  const { credentials: _c, sandboxCredentials: _s, temporary: _t, ...rest } = input;
   return {
     ...rest,
     endpoint: rest.endpoint || undefined,
@@ -159,7 +161,7 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {
-      const created = await getRuntime().create(entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials });
+      const created = await getRuntime().create(entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials, temporary: input.temporary });
       return c.json({ ok: true, data: created }, 201);
     } catch (error) { return failure(c, error); }
   }) as any);
@@ -175,7 +177,7 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {
-      const updated = await getRuntime().update(c.req.valid("param").id, entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials });
+      const updated = await getRuntime().update(c.req.valid("param").id, entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials, temporary: input.temporary });
       return updated ? c.json({ ok: true, data: updated }, 200) : notFound(c);
     } catch (error) { return failure(c, error); }
   }) as any);
