@@ -58,7 +58,7 @@ export interface OrchestratorContext {
   /** Sandbox providers this host can run (shell layer); the cascade falls back from the rest. */
   readonly sandboxProviders?: () => ReadonlySet<import("./sandbox.js").SandboxProvider>;
   /** Storage mounts an agent may see in its workspace (storage feature, optional). */
-  readonly storageMounts?: (agentName: string | undefined, target: "host" | "remote") => Promise<import("./sandbox.js").StorageMountSpec[]>;
+  readonly storageMounts?: (agentName: string | undefined, target: "host" | "remote", options?: import("./sandbox.js").StorageMountOptions) => Promise<import("./sandbox.js").StorageMountSpec[]>;
   readonly logStore: LogStore;
   readonly sessionStore: SessionStore;
   readonly teamStore: TeamStore;

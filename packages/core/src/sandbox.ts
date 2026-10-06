@@ -249,9 +249,17 @@ export interface StorageMountSpec {
   };
 }
 
+export interface StorageMountOptions {
+  /**
+   * How long remote mounts must work (the task's timeout): the lifetime of temporary keys, for
+   * entries that mint them. Default 2 hours, at most 12.
+   */
+  ttlSeconds?: number;
+}
+
 /** What a workspace asks the storage feature: the mounts this agent may see. */
 export interface StorageMountProvider {
-  mountsFor(agentName: string | undefined, target: "host" | "remote"): Promise<StorageMountSpec[]>;
+  mountsFor(agentName: string | undefined, target: "host" | "remote", options?: StorageMountOptions): Promise<StorageMountSpec[]>;
 }
 
 /** Keep only well-formed sandbox settings (unknown keys and wrong types are dropped). */

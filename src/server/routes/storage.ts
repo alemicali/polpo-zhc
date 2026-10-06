@@ -14,6 +14,12 @@ const CredentialsSchema = z.object({
   sessionToken: z.string().trim().optional(),
 });
 
+/** Temporary keys per run for remote sandboxes; null goes back to the fixed sandbox key. */
+const TemporarySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("r2"), accountId: z.string().trim().min(1), parentAccessKeyId: z.string().trim().min(1), apiToken: z.string().trim().optional() }),
+  z.object({ kind: z.literal("sts"), roleArn: z.string().trim().min(1), endpoint: z.string().trim().optional() }),
+]).nullable();
+
 const GrantSchema = z.object({
   id: z.string().optional(),
   agent: z.string().trim().min(1),
@@ -92,10 +98,10 @@ const deleteRoute = createRoute({
 });
 const credentialsRoute = createRoute({
   method: "put", path: "/{id}/credentials", tags: ["Storage"], summary: "Set storage credentials",
-  description: "Stored in the vault (system namespace). `sandboxCredentials`: a dedicated, limited key for remote sandboxes; null removes it.",
+  description: "Stored in the vault (system namespace). `sandboxCredentials`: a dedicated, limited key for remote sandboxes; null removes it. `temporary`: mint temporary keys per task run instead (R2: account id, parent access key id, API token; S3/MinIO: STS role ARN); null goes back to the fixed key. The API token is never returned.",
   request: {
     params: idParam,
-    body: { content: { "application/json": { schema: z.object({ credentials: CredentialsSchema.optional(), sandboxCredentials: CredentialsSchema.nullable().optional() }) } } },
+    body: { content: { "application/json": { schema: z.object({ credentials: CredentialsSchema.optional(), sandboxCredentials: CredentialsSchema.nullable().optional(), temporary: TemporarySchema.optional() }) } } },
   },
   responses: {
     200: { content: { "application/json": { schema: okAny } }, description: "Updated" },

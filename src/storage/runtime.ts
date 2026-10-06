@@ -9,7 +9,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { StorageMountProvider, StorageMountSpec } from "@polpo-ai/core/sandbox";
+import type { StorageMountOptions, StorageMountProvider, StorageMountSpec } from "@polpo-ai/core/sandbox";
 import {
   STORAGE_VAULT_OWNER,
   assertStorageAccess,
@@ -18,6 +18,9 @@ import {
   storageAccessFor,
   storageCredentialsService,
   storageSandboxCredentialsService,
+  storageTemporaryTokenService,
+  validateStorageEntry,
+  type StorageTemporaryCredentials,
   type CreateStorageEntry,
   type StorageAccess,
   type StorageCredentialStatus,
@@ -30,6 +33,7 @@ import { databaseStoresFor } from "../core/storage.js";
 import { FileStorageRegistryStore } from "../stores/file-storage-registry-store.js";
 import { StorageMountManager, type MountManagerOptions, type MountStatus } from "./mount-manager.js";
 import { S3Client, s3TargetFor } from "./s3.js";
+import { TemporaryCredentialCache, clampTtl, mintR2, mintSts, sessionNameFor, type MintedCredentials } from "./temp-credentials.js";
 
 export type StorageChangeAction = "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed";
 /** Emits "storage:changed" (the orchestrator adds the event origin). */
@@ -58,8 +62,22 @@ export interface StorageListItem {
   lastModified?: string;
 }
 
+/**
+ * Temporary-key settings as the credentials API receives them: "fixed" (null) goes back to the
+ * entry's fixed sandbox key. The Cloudflare API token is write-only (kept in the vault).
+ */
+export type TemporaryCredentialsInput =
+  | null
+  | { kind: "r2"; accountId: string; parentAccessKeyId: string; apiToken?: string }
+  | { kind: "sts"; roleArn: string; endpoint?: string };
+
+type Secrets = { credentials?: StorageCredentials; sandboxCredentials?: StorageCredentials | null; temporary?: TemporaryCredentialsInput };
+
 export class StorageRuntime implements StorageMountProvider {
   readonly store: StorageRegistryStore;
+  private readonly tempCache = new TemporaryCredentialCache();
+  /** Cloudflare API base URL (tests point it at a local server). */
+  cloudflareApi?: string;
   private mountManager?: StorageMountManager;
 
   constructor(
@@ -123,7 +141,7 @@ export class StorageRuntime implements StorageMountProvider {
    * points inside it). "remote": FUSE specs with the entry's sandbox credentials, only for
    * entries that have them.
    */
-  async mountsFor(agentName: string | undefined, target: "host" | "remote"): Promise<StorageMountSpec[]> {
+  async mountsFor(agentName: string | undefined, target: "host" | "remote", options: StorageMountOptions = {}): Promise<StorageMountSpec[]> {
     const specs: StorageMountSpec[] = [];
     for (const entry of await this.store.list()) {
       if (!entry.enabled) continue;
@@ -137,10 +155,10 @@ export class StorageRuntime implements StorageMountProvider {
         specs.push({ name: entry.slug, path: hostPath, hostPath, readOnly });
         continue;
       }
-      const credentials = await this.sandboxCredentials(entry.id);
-      if (!credentials) continue;
       const s3 = s3TargetFor(entry);
       const prefix = `${normalizeStoragePrefix(entry.prefix)}${grant.prefix}`;
+      const credentials = await this.remoteCredentials(entry, agentName, prefix, readOnly, options.ttlSeconds);
+      if (!credentials) continue;
       specs.push({
         name: entry.slug,
         path: `${REMOTE_MOUNT_ROOT}/${entry.slug}`,
@@ -159,6 +177,41 @@ export class StorageRuntime implements StorageMountProvider {
     return specs;
   }
 
+  /**
+   * Keys a remote sandbox mounts with: temporary ones minted for this run when the entry has them
+   * (cached per agent and entry), else, or when minting fails, the entry's fixed sandbox key.
+   */
+  private async remoteCredentials(entry: StorageEntry, agent: string | undefined, prefix: string, readOnly: boolean, ttlSeconds?: number): Promise<StorageCredentials | undefined> {
+    const fixed = await this.sandboxCredentials(entry.id);
+    if (!entry.temporaryCredentials) return fixed;
+    const ttl = clampTtl(ttlSeconds);
+    const cacheKey = `${entry.id}|${agent ?? ""}|${readOnly ? "ro" : "rw"}|${prefix}`;
+    try {
+      let minted: MintedCredentials | undefined = this.tempCache.get(cacheKey, ttl);
+      if (!minted) {
+        minted = await this.mint(entry, entry.temporaryCredentials, agent, { bucket: entry.bucket, prefix, readOnly, ttlSeconds: ttl });
+        this.tempCache.set(cacheKey, minted, ttl);
+      }
+      return minted.credentials;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[storage] temporary keys for "${entry.slug}" could not be minted${fixed ? ", using the fixed sandbox key" : ""}: ${message}`);
+      this.emit?.({ name: entry.slug, action: "mount-failed", error: `Temporary keys: ${message}` });
+      return fixed;
+    }
+  }
+
+  private async mint(entry: StorageEntry, settings: StorageTemporaryCredentials, agent: string | undefined, req: Parameters<typeof mintR2>[2]): Promise<MintedCredentials> {
+    if (settings.kind === "r2") {
+      const token = (await this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entry.id)).catch(() => undefined))?.credentials?.apiToken;
+      if (!token) throw new Error("the Cloudflare API token is not set");
+      return mintR2(settings, token, req, this.cloudflareApi);
+    }
+    const main = await this.credentials(entry.id);
+    if (!main) throw new Error("the entry's main credentials are not set");
+    return mintSts(settings, main, entry, req, sessionNameFor(agent));
+  }
+
   // ── Registry (admin: API and Polpo) ────────────────────────────────
 
   async list(): Promise<PublicStorageEntry[]> {
@@ -174,7 +227,7 @@ export class StorageRuntime implements StorageMountProvider {
     return { ...entry, ...(await this.credentialStatus(entry.id)), mount: this.mountStatus(entry) };
   }
 
-  async create(input: CreateStorageEntry, secrets: { credentials?: StorageCredentials; sandboxCredentials?: StorageCredentials | null } = {}): Promise<PublicStorageEntry> {
+  async create(input: CreateStorageEntry, secrets: Secrets = {}): Promise<PublicStorageEntry> {
     if ((secrets.credentials || secrets.sandboxCredentials) && !this.vaultStore) throw vaultUnavailable();
     const entry = await this.store.create(input);
     try {
@@ -191,15 +244,23 @@ export class StorageRuntime implements StorageMountProvider {
   async update(
     idOrSlug: string,
     patch: Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>,
-    secrets: { credentials?: StorageCredentials; sandboxCredentials?: StorageCredentials | null } = {},
+    secrets: Secrets = {},
   ): Promise<PublicStorageEntry | null> {
     const current = await this.store.get(idOrSlug);
     if (!current) return null;
-    if ((secrets.credentials || secrets.sandboxCredentials) && !this.vaultStore) throw vaultUnavailable();
+    if ((secrets.credentials || secrets.sandboxCredentials || secrets.temporary?.kind === "r2") && !this.vaultStore) throw vaultUnavailable();
+    if (secrets.temporary !== undefined) patch = { ...patch, temporaryCredentials: await this.prepareTemporary(current, secrets.temporary) };
     const updated = (await this.store.update(current.id, patch))!;
+    if (secrets.temporary !== undefined || secrets.credentials) this.tempCache.clear(`${updated.id}|`);
     if (secrets.credentials) await this.saveCredentials(storageCredentialsService(updated.id), updated, secrets.credentials);
     if (secrets.sandboxCredentials) await this.saveCredentials(storageSandboxCredentialsService(updated.id), updated, secrets.sandboxCredentials);
     if (secrets.sandboxCredentials === null) await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageSandboxCredentialsService(updated.id));
+    if (secrets.temporary === null) await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageTemporaryTokenService(updated.id)).catch(() => undefined);
+    if (secrets.temporary?.kind === "r2" && secrets.temporary.apiToken?.trim()) {
+      await this.vaultStore!.set(STORAGE_VAULT_OWNER, storageTemporaryTokenService(updated.id), {
+        type: "custom", label: `Storage ${updated.slug} (temporary keys API token)`, credentials: { apiToken: secrets.temporary.apiToken.trim() },
+      });
+    }
     const mountChanged = MOUNT_FIELDS.some((field) => JSON.stringify(current[field]) !== JSON.stringify(updated[field])) || !!secrets.credentials;
     if (this.mountingActive && mountChanged) {
       if (current.slug !== updated.slug) await this.mounts.remove(current);
@@ -209,6 +270,20 @@ export class StorageRuntime implements StorageMountProvider {
     return this.toPublic(updated);
   }
 
+  /** Validate temporary-key settings and return what the registry stores (no secrets). */
+  private async prepareTemporary(entry: StorageEntry, input: TemporaryCredentialsInput): Promise<StorageTemporaryCredentials | undefined> {
+    if (input === null) return undefined;
+    const settings: StorageTemporaryCredentials = input.kind === "r2"
+      ? { kind: "r2", accountId: input.accountId.trim(), parentAccessKeyId: input.parentAccessKeyId.trim() }
+      : { kind: "sts", roleArn: input.roleArn.trim(), ...(input.endpoint?.trim() ? { endpoint: input.endpoint.trim() } : {}) };
+    const problem = validateStorageEntry({ ...entry, temporaryCredentials: settings });
+    if (problem) throw new Error(problem);
+    if (input.kind === "r2" && !input.apiToken?.trim() && !(await this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entry.id)).catch(() => undefined))) {
+      throw new Error("The Cloudflare API token is required");
+    }
+    return settings;
+  }
+
   async delete(idOrSlug: string): Promise<boolean> {
     const current = await this.store.get(idOrSlug);
     if (!current) return false;
@@ -216,6 +291,8 @@ export class StorageRuntime implements StorageMountProvider {
     const deleted = await this.store.delete(current.id);
     await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageCredentialsService(current.id)).catch(() => undefined);
     await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageSandboxCredentialsService(current.id)).catch(() => undefined);
+    await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageTemporaryTokenService(current.id)).catch(() => undefined);
+    this.tempCache.clear(`${current.id}|`);
     return deleted;
   }
 
@@ -239,8 +316,11 @@ export class StorageRuntime implements StorageMountProvider {
   // ── Credentials ────────────────────────────────────────────────────
 
   async credentialStatus(entryId: string): Promise<StorageCredentialStatus> {
-    const [host, sandbox] = await Promise.all([this.credentials(entryId), this.sandboxCredentials(entryId)]);
-    return { credentials: host ? "set" : "not set", sandboxCredentials: sandbox ? "set" : "not set" };
+    const [host, sandbox, token] = await Promise.all([
+      this.credentials(entryId), this.sandboxCredentials(entryId),
+      this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entryId)).catch(() => undefined),
+    ]);
+    return { credentials: host ? "set" : "not set", sandboxCredentials: sandbox ? "set" : "not set", temporaryToken: token ? "set" : "not set" };
   }
 
   /** Host credentials (never returned by APIs or given to agents). */

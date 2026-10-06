@@ -770,7 +770,7 @@ export class Orchestrator extends TypedEmitter {
       taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
       sandboxProviders: () => availableProviders(),
-      storageMounts: (agentName, target) => this.storageMountProvider?.mountsFor(agentName, target) ?? Promise.resolve([]),
+      storageMounts: (agentName, target, options) => this.storageMountProvider?.mountsFor(agentName, target, options) ?? Promise.resolve([]),
       logStore: this.logStore,
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
