@@ -52,10 +52,25 @@ export interface Session {
    * Scoped sessions are never resumed as someone's "latest" chat: what is said there stays there.
    */
   scope?: string;
+  /** Session this one was branched from ("fork from here"). */
+  parentSessionId?: string;
+  /** Message of the parent session the branch starts after (the last message copied). */
+  forkMessageId?: string;
 }
 
 export interface CreateSessionOptions {
   scope?: string;
+}
+
+export interface ForkSessionOptions {
+  /** Title of the new session (defaults to the parent's title). */
+  title?: string;
+}
+
+export interface ForkSessionResult {
+  session: Session;
+  /** Parent message id → id of its copy in the new session, for every copied message. */
+  messageIds: Record<string, string>;
 }
 
 export interface SessionStore {
@@ -82,6 +97,49 @@ export interface SessionStore {
   /** Star or unstar a session. Does NOT bump updatedAt (preserves recent ordering). */
   setStarred(sessionId: string, starred: boolean): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
+  /**
+   * Branch a conversation: a new session (same agent and scope) holding copies of every message
+   * up to and including `messageId`, with new ids and the original timestamps, written at once.
+   * Returns undefined when the session or the message does not exist. Optional for custom stores.
+   */
+  forkSession?(sessionId: string, messageId: string, opts?: ForkSessionOptions): Promise<ForkSessionResult | undefined>;
   prune(keepSessions: number): Promise<number>;
   close(): Promise<void> | void;
+}
+
+// ── Chat queue ─────────────────────────────────────────────────────────
+
+/** A prompt waiting to be sent to a chat session after the running turn. */
+export interface ChatQueueItem {
+  id: string;
+  sessionId: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface ChatQueueState {
+  /** Items in send order (head first). */
+  items: ChatQueueItem[];
+  /** Send the head automatically when a turn completes (default true). */
+  autoSend: boolean;
+}
+
+/**
+ * Per-session prompt queue, kept on the server so it survives reloads and is shared by every
+ * device looking at the session.
+ */
+export interface ChatQueueStore {
+  get(sessionId: string): Promise<ChatQueueState>;
+  /** Append (or, with `front`, prepend) an item. */
+  add(sessionId: string, content: string, opts?: { front?: boolean }): Promise<ChatQueueItem>;
+  update(sessionId: string, id: string, content: string): Promise<ChatQueueItem | undefined>;
+  remove(sessionId: string, id: string): Promise<ChatQueueItem | undefined>;
+  /** Reorder: `ids` lists the items in their new order; ids not listed keep their relative order after them. */
+  reorder(sessionId: string, ids: string[]): Promise<ChatQueueItem[]>;
+  clear(sessionId: string): Promise<number>;
+  /** Remove and return the head, if any. */
+  shift(sessionId: string): Promise<ChatQueueItem | undefined>;
+  setAutoSend(sessionId: string, autoSend: boolean): Promise<void>;
+  /** Drop the queue and its settings (the session was deleted). */
+  deleteSession(sessionId: string): Promise<void>;
 }

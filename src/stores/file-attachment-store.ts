@@ -51,6 +51,10 @@ export class FileAttachmentStore implements AttachmentStore {
     return true;
   }
 
+  async getByPath(path: string): Promise<Attachment[]> {
+    return this.readAll().filter(a => a.path === path);
+  }
+
   async deleteBySession(sessionId: string): Promise<number> {
     const all = this.readAll();
     const kept = all.filter(a => a.sessionId !== sessionId);
