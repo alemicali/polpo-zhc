@@ -6,6 +6,7 @@ import {
   Target,
   Bot,
   MessageCircle,
+  UsersRound,
   Brain,
   Sparkles,
   Columns2,
@@ -44,6 +45,7 @@ const nav: NavSection[] = [
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
+      { to: "/groups", icon: UsersRound, label: "Groups" },
     ],
   },
   {

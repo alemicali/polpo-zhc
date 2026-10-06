@@ -104,6 +104,10 @@ export class EventSourceManager {
     es.addEventListener("mission:resumed", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("mission:deleted", (e) => this.handleMessage(e as MessageEvent));
     es.addEventListener("log", (e) => this.handleMessage(e as MessageEvent));
+    // rooms (group chats of people and agents)
+    for (const name of ["room:created", "room:updated", "room:deleted", "room:message", "room:typing"]) {
+      es.addEventListener(name, (e) => this.handleMessage(e as MessageEvent));
+    }
 
     es.onerror = () => {
       this.scheduleReconnect();

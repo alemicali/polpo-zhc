@@ -48,6 +48,7 @@ import {
   Database,
   ChartNoAxesCombined,
   BrainCircuit,
+  UsersRound,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -115,6 +116,7 @@ type TabGroup = {
 
 const pinnedTabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/groups", icon: UsersRound, label: "Groups" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
@@ -161,6 +163,7 @@ const secondaryTabs = secondaryGroups.flatMap(group => group.tabs);
 const defaultMorePath = secondaryTabs[0]?.path ?? "/approvals";
 const tabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/groups", icon: UsersRound, label: "Groups" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
@@ -597,6 +600,8 @@ function RightPanelContent() {
   // Tool surfaces keep the platform tab strip but meet its edges so their
   // dense, resizable work areas get every available pixel.
   const fullBleed = pathname === "/coding"
+    || pathname === "/groups"
+    || pathname.startsWith("/groups/")
     || pathname.startsWith("/coding/")
     || pathname === "/terminal"
     || pathname === "/browser"
@@ -689,6 +694,7 @@ export function ChatFirstLayout() {
 function resolvePageTitle(pathname: string): string {
   const titles: Record<string, string> = {
     "/dashboard": "Dashboard",
+    "/groups": "Groups",
     "/missions": "Missions",
     "/tasks": "Tasks",
     "/agents": "Agents",
