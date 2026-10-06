@@ -288,7 +288,7 @@ function xmlUnescape(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
-function xmlValue(xml: string, tag: string): string | undefined {
+export function xmlValue(xml: string, tag: string): string | undefined {
   const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml);
   return match ? xmlUnescape(match[1]!) : undefined;
 }
@@ -310,4 +310,32 @@ export function parseListing(xml: string): S3Listing {
     truncated: xmlValue(xml, "IsTruncated") === "true",
     nextToken: xmlValue(xml, "NextContinuationToken"),
   };
+}
+
+/**
+ * Sign a request with SigV4 for any AWS-style service (STS, …) and return the headers to send.
+ * The body is hashed here; the S3Client keeps its own signing for object requests.
+ */
+export function signRequestV4(opts: {
+  method: string; url: URL; body?: string; headers?: Record<string, string>;
+  credentials: StorageCredentials; region: string; service: string; now?: Date;
+}): Record<string, string> {
+  const { amzDate, date } = timestamps(opts.now ?? new Date());
+  const payloadHash = sha256Hex(opts.body ?? "");
+  const headers: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(opts.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v])),
+    host: opts.url.host,
+    "x-amz-date": amzDate,
+  };
+  if (opts.credentials.sessionToken) headers["x-amz-security-token"] = opts.credentials.sessionToken;
+  const signed = Object.keys(headers).sort();
+  const canonicalHeaders = signed.map((name) => `${name}:${headers[name]!.trim().replace(/\s+/g, " ")}\n`).join("");
+  const canonical = [opts.method, opts.url.pathname, opts.url.search.slice(1), canonicalHeaders, signed.join(";"), payloadHash].join("\n");
+  const scope = `${date}/${opts.region}/${opts.service}/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonical)].join("\n");
+  let key: Buffer = hmac(`AWS4${opts.credentials.secretAccessKey}`, date);
+  for (const part of [opts.region, opts.service, "aws4_request"]) key = hmac(key, part);
+  const signature = createHmac("sha256", key).update(stringToSign).digest("hex");
+  headers.authorization = `AWS4-HMAC-SHA256 Credential=${opts.credentials.accessKeyId}/${scope}, SignedHeaders=${signed.join(";")}, Signature=${signature}`;
+  return headers;
 }

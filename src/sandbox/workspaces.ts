@@ -39,7 +39,7 @@ export interface HostWorkspaceOptions {
 }
 
 /** Shared filesystem operations: the paths the agent sees are the host's own. */
-abstract class HostFsWorkspace implements Workspace {
+export abstract class HostFsWorkspace implements Workspace {
   readonly id = `ws-${nanoid(10)}`;
   abstract readonly provider: Workspace["provider"];
   readonly root: string;
@@ -94,7 +94,7 @@ abstract class HostFsWorkspace implements Workspace {
 }
 
 /** Run argv, capture output, enforce the timeout (killing the whole process group). */
-function run(argv: string[], opts: ExecOptions & { env: Record<string, string>; cwd?: string }): Promise<ExecResult> {
+export function run(argv: string[], opts: ExecOptions & { env: Record<string, string>; cwd?: string }): Promise<ExecResult> {
   const started = Date.now();
   return new Promise((resolveRun) => {
     const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
@@ -144,6 +144,25 @@ const DEFAULT_TOOL_DIRS = [".npm-global", ".local/bin", ".cache/ms-playwright", 
 
 export function bwrapAvailable(): boolean {
   return existsSync("/usr/bin/bwrap") || existsSync("/bin/bwrap");
+}
+
+/**
+ * The allowlist proxy as seen from inside a jail or container: proxy variables for the tools,
+ * and a script that starts the bridge (127.0.0.1:port to the proxy socket mounted at
+ * /run/polpo-net) for the life of the command and waits until it listens.
+ */
+export function networkBridge(command: string, port: number, nodeBin: string): { env: Record<string, string>; script: string } {
+  const url = `http://127.0.0.1:${port}`;
+  return {
+    env: { HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url, ALL_PROXY: url,
+      NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1", NODE_USE_ENV_PROXY: "1",
+      npm_config_proxy: url, npm_config_https_proxy: url },
+    // the bridge lives as long as the command; wait until it listens
+    script: `${nodeBin} /run/polpo-net/bridge.cjs ${port} /run/polpo-net/proxy.sock >/dev/null 2>&1 &
+__polpo_bridge=$!; trap 'kill $__polpo_bridge 2>/dev/null' EXIT
+for __i in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && break; sleep 0.05; done
+${command}`,
+  };
 }
 
 export class BwrapWorkspace extends HostFsWorkspace {
@@ -205,15 +224,9 @@ export class BwrapWorkspace extends HostFsWorkspace {
     if (network.mode === "allowlist") {
       const proxy = await this.networkProxy();
       args.push("--ro-bind", proxy.dir, "/run/polpo-net");
-      const url = `http://127.0.0.1:${this.bridgePort}`;
-      Object.assign(env, { HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url, ALL_PROXY: url,
-        NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1", NODE_USE_ENV_PROXY: "1",
-        npm_config_proxy: url, npm_config_https_proxy: url });
-      // the bridge lives as long as the command; wait until it listens
-      script = `/usr/bin/node /run/polpo-net/bridge.cjs ${this.bridgePort} /run/polpo-net/proxy.sock >/dev/null 2>&1 &
-__polpo_bridge=$!; trap 'kill $__polpo_bridge 2>/dev/null' EXIT
-for __i in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/${this.bridgePort}) 2>/dev/null && break; sleep 0.05; done
-${command}`;
+      const bridge = networkBridge(command, this.bridgePort, "/usr/bin/node");
+      Object.assign(env, bridge.env);
+      script = bridge.script;
     }
     // the caller's variables come last (they may, for instance, clear NO_PROXY)
     for (const [key, value] of Object.entries({ ...env, ...(opts.env ?? {}) })) args.push("--setenv", key, value);

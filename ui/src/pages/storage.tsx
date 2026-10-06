@@ -14,6 +14,7 @@ import {
   useStorage,
   type MountState,
   type StorageCredentialsInput,
+  type StorageTemporaryInput,
   type StorageDriver,
   type StorageEntry,
   type StorageEntryInput,
@@ -184,7 +185,9 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
               <h3 className="text-xs font-semibold">Credentials</h3>
               <dl className="mt-3 divide-y divide-border border-y border-border">
                 <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Access key</dt><dd><CredentialState value={entry.credentials} /></dd></div>
-                <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd><CredentialState value={entry.sandboxCredentials} /></dd></div>
+                {entry.temporaryCredentials
+                  ? <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd>Temporary keys per run ({entry.temporaryCredentials.kind === "r2" ? "Cloudflare R2" : "STS role"})</dd></div>
+                  : <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd><CredentialState value={entry.sandboxCredentials} /></dd></div>}
               </dl>
               <p className="mt-2 text-[10px] text-muted-foreground">Keys are stored encrypted in the Vault and are never shown again.</p>
             </section>
@@ -260,6 +263,12 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
   const [sandboxKeyId, setSandboxKeyId] = useState("");
   const [sandboxSecret, setSandboxSecret] = useState("");
   const [removeSandbox, setRemoveSandbox] = useState(false);
+  const [keyMode, setKeyMode] = useState<"fixed" | "temporary">("fixed");
+  const [tmpAccountId, setTmpAccountId] = useState("");
+  const [tmpParentKey, setTmpParentKey] = useState("");
+  const [tmpToken, setTmpToken] = useState("");
+  const [tmpRoleArn, setTmpRoleArn] = useState("");
+  const [tmpEndpoint, setTmpEndpoint] = useState("");
   const [grants, setGrants] = useState<StorageGrant[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -273,6 +282,10 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
     setReadOnly(entry?.readOnly ?? false); setEnabled(entry?.enabled ?? true); setDriver(entry?.driver ?? "rclone");
     setCacheMode(entry?.cache?.mode ?? "writes"); setCacheSize(String(entry?.cache?.maxSizeMb ?? 1024));
     setAccessKeyId(""); setSecretAccessKey(""); setSandboxKeyId(""); setSandboxSecret(""); setRemoveSandbox(false);
+    const temp = entry?.temporaryCredentials;
+    setKeyMode(temp ? "temporary" : "fixed");
+    setTmpAccountId(temp?.kind === "r2" ? temp.accountId : r2?.[1] ?? ""); setTmpParentKey(temp?.kind === "r2" ? temp.parentAccessKeyId : ""); setTmpToken("");
+    setTmpRoleArn(temp?.kind === "sts" ? temp.roleArn : ""); setTmpEndpoint(temp?.kind === "sts" ? temp.endpoint ?? "" : "");
     setGrants(entry?.grants ?? []);
   }, [open, entry]);
 
@@ -286,7 +299,14 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
   const credentials = accessKeyId.trim() || secretAccessKey.trim() ? { accessKeyId: accessKeyId.trim(), secretAccessKey: secretAccessKey.trim() } : undefined;
   const sandboxCredentials: StorageCredentialsInput | null | undefined = removeSandbox ? null
     : sandboxKeyId.trim() || sandboxSecret.trim() ? { accessKeyId: sandboxKeyId.trim(), secretAccessKey: sandboxSecret.trim() } : undefined;
-  const missing = !name.trim() || !bucket.trim() || (preset === "r2" && !accountId.trim()) || (preset === "other" && !endpoint.trim())
+  const temporary: StorageTemporaryInput | null | undefined = keyMode === "fixed" ? (entry?.temporaryCredentials ? null : undefined)
+    : preset === "r2"
+      ? { kind: "r2", accountId: tmpAccountId.trim(), parentAccessKeyId: tmpParentKey.trim(), ...(tmpToken.trim() ? { apiToken: tmpToken.trim() } : {}) }
+      : { kind: "sts", roleArn: tmpRoleArn.trim(), ...(tmpEndpoint.trim() ? { endpoint: tmpEndpoint.trim() } : {}) };
+  const temporaryIncomplete = !!temporary && (temporary.kind === "r2"
+    ? !temporary.accountId || !temporary.parentAccessKeyId || (!temporary.apiToken && entry?.temporaryToken !== "set")
+    : !temporary.roleArn);
+  const missing = temporaryIncomplete || !name.trim() || !bucket.trim() || (preset === "r2" && !accountId.trim()) || (preset === "other" && !endpoint.trim())
     || (!entry && !credentials) || (credentials && (!credentials.accessKeyId || !credentials.secretAccessKey))
     || (!!sandboxCredentials && (!sandboxCredentials.accessKeyId || !sandboxCredentials.secretAccessKey))
     || grants.some((grant) => !grant.agent);
@@ -302,6 +322,7 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
       grants: grants.map((grant) => ({ ...grant, prefix: grant.prefix?.trim() || undefined })),
       ...(credentials ? { credentials } : {}),
       ...(sandboxCredentials !== undefined ? { sandboxCredentials } : {}),
+      ...(temporary !== undefined ? { temporary } : {}),
     };
     try {
       const saved = entry ? await storage.updateEntry(entry.id, input) : await storage.createEntry(input);
@@ -388,8 +409,16 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
           <section className="grid gap-3 border-t border-border pt-4">
             <div>
               <h3 className="text-xs font-semibold">Sandbox key (optional)</h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">Remote sandboxes mount the bucket themselves, so they need a key inside the sandbox. Use a dedicated key limited to this bucket (and prefix): never your main key. Without it, the bucket is not mounted in remote sandboxes.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Remote sandboxes mount the bucket themselves, so they need a key inside the sandbox. Use a fixed key limited to this bucket (and prefix), or let Polpo mint temporary keys for each task run. Never your main key as a fixed key. Without either, the bucket is not mounted in remote sandboxes.</p>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              {([["fixed", "Fixed key", "One dedicated key, stored in the Vault."], ["temporary", "Temporary keys per run", "Minted per task, limited to the agent's prefix, expire with the task."]] as const).map(([id, title, text]) => (
+                <button key={id} type="button" onClick={() => setKeyMode(id)} className={cn("border p-2 text-left", keyMode === id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
+                  <span className="block text-xs font-medium">{title}</span><span className="block text-[11px] text-muted-foreground">{text}</span>
+                </button>
+              ))}
+            </div>
+            {keyMode === "fixed" && (<>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Access key ID"><Input value={sandboxKeyId} onChange={(event) => { setSandboxKeyId(event.target.value); setRemoveSandbox(false); }} className="font-mono" autoComplete="off" placeholder={entry?.sandboxCredentials === "set" ? "Leave blank to keep" : "Optional"} /></Field>
               <Field label="Secret access key"><Input value={sandboxSecret} onChange={(event) => { setSandboxSecret(event.target.value); setRemoveSandbox(false); }} type="password" autoComplete="new-password" placeholder={entry?.sandboxCredentials === "set" ? "Leave blank to keep" : "Optional"} /></Field>
@@ -397,6 +426,19 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
             {entry?.sandboxCredentials === "set" && (
               <label className="flex items-center gap-2 text-[11px] text-muted-foreground"><input type="checkbox" checked={removeSandbox} onChange={(event) => { setRemoveSandbox(event.target.checked); if (event.target.checked) { setSandboxKeyId(""); setSandboxSecret(""); } }} /> Remove the stored sandbox key</label>
             )}
+            </>)}
+            {keyMode === "temporary" && (preset === "r2" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Cloudflare account ID"><Input value={tmpAccountId} onChange={(event) => setTmpAccountId(event.target.value)} className="font-mono" autoComplete="off" /></Field>
+                <Field label="Parent access key ID"><Input value={tmpParentKey} onChange={(event) => setTmpParentKey(event.target.value)} className="font-mono" autoComplete="off" /></Field>
+                <Field label="Cloudflare API token"><Input value={tmpToken} onChange={(event) => setTmpToken(event.target.value)} type="password" autoComplete="new-password" placeholder={entry?.temporaryToken === "set" ? "Leave blank to keep" : "API token"} /></Field>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="IAM role ARN"><Input value={tmpRoleArn} onChange={(event) => setTmpRoleArn(event.target.value)} className="font-mono" autoComplete="off" placeholder="arn:aws:iam::123456789012:role/polpo-sandbox" /></Field>
+                <Field label="STS endpoint (optional)"><Input value={tmpEndpoint} onChange={(event) => setTmpEndpoint(event.target.value)} className="font-mono" autoComplete="off" placeholder={preset === "aws" ? "Default: AWS regional STS" : "Default: the bucket endpoint"} /></Field>
+              </div>
+            ))}
           </section>
 
           <section className="grid gap-3 border-t border-border pt-4">

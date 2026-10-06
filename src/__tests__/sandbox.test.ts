@@ -7,6 +7,7 @@ import { resolveSandbox, readsExternalContent, normalizeSandboxSettings, type Ef
 import { BwrapWorkspace, LocalWorkspace, bwrapAvailable } from "../sandbox/workspaces.js";
 import { WorkspaceShell, createWorkspace } from "../sandbox/manager.js";
 import { hostAllowed } from "../sandbox/net-proxy.js";
+import { DockerWorkspace, containerBinary } from "../sandbox/docker.js";
 
 const all = new Set(["local", "bwrap", "docker", "daytona", "e2b"] as const);
 
@@ -270,5 +271,72 @@ describe("Polpo's tools", () => {
     const out = await executeOrchestratorTool("sandbox_status", {}, fakePolpo({ name: "web", allowedTools: ["http_fetch"] }));
     expect(out).toContain("Available on this server");
     expect(out).toMatch(/- web: tasks (bwrap|local), network allowlist \[github.com\]/);
+  });
+});
+
+describe("docker workspace argv", () => {
+  const dir = mkdtempSync(join(tmpdir(), "polpo-docker-"));
+  const root = join(dir, "work");
+  const out = join(dir, "out");
+  const skills = join(dir, "skills");
+  const mnt = join(dir, "mnt");
+  for (const d of [root, out, skills, mnt, join(root, ".polpo")]) mkdirSync(d, { recursive: true });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const make = (network: EffectiveSandbox["network"], extra: Partial<EffectiveSandbox> = {}, bin = "/usr/bin/docker") =>
+    new DockerWorkspace({
+      root, writable: [out], readable: [skills], hide: [join(root, ".polpo")],
+      mounts: [{ name: "data", path: "/mnt/storage/data", readOnly: true, hostPath: mnt }],
+      sandbox: { ...sandbox(network), provider: "docker", ...extra },
+    }, bin, "1000:1000");
+  const pair = (argv: string[], flag: string) => argv.flatMap((a, i) => a === flag ? [argv[i + 1]] : []);
+
+  test("isolated rootfs, same host paths, .polpo hidden, no network", async () => {
+    const argv = await make({ mode: "deny" }).argv("echo hi", {}, "polpo-test");
+    expect(argv.slice(0, 7)).toEqual(["/usr/bin/docker", "run", "--rm", "--init", "--name", "polpo-test", "--user"]);
+    expect(argv).toContain("--read-only");
+    expect(pair(argv, "--tmpfs")).toEqual(["/tmp:rw,exec,mode=1777", join(root, ".polpo")]);
+    expect(pair(argv, "--network")).toEqual(["none"]);
+    expect(pair(argv, "-v")).toEqual([`${root}:${root}`, `${out}:${out}`, `${skills}:${skills}:ro`, `${mnt}:${mnt}:ro`]);
+    expect(argv).toContain("1000:1000");
+    expect(argv.slice(-5)).toEqual([root, "node:22-bookworm-slim", "/bin/bash", "-c", "echo hi"]);
+  });
+
+  test("image and resources come from the settings", async () => {
+    const argv = await make({ mode: "deny" }, { resources: { memoryMb: 512, cpus: 1.5 }, providerOptions: { image: "python:3.12" } }).argv("true", { env: { A: "b" }, cwd: out });
+    expect(pair(argv, "--memory")).toEqual(["512m"]);
+    expect(pair(argv, "--memory-swap")).toEqual(["512m"]);
+    expect(pair(argv, "--cpus")).toEqual(["1.5"]);
+    expect(argv).toContain("python:3.12");
+    expect(pair(argv, "-e")).toContain("A=b");
+    expect(pair(argv, "--workdir")).toEqual([out]);
+  });
+
+  test("open network uses the default one; podman keeps the uid", async () => {
+    const open = await make({ mode: "open" }).argv("true");
+    expect(open).not.toContain("--network");
+    const podman = await make({ mode: "deny" }, {}, "/usr/bin/podman").argv("true");
+    expect(podman).toContain("--userns=keep-id");
+    expect((await make({ mode: "deny" }).argv("true"))).not.toContain("--userns=keep-id");
+  });
+
+  test("allowlist: no network, proxy socket dir and bridge", async () => {
+    const ws = make({ mode: "allowlist", allow: ["example.com"] });
+    try {
+      const argv = await ws.argv("curl https://example.com");
+      expect(pair(argv, "--network")).toEqual(["none"]);
+      expect(pair(argv, "-v").some((v) => v.endsWith(":/run/polpo-net:ro"))).toBe(true);
+      expect(pair(argv, "-e")).toContain("HTTPS_PROXY=http://127.0.0.1:3128");
+      expect(argv.at(-1)).toMatch(/^node \/run\/polpo-net\/bridge\.cjs 3128 .*\ncurl https:\/\/example\.com$/s);
+    } finally { await ws.dispose(); }
+  });
+
+  test("binary lookup follows PATH", () => {
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    expect(containerBinary(bin)).toBeUndefined();
+    writeFileSync(join(bin, "podman"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(containerBinary(bin)).toBe(join(bin, "podman"));
+    writeFileSync(join(bin, "docker"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(containerBinary(bin)).toBe(join(bin, "docker"));
   });
 });

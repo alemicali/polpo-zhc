@@ -2,7 +2,6 @@
  * Creates the workspace an agent's tools run in, from the settings cascade
  * (instance → agent → mission → task), and adapts it to the Shell the tools already use.
  */
-import { existsSync } from "node:fs";
 import type { Shell, ShellOptions, ShellResult } from "@polpo-ai/core/shell";
 import {
   resolveSandbox,
@@ -14,13 +13,14 @@ import {
   type Workspace,
 } from "@polpo-ai/core/sandbox";
 import { bashSafeEnv } from "../tools/safe-env.js";
+import { DockerWorkspace, dockerAvailable } from "./docker.js";
 import { BwrapWorkspace, LocalWorkspace, bwrapAvailable, type HostWorkspaceOptions } from "./workspaces.js";
 
 /** Providers this machine can run right now. */
 export function availableProviders(): Set<SandboxProvider> {
   const out = new Set<SandboxProvider>(["local"]);
   if (bwrapAvailable()) out.add("bwrap");
-  if (existsSync("/usr/bin/docker") || existsSync("/usr/bin/podman")) out.add("docker");
+  if (dockerAvailable()) out.add("docker");
   // remote providers join this list with their adapters (Daytona, then E2B)
   return out;
 }
@@ -47,14 +47,12 @@ export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRe
   const opts: HostWorkspaceOptions = {
     root: req.root, writable: req.writable, readable: req.readable, mounts: req.mounts, hide: req.hide, sandbox, onNetworkDenied: req.onNetworkDenied,
   };
-  switch (sandbox.provider) {
-    case "bwrap": return new BwrapWorkspace(opts);
-    case "local": return new LocalWorkspace(opts, bashSafeEnv);
-    default:
-      // docker, daytona and e2b adapters are not available yet: never fall back to weaker isolation silently
-      if (bwrapAvailable()) return new BwrapWorkspace({ ...opts, sandbox: { ...sandbox, provider: "bwrap" } });
-      throw new Error(`Sandbox provider "${sandbox.provider}" is not available on this server`);
-  }
+  if (sandbox.provider === "local") return new LocalWorkspace(opts, bashSafeEnv);
+  if (sandbox.provider === "bwrap") return new BwrapWorkspace(opts);
+  if (sandbox.provider === "docker" && dockerAvailable()) return new DockerWorkspace(opts);
+  // daytona and e2b adapters are not available yet: never fall back to weaker isolation silently
+  if (bwrapAvailable()) return new BwrapWorkspace({ ...opts, sandbox: { ...sandbox, provider: "bwrap" } });
+  throw new Error(`Sandbox provider "${sandbox.provider}" is not available on this server`);
 }
 
 /** The Shell the system tools use (bash, grep, glob), running inside a workspace. */

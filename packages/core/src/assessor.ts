@@ -45,6 +45,11 @@ export interface AssessmentDeps {
   /** Path to the per-project .polpo directory. */
   polpoDir: string;
   /**
+   * Run multi-line scripts without writing a file under polpoDir first. Needed when the shell
+   * runs in a sandbox that cannot see the .polpo directory.
+   */
+  inlineScripts?: boolean;
+  /**
    * LLM review function — injected by the shell layer.
    * When not provided, llm_review expectations will fail with an error message.
    */
@@ -138,6 +143,21 @@ export async function runCheck(
             return { type: "script", passed: false, message: `Script failed: ${label}`, details: result.stderr || result.stdout };
           }
           return { type: "script", passed: true, message: `Script passed: ${label}` };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { type: "script", passed: false, message: `Script failed: ${label}`, details: msg };
+        }
+      }
+
+      if (deps.inlineScripts) {
+        // The shell cannot see polpoDir (sandbox): hand the script over inside the command itself
+        const body = Buffer.from(`set -euo pipefail\n\n${cmd}\n`, "utf8").toString("base64");
+        try {
+          const result = await deps.shell.execute(`bash -c "$(printf %s '${body}' | base64 -d)"`, { cwd });
+          if (result.exitCode !== 0) {
+            return { type: "script", passed: false, message: `Script failed: ${label}`, details: result.stderr || result.stdout };
+          }
+          return { type: "script", passed: true, message: `Script passed: ${label}`, details: result.stdout || result.stderr || undefined };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           return { type: "script", passed: false, message: `Script failed: ${label}`, details: msg };
