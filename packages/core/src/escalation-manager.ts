@@ -239,11 +239,13 @@ export class EscalationManager {
     });
 
     if (this.approvalMgr) {
-      this.ctx.emitter.emit("approval:requested", {
-        requestId: `esc-${taskId}`,
+      // A real, stored request: approving retries the task, rejecting sends it back with feedback.
+      await this.approvalMgr.requestHumanApproval({
         gateId: "escalation",
         gateName: `Escalation: ${task.title}`,
         taskId,
+        missionId: task.missionId,
+        payload: { level: level.level },
       });
     }
   }
