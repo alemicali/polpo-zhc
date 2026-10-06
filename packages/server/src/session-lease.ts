@@ -7,8 +7,9 @@
  * or waits, depending on the caller.
  *
  * The scheduler claims the lease before taking a queued prompt and hands it to the turn it starts
- * (`transfer`), so nothing can slip in between. A lease older than MAX_LEASE_MS is considered
- * abandoned and can be taken over, so a lost release never blocks a session forever.
+ * (`transfer`), so nothing can slip in between. A running turn refreshes its lease (`touch`,
+ * a heartbeat), so only a lease not refreshed for MAX_LEASE_MS — a lost release — can be taken
+ * over; a long legitimate turn keeps its session.
  *
  * In-memory and single-process, like the stream registry.
  */
@@ -64,6 +65,19 @@ export const sessionLeases = {
     if (!current || current.owner !== from) return false;
     LEASES.set(sessionId, { owner: to, kind, acquiredAt: Date.now() });
     return true;
+  },
+
+  /** Heartbeat: the holder is alive (keeps a long turn's lease from being taken over). */
+  touch(sessionId: string, owner: string): void {
+    const current = LEASES.get(sessionId);
+    if (current && current.owner === owner) current.acquiredAt = Date.now();
+  },
+
+  /** Refresh the lease every `everyMs` until the returned function is called. */
+  heartbeat(sessionId: string, owner: string, everyMs = 60_000): () => void {
+    const timer = setInterval(() => sessionLeases.touch(sessionId, owner), everyMs);
+    (timer as { unref?: () => void }).unref?.();
+    return () => clearInterval(timer);
   },
 
   /** Release the lease if `owner` still holds it. */

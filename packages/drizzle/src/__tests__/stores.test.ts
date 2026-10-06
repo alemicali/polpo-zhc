@@ -609,6 +609,23 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect((await q.get(other)).items).toHaveLength(1);
     });
 
+    it("keeps marked (send-next) items and an auto-send hold", async () => {
+      const sid = await stores.sessionStore.create("q");
+      const q = stores.chatQueueStore;
+      await q.add(sid, "plain");
+      const marked = await q.add(sid, "carried", { front: true, steerId: "steer-1" });
+      expect(marked.steerId).toBe("steer-1");
+      expect((await q.get(sid)).items.map((i) => [i.content, i.steerId])).toEqual([["carried", "steer-1"], ["plain", undefined]]);
+      await q.setHold!(sid, "error");
+      expect(await q.get(sid)).toMatchObject({ autoSend: true, hold: "error" });
+      await q.setHold!(sid, null);
+      expect((await q.get(sid)).hold).toBeUndefined();
+      await q.setHold!(sid, "aborted");
+      await q.setAutoSend(sid, true); // resuming clears the hold
+      expect((await q.get(sid)).hold).toBeUndefined();
+      expect((await q.remove(sid, marked.id))?.steerId).toBe("steer-1");
+    });
+
     it("drops the queue with its session", async () => {
       const sid = await stores.sessionStore.create("q");
       await stores.chatQueueStore.add(sid, "a");

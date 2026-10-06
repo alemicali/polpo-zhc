@@ -15,7 +15,7 @@ export class DrizzleChatQueueStore implements ChatQueueStore {
   ) {}
 
   private toItem(row: any): ChatQueueItem {
-    return { id: row.id, sessionId: row.sessionId, content: row.content, createdAt: row.createdAt };
+    return { id: row.id, sessionId: row.sessionId, content: row.content, createdAt: row.createdAt, ...(row.steerId ? { steerId: row.steerId } : {}) };
   }
 
   private async rows(sessionId: string): Promise<any[]> {
@@ -29,17 +29,22 @@ export class DrizzleChatQueueStore implements ChatQueueStore {
       this.rows(sessionId),
       this.db.select().from(this.settings).where(eq(this.settings.sessionId, sessionId)) as Promise<any[]>,
     ]);
-    return { items: rows.map((r) => this.toItem(r)), autoSend: settings[0]?.autoSend ?? true };
+    return {
+      items: rows.map((r) => this.toItem(r)),
+      autoSend: settings[0]?.autoSend ?? true,
+      ...(settings[0]?.hold ? { hold: settings[0].hold } : {}),
+    };
   }
 
-  async add(sessionId: string, content: string, opts?: { front?: boolean }): Promise<ChatQueueItem> {
+  async add(sessionId: string, content: string, opts?: { front?: boolean; steerId?: string }): Promise<ChatQueueItem> {
     const rows = await this.rows(sessionId);
     const position = rows.length === 0
       ? 0
       : opts?.front ? Number(rows[0].position) - 1 : Number(rows[rows.length - 1].position) + 1;
-    const item = { id: nanoid(12), sessionId, content, createdAt: new Date().toISOString() };
+    const item: ChatQueueItem = { id: nanoid(12), sessionId, content, createdAt: new Date().toISOString(), ...(opts?.steerId ? { steerId: opts.steerId } : {}) };
     await this.db.insert(this.items).values({
       ...item,
+      steerId: opts?.steerId ?? null,
       content: this.dialect === "pg" ? pgSafe(content) : content,
       position,
     });
@@ -96,8 +101,18 @@ export class DrizzleChatQueueStore implements ChatQueueStore {
 
   async setAutoSend(sessionId: string, autoSend: boolean): Promise<void> {
     await this.db.insert(this.settings)
-      .values({ sessionId, autoSend })
-      .onConflictDoUpdate({ target: this.settings.sessionId, set: { autoSend } });
+      .values({ sessionId, autoSend, hold: null })
+      .onConflictDoUpdate({ target: this.settings.sessionId, set: { autoSend, hold: null } });
+  }
+
+  async setHold(sessionId: string, reason: string | null): Promise<void> {
+    if (reason === null) {
+      await this.db.update(this.settings).set({ hold: null }).where(eq(this.settings.sessionId, sessionId));
+      return;
+    }
+    await this.db.insert(this.settings)
+      .values({ sessionId, autoSend: true, hold: reason })
+      .onConflictDoUpdate({ target: this.settings.sessionId, set: { hold: reason } });
   }
 
   async sessionsWithItems(): Promise<string[]> {

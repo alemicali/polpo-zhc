@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import type { ChatQueueItem, ChatQueueState, ChatQueueStore } from "@polpo-ai/core";
 
-type Stored = Record<string, { items: ChatQueueItem[]; autoSend?: boolean }>;
+type Stored = Record<string, { items: ChatQueueItem[]; autoSend?: boolean; hold?: string }>;
 
 /**
  * File-backed ChatQueueStore: every session's prompt queue in `.polpo/chat-queue.json`.
@@ -29,14 +29,14 @@ export class FileChatQueueStore implements ChatQueueStore {
   private write(data: Stored): void {
     if (!existsSync(this.polpoDir)) mkdirSync(this.polpoDir, { recursive: true });
     for (const [sessionId, entry] of Object.entries(data)) {
-      if (entry.items.length === 0 && entry.autoSend !== false) delete data[sessionId];
+      if (entry.items.length === 0 && entry.autoSend !== false && !entry.hold) delete data[sessionId];
     }
     const tmp = `${this.filePath}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
     renameSync(tmp, this.filePath);
   }
 
-  private mutate<T>(sessionId: string, change: (entry: { items: ChatQueueItem[]; autoSend?: boolean }) => T): T {
+  private mutate<T>(sessionId: string, change: (entry: { items: ChatQueueItem[]; autoSend?: boolean; hold?: string }) => T): T {
     const data = this.read();
     const entry = data[sessionId] ?? { items: [] };
     data[sessionId] = entry;
@@ -47,11 +47,11 @@ export class FileChatQueueStore implements ChatQueueStore {
 
   async get(sessionId: string): Promise<ChatQueueState> {
     const entry = this.read()[sessionId];
-    return { items: [...(entry?.items ?? [])], autoSend: entry?.autoSend ?? true };
+    return { items: [...(entry?.items ?? [])], autoSend: entry?.autoSend ?? true, ...(entry?.hold ? { hold: entry.hold } : {}) };
   }
 
-  async add(sessionId: string, content: string, opts?: { front?: boolean }): Promise<ChatQueueItem> {
-    const item: ChatQueueItem = { id: nanoid(12), sessionId, content, createdAt: new Date().toISOString() };
+  async add(sessionId: string, content: string, opts?: { front?: boolean; steerId?: string }): Promise<ChatQueueItem> {
+    const item: ChatQueueItem = { id: nanoid(12), sessionId, content, createdAt: new Date().toISOString(), ...(opts?.steerId ? { steerId: opts.steerId } : {}) };
     return this.mutate(sessionId, (entry) => {
       if (opts?.front) entry.items.unshift(item);
       else entry.items.push(item);
@@ -100,7 +100,14 @@ export class FileChatQueueStore implements ChatQueueStore {
   }
 
   async setAutoSend(sessionId: string, autoSend: boolean): Promise<void> {
-    this.mutate(sessionId, (entry) => { entry.autoSend = autoSend; });
+    this.mutate(sessionId, (entry) => { entry.autoSend = autoSend; delete entry.hold; });
+  }
+
+  async setHold(sessionId: string, reason: string | null): Promise<void> {
+    this.mutate(sessionId, (entry) => {
+      if (reason) entry.hold = reason;
+      else delete entry.hold;
+    });
   }
 
   async sessionsWithItems(): Promise<string[]> {

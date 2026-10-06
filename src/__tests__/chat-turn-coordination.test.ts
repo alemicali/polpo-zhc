@@ -39,7 +39,7 @@ vi.mock("../llm/pi-client.js", async (importOriginal) => {
   };
 });
 
-import { mockTextStream, mockToolCallStream } from "./helpers/mock-llm.js";
+import { mockTextStream, mockToolCallStream, mockStream, mockTextResponse } from "./helpers/mock-llm.js";
 
 let tmpDir: string;
 let app: any;
@@ -396,5 +396,167 @@ describe("branches", () => {
     } finally {
       orchestrator.off("message:added" as any, onAdded);
     }
+  });
+});
+
+/** Swap a store method for the duration of `run` (every other call goes to the real store). */
+async function withPatchedStore<T>(
+  getter: "getSessionStore" | "getChatQueueStore",
+  overrides: Record<string, (...args: any[]) => unknown>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const original = (orchestrator as any)[getter].bind(orchestrator);
+  const real = original();
+  const proxy = new Proxy(real, {
+    get(target, prop) {
+      if (typeof prop === "string" && prop in overrides) return overrides[prop];
+      const value = (target as any)[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  (orchestrator as any)[getter] = () => proxy;
+  try {
+    return await run();
+  } finally {
+    (orchestrator as any)[getter] = original;
+  }
+}
+
+const errorStream = () => mockStream([{ type: "error", reason: "error", error: { errorMessage: "model down" } }] as any, mockTextResponse(""));
+
+describe("turns that fail before streaming", () => {
+  test("a store failure while setting up the turn frees the session at once", async () => {
+    const { sessionLeases } = await import("@polpo-ai/server");
+    const sid = await newSessionWithAnswer();
+    const real = orchestrator.getSessionStore()!;
+    let fail = true;
+    await withPatchedStore("getSessionStore", {
+      addMessage: async (...args: any[]) => {
+        if (fail && args[1] === "assistant" && args[2] === "") {
+          fail = false;
+          throw new Error("disk full");
+        }
+        return (real.addMessage as any)(...args);
+      },
+    }, async () => {
+      script([() => mockTextStream("never")]);
+      const run = await startStream({ messages: [{ role: "user", content: "boom" }] }, { "x-session-id": sid });
+      expect(await run.text).toContain("disk full");
+    });
+    expect(sessionLeases.isHeld(sid)).toBe(false);
+    expect(await idle(sid)).toBe(true);
+    script([() => mockTextStream("Works again.")]);
+    const again = await startStream({ messages: [{ role: "user", content: "retry" }] }, { "x-session-id": sid });
+    expect(again.res.status).toBe(200);
+    await again.text;
+  });
+
+  test("carried-over steers the turn could not store go back to the queue", async () => {
+    const { sessionLeases } = await import("@polpo-ai/server");
+    const sid = await newSessionWithAnswer();
+    const queueStore = orchestrator.getChatQueueStore();
+    const real = orchestrator.getSessionStore()!;
+    await queueStore.add(sid, "first steer", { steerId: "c1" });
+    await queueStore.add(sid, "second steer", { steerId: "c2" });
+    let fail = true;
+    let left: Awaited<ReturnType<typeof queueStore.get>> | undefined;
+    await withPatchedStore("getSessionStore", {
+      addMessage: async (...args: any[]) => {
+        if (fail && args[2] === "second steer") {
+          fail = false;
+          throw new Error("disk full");
+        }
+        return (real.addMessage as any)(...args);
+      },
+    }, async () => {
+      script([() => mockTextStream("never")]);
+      await app.request(`/api/v1/chat/sessions/${sid}/queue`); // kicks the dispatcher
+      try {
+        await waitFor(async () => !fail && !sessionLeases.isHeld(sid)
+          && (await queueStore.get(sid)).items.some((i) => i.steerId === "c2"), 4000);
+      } finally {
+        // Keep what is left, but stop the retry scheduled after the error from reaching other tests.
+        left = await queueStore.get(sid);
+        await queueStore.clear(sid);
+      }
+    });
+    expect(left!.items.map((i) => [i.content, i.steerId])).toEqual([["second steer", "c2"]]);
+    expect((await messagesOf(sid)).map((m) => m.content)).toContain("first steer");
+  });
+});
+
+describe("auto-send holds (persisted)", () => {
+  test("after an error or Stop queued prompts wait until the user resumes; marked ones still go", async () => {
+    const sid = await newSessionWithAnswer();
+    const base = `/api/v1/chat/sessions/${sid}/queue`;
+    script([errorStream]);
+    await (await startStream({ messages: [{ role: "user", content: "fails" }] }, { "x-session-id": sid })).text;
+    await waitFor(() => idle(sid));
+    await app.request(base, json("POST", { content: "after the error" }));
+    await new Promise((r) => setTimeout(r, 500));
+    let state = (await (await app.request(base)).json()).data;
+    expect(state).toMatchObject({ hold: "error", items: [{ content: "after the error" }] });
+    expect(calls).toHaveLength(1);
+
+    // Resuming auto-send clears the hold and sends.
+    script([() => mockTextStream("Resumed.")]);
+    await app.request(base, json("PATCH", { autoSend: true }));
+    await waitFor(async () => (await messagesOf(sid)).some((m) => m.content === "Resumed.") && await idle(sid));
+
+    // Stop holds it too.
+    const reached = deferred();
+    script([() => mockTextStream("never")], { 0: new Promise<void>(() => {}) }, { 0: reached.resolve });
+    const run = await startStream({ messages: [{ role: "user", content: "slow" }] }, { "x-session-id": sid });
+    await reached.promise;
+    await app.request(`/v1/chat/completions/abort/${run.turnId}`, { method: "POST" });
+    // The model call here never notices the abort: the session is free anyway.
+    const { sessionLeases } = await import("@polpo-ai/server");
+    await waitFor(async () => await idle(sid) && !sessionLeases.isHeld(sid));
+    await waitFor(async () => (await (await app.request(base)).json()).data.hold === "aborted");
+
+    // A marked message (a carried-over steer) goes out even with auto-send off and a hold.
+    await app.request(base, json("PATCH", { autoSend: false }));
+    await orchestrator.getChatQueueStore().setHold!(sid, "aborted");
+    await orchestrator.getChatQueueStore().add(sid, "carried", { steerId: "kept" });
+    script([() => mockTextStream("Carried sent.")]);
+    await app.request(base);
+    await waitFor(async () => (await messagesOf(sid)).some((m) => m.content === "Carried sent.") && await idle(sid));
+    state = (await (await app.request(base)).json()).data;
+    expect(state.items).toEqual([]);
+  }, 15_000);
+
+  test("a message refused because the chat was busy is sent right after the running turn", async () => {
+    const sid = await newSessionWithAnswer();
+    const base = `/api/v1/chat/sessions/${sid}/queue`;
+    await app.request(base, json("PATCH", { autoSend: false }));
+    const release = deferred();
+    const reached = deferred();
+    script([() => mockTextStream("Running."), () => mockTextStream("Then this.")], { 0: release.promise }, { 0: reached.resolve });
+    const run = await startStream({ messages: [{ role: "user", content: "busy" }] }, { "x-session-id": sid });
+    await reached.promise;
+    const added = await (await app.request(base, json("POST", { content: "typed meanwhile", next: true }))).json();
+    expect(added.data.steerId).toMatch(/^next-/);
+    release.resolve();
+    await run.text;
+    await waitFor(async () => (await messagesOf(sid)).some((m) => m.content === "Then this.") && await idle(sid));
+    expect((await messagesOf(sid)).map((m) => m.content).slice(-2)).toEqual(["typed meanwhile", "Then this."]);
+  });
+});
+
+describe("internal headers", () => {
+  test("external requests cannot hand themselves a lease or skip storing their message", async () => {
+    const { sessionLeases } = await import("@polpo-ai/server");
+    const sid = await newSessionWithAnswer();
+    expect(sessionLeases.tryAcquire(sid, "victim")).toBe(true);
+    try {
+      const stolen = await post(sid, { messages: [{ role: "user", content: "x" }] }, { "x-polpo-lease": "victim" });
+      expect(stolen.status).toBe(409);
+    } finally {
+      sessionLeases.release(sid, "victim");
+    }
+    script([() => mockTextStream("Stored.")]);
+    const res = await post(sid, { messages: [{ role: "user", content: "keep me" }] }, { "x-polpo-skip-user-message": "1" });
+    expect(res.status).toBe(200);
+    expect((await messagesOf(sid)).map((m) => m.content)).toContain("keep me");
   });
 });

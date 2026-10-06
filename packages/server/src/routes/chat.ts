@@ -329,8 +329,9 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
   // ── Prompt queue ─────────────────────────────────────────────────────
   //
   // GET    /sessions/:id/queue                  — { items, autoSend }
-  // POST   /sessions/:id/queue                  — { content, front? } add a prompt
-  // PATCH  /sessions/:id/queue                  — { autoSend }
+  // POST   /sessions/:id/queue                  — { content, front?, next? } add a prompt (next: send
+  //                                                right after the running turn, auto-send or not)
+  // PATCH  /sessions/:id/queue                  — { autoSend } (also clears a hold)
   // DELETE /sessions/:id/queue                  — clear
   // PUT    /sessions/:id/queue/order            — { ids } new order
   // PATCH  /sessions/:id/queue/:itemId          — { content }
@@ -362,20 +363,25 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     if (r.error) return r.error;
     const state = await r.queue.get(r.id);
     // Someone is looking at a queue that could be sending (e.g. after a restart): let it.
-    if (state.autoSend && state.items.length > 0) getDeps().turnScheduler?.queueChanged(r.id);
+    if (state.items.some((i) => i.steerId) || (state.autoSend && !state.hold && state.items.length > 0)) {
+      getDeps().turnScheduler?.queueChanged(r.id);
+    }
     return c.json({ ok: true, data: state });
   });
 
   app.post("/sessions/:id/queue", async (c) => {
     const r = await queueDeps(c);
     if (r.error) return r.error;
-    const body = await c.req.json().catch(() => null) as { content?: unknown; front?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { content?: unknown; front?: unknown; next?: unknown } | null;
     const content = queueText(body?.content);
     if (!content) return c.json({ ok: false, error: "content (non-empty text) is required", code: "VALIDATION_ERROR" }, 400);
     if ((await r.queue.get(r.id)).items.length >= MAX_QUEUE_ITEMS) {
       return c.json({ ok: false, error: `The queue is full (${MAX_QUEUE_ITEMS} prompts)`, code: "QUEUE_FULL" }, 409);
     }
-    const item = await r.queue.add(r.id, content, { front: body?.front === true });
+    // next: send it right after the running turn, whatever auto-send says (a message that could
+    // not be sent because the chat was busy).
+    const next = body?.next === true;
+    const item = await r.queue.add(r.id, content, { front: next || body?.front === true, ...(next ? { steerId: `next-${nanoid(12)}` } : {}) });
     queueChanged(r.id);
     getDeps().turnScheduler?.queueChanged(r.id);
     return c.json({ ok: true, data: item }, 201);

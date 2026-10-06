@@ -114,6 +114,11 @@ export interface ChatQueueItem {
   id: string;
   sessionId: string;
   content: string;
+  /**
+   * Set on a message that must go out next whatever auto-send says: a steer that missed its turn
+   * (the id the client knows it by) or a prompt the user asked to send now while busy.
+   */
+  steerId?: string;
   createdAt: string;
 }
 
@@ -122,6 +127,11 @@ export interface ChatQueueState {
   items: ChatQueueItem[];
   /** Send the head automatically when a turn completes (default true). */
   autoSend: boolean;
+  /**
+   * Auto-send is held because the last turn did not complete normally ("error", "aborted",
+   * "interactive", "max_turns"): queued prompts wait until a turn completes or the user resumes.
+   */
+  hold?: string;
 }
 
 /**
@@ -130,8 +140,8 @@ export interface ChatQueueState {
  */
 export interface ChatQueueStore {
   get(sessionId: string): Promise<ChatQueueState>;
-  /** Append (or, with `front`, prepend) an item. */
-  add(sessionId: string, content: string, opts?: { front?: boolean }): Promise<ChatQueueItem>;
+  /** Append (or, with `front`, prepend) an item; `steerId` marks it to be sent next (see ChatQueueItem). */
+  add(sessionId: string, content: string, opts?: { front?: boolean; steerId?: string }): Promise<ChatQueueItem>;
   update(sessionId: string, id: string, content: string): Promise<ChatQueueItem | undefined>;
   remove(sessionId: string, id: string): Promise<ChatQueueItem | undefined>;
   /** Reorder: `ids` lists the items in their new order; ids not listed keep their relative order after them. */
@@ -139,7 +149,10 @@ export interface ChatQueueStore {
   clear(sessionId: string): Promise<number>;
   /** Remove and return the head, if any. */
   shift(sessionId: string): Promise<ChatQueueItem | undefined>;
+  /** Turn auto-send on/off; either way it clears a hold. */
   setAutoSend(sessionId: string, autoSend: boolean): Promise<void>;
+  /** Hold auto-send after a turn that did not complete (reason), or release it (null). */
+  setHold?(sessionId: string, reason: string | null): Promise<void>;
   /** Drop the queue and its settings (the session was deleted). */
   deleteSession(sessionId: string): Promise<void>;
   /** Sessions that have queued prompts (to resume auto-send after a restart). */

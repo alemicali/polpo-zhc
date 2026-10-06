@@ -37,6 +37,7 @@ import {
   streamRegistry,
   createTurnScheduler,
   sessionLeases,
+  internalCallHeaders,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
@@ -466,6 +467,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       "content-type": "application/json",
       "x-session-id": wait.sessionId,
       "x-polpo-internal-continuation": "background-wait",
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
     const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
@@ -505,6 +507,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       "x-session-id": sessionId,
       // One turn per session: a channel message waits for the running answer instead of failing.
       "x-polpo-lease-wait": String(10 * 60 * 1000),
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
     const response = await completionApp.request(new Request("http://polpo.internal/", {

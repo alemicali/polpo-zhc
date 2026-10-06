@@ -1,5 +1,5 @@
 {
-  "id": "71de9229-648f-460e-8fef-6d12e62b0bf3",
+  "id": "38d059a3-3d29-4cf4-a26f-0e1982ef6490",
   "prevId": "b9eb2f11-f498-4726-bc09-35a8617d1ee5",
   "version": "7",
   "dialect": "postgresql",
@@ -225,6 +225,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "steer_id": {
+          "name": "steer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -286,6 +292,12 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": true
+        },
+        "hold": {
+          "name": "hold",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

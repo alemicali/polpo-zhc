@@ -58,6 +58,12 @@ describe("FileChatQueueStore", () => {
     await q.setAutoSend("s1", false);
 
     expect((await q.sessionsWithItems()).sort()).toEqual(["s1", "s2"]);
+    const marked = await q.add("s3", "carried", { steerId: "st" });
+    await q.setHold("s3", "interactive");
+    expect(await new FileChatQueueStore(dir).get("s3")).toMatchObject({ hold: "interactive", items: [{ content: "carried", steerId: marked.steerId }] });
+    await q.setAutoSend("s3", true);
+    expect((await q.get("s3")).hold).toBeUndefined();
+    await q.deleteSession("s3");
     const reloaded = new FileChatQueueStore(dir);
     expect(await reloaded.get("s1")).toMatchObject({ autoSend: false, items: [{ content: "z" }] });
     expect(await reloaded.clear("s1")).toBe(1);

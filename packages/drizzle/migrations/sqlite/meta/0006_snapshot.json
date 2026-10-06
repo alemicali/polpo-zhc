@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "140012a8-3eaf-4b8e-99ac-33802932dd14",
+  "id": "cfb343c2-5637-46c9-b082-d22579aaceca",
   "prevId": "72fb23e2-5e02-4590-a7e4-86842e75716c",
   "tables": {
     "approvals": {
@@ -218,6 +218,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "steer_id": {
+          "name": "steer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -264,6 +271,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "hold": {
+          "name": "hold",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

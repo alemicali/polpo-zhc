@@ -3,12 +3,14 @@ CREATE TABLE "chat_queue_items" (
 	"session_id" text NOT NULL,
 	"content" text NOT NULL,
 	"position" integer NOT NULL,
-	"created_at" text NOT NULL
+	"created_at" text NOT NULL,
+	"steer_id" text
 );
 --> statement-breakpoint
 CREATE TABLE "chat_queue_settings" (
 	"session_id" text PRIMARY KEY NOT NULL,
-	"auto_send" boolean NOT NULL
+	"auto_send" boolean NOT NULL,
+	"hold" text
 );
 --> statement-breakpoint
 ALTER TABLE "sessions" ADD COLUMN "parent_session_id" text;--> statement-breakpoint

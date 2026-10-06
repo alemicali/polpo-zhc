@@ -29,6 +29,7 @@ import {
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
 import { sessionLeases } from "../session-lease.js";
+import { INTERNAL_CALL_HEADER, isInternalCall } from "../internal-call.js";
 import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
@@ -494,8 +495,10 @@ export interface ToolExecutionContext {
   sessionId?: string;
 }
 
-/** Longest a caller may ask to wait for a busy session (x-polpo-lease-wait, ms). */
+/** Longest the server's own callers may wait for a busy session (x-polpo-lease-wait, ms). */
 const MAX_LEASE_WAIT_MS = 15 * 60 * 1000;
+/** Longest an external caller may wait for a busy session. */
+const MAX_EXTERNAL_LEASE_WAIT_MS = 30 * 1000;
 
 /** The session lease a completion request holds (see session-lease.ts). */
 interface TurnLease {
@@ -512,26 +515,45 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
   // could start a turn, and keeps it until the turn is over (streaming: until the stream ends).
   app.openapi(chatCompletionsRoute, async (c) => {
     const lease: TurnLease = { owner: `lease-${nanoid(12)}`, sessionId: null, transferred: false };
+    // A long non-streaming turn keeps its lease alive (streaming turns beat on their own).
+    const heartbeat = setInterval(() => {
+      if (lease.sessionId && !lease.transferred) sessionLeases.touch(lease.sessionId, lease.owner);
+    }, 60_000);
+    (heartbeat as { unref?: () => void }).unref?.();
     try {
       return await handleCompletion(c, lease);
     } finally {
+      clearInterval(heartbeat);
       if (lease.sessionId && !lease.transferred) sessionLeases.release(lease.sessionId, lease.owner);
     }
   });
 
   const handleCompletion = async (c: any, lease: TurnLease): Promise<any> => {
     const deps = getDeps();
+
+    // ── Auth ──
+    if (apiKeys && apiKeys.length > 0) {
+      const auth = c.req.header("Authorization");
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+      if (!token || !apiKeys.includes(token)) {
+        return c.json({ error: { message: "Invalid API key", type: "invalid_request_error", code: "invalid_api_key" } }, 401);
+      }
+    }
+
+    // Requests this process sends to itself (scheduler, channels, background waits) may hand a
+    // lease over, wait longer and skip storing the user message; nobody else can.
+    const internal = isInternalCall(c.req.header(INTERNAL_CALL_HEADER));
     /**
      * Claim the session's lease: synchronously when free (or handed over by the scheduler via
      * x-polpo-lease), otherwise wait only when the caller asked to (x-polpo-lease-wait, ms).
      */
     const claimLease = async (sid: string): Promise<boolean> => {
-      const handoff = c.req.header("x-polpo-lease");
+      const handoff = internal ? c.req.header("x-polpo-lease") : undefined;
       if ((handoff && sessionLeases.transfer(sid, handoff, lease.owner)) || sessionLeases.tryAcquire(sid, lease.owner)) {
         lease.sessionId = sid;
         return true;
       }
-      const waitMs = Math.min(Number(c.req.header("x-polpo-lease-wait")) || 0, MAX_LEASE_WAIT_MS);
+      const waitMs = Math.min(Number(c.req.header("x-polpo-lease-wait")) || 0, internal ? MAX_LEASE_WAIT_MS : MAX_EXTERNAL_LEASE_WAIT_MS);
       if (waitMs > 0 && await sessionLeases.acquire(sid, lease.owner, { waitMs })) {
         lease.sessionId = sid;
         return true;
@@ -544,15 +566,6 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     const requestedSession = c.req.header("x-session-id");
     if (requestedSession && requestedSession !== "new" && !(await claimLease(requestedSession))) {
       return sessionBusy();
-    }
-
-    // ── Auth ──
-    if (apiKeys && apiKeys.length > 0) {
-      const auth = c.req.header("Authorization");
-      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
-      if (!token || !apiKeys.includes(token)) {
-        return c.json({ error: { message: "Invalid API key", type: "invalid_request_error", code: "invalid_api_key" } }, 401);
-      }
     }
 
     // ── Parse body ──
@@ -705,7 +718,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       // Background-wait continuations and server-started answers (a branch replying to its last
       // user message) run on a conversation whose user message is already stored.
       const skipUserPersistence = c.req.header("x-polpo-internal-continuation") === "background-wait"
-        || c.req.header("x-polpo-skip-user-message") === "1";
+        || (internal && c.req.header("x-polpo-skip-user-message") === "1");
       const lastUserMsg = skipUserPersistence
         ? undefined
         : [...body.messages].reverse().find(m => m.role === "user");
@@ -866,6 +879,13 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       // The stream callback owns the lease from here and releases it when the turn is over.
       lease.transferred = true;
       return streamSSE(c, async (stream) => {
+        // Keep the lease alive for as long as this turn runs (only a dead turn's lease expires).
+        const stopHeartbeat = lease.sessionId ? sessionLeases.heartbeat(lease.sessionId, lease.owner) : () => {};
+        // Stop frees the session right away, even if the model call is slow to notice the abort.
+        registryEntry.abortController.signal.addEventListener("abort", () => {
+          stopHeartbeat();
+          if (lease.sessionId) sessionLeases.release(lease.sessionId, lease.owner);
+        }, { once: true });
         // Client-disconnect ≠ LLM-abort. Disconnect just means stop trying to
         // write to this socket; the LLM keeps running and feeds the registry.
         // Explicit user cancel goes through registry.abort() which fires
@@ -909,31 +929,13 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           return placeholder.id;
         };
 
-        // Steers that missed the previous turn of this session become messages of this one,
-        // right after its own user message.
-        const carried = sessionId && deps.turnScheduler ? await deps.turnScheduler.takeCarryOver(sessionId) : [];
-        const carriedApplied: Array<{ id: string; content: string; message_id?: string }> = [];
-        for (const steer of carried) carriedApplied.push(await persistSteer(steer));
-
-        // Reserve a placeholder message in the store BEFORE streaming.
-        // This guarantees the assistant message exists even if the client disconnects.
-        let assistantMsgId: string | null = await newAssistantPlaceholder();
-
-        // The first chunk tells clients (and resuming clients, via the replay buffer) which
-        // stored message this stream is filling.
-        await emit(sseChunk(completionId, { role: "assistant" }, null, {
-          turn: { id: turnId, session_id: sessionId, assistant_message_id: assistantMsgId },
-        }));
-        if (carriedApplied.length > 0) {
-          await emit(sseChunk(completionId, {}, null, {
-            steer_applied: { steers: carriedApplied, assistant_message_id: assistantMsgId, previous_assistant_message_id: null },
-          }));
-        }
-
-        let messages: any[] = [
-          ...projection.messages,
-          ...carried.map((steer) => ({ role: "user", content: resolveSteerText(steer.content), timestamp: Date.now() })),
-        ];
+        // Everything below runs inside the try/finally that ends the turn: whatever fails (even the
+        // store, before the first chunk), the registry entry completes, the session lease is
+        // released and carried-over steers not stored yet go back to the queue.
+        let carried: Array<{ id: string; content: string }> = [];
+        let carriedStored = 0;
+        let assistantMsgId: string | null = null;
+        let messages: any[] = [...projection.messages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
         const segmentsAccum: MessageSegment[] = [];
@@ -979,6 +981,31 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         };
 
         try {
+          // Steers that missed the previous turn of this session become messages of this one,
+          // right after its own user message.
+          if (sessionId && deps.turnScheduler) carried = await deps.turnScheduler.takeCarryOver(sessionId);
+          const carriedApplied: Array<{ id: string; content: string; message_id?: string }> = [];
+          for (const steer of carried) {
+            carriedApplied.push(await persistSteer(steer));
+            carriedStored++;
+          }
+
+          // Reserve a placeholder message in the store BEFORE streaming.
+          // This guarantees the assistant message exists even if the client disconnects.
+          assistantMsgId = await newAssistantPlaceholder();
+
+          // The first chunk tells clients (and resuming clients, via the replay buffer) which
+          // stored message this stream is filling.
+          await emit(sseChunk(completionId, { role: "assistant" }, null, {
+            turn: { id: turnId, session_id: sessionId, assistant_message_id: assistantMsgId },
+          }));
+          if (carriedApplied.length > 0) {
+            await emit(sseChunk(completionId, {}, null, {
+              steer_applied: { steers: carriedApplied, assistant_message_id: assistantMsgId, previous_assistant_message_id: null },
+            }));
+          }
+          messages.push(...carried.map((steer) => ({ role: "user", content: resolveSteerText(steer.content), timestamp: Date.now() })));
+
           for (let turn = 0; turn < maxTurns; turn++) {
             // Bail out early if the client already disconnected
             if (abortController.signal.aborted) break;
@@ -1397,6 +1424,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             await emit("[DONE]");
           }
         } catch (err) {
+          // Carried-over steers the turn could not store yet: still the next message.
+          for (const steer of carried.slice(carriedStored)) undelivered.push({ ...steer, createdAt: Date.now() });
+          carriedStored = carried.length;
           if (abortController.signal.aborted) {
             turnOutcome = "aborted";
           } else {
@@ -1420,6 +1450,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           // The session was deleted under this turn (e.g. a branch undone): nothing to record.
           const discarded = streamRegistry.isDiscarded(turnId);
           try {
+            if (turnOutcome === "aborted") {
+              // Even a stopped turn never drops carried-over steers it had not stored.
+              for (const steer of carried.slice(carriedStored)) undelivered.push({ ...steer, createdAt: Date.now() });
+            }
             // Always persist the assistant response — even on disconnect.
             // SECURITY: Redact vault credentials before persisting to SQLite
             const safeToolCalls = redactVaultToolCalls(toolCallsAccum);
@@ -1436,6 +1470,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 undelivered.map((steer) => ({ id: steer.id, content: steer.content })));
             }
           } finally {
+            stopHeartbeat();
             if (lease.sessionId) sessionLeases.release(lease.sessionId, lease.owner);
           }
         }
@@ -1897,6 +1932,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     // Stop means "not this": undelivered steers go back to the person who pressed it, never
     // into the conversation. Resuming clients learn it from the replay buffer.
     const returned = streamRegistry.closeSteering(turnId).map((steer) => ({ id: steer.id, content: steer.content }));
+    // Stopped: queued prompts wait for the user (before the session is freed below).
+    const stoppedSession = streamRegistry.get(turnId)?.sessionId;
+    if (stoppedSession && stoppedSession !== "anon") await getDeps().turnScheduler?.holdAutoSend(stoppedSession, "aborted");
     const finalData = returned.length > 0
       ? sseChunk(`chatcmpl-${turnId}`, {}, null, { steer_returned: { reason: "aborted", scheduled: false, steers: returned } })
       : undefined;
@@ -1941,7 +1979,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     if (id && streamRegistry.hasSeenSteer(turnId, id)) {
       return c.json({ ok: true, data: { id, turnId, status: "pending" } }, 202);
     }
-    if (id && scheduler?.isCarried(id)) {
+    const steerSession = streamRegistry.get(turnId)?.sessionId;
+    if (id && scheduler && steerSession && steerSession !== "anon" && await scheduler.isCarried(steerSession, id)) {
       return c.json({ ok: true, data: { id, turnId, status: "scheduled" } }, 202);
     }
     const result = streamRegistry.steer(turnId, { id, content });
@@ -1979,7 +2018,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     }
     const outcome = streamRegistry.cancelSteer(c.req.param("turnId"), c.req.param("steerId"));
     // Carried over to the next message but not sent yet: still withdrawable.
-    if (outcome !== "cancelled" && await getDeps().turnScheduler?.cancelCarried(c.req.param("steerId"))) {
+    const steerSession = streamRegistry.get(c.req.param("turnId"))?.sessionId;
+    if (outcome !== "cancelled" && steerSession && steerSession !== "anon"
+      && await getDeps().turnScheduler?.cancelCarried(steerSession, c.req.param("steerId"))) {
       return c.json({ ok: true, data: { cancelled: true } });
     }
     if (outcome === "not_found") {

@@ -5,13 +5,14 @@
  * - **Undelivered steers** (the turn ended on an interactive tool, an error or
  *   the round limit before a safe point, or the steer arrived as it finished):
  *   they become the next message. They are stored at the head of the session's
- *   queue (so a restart does not lose them) and marked to be sent regardless of
- *   auto-send. The next turn that starts on the session (e.g. the client's
- *   acknowledgement of navigate_to) takes them at its start; if none starts
- *   within a short grace period, the scheduler starts one itself.
- * - **Queued prompts**: when the session is idle after a normally completed
- *   turn (or after a restart, unless the conversation waits for the user) and
- *   auto-send is on, the head is sent as a new turn.
+ *   queue marked with their steer id (so a restart does not lose them, and they
+ *   are sent whatever auto-send says). The next turn that starts on the session
+ *   (e.g. the client's acknowledgement of navigate_to) takes them at its start;
+ *   if none starts within a short grace period, the scheduler starts one itself.
+ * - **Queued prompts**: when the session is idle and auto-send is on, the head
+ *   is sent as a new turn. A turn that did not complete normally (error, Stop,
+ *   waiting for the user, round limit) puts a persisted *hold* on auto-send
+ *   until a turn completes or the user resumes it — also across restarts.
  *
  * One turn per session: the scheduler claims the session lease (session-lease.ts)
  * before taking anything from the queue and hands it to the turn it starts, so
@@ -23,6 +24,7 @@
 import type { AttachmentStore, ChatQueueStore, SessionStore } from "@polpo-ai/core";
 import { streamRegistry } from "./stream-registry.js";
 import { sessionLeases } from "./session-lease.js";
+import { internalCallHeaders } from "./internal-call.js";
 
 export type TurnOutcome = "completed" | "interactive" | "error" | "aborted" | "max_turns";
 export type TurnStartReason = "queue" | "steer" | "fork" | "send-now";
@@ -44,7 +46,7 @@ export interface TurnSchedulerDeps {
   /** Bearer token for the internal request, when the completions app requires one. */
   apiKey?: string;
   /** Delays (ms) — overridable for tests. */
-  delays?: { afterCompleted?: number; carryOver?: number; carryOverAfterInteractive?: number };
+  delays?: { afterCompleted?: number; carryOver?: number; carryOverAfterInteractive?: number; afterError?: number; resumeStagger?: number };
 }
 
 export interface StartedTurn {
@@ -65,24 +67,14 @@ export class SessionBusyError extends Error {
   }
 }
 
-const DEFAULT_DELAYS = { afterCompleted: 250, carryOver: 300, carryOverAfterInteractive: 1500 };
+const DEFAULT_DELAYS = { afterCompleted: 250, carryOver: 300, carryOverAfterInteractive: 1500, afterError: 5000, resumeStagger: 500 };
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 let tokenCounter = 0;
 const newToken = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(tokenCounter++).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-interface ForcedItem {
-  /** Steer id the client knows (to withdraw it). */
-  steerId: string;
-  /** Queue item holding it. */
-  itemId: string;
-}
-
 export class TurnScheduler {
-  /** Queue items that are carried-over steers: sent first, whatever auto-send says. */
-  private readonly forced = new Map<string, ForcedItem[]>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly lastOutcome = new Map<string, TurnOutcome>();
   private readonly delays: typeof DEFAULT_DELAYS;
   private readonly unsubscribe: () => void;
 
@@ -102,62 +94,64 @@ export class TurnScheduler {
 
   /** Called by the completions loop when a turn on `sessionId` is over (before it frees the session). */
   async turnFinished(sessionId: string, outcome: TurnOutcome, undelivered: CarriedSteer[] = []): Promise<void> {
-    this.lastOutcome.set(sessionId, outcome);
-    if (undelivered.length > 0) await this.carryOver(sessionId, undelivered, outcome);
-    else if (this.forced.get(sessionId)?.length) this.schedule(sessionId, this.delays.carryOver);
+    const queue = this.deps.getQueueStore?.();
+    // Auto-send only follows a turn that completed; anything else holds it (persisted).
+    await queue?.setHold?.(sessionId, outcome === "completed" ? null : outcome).catch(() => undefined);
+    if (undelivered.length > 0) {
+      await this.carryOver(sessionId, undelivered, outcome);
+      return;
+    }
+    const state = await queue?.get(sessionId).catch(() => undefined);
+    if (state?.items.some((i) => i.steerId)) this.schedule(sessionId, this.delays.carryOver);
     else if (outcome === "completed") this.schedule(sessionId, this.delays.afterCompleted);
   }
 
+  /** Hold auto-send for the session (e.g. the user pressed Stop). */
+  async holdAutoSend(sessionId: string, reason: string): Promise<void> {
+    await this.deps.getQueueStore?.()?.setHold?.(sessionId, reason).catch(() => undefined);
+  }
+
   /**
-   * Make steers the next message of the session: stored at the head of its queue (in order) and
-   * sent regardless of auto-send.
+   * Make steers the next message of the session: stored at the head of its queue (in order) with
+   * their steer id, so they are sent regardless of auto-send — also after a restart.
    */
   async carryOver(sessionId: string, steers: CarriedSteer[], outcome?: TurnOutcome): Promise<void> {
     if (steers.length === 0) return;
     const queue = this.deps.getQueueStore?.();
-    const forced = this.forced.get(sessionId) ?? [];
-    if (queue) {
-      const added: ForcedItem[] = [];
-      for (const steer of [...steers].reverse()) {
-        const item = await queue.add(sessionId, steer.content, { front: true });
-        added.unshift({ steerId: steer.id, itemId: item.id });
-      }
-      this.forced.set(sessionId, [...added, ...forced]);
-      this.deps.emit("chat:queue-updated", { sessionId });
-    }
-    this.schedule(sessionId, outcome === "interactive" ? this.delays.carryOverAfterInteractive : this.delays.carryOver);
+    if (!queue) return;
+    for (const steer of [...steers].reverse()) await queue.add(sessionId, steer.content, { front: true, steerId: steer.id });
+    this.deps.emit("chat:queue-updated", { sessionId });
+    const delay = outcome === "interactive" ? this.delays.carryOverAfterInteractive
+      : outcome === "error" ? this.delays.afterError
+        : this.delays.carryOver;
+    this.schedule(sessionId, delay);
   }
 
-  /** Is this steer id waiting as a carried-over steer? */
-  isCarried(steerId: string): boolean {
-    for (const list of this.forced.values()) if (list.some((f) => f.steerId === steerId)) return true;
-    return false;
+  /** Is this steer id waiting in the session's queue as a carried-over steer? */
+  async isCarried(sessionId: string, steerId: string): Promise<boolean> {
+    const state = await this.deps.getQueueStore?.()?.get(sessionId).catch(() => undefined);
+    return !!state?.items.some((i) => i.steerId === steerId);
   }
 
   /** Withdraw a carried-over steer that was not sent yet. */
-  async cancelCarried(steerId: string): Promise<boolean> {
-    for (const [sessionId, list] of this.forced) {
-      const index = list.findIndex((f) => f.steerId === steerId);
-      if (index < 0) continue;
-      const [entry] = list.splice(index, 1);
-      if (list.length === 0) this.forced.delete(sessionId);
-      const removed = await this.deps.getQueueStore?.()?.remove(sessionId, entry.itemId);
-      if (removed) this.deps.emit("chat:queue-updated", { sessionId });
-      return !!removed;
-    }
-    return false;
+  async cancelCarried(sessionId: string, steerId: string): Promise<boolean> {
+    const queue = this.deps.getQueueStore?.();
+    const item = (await queue?.get(sessionId).catch(() => undefined))?.items.find((i) => i.steerId === steerId);
+    if (!queue || !item) return false;
+    const removed = await queue.remove(sessionId, item.id);
+    if (removed) this.deps.emit("chat:queue-updated", { sessionId });
+    return !!removed;
   }
 
   /** Carried-over steers taken by the turn starting now (it injects them after its own message). */
   async takeCarryOver(sessionId: string): Promise<CarriedSteer[]> {
-    const forced = this.forced.get(sessionId) ?? [];
-    this.forced.delete(sessionId);
-    if (forced.length === 0) return [];
     const queue = this.deps.getQueueStore?.();
+    if (!queue) return [];
+    const carried = (await queue.get(sessionId)).items.filter((i) => i.steerId);
     const taken: CarriedSteer[] = [];
-    for (const entry of forced) {
-      const item = await queue?.remove(sessionId, entry.itemId);
-      if (item) taken.push({ id: entry.steerId, content: item.content });
+    for (const item of carried) {
+      const removed = await queue.remove(sessionId, item.id);
+      if (removed) taken.push({ id: item.steerId!, content: removed.content });
     }
     if (taken.length > 0) this.deps.emit("chat:queue-updated", { sessionId });
     return taken;
@@ -168,16 +162,17 @@ export class TurnScheduler {
     this.kick(sessionId, 0);
   }
 
-  /** After a restart: sessions with queued prompts get a chance to send them. */
+  /**
+   * After a restart: sessions with queued prompts get a chance to send them (one at a time,
+   * staggered). Held sessions and auto-send off still wait; carried-over steers go out.
+   */
   async resumePending(): Promise<void> {
     const sessions = await this.deps.getQueueStore?.()?.sessionsWithItems?.().catch(() => []) ?? [];
-    for (const sessionId of sessions) this.kick(sessionId, 0);
+    sessions.forEach((sessionId, index) => this.kick(sessionId, index * this.delays.resumeStagger));
   }
 
   /** Forget a session (deleted). */
   forget(sessionId: string): void {
-    this.forced.delete(sessionId);
-    this.lastOutcome.delete(sessionId);
     const timer = this.timers.get(sessionId);
     if (timer) clearTimeout(timer);
     this.timers.delete(sessionId);
@@ -205,12 +200,11 @@ export class TurnScheduler {
 
     const token = newToken("dispatch");
     if (!sessionLeases.tryAcquire(sessionId, token, "dispatch")) {
-      // Something is running or about to (a turn finishing, a channel turn): it goes next.
-      const state = await queue.get(sessionId);
-      if (!state.items.some((i) => i.id === itemId)) return undefined;
-      await queue.reorder(sessionId, [itemId]);
-      const forced = this.forced.get(sessionId) ?? [];
-      if (!forced.some((f) => f.itemId === itemId)) this.forced.set(sessionId, [{ steerId: itemId, itemId }, ...forced]);
+      // Something is running or about to (a turn finishing, a channel turn): it goes next,
+      // whatever auto-send says.
+      const item = await queue.remove(sessionId, itemId);
+      if (!item) return undefined;
+      await queue.add(sessionId, item.content, { front: true, steerId: item.steerId ?? `next-${item.id}` });
       this.deps.emit("chat:queue-updated", { sessionId });
       return { mode: "scheduled" };
     }
@@ -302,6 +296,7 @@ export class TurnScheduler {
         "x-session-id": sessionId,
         "x-polpo-turn-reason": opts.reason,
         "x-polpo-lease": token,
+        ...internalCallHeaders(),
       };
       if (opts.content === undefined) headers["x-polpo-skip-user-message"] = "1";
       if (this.deps.apiKey) headers.authorization = `Bearer ${this.deps.apiKey}`;
@@ -326,7 +321,6 @@ export class TurnScheduler {
       })();
       if (!turnId) return undefined;
       const userMessageId = response.headers.get("x-user-message-id") ?? undefined;
-      this.lastOutcome.delete(sessionId);
       this.deps.emit("chat:turn-started", { sessionId, turnId, reason: opts.reason, ...(userMessageId ? { userMessageId } : {}) });
       return { turnId, userMessageId };
     } finally {
@@ -354,10 +348,12 @@ export class TurnScheduler {
     this.timers.set(sessionId, timer);
   }
 
-  /** May auto-send run now? After a completed turn; after a restart, unless the chat waits for the user. */
-  private async autoSendAllowed(sessionId: string): Promise<boolean> {
-    const outcome = this.lastOutcome.get(sessionId);
-    if (outcome) return outcome === "completed";
+  /**
+   * May auto-send run now? Not while held (the last turn errored, was stopped, waits for the
+   * user…), nor when the stored conversation ends on a question to the user.
+   */
+  private async autoSendAllowed(sessionId: string, state: { autoSend: boolean; hold?: string }): Promise<boolean> {
+    if (!state.autoSend || state.hold) return false;
     const recent = await this.deps.getSessionStore()?.getRecentMessages(sessionId, 1).catch(() => []) ?? [];
     const last = recent[0];
     return !(last?.role === "assistant" && last.toolCalls?.some((call) => call.state === "interrupted"));
@@ -375,41 +371,29 @@ export class TurnScheduler {
     if (!sessionLeases.tryAcquire(sessionId, token, "dispatch")) return;
     let handedOff = false;
     try {
-      let content: string | undefined;
-      let forcedEntry: ForcedItem | undefined;
-      let reason: TurnStartReason = "queue";
-      const forced = this.forced.get(sessionId) ?? [];
-      while (forced.length > 0 && content === undefined) {
-        const entry = forced.shift()!;
-        const item = await queue.remove(sessionId, entry.itemId);
-        if (item) {
-          content = item.content;
-          forcedEntry = entry;
-          reason = "steer";
-        }
+      const state = await queue.get(sessionId);
+      // Carried-over steers (and "send now" while busy) first, whatever auto-send says.
+      const forced = state.items.find((i) => i.steerId);
+      let item: Awaited<ReturnType<ChatQueueStore["shift"]>>;
+      if (forced) {
+        item = await queue.remove(sessionId, forced.id);
+      } else {
+        if (state.items.length === 0 || !(await this.autoSendAllowed(sessionId, state))) return;
+        item = await queue.shift(sessionId);
       }
-      if (forced.length === 0) this.forced.delete(sessionId);
-      if (content === undefined) {
-        const state = await queue.get(sessionId);
-        if (!state.autoSend || state.items.length === 0) return;
-        if (!(await this.autoSendAllowed(sessionId))) return;
-        const item = await queue.shift(sessionId);
-        if (!item) return;
-        content = item.content;
-      }
+      if (!item) return;
       this.deps.emit("chat:queue-updated", { sessionId });
       try {
-        const started = await this.startTurn(sessionId, { content, reason, leaseToken: token });
+        const started = await this.startTurn(sessionId, { content: item.content, reason: item.steerId ? "steer" : "queue", leaseToken: token });
         if (!started) throw new Error("The chat is not available");
         handedOff = true;
       } catch (error) {
-        // Never lose what the user typed: back to the head of the queue.
-        const item = await queue.add(sessionId, content, { front: true });
-        if (forcedEntry) this.forced.set(sessionId, [{ steerId: forcedEntry.steerId, itemId: item.id }, ...(this.forced.get(sessionId) ?? [])]);
+        // Never lose what the user typed: back to the head of the queue, still marked if it was.
+        await queue.add(sessionId, item.content, { front: true, ...(item.steerId ? { steerId: item.steerId } : {}) });
         this.deps.emit("chat:queue-updated", { sessionId });
         if (!(error instanceof SessionBusyError)) {
-          // Stop auto-sending after a failure; the next completed turn retries.
-          this.lastOutcome.set(sessionId, "error");
+          // Hold auto-send after a failure; a completed turn or the user resumes it.
+          await queue.setHold?.(sessionId, "error").catch(() => undefined);
           throw error;
         }
       }
