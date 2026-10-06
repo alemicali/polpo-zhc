@@ -34,6 +34,10 @@ export class TelegramGatewayAdapter implements TelegramGatewayHandler {
     });
   }
 
+  async joinsByIntent(senderId: string, chatId: string, text: string, senderName: string | undefined, messageId: string, group: InboundGroup): Promise<boolean> {
+    return this.gateway.joinsByIntent({ channel: "telegram", externalId: senderId, chatId, displayName: senderName, text, messageId, group });
+  }
+
   async handleMenuCallback(action: string, value: string, chatId: string, senderId: string, senderName?: string, group?: InboundGroup): Promise<string | undefined> {
     return this.gateway.handleMenuCallback(action, value, { channel: "telegram", externalId: senderId, chatId, displayName: senderName, group });
   }

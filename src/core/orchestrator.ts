@@ -65,6 +65,7 @@ import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
+import { GroupIntentArbiter, type IntentCandidate } from "../notifications/group-intent.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
@@ -1591,6 +1592,15 @@ export class Orchestrator extends TypedEmitter {
 
     const resolver = this.createApprovalResolver();
 
+    // groupReplies "intent": one arbiter for all the bots, so a group message is classified once
+    const gateways: ChannelGateway[] = [];
+    const intent = new GroupIntentArbiter({
+      apiKey: () => process.env.TYPESAFE_API_KEY || undefined,
+      candidates: async (conversation) =>
+        (await Promise.all(gateways.map(g => g.intentCandidate(conversation)))).filter((c): c is IntentCandidate => !!c),
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+
     const usedTokens = new Set<string>();
     for (const key of ordered) {
       const ch = this.notificationRouter!.getChannel(key);
@@ -1620,7 +1630,10 @@ export class Orchestrator extends TypedEmitter {
           channelConfig,
           approvalResolver: resolver,
           onTyping: (chatId, target) => poller.sendTyping(chatId, target),
+          key,
         });
+        gateway.setIntentArbiter(intent);
+        gateways.push(gateway);
         gateway.setPartialResponseHandler((chatId, text, target) => poller.sendPartial(chatId, text, target));
         gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
