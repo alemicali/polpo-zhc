@@ -3,7 +3,7 @@ import { resolve, join } from "node:path";
 import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
-import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
+import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile, parseProviders } from "./config.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -53,6 +53,8 @@ import {
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
+import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../llm/custom-providers.js";
+import { readProviderSecrets } from "../llm/provider-secrets.js";
 import { startNotificationServer, getSocketPath } from "./notification.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
@@ -447,6 +449,11 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
+    // Vault first: custom provider keys live there ("$providers"), and the key check below
+    // must see them (otherwise vault-only custom providers are reported as missing).
+    this.initVaultStore();
+    await refreshCustomProviderSecretStatus();
+
     // Validate API keys (after stores are available so we can read per-agent models)
     await this.validateProviders();
 
@@ -455,7 +462,6 @@ export class Orchestrator extends TypedEmitter {
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
 
-    this.initVaultStore();
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
   }
 
@@ -875,7 +881,9 @@ export class Orchestrator extends TypedEmitter {
       teams: [], // populated by syncConfigCache() from stores
       tasks: [],
       settings,
-      providers: polpoConfig?.providers,
+      providers: polpoConfig?.providers
+        ? parseProviders(polpoConfig.providers as Record<string, unknown>)
+        : undefined,
     };
 
     // Apply provider overrides and allowlist
@@ -892,6 +900,7 @@ export class Orchestrator extends TypedEmitter {
     await this.agentMgr.syncConfigCache();
 
     this.initVaultStore();
+    await refreshCustomProviderSecretStatus();
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
     this.interactive = true;
     await this.registry.setState({
@@ -1031,6 +1040,9 @@ export class Orchestrator extends TypedEmitter {
   private initVaultStore(): void {
     try {
       this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
+      // Custom provider keys / secret headers live in the vault (owner "$providers").
+      const vault = this.vaultStore;
+      setProviderSecretsSource({ get: (id) => readProviderSecrets(vault, id) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
@@ -1400,13 +1412,18 @@ export class Orchestrator extends TypedEmitter {
     //    Settings and providers come from polpo.json; teams come from stores.
     const newSettings = polpoConfig.settings ?? this.config.settings;
     this.config.settings = newSettings;
-    if (polpoConfig.providers) {
-      this.config.providers = polpoConfig.providers;
-      setProviderOverrides(polpoConfig.providers);
-    }
-    if (newSettings.modelAllowlist) {
-      setModelAllowlist(newSettings.modelAllowlist);
-    }
+    // Providers: parse like at boot and always replace — removed providers must disappear
+    // from the runtime registry too.
+    const parsedProviders = polpoConfig.providers
+      ? parseProviders(polpoConfig.providers as Record<string, unknown>)
+      : {};
+    this.config.providers = Object.keys(parsedProviders).length > 0 ? parsedProviders : undefined;
+    setProviderOverrides(parsedProviders);
+    await refreshCustomProviderSecretStatus();
+    // Allowlist: an allowlist removed from polpo.json must stop being enforced.
+    setModelAllowlist(newSettings.modelAllowlist && Object.keys(newSettings.modelAllowlist).length > 0
+      ? newSettings.modelAllowlist
+      : undefined);
 
     // Re-sync config.teams from TeamStore/AgentStore (authoritative source)
     await this.agentMgr.syncConfigCache();

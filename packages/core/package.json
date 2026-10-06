@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration platform",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,14 @@
     "./schemas": {
       "types": "./dist/schemas.d.ts",
       "import": "./dist/schemas.js"
+    },
+    "./provider-config": {
+      "types": "./dist/provider-config.d.ts",
+      "import": "./dist/provider-config.js"
+    },
+    "./provider-presets": {
+      "types": "./dist/provider-presets.d.ts",
+      "import": "./dist/provider-presets.js"
     },
     "./events": {
       "types": "./dist/events.d.ts",

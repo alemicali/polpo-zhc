@@ -1,4 +1,4 @@
-import { PROVIDER_ENV_MAP, listProviders } from "../llm/pi-client.js";
+import { PROVIDER_ENV_MAP, listProviders, hasAmbientCredentials } from "../llm/pi-client.js";
 import { getAllProfiles } from "../auth/store.js";
 
 export interface DetectedProvider {
@@ -54,7 +54,8 @@ export function detectProviders(): DetectedProvider[] {
     // - The env var is set, AND
     // - Either this provider itself has OAuth (so the key is genuinely for it),
     //   or the env var is NOT claimed by another OAuth provider
-    const envVarSet = envVar ? !!process.env[envVar] : false;
+    // Includes ambient credentials (AWS profile/role, Vertex ADC) and Cloudflare account/gateway ids.
+    const envVarSet = hasAmbientCredentials(name);
     const envClaimedByOtherOAuth = envVar && oauthOwnedEnvVars.has(envVar) && !hasOAuth;
     const hasEnvKey = envVarSet && !envClaimedByOtherOAuth;
 
