@@ -70,6 +70,10 @@
       "types": "./dist/session-store.d.ts",
       "import": "./dist/session-store.js"
     },
+    "./room-store": {
+      "types": "./dist/room-store.d.ts",
+      "import": "./dist/room-store.js"
+    },
     "./coding-session-store": {
       "types": "./dist/coding-session-store.d.ts",
       "import": "./dist/coding-session-store.js"

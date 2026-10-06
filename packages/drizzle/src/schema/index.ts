@@ -24,6 +24,7 @@ export { appsSqlite, dataSourcesSqlite, dataViewsSqlite, dataActivitySqlite } fr
 export { brainItemsSqlite } from "./company-brain.js";
 export { whatsappMessagesSqlite, whatsappContactsSqlite } from "./whatsapp.js";
 export { chatQueueItemsSqlite, chatQueueSettingsSqlite } from "./chat-queue.js";
+export { roomsSqlite, roomMessagesSqlite } from "./rooms.js";
 
 // PostgreSQL schemas
 export {
@@ -51,3 +52,4 @@ export { appsPg, dataSourcesPg, dataViewsPg, dataActivityPg } from "./registries
 export { brainItemsPg } from "./company-brain.js";
 export { whatsappMessagesPg, whatsappContactsPg } from "./whatsapp.js";
 export { chatQueueItemsPg, chatQueueSettingsPg } from "./chat-queue.js";
+export { roomsPg, roomMessagesPg } from "./rooms.js";
