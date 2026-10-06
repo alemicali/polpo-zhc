@@ -60,6 +60,7 @@ export class EventSourceManager {
     // Listen for named events (Polpo sends typed event names)
     // EventSource API: use addEventListener for named events
     for (const name of ["session:created", "session:updated", "session:deleted", "message:added",
+      "chat:turn-started", "chat:queue-updated",
       "background-wait:completed", "background-wait:failed", "background-wait:cancelled"]) {
       es.addEventListener(name, (e) => this.handleMessage(e as MessageEvent));
     }

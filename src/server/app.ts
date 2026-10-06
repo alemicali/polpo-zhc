@@ -1,3 +1,5 @@
+import { unlink } from "node:fs/promises";
+import { join as joinPath } from "node:path";
 import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
@@ -33,6 +35,7 @@ import {
   attachmentRoutes,
   countsRoutes,
   streamRegistry,
+  createTurnScheduler,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
@@ -193,7 +196,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
+  // Server-side turns: queued prompts, steers that missed their turn, a branch's answer.
+  const turnScheduler = createTurnScheduler({
+    getSessionStore: () => o.getSessionStore(),
+    getAttachmentStore: () => o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
+    getQueueStore: () => o.getChatQueueStore(),
+    emit: (event, data) => o.emit(event as any, data as any),
+    request: (req) => completionApp.request(req),
+    apiKey: opts?.apiKeys?.[0],
+  });
   const completionApp = completionRoutes(() => ({
+    turnScheduler,
     contextCheckpoints: databaseStoresFor(o.getPolpoDir())?.contextCheckpointStore ?? new FileContextCheckpointStore(o.getPolpoDir()),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
     saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
@@ -567,6 +580,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     sessionStore: o.getSessionStore(),
     emit: (event: string, data: unknown) => o.emit(event as any, data),
+    chatQueueStore: o.getChatQueueStore(),
+    turnScheduler,
+    removeAttachmentFile: async (path: string) => {
+      // Only chat attachments, never anything else under the project.
+      if (!/^workspace\/attachments\/[\w-]+\/[^/\\]+$/.test(path)) return;
+      await unlink(joinPath(o.getWorkDir(), path)).catch(() => undefined);
+    },
   })));
 
   authed.route("/skills", skillRoutes(() => ({

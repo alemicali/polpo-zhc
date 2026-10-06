@@ -239,14 +239,18 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     const attachment = await attachmentStore.get(id);
     if (!attachment) return c.json({ ok: false, error: "Not found" }, 404);
 
-    // Delete file
-    const absPath = join(workDir, attachment.path);
-    try {
-      if ((fs as any).unlink) await (fs as any).unlink(absPath);
-    } catch { /* best effort */ }
-
-    // Delete metadata
+    // Delete metadata, then the file — unless another message still points at it (a branched
+    // conversation shares its parent's files). Stores that cannot tell keep the file.
     await attachmentStore.delete(id);
+    const stillUsed = attachmentStore.getByPath
+      ? (await attachmentStore.getByPath(attachment.path).catch(() => [attachment])).length > 0
+      : true;
+    if (!stillUsed) {
+      const absPath = join(workDir, attachment.path);
+      try {
+        if ((fs as any).unlink) await (fs as any).unlink(absPath);
+      } catch { /* best effort */ }
+    }
     return c.json({ ok: true }, 200);
   });
 
