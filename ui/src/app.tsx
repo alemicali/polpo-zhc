@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { PolpoProvider } from "@polpo-ai/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Loader2 } from "lucide-react";
@@ -16,7 +16,7 @@ const AgentsPage = lazy(() => import("@/pages/agents").then(m => ({ default: m.A
 const AgentDetailPage = lazy(() => import("@/pages/agent-detail").then(m => ({ default: m.AgentDetailPage })));
 const ActivityPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.ActivityPage })));
 const ChatPage = lazy(() => import("@/pages/chat").then(m => ({ default: m.ChatPage })));
-const GroupsPage = lazy(() => import("@/pages/groups").then(m => ({ default: m.GroupsPage })));
+const ChangelogPage = lazy(() => import("@/pages/changelog").then(m => ({ default: m.ChangelogPage })));
 const MemoryPage = lazy(() => import("@/pages/memory").then(m => ({ default: m.MemoryPage })));
 
 const NotificationsPage = lazy(() => import("@/pages/notifications").then(m => ({ default: m.NotificationsPage })));
@@ -139,6 +139,12 @@ function SetupModeRedirect({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Groups now live inside the chat: /groups → /chat, /groups/:roomId → /chat?room=:roomId. */
+function GroupsRedirect() {
+  const { roomId } = useParams<{ roomId?: string }>();
+  return <Navigate to={roomId ? `/chat?room=${encodeURIComponent(roomId)}` : "/chat"} replace />;
+}
+
 function PageLoader() {
   return (
     <div className="flex items-center justify-center flex-1">
@@ -182,8 +188,9 @@ export function App() {
           <Route path="skills/:skillName" element={<Suspense fallback={<PageLoader />}><SkillDetailPage /></Suspense>} />
           <Route path="activity" element={<Suspense fallback={<PageLoader />}><ActivityPage /></Suspense>} />
           <Route path="chat" element={<Suspense fallback={<PageLoader />}><ChatPage /></Suspense>} />
-          <Route path="groups" element={<Suspense fallback={<PageLoader />}><GroupsPage /></Suspense>} />
-          <Route path="groups/:roomId" element={<Suspense fallback={<PageLoader />}><GroupsPage /></Suspense>} />
+          <Route path="groups" element={<GroupsRedirect />} />
+          <Route path="groups/:roomId" element={<GroupsRedirect />} />
+          <Route path="changelog" element={<Suspense fallback={<PageLoader />}><ChangelogPage /></Suspense>} />
           <Route path="memory" element={<Suspense fallback={<PageLoader />}><MemoryPage /></Suspense>} />
           <Route path="logs" element={<Navigate to="/activity" replace />} />
           <Route path="notifications" element={<Suspense fallback={<PageLoader />}><NotificationsPage /></Suspense>} />

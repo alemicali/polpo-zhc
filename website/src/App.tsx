@@ -660,7 +660,7 @@ function InkHubSection() {
 
 function DeployOptions() {
   const options: { icon: LucideIcon; title: string; desc: string; link: string }[] = [
-    { icon: Laptop, title: "Desktop App", desc: "One-click install. Auto-updates.", link: "https://github.com/lumea-labs/polpo/releases/latest" },
+    { icon: Laptop, title: "Desktop App", desc: "One-click install. Auto-updates.", link: "https://github.com/alemicali/polpo-zhc/releases/latest" },
     { icon: Server, title: "VPS / Cloud", desc: "Hetzner, AWS, Railway.", link: "https://docs.polpo.sh/install/hetzner" },
     { icon: Container, title: "Docker", desc: "One-line container.", link: "https://docs.polpo.sh/install#docker" },
     { icon: Smartphone, title: "Mobile", desc: "PWA, monitor anywhere.", link: "https://docs.polpo.sh/install" },
@@ -835,12 +835,12 @@ function Footer() {
             <div>
               <p className="font-mono text-xs uppercase tracking-wider text-neutral-400 mb-3">Community</p>
               <nav className="flex flex-col gap-2">
-                <ExtLink href="https://github.com/lumea-labs/polpo" className="text-sm text-neutral-600 hover:text-neutral-950 transition flex items-center gap-1.5">
+                <ExtLink href="https://github.com/alemicali/polpo-zhc" className="text-sm text-neutral-600 hover:text-neutral-950 transition flex items-center gap-1.5">
                   <GitHubIcon className="h-3.5 w-3.5" /> GitHub
                 </ExtLink>
                 <ExtLink href="https://www.npmjs.com/package/@polpo-ai/polpo" className="text-sm text-neutral-600 hover:text-neutral-950 transition">npm</ExtLink>
-                <ExtLink href="https://github.com/lumea-labs/polpo/issues" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Issues</ExtLink>
-                <ExtLink href="https://github.com/lumea-labs/polpo/blob/main/CONTRIBUTING.md" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Contributing</ExtLink>
+                <ExtLink href="https://github.com/alemicali/polpo-zhc/issues" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Issues</ExtLink>
+                <ExtLink href="https://github.com/alemicali/polpo-zhc/blob/main/CONTRIBUTING.md" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Contributing</ExtLink>
                 <ExtLink href="https://discord.gg/xha8trjq" className="text-sm text-neutral-600 hover:text-neutral-950 transition">Discord</ExtLink>
               </nav>
             </div>

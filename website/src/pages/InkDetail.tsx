@@ -679,7 +679,7 @@ export function InkDetailPage() {
             <span className="text-xs text-neutral-400">Ink — Package Registry</span>
           </div>
           <div className="flex items-center gap-4">
-            <ExtLink href="https://github.com/lumea-labs/polpo" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
+            <ExtLink href="https://github.com/alemicali/polpo-zhc" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
             <ExtLink href="https://docs.polpo.sh" className="text-xs text-neutral-400 hover:text-neutral-600 transition">Docs</ExtLink>
             <span className="text-xs text-neutral-400">MIT License</span>
           </div>

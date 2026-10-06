@@ -62,11 +62,11 @@ export function Navbar() {
             Discord
           </ExtLink>
           <ExtLink
-            href="https://github.com/lumea-labs/polpo"
+            href="https://github.com/alemicali/polpo-zhc"
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:border-neutral-400 hover:text-neutral-950"
           >
             <GitHubIcon className="h-4 w-4" />
-            lumea-labs/polpo
+            alemicali/polpo-zhc
           </ExtLink>
         </nav>
       </div>

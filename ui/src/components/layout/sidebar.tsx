@@ -6,7 +6,7 @@ import {
   Target,
   Bot,
   MessageCircle,
-  UsersRound,
+  Megaphone,
   Brain,
   Sparkles,
   Columns2,
@@ -30,6 +30,7 @@ import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import {
   Tooltip,
   TooltipContent,
@@ -46,7 +47,6 @@ const nav: NavSection[] = [
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
-      { to: "/groups", icon: UsersRound, label: "Groups" },
     ],
   },
   {
@@ -83,6 +83,9 @@ const nav: NavSection[] = [
     ],
   },
 ];
+
+/** Pinned at the bottom of the nav, above the connection footer. */
+const WHATS_NEW_ITEM: NavItem = { to: "/changelog", icon: Megaphone, label: "Novità" };
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
@@ -203,6 +206,7 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
           <NavLink to={to} className={linkClasses}>
             <Icon className="h-[18px] w-[18px]" />
             {to === "/approvals" && <PendingBadge collapsed />}
+            {to === WHATS_NEW_ITEM.to && <WhatsNewDot className="absolute right-1.5 top-1.5" />}
           </NavLink>
         </div>
       </TooltipTrigger>
@@ -243,6 +247,7 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
       <Icon className="h-[18px] w-[18px] shrink-0" />
       <span className="truncate">{label}</span>
       {to === "/approvals" && <PendingBadge collapsed={false} />}
+      {to === WHATS_NEW_ITEM.to && <WhatsNewDot className="ml-auto" />}
     </NavLink>
   );
 }
@@ -336,6 +341,11 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* What's new — pinned near the bottom */}
+      <div className={cn("shrink-0 border-t border-border/40", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>
+        {collapsed ? <NavItemCollapsed {...WHATS_NEW_ITEM} /> : <NavItemExpanded {...WHATS_NEW_ITEM} />}
+      </div>
 
       {/* Footer — project + connection */}
       <div

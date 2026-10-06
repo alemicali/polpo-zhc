@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Plus, Trash2, ChevronsLeft } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Trash2, ChevronsLeft, UsersRound } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useChatActions, useChatPageSessionsOpen, useChatState, useSidebarOpen, sidebarActions, chatPageSessionActions } from "@/hooks/chat-context";
 import { setLayoutMode } from "@/hooks/use-layout-mode";
@@ -26,6 +26,8 @@ import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
 import { BrandMark } from "@/components/shared/brand-mark";
+import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { requestNewGroup, setActiveChatRoom, useActiveChatRoom, useActiveChatRoomTitle } from "@/hooks/use-chat-room";
 
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -35,7 +37,6 @@ const titles: Record<string, string> = {
   "/skills": "Skills",
   "/activity": "Activity",
   "/chat": "Chat",
-  "/groups": "Groups",
   "/memory": "Memory",
   "/logs": "Logs",
   "/notifications": "Notifications",
@@ -47,6 +48,7 @@ const titles: Record<string, string> = {
   "/data": "Data",
   "/views": "Views",
   "/brain": "Company Brain",
+  "/changelog": "Novità",
 };
 
 function resolveTitle(pathname: string): string {
@@ -55,7 +57,6 @@ function resolveTitle(pathname: string): string {
   if (pathname.startsWith("/tasks/")) return "Task Detail";
   if (pathname.startsWith("/agents/")) return "Agent Detail";
   if (pathname.startsWith("/skills/")) return "Skill Detail";
-  if (pathname.startsWith("/groups/")) return "Groups";
   return "";
 }
 
@@ -70,6 +71,11 @@ function ChatHeaderCenter() {
   const sessionTitle = sessionId
     ? sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"
     : "New session";
+  // A group open in the chat replaces the session in the header.
+  const roomId = useActiveChatRoom();
+  const roomTitle = useActiveChatRoomTitle();
+  const inGroup = roomId !== null;
+  const centerTitle = inGroup ? roomTitle || "Group" : sessionTitle;
 
   return (
     <div className="hidden w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 lg:grid">
@@ -93,24 +99,20 @@ function ChatHeaderCenter() {
               {sessionsOpen ? "Hide threads" : "Threads"}
             </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                onClick={newSession}
-                aria-label="New session"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-          </Tooltip>
+          <NewChatMenu
+            className="h-8 w-8 rounded-lg hover:bg-accent/50"
+            onNewChat={() => {
+              setActiveChatRoom(null);
+              newSession();
+            }}
+            onNewGroup={() => requestNewGroup(sessionAgent ?? undefined)}
+          />
         </div>
 
         <div className="flex min-w-0 max-w-44 items-center gap-1.5 rounded-full bg-muted/45 px-2 py-1">
-          {agentConfig ? (
+          {inGroup ? (
+            <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
+          ) : agentConfig ? (
             <AgentAvatar
               avatar={agentConfig.identity?.avatar}
               name={agentName}
@@ -119,23 +121,23 @@ function ChatHeaderCenter() {
           ) : (
             <span className="shrink-0 text-sm leading-none">🐙</span>
           )}
-          <span className="truncate text-xs font-semibold text-foreground">{agentName}</span>
+          <span className="truncate text-xs font-semibold text-foreground">{inGroup ? "Group chat" : agentName}</span>
         </div>
       </div>
 
       <div className="min-w-0 text-center">
-        <div className="truncate text-sm font-semibold leading-5 text-foreground" title={sessionTitle}>
-          {sessionTitle}
+        <div className="truncate text-sm font-semibold leading-5 text-foreground" title={centerTitle}>
+          {centerTitle}
         </div>
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-1">
-        {messages.length > 0 && (
+        {!inGroup && messages.length > 0 && (
           <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
             {messages.length}
           </span>
         )}
-        {!isLoading && messages.length > 0 && (
+        {!inGroup && !isLoading && messages.length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -189,7 +191,7 @@ export function Header() {
       </div>
 
       {/* Desktop: page title */}
-      <div className="hidden lg:flex items-center gap-3">
+      <div className="hidden shrink-0 lg:flex items-center gap-3">
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
         <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
@@ -197,9 +199,11 @@ export function Header() {
         </span>
       </div>
 
+      {/* Chat controls sit in the flow between the title and the actions, so
+          they never overlap the title / project badge. Desktop only. */}
       {isOnChatPage && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[min(72rem,72vw)] -translate-x-1/2 -translate-y-1/2">
-          <div className="pointer-events-auto flex justify-center">
+        <div className="hidden min-w-0 flex-1 justify-center px-4 lg:flex xl:px-6">
+          <div className="w-full max-w-6xl">
             <ChatHeaderCenter />
           </div>
         </div>

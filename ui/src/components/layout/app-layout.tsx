@@ -4,15 +4,15 @@ import { Header } from "./header";
 import { BottomNav } from "./bottom-nav";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatNavigationEffects } from "./chat-navigation-effects";
+import { ChatRoomRouteSync } from "./chat-room-route-sync";
 import { ChatFirstLayout } from "./chat-first-layout";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
 
 /** Tool surfaces that should meet the surrounding pane edges. */
 function hasNoPagePadding(pathname: string): boolean {
-  return pathname === "/coding"
-    || pathname === "/groups"
-    || pathname.startsWith("/groups/")
+  return pathname === "/chat"
+    || pathname === "/coding"
     || pathname.startsWith("/coding/")
     || pathname === "/terminal"
     || pathname === "/browser"
@@ -58,6 +58,7 @@ export function AppLayout() {
       </div>
       <BottomNav />
       <ChatNavigationEffects />
+      <ChatRoomRouteSync />
     </div>
   );
 }

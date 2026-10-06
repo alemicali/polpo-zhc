@@ -28,9 +28,20 @@ vi.mock("@polpo-ai/react", async () => {
   };
 });
 
-import { firstLine, mergeRoomMessages, typingLabel, type RoomMessage } from "../src/lib/rooms-api";
+import { MemoryRouter, useLocation, useNavigate, type Location, type NavigateFunction } from "react-router-dom";
+import { firstLine, mergeRoomMessages, typingLabel, type Room, type RoomMessage } from "../src/lib/rooms-api";
 import { useGroups } from "../src/hooks/use-rooms";
+import {
+  closeNewGroup,
+  getActiveChatRoom,
+  setActiveChatRoom,
+  useNewGroupRequest,
+} from "../src/hooks/use-chat-room";
+import { ChatRoomRouteSync } from "../src/components/layout/chat-room-route-sync";
 import { GroupComposer } from "../src/components/groups/group-composer";
+import { GroupSidebarSection } from "../src/components/groups/group-list";
+import { NewGroupDialog } from "../src/components/groups/group-dialogs";
+import { TooltipProvider } from "../src/components/ui/tooltip";
 import type { GroupMember } from "../src/components/groups/use-member-directory";
 
 const msg = (id: string, ts: string, extra: Partial<RoomMessage> = {}): RoomMessage => ({
@@ -63,6 +74,8 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   sse.events = [];
+  setActiveChatRoom(null);
+  closeNewGroup();
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -177,4 +190,123 @@ test("composer: Shift+Enter does not send and a failed send keeps the draft", as
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   expect(onSend).toHaveBeenCalledWith("hello");
   expect(textarea().value).toBe("hello");
+});
+
+// ── Groups inside the chat ──────────────────────────────────────────────────
+
+test("chat route sync: ?room= opens the group, leaving it goes back to /chat, ?newGroup=1 opens the dialog", async () => {
+  let location: Location | undefined;
+  let navigate: NavigateFunction | undefined;
+  let request: ReturnType<typeof useNewGroupRequest> = null;
+  function Probe() {
+    const current = { location: useLocation(), navigate: useNavigate(), request: useNewGroupRequest() };
+    useEffect(() => {
+      location = current.location;
+      navigate = current.navigate;
+      request = current.request;
+    });
+    return null;
+  }
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={["/chat?room=web%3A1"]}>
+      <ChatRoomRouteSync />
+      <Probe />
+    </MemoryRouter>,
+  ));
+  expect(getActiveChatRoom()).toBe("web:1");
+
+  // Leaving the group from the UI updates the URL.
+  await act(async () => { setActiveChatRoom(null); });
+  expect(location!.pathname).toBe("/chat");
+  expect(location!.search).toBe("");
+
+  // Opening another group from the UI pushes ?room=.
+  await act(async () => { setActiveChatRoom("web:2"); });
+  expect(new URLSearchParams(location!.search).get("room")).toBe("web:2");
+
+  // Browser back → plain /chat → normal chat.
+  await act(async () => { navigate!(-1); });
+  expect(getActiveChatRoom()).toBeNull();
+
+  // One-shot link: opens the "New group" dialog and is removed from the URL.
+  await act(async () => { navigate!("/chat?newGroup=1&agent=giulia"); });
+  expect(request).toEqual({ agents: ["giulia"] });
+  expect(location!.search).toBe("");
+  expect(getActiveChatRoom()).toBeNull();
+});
+
+test("chat route sync: arriving on /chat keeps a group opened in another chat surface", async () => {
+  setActiveChatRoom("web:7");
+  let location: Location | undefined;
+  function Probe() {
+    const current = useLocation();
+    useEffect(() => { location = current; });
+    return null;
+  }
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={["/chat"]}>
+      <ChatRoomRouteSync />
+      <Probe />
+    </MemoryRouter>,
+  ));
+  expect(new URLSearchParams(location!.search).get("room")).toBe("web:7");
+  expect(getActiveChatRoom()).toBe("web:7");
+});
+
+const room = (id: string, kind: Room["kind"], title: string, updatedAt = "2026-10-06T10:00:00Z"): Room => ({
+  id, kind, title, agents: ["giulia", "marco"], settings: {}, createdAt: updatedAt, updatedAt,
+});
+const resolveMember = (id: string): GroupMember => members.find((m) => m.id === id) ?? { id, name: id, isOrchestrator: false, known: false };
+
+test("sidebar groups section: web groups first, Telegram groups collapsed and read-only", async () => {
+  const onSelect = vi.fn();
+  const onNew = vi.fn();
+  await act(async () => root.render(
+    <TooltipProvider>
+      <GroupSidebarSection
+        rooms={[room("web:1", "web", "Launch"), room("telegram:-100", "telegram", "Team TG")]}
+        loading={false}
+        error={null}
+        activeRoomId={null}
+        unread={new Set(["web:1"])}
+        resolve={resolveMember}
+        onSelect={onSelect}
+        onNew={onNew}
+        onRetry={() => {}}
+      />
+    </TooltipProvider>,
+  ));
+  expect(container.textContent).toContain("Launch");
+  expect(container.textContent).toContain("Telegram groups");
+  expect(container.textContent).not.toContain("Team TG");
+  expect(container.querySelector('[aria-label="New messages"]')).not.toBeNull();
+
+  const launch = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Launch"))!;
+  await act(async () => { launch.click(); });
+  expect(onSelect).toHaveBeenCalledWith("web:1");
+
+  const telegram = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Telegram groups"))!;
+  await act(async () => { telegram.click(); });
+  expect(container.textContent).toContain("Team TG");
+
+  await act(async () => { (container.querySelector('[aria-label="New group"]') as HTMLButtonElement).click(); });
+  expect(onNew).toHaveBeenCalled();
+});
+
+test("new group dialog preselects the agent picked in the chat", async () => {
+  await act(async () => root.render(
+    <NewGroupDialog
+      open
+      onOpenChange={() => {}}
+      members={members}
+      resolve={resolveMember}
+      onCreate={() => Promise.resolve()}
+      initialAgents={["giulia"]}
+    />,
+  ));
+  const checked = [...document.querySelectorAll('[role="checkbox"]')]
+    .filter((el) => el.getAttribute("aria-checked") === "true")
+    .map((el) => el.textContent);
+  expect(checked).toHaveLength(1);
+  expect(checked[0]).toContain("Giulia");
 });
