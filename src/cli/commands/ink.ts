@@ -34,6 +34,7 @@ import { loadPolpoConfig, savePolpoConfig } from "../../core/config.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../../core/types.js";
 import { FileMemoryStore } from "../../stores/file-memory-store.js";
 import { createCliStores, createCliAgentStore } from "../stores.js";
+import { inkApiUrl } from "../../core/ink-config.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -468,7 +469,6 @@ function formatVerdict(verdict?: string): string {
   }
 }
 
-const INK_API_URL = "https://polpo.sh/api";
 
 /**
  * Fire-and-forget telemetry POST to the Ink Hub API.
@@ -489,7 +489,7 @@ async function reportInkInstall(source: string, packages: InkPackage[]): Promise
       timestamp: new Date().toISOString(),
     };
 
-    await fetch(`${INK_API_URL}/installs`, {
+    await fetch(`${inkApiUrl()}/installs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

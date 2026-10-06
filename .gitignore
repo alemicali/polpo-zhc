@@ -67,3 +67,5 @@ ui/.env
 .windsurf/
 .zencoder/
 docs-backup/
+website/dist-server/
+website/data/

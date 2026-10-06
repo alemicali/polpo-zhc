@@ -40,8 +40,8 @@ import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
 import { createCliStores } from "../cli/stores.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
+import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 
-const INK_API_URL = "https://polpo.sh/api";
 
 // ─── Helpers ───
 
@@ -67,7 +67,7 @@ function reportInstall(source: string, packages: InkPackage[]): void {
       })),
       timestamp: new Date().toISOString(),
     };
-    fetch(`${INK_API_URL}/installs`, {
+    fetch(`${inkApiUrl()}/installs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -93,7 +93,7 @@ function createInkSearchTool(): AgentTool<typeof InkSearchSchema> {
     parameters: InkSearchSchema,
     async execute(_toolCallId, params) {
       try {
-        const res = await fetch(`${INK_API_URL}/packages`, {
+        const res = await fetch(`${inkApiUrl()}/packages`, {
           signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) return err(`Ink Hub API returned HTTP ${res.status}`);
@@ -195,7 +195,7 @@ function createInkBrowseTool(polpoDir: string): AgentTool<typeof InkBrowseSchema
 // ─── ink_add ───
 
 const InkAddSchema = Type.Object({
-  source: Type.String({ description: "Package source — GitHub owner/repo (e.g. 'lumea-labs/ink-registry') or a full GitHub URL" }),
+  source: Type.String({ description: `Package source — GitHub owner/repo (e.g. '${inkRegistry()}') or a full GitHub URL` }),
   name: Type.Optional(Type.String({ description: "Install a specific package by name (e.g. 'devops-engineer'). If omitted, all packages from the source are installed." })),
 });
 
@@ -420,7 +420,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
 // ─── ink_remove ───
 
 const InkRemoveSchema = Type.Object({
-  source: Type.String({ description: "Package source to remove — GitHub owner/repo (e.g. 'lumea-labs/ink-registry')" }),
+  source: Type.String({ description: `Package source to remove — GitHub owner/repo (e.g. '${inkRegistry()}')` }),
 });
 
 function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema> {
@@ -466,7 +466,7 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
 // ─── ink_update ───
 
 const InkUpdateSchema = Type.Object({
-  source: Type.Optional(Type.String({ description: "Specific source to update (e.g. 'lumea-labs/ink-registry'). If omitted, all installed sources are updated." })),
+  source: Type.Optional(Type.String({ description: `Specific source to update (e.g. '${inkRegistry()}'). If omitted, all installed sources are updated.` })),
 });
 
 function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema> {

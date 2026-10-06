@@ -9,6 +9,7 @@ import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInf
 import { buildModelListingForPrompt, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
 import { detectProviders } from "../setup/providers.js";
+import { inkRegistry } from "../core/ink-config.js";
 
 /**
  * Describe what tools/capabilities an agent has based on its allowedTools config.
@@ -267,11 +268,11 @@ export async function buildChatSystemPrompt(
     `You have five Ink tools:`,
     `- \`ink_search\`: Search the Ink Hub for available packages (by name, type, or tags)`,
     `- \`ink_browse\`: List packages already installed in this project`,
-    `- \`ink_add\`: Install packages from a GitHub source (e.g. "lumea-labs/ink-registry")`,
+    `- \`ink_add\`: Install packages from a GitHub source (e.g. "${inkRegistry()}")`,
     `- \`ink_remove\`: Remove an installed registry source and uninstall its packages`,
     `- \`ink_update\`: Update installed registries (git pull + re-discover + re-install)`,
     ``,
-    `The official registry is \`lumea-labs/ink-registry\`.`,
+    `The official registry is \`${inkRegistry()}\`.`,
     ``,
     `### How ink_add works (merge behavior)`,
     ``,
