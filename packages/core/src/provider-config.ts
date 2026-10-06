@@ -178,7 +178,9 @@ export function parseStoredProvider(raw: unknown): ProviderConfig | undefined {
   const effectiveApi = pc.api ?? "openai-completions";
   const compat = sanitizeCompat(effectiveApi, c.compat);
   if (compat) pc.compat = compat;
-  if (c.allowPrivateNetwork === true) pc.allowPrivateNetwork = true;
+  // Keep an explicit `false` (e.g. Ink-imported providers): it must never be upgraded by the
+  // legacy "hand-written entry" rule at runtime.
+  if (typeof c.allowPrivateNetwork === "boolean") pc.allowPrivateNetwork = c.allowPrivateNetwork;
   if (typeof c.timeoutMs === "number" && c.timeoutMs >= 1_000 && c.timeoutMs <= 3_600_000) pc.timeoutMs = Math.floor(c.timeoutMs);
   if (typeof c.maxRetries === "number" && c.maxRetries >= 0 && c.maxRetries <= 10) pc.maxRetries = Math.floor(c.maxRetries);
   if (Array.isArray(c.models)) {

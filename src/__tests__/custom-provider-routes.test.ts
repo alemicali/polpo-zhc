@@ -324,6 +324,23 @@ describe("secret binding (review findings)", () => {
     expect(sec.status).toBe(400);
   });
 
+  it("masked header values (from GET /config redaction) are restored for the same target, refused otherwise", async () => {
+    await call("POST", "/", { id: "local-llm", provider: { ...draft(), headers: { "X-Team": "polpo-team-name" } } });
+    const masked = { ...draft(), headers: { "X-Team": "••••name" } };
+    const upd = await call("PUT", "/local-llm", { provider: masked });
+    expect(upd.status).toBe(200);
+    expect(upd.json.data.headers).toEqual({ "X-Team": "polpo-team-name" });
+    const json = JSON.parse(readFileSync(join(polpoDir, "polpo.json"), "utf-8"));
+    expect(json.providers["local-llm"].headers).toEqual({ "X-Team": "polpo-team-name" });
+    // New origin: the saved value must not follow — refused
+    const moved = await call("PUT", "/local-llm", { provider: { ...masked, baseUrl: `${attacker.url}/v1` } });
+    expect(moved.status).toBe(400);
+    expect(moved.json.error).toMatch(/masked value/);
+    // Create / unrelated drafts with masks are refused
+    expect((await call("POST", "/", { id: "other", provider: masked })).status).toBe(400);
+    expect((await call("POST", "/test", { provider: masked })).status).toBe(400);
+  });
+
   it("concurrent creates of the same id: exactly one wins", async () => {
     const [a, b] = await Promise.all([saveLocal({ apiKey: "first-key-0123456789" }), saveLocal({ apiKey: "second-key-0123456789" })]);
     expect([a.status, b.status].sort()).toEqual([201, 409]);

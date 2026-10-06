@@ -6,13 +6,17 @@
  *   apiKey            → provider API key
  *   header:<Name>     → secret header value (e.g. "header:OpenAI-Organization")
  *
- * NOTE: "$providers" is written only from internal code (routes in this module's callers).
- * The reserved-owner protection for the public /vault API lives on the security-hardening
- * branch; until it lands, the generic vault routes do not special-case this owner.
+ * "$providers" is a reserved system owner (`isReservedVaultOwner`): the public /vault routes,
+ * agent vault tools and onboarding refuse it, so it is written only from this module.
  */
 
-import type { VaultStore } from "@polpo-ai/core/vault-store";
+import { isReservedVaultOwner, type VaultStore } from "@polpo-ai/core/vault-store";
 import { PROVIDER_VAULT_HEADER_PREFIX, PROVIDER_VAULT_KEY, PROVIDER_VAULT_OWNER } from "@polpo-ai/core/provider-config";
+
+// Provider secrets must live in a reserved namespace — never in an agent-addressable owner.
+if (!isReservedVaultOwner(PROVIDER_VAULT_OWNER)) {
+  throw new Error(`Provider vault owner "${PROVIDER_VAULT_OWNER}" must be a reserved vault owner`);
+}
 
 export interface ProviderSecrets {
   apiKey?: string;

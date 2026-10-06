@@ -21,6 +21,7 @@ import {
 } from "@polpo-ai/core/provider-config";
 import type { ProviderConfig } from "../../core/types.js";
 import type { VaultStore } from "../../core/vault-store.js";
+import { isRedactedValue } from "@polpo-ai/core/secret-redaction";
 import { loadPolpoConfig, mutatePolpoProviders } from "../../core/config.js";
 import {
   allowedProviderEnvVar,
@@ -146,6 +147,28 @@ export function sameSecretTarget(a: ProviderConfig, b: ProviderConfig): boolean 
   return !!originOf(a.baseUrl) && secretTarget(a) === secretTarget(b);
 }
 
+/**
+ * GET /config masks provider header values ("••••"). If such a masked value comes back,
+ * restore it from the saved provider when the secret target is unchanged; otherwise refuse
+ * (never persist or send a mask, never move a saved value to a new target).
+ */
+function restoreMaskedHeaders(cfg: ProviderConfig, saved: ProviderConfig | undefined): { ok: true; config: ProviderConfig } | { ok: false; error: string } {
+  const masked = Object.entries(cfg.headers ?? {}).filter(([, v]) => isRedactedValue(v));
+  if (masked.length === 0) return { ok: true, config: cfg };
+  const sameTarget = !!saved && sameSecretTarget(saved, cfg);
+  const headers = { ...(cfg.headers ?? {}) };
+  for (const [name] of masked) {
+    const original = sameTarget
+      ? Object.entries(saved!.headers ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1]
+      : undefined;
+    if (original === undefined || isRedactedValue(original)) {
+      return { ok: false, error: `Header "${name}" contains a masked value — enter the real value again` };
+    }
+    headers[name] = original;
+  }
+  return { ok: true, config: { ...cfg, headers } };
+}
+
 /** Merge stored secrets with a write-only patch, without persisting (for drafts). */
 function overlaySecrets(stored: ProviderSecrets | undefined, patch: z.infer<typeof providerSecretsSchema> | undefined): ProviderSecrets {
   const out: ProviderSecrets = { apiKey: stored?.apiKey, headers: { ...(stored?.headers ?? {}) } };
@@ -237,7 +260,9 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     const idError = checkId(id);
     if (idError) return fail(c, 400, idError);
     if (getCustomProviderConfig(id) || creating.has(id)) return fail(c, 409, `Custom provider "${id}" already exists`);
-    const v = validate(body.data.provider, body.data.confirmEnvReuse);
+    const validated = validate(body.data.provider, body.data.confirmEnvReuse);
+    if (!validated.ok) return fail(c, 400, validated.error);
+    const v = restoreMaskedHeaders(validated.config, undefined);
     if (!v.ok) return fail(c, 400, v.error);
     // Claim the id synchronously so concurrent creates for the same id cannot both pass.
     creating.add(id);
@@ -259,7 +284,9 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     if (!current) return fail(c, 404, `Custom provider "${id}" not found`);
     const body = UpdateSchema.safeParse(await readJson(c));
     if (!body.success) return fail(c, 400, body.error.issues.map((i) => i.message).join("; "));
-    const v = validate(body.data.provider, body.data.confirmEnvReuse);
+    const validated = validate(body.data.provider, body.data.confirmEnvReuse);
+    if (!validated.ok) return fail(c, 400, validated.error);
+    const v = restoreMaskedHeaders(validated.config, current);
     if (!v.ok) return fail(c, 400, v.error);
     const net = await checkEndpoint(v.config.baseUrl!, { allowPrivateNetwork: !!v.config.allowPrivateNetwork });
     if (!net.ok) return fail(c, 400, net.error ?? "Endpoint not allowed", { addressClass: net.addressClass });
@@ -333,7 +360,9 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     }
     let config: ProviderConfig;
     if (body.provider !== undefined) {
-      const v = validate(body.provider, body.confirmEnvReuse);
+      const validated = validate(body.provider, body.confirmEnvReuse);
+      if (!validated.ok) return { error: validated.error, status: 400 };
+      const v = restoreMaskedHeaders(validated.config, saved);
       if (!v.ok) return { error: v.error, status: 400 };
       config = v.config;
     } else {

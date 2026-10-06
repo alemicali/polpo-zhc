@@ -18,6 +18,9 @@ import {
 import { parseProviders } from "../core/config.js";
 import type { ProviderConfig } from "../core/types.js";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { mergeInkProviders } from "../core/ink.js";
+import { PROVIDER_VAULT_OWNER } from "@polpo-ai/core/provider-config";
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { startFakeLlmServer, type FakeLlmServer } from "./helpers/fake-llm-server.js";
 
 const ctx = () => ({ messages: [{ role: "user" as const, content: "hi", timestamp: Date.now() }] });
@@ -169,6 +172,30 @@ describe("custom provider runtime (fake OpenAI-compatible server)", () => {
     const res = await completeSimpleWithAuth(resolveModel("ollama:fake-model"), ctx());
     expect(res.stopReason).not.toBe("error");
     expect(textOf(res)).toBe("OK");
+  });
+
+  it("Ink-imported providers are keyless with private network off (never treated as legacy)", async () => {
+    const target: Record<string, unknown> = {};
+    const decisions = await mergeInkProviders(target, {
+      inkgw: { baseUrl: `${server.url}/v1`, api: "openai-completions", models: [{ id: "fake-model", name: "F" }], auth: { type: "bearer", envVar: "CUSTOM_X_API_KEY" }, headers: { "X-A": "1" } },
+    }, { allowCustom: true });
+    expect(decisions).toEqual([{ name: "inkgw", action: "added" }]);
+    const parsed = parseProviders(target);
+    expect(parsed.inkgw).toMatchObject({ preset: "ink", auth: { type: "none" }, allowPrivateNetwork: false });
+    expect(parsed.inkgw.headers).toBeUndefined();
+    setProviderOverrides(parsed);
+    // Keyless: no credentials needed…
+    expect(hasProviderCredentials("inkgw")).toBe(true);
+    // …but a localhost base URL stays blocked (no legacy "admin intent" upgrade).
+    const res = await completeSimpleWithAuth(resolveModel("inkgw:fake-model"), ctx());
+    expect(res.stopReason).toBe("error");
+    expect(res.errorMessage).toMatch(/private\/internal address/);
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("provider secrets live under a reserved vault owner", () => {
+    expect(PROVIDER_VAULT_OWNER).toBe("$providers");
+    expect(isReservedVaultOwner(PROVIDER_VAULT_OWNER)).toBe(true);
   });
 
   it("legacy entries still never reach metadata addresses", async () => {

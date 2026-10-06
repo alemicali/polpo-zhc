@@ -6,14 +6,19 @@
  */
 
 import type { ProviderApi, ProviderAuthConfig, ProviderConfig } from "./types.js";
+import { RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
 
 // ── Identifiers ─────────────────────────────────────────────────────
 
 /** Custom provider ids: lowercase slug, 2-41 chars. Used as the model-spec prefix ("<id>:<model>"). */
 export const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-]{1,40}$/;
 
-/** Reserved vault owner holding instance-wide provider secrets. */
-export const PROVIDER_VAULT_OWNER = "$providers";
+/**
+ * Reserved vault owner holding instance-wide provider secrets. Built on the shared
+ * reserved-owner prefix, so user/agent-facing vault routes and tools refuse it
+ * (see `isReservedVaultOwner`).
+ */
+export const PROVIDER_VAULT_OWNER = `${RESERVED_VAULT_OWNER_PREFIX}providers`;
 
 /** Vault credential key for the provider API key. */
 export const PROVIDER_VAULT_KEY = "apiKey";
