@@ -510,6 +510,45 @@ export function listProviders(): string[] {
 /**
  * List all models for a given provider (or all providers if none specified).
  */
+/**
+ * Cheaper models that summarize well, per provider, in order of preference. A compaction
+ * summary is a bounded, well-specified writing task: it does not need the conversation's
+ * (often large) model.
+ */
+const SUMMARY_MODEL_PREFERENCES: Record<string, string[]> = {
+  "anthropic": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+  "openai-codex": ["gpt-6-luna", "gpt-5.6-luna"],
+  "openai": ["gpt-5.4-mini", "gpt-5-mini", "gpt-4.1-mini"],
+  "google": ["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"],
+  "openrouter": ["~anthropic/claude-haiku-latest", "anthropic/claude-haiku-4.5"],
+};
+
+/**
+ * The model that writes a compaction summary of `promptTokens` tokens: the configured one when
+ * set; otherwise a cheaper model of the conversation's own provider (same credentials) when it
+ * fits the prompt with room to answer; otherwise the conversation's model.
+ */
+export function resolveSummaryModel(conversationModel: Model<Api>, configuredSpec: string | undefined, promptTokens: number): Model<Api> {
+  const fits = (model: Model<Api>) => !model.contextWindow || promptTokens + 8_000 <= model.contextWindow * 0.9;
+  if (configuredSpec) {
+    try {
+      const configured = resolveModel(configuredSpec);
+      if (fits(configured)) return configured;
+    } catch { /* unknown spec: fall through */ }
+  }
+  const provider = conversationModel?.provider;
+  for (const id of SUMMARY_MODEL_PREFERENCES[provider] ?? []) {
+    if (id === conversationModel.id) break;
+    try {
+      if (!getModels(provider as BuiltinProvider).some((model) => model.id === id)) continue;
+      // resolveModel applies the same provider overrides (base URL, auth) as the conversation
+      const candidate = resolveModel(`${provider}:${id}`);
+      if (fits(candidate)) return candidate;
+    } catch { /* provider not in the builtin registry */ }
+  }
+  return conversationModel;
+}
+
 export function listModels(provider?: string): ModelInfo[] {
   const models: ModelInfo[] = [];
 

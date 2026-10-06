@@ -34,7 +34,7 @@ export function createActivity(): AgentActivity {
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
-import { resolveModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
@@ -548,10 +548,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       pendingToolCalls: new Set(),
     } as any,
   });
-  const summaryModel = (() => {
-    if (!compactionSettings.model) return model;
-    try { return resolveModel(compactionSettings.model); } catch { return model; }
-  })();
+
   compactor = new ContextCompactor({
     budget: contextBudget,
     settings: compactionSettings,
@@ -564,6 +561,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     },
     summarize: async ({ messages, previousSummary, focus, signal }) => {
       const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus });
+      // a cheaper sibling of the agent's model unless one is configured (see resolveSummaryModel)
+      const summaryModel = resolveSummaryModel(model, compactionSettings.model, Math.ceil((systemPrompt.length + prompt.length) / 3));
       const response = await completeSimpleWithAuth(summaryModel, {
         systemPrompt,
         messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],

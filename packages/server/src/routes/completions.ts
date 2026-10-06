@@ -20,20 +20,15 @@ import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import {
   agentMemoryScope,
-  buildSummaryPrompt,
-  ContextCompactor,
-  contextBudgetForModel,
-  estimateContextTokens,
   isContextOverflowError,
-  parseSummary,
   type CompactionSettings,
 } from "@polpo-ai/core";
-import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
 import { sessionLeases } from "../session-lease.js";
 import { INTERNAL_CALL_HEADER, isInternalCall } from "../internal-call.js";
-import { loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpointStore } from "../context-checkpoint.js";
+import { type ContextCheckpointStore } from "../context-checkpoint.js";
+import { createSessionCompaction } from "../session-compactor.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
 const DEFAULT_MAX_TURNS = 200;
@@ -470,8 +465,8 @@ export interface CompletionRouteDeps {
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
   /** One-shot completion (completeSimple from pi-ai): writes compaction summaries. Without it the deterministic extract is used. */
   completeLLM?: (model: any, opts: { systemPrompt: string; messages: any[] }, options?: any) => Promise<any>;
-  /** Resolve a "provider:model" spec (the compaction summary model). */
-  resolveModel?: (spec: string) => any;
+  /** Model for a compaction summary: the configured one, else a cheaper sibling of the conversation's model that fits the prompt. */
+  resolveSummaryModel?: (conversationModel: any, configuredSpec: string | undefined, promptTokens: number) => any;
   /** Persist provider-reported token usage for dashboard aggregation. */
   recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
   /**
@@ -794,77 +789,33 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       ...(deps.getConfig()?.settings?.compaction ?? {}),
       ...((agentCompactionSettings as CompactionSettings | undefined) ?? {}),
     };
-    const contextBudget = contextBudgetForModel(m ?? {}, compactionSettings);
     const usageSource: TokenUsageRecord["source"] = c.req.header("x-polpo-internal-continuation") === "background-wait"
       ? "background_wait"
       : agentMode ? "agent_chat" : "orchestrator_chat";
 
     const session = sessionId && sessionStore ? await sessionStore.getSession(sessionId) : undefined;
-    const checkpointScope = JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]);
-    const checkpointStore = session ? deps.contextCheckpoints : undefined;
-    const checkpoint = await loadContextCheckpoint(checkpointStore, sessionId, checkpointScope, piMessages)
-      .catch(() => null);
-    let checkpointRevision = checkpoint?.revision ?? null;
-    const summaryModel = compactionSettings.model && deps.resolveModel
-      ? (() => { try { return deps.resolveModel!(compactionSettings.model!); } catch { return m; } })()
-      : m;
-    const memoryScope = agentMode && body.agent ? agentMemoryScope(body.agent) : undefined;
-    let savedFacts = 0;
-    const compactor = new ContextCompactor({
-      budget: contextBudget,
+    const compaction = await createSessionCompaction({
+      model: m,
       settings: compactionSettings,
-      pinned: () => 0,
-      baseTokens: () => estimateContextTokens({ systemPrompt: fullSystemPrompt, messages: [], tools: effectiveTools }),
-      summarize: deps.completeLLM ? async ({ messages: folded, previousSummary, focus, signal }) => {
-        const { systemPrompt, prompt } = buildSummaryPrompt({ messages: folded, previousSummary, focus });
-        const response = await deps.completeLLM!(summaryModel, {
-          systemPrompt,
-          messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
-        }, { signal, maxTokens: 8_000 });
-        if (response?.stopReason === "error") throw new Error(response.errorMessage ?? "summary failed");
-        const text = (response?.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
-        const parsed = parseSummary(text);
-        return { summary: parsed.summary, durableFacts: parsed.durableFacts, model: `${summaryModel?.provider}:${summaryModel?.id}` };
-      } : undefined,
-      onDurableFacts: async (facts) => {
-        const memory = deps.getMemoryStore?.();
-        if (!memory) return;
-        const known = String((await memory.get(memoryScope).catch(() => "")) ?? "").toLowerCase();
-        for (const fact of facts.slice(0, 10)) {
-          const line = redactSecrets(fact.length > 300 ? `${fact.slice(0, 297)}...` : fact);
-          if (known.includes(line.toLowerCase())) continue;
-          try { await memory.append(line, memoryScope); savedFacts += 1; } catch { /* best effort */ }
-        }
-      },
+      systemPrompt: () => fullSystemPrompt,
+      tools: () => effectiveTools,
+      original: piMessages,
+      sessionId,
+      scope: JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]),
+      store: session ? deps.contextCheckpoints : undefined,
+      completeLLM: deps.completeLLM,
+      summaryModel: deps.resolveSummaryModel ? (promptTokens) => deps.resolveSummaryModel!(m, compactionSettings.model, promptTokens) : undefined,
+      memory: deps.getMemoryStore?.() ? { store: deps.getMemoryStore(), scope: agentMode && body.agent ? agentMemoryScope(body.agent) : undefined } : undefined,
+      onCompacted: (info) => deps.emit("context:compacted", {
+        scope: "chat", ...(sessionId ? { sessionId } : {}), ...(body.agent ? { agentName: body.agent } : {}), ...info,
+      }),
     });
-    if (checkpoint) compactor.restoreState({ covered: checkpoint.covered, summary: checkpoint.summary, pruned: [], count: checkpoint.count });
-    /** Messages sent in the last model call, to pair the provider's usage with them. */
-    let lastProjectedCount = 0;
-
-    const prepareContext = async (current: any[], force?: "overflow" | "manual", focus?: string) => {
-      savedFacts = 0;
-      const { messages: projected, info } = await compactor.prepare(current, { force, focus });
-      lastProjectedCount = projected.length;
-      if (!info) return { messages: projected, info: null };
-      // Persist the summary for the caller-visible history it covers (never secrets, never the
-      // loop's raw tool output). A storage failure must not fail the completion.
-      const state = compactor.getState();
-      if (state.summary && state.covered > 0) {
-        await saveContextCheckpoint(checkpointStore, sessionId, checkpointScope, piMessages,
-          Math.min(state.covered, piMessages.length), redactSecrets(state.summary), state.count, checkpointRevision)
-          .then((revision) => { if (revision) checkpointRevision = revision; })
-          .catch(error => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
-      }
-      deps.emit("context:compacted", {
-        scope: "chat", ...(sessionId ? { sessionId } : {}), ...(body.agent ? { agentName: body.agent } : {}),
-        ...info, ...(savedFacts ? { savedFacts } : {}),
-      });
-      return { messages: projected, info };
-    };
+    const prepareContext = (current: any[], force?: "overflow" | "manual", focus?: string) =>
+      compaction.prepare(current, force, focus);
 
     const recordResponseUsage = async (response: any): Promise<void> => {
       const usage = response?.usage;
-      if (usage) compactor.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0), lastProjectedCount);
+      if (usage) compaction.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0));
       if (!usage || !deps.recordTokenUsage) return;
       try {
         await deps.recordTokenUsage({
