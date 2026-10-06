@@ -571,7 +571,7 @@ export class MissionExecutor {
     if (!mission) throw new Error("Mission not found");
     const executableStates = ["draft", "scheduled", "recurring", "failed", "cancelled"];
     if (!executableStates.includes(mission.status)) {
-      throw new Error(`Cannot execute mission in "${mission.status}" state`);
+      throw new Error(`Cannot execute mission in "${mission.status}" state (must be ${executableStates.map(s => `"${s}"`).join(", ")})`);
     }
     // Remember whether this is a scheduled/recurring mission so we can restore status after completion
     const scheduledStatus = mission.status === "scheduled" || mission.status === "recurring" ? mission.status : undefined;

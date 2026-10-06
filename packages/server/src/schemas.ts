@@ -328,6 +328,8 @@ const LoopConfigSchema = z.object({
   output: LoopOutputSchema.optional(),
 });
 
+// Recursive: it must be a named OpenAPI component (emitted as a $ref), or generating the
+// spec recurses forever and GET /api/v1/openapi.json fails with a stack overflow.
 const PipelineStepSchema: z.ZodType<any> = z.lazy(() => z.union([
   z.object({
     loop: z.string().min(1),
@@ -356,7 +358,7 @@ const PipelineStepSchema: z.ZodType<any> = z.lazy(() => z.union([
     notify: z.array(z.string().min(1)).optional(),
     when: z.string().min(1).optional(),
   }),
-]));
+])).openapi("PipelineStep");
 
 const PipelineSchema = z.object({
   mode: z.enum(["sequential", "parallel"]).optional(),
