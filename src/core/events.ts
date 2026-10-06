@@ -23,7 +23,6 @@ export class TypedEmitter extends EventEmitter implements EventBus {
   }
 
   override emit<K extends PolpoEvent>(event: K, payload: PolpoEventMap[K]): boolean;
-  override emit(event: string | symbol, ...args: unknown[]): boolean;
   override emit(event: string | symbol, ...args: unknown[]): boolean {
     if (this.logSink && typeof event === "string" && !LOG_EXCLUDED.has(event)) {
       try {

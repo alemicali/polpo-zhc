@@ -23,6 +23,7 @@ import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-re
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
 import { TypedEmitter } from "./events.js";
+import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
 import type { BackgroundWaitStore, TaskControlStore } from "./task-control-store.js";
@@ -1159,13 +1160,16 @@ export class Orchestrator extends TypedEmitter {
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
 
-  private async emitTeamSnapshot(event: string, data: Record<string, unknown>): Promise<void> {
+  private async emitTeamSnapshot<K extends "agent:created" | "agent:updated" | "agent:removed" | "team:created" | "team:updated" | "team:removed">(
+    event: K,
+    data: Omit<PolpoEventMap[K], "agents" | "teams" | "timestamp">,
+  ): Promise<void> {
     this.emit(event, {
       ...data,
       agents: await this.getAgents(),
       teams: await this.getTeams(),
       timestamp: new Date().toISOString(),
-    });
+    } as PolpoEventMap[K]);
   }
 
 
@@ -1980,7 +1984,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Create the bridge
     const bridge = new WhatsAppBridge(waChannel, (level, msg) => {
-      this.emit("log", { level: level as "info" | "warn" | "verbose", message: msg });
+      this.emit("log", { level: level === "verbose" ? "debug" : level as "info" | "warn", message: msg });
     });
 
     // Attach store to bridge (buffers all messages for tool access)

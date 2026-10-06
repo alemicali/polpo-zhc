@@ -163,6 +163,32 @@ export class ApprovalManager {
     return request;
   }
 
+  /**
+   * A human approval asked by the system itself (no configured gate), e.g. an escalation:
+   * stored like any gate request, so /approve, /reject and the API can resolve it.
+   */
+  async requestHumanApproval(opts: { gateId: string; gateName: string; taskId?: string; missionId?: string; payload?: unknown }): Promise<ApprovalRequest> {
+    const request: ApprovalRequest = {
+      id: nanoid(),
+      gateId: opts.gateId,
+      gateName: opts.gateName,
+      taskId: opts.taskId,
+      missionId: opts.missionId,
+      status: "pending",
+      payload: opts.payload ?? null,
+      requestedAt: new Date().toISOString(),
+    };
+    await this.store.upsert(request);
+    this.ctx.emitter.emit("approval:requested", {
+      requestId: request.id,
+      gateId: request.gateId,
+      gateName: request.gateName,
+      taskId: request.taskId,
+      missionId: request.missionId,
+    });
+    return request;
+  }
+
   async approve(requestId: string, resolvedBy?: string, note?: string): Promise<ApprovalRequest | null> {
     return this.resolve(requestId, "approved", resolvedBy, note);
   }

@@ -41,7 +41,6 @@ import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { createCliStores } from "../cli/stores.js";
-import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
 import {
@@ -2327,7 +2326,7 @@ export async function executeOrchestratorTool(
       case "brain_upsert_entity": case "brain_upsert_relation": case "brain_upsert_claim": case "brain_ingest_data_source":
       case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
         return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
-          polpo.emit("brain:changed" as any, event);
+          polpo.emit("brain:changed", event);
         });
 
       // ── Task ──
@@ -6164,7 +6163,8 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
         // Append memory.md if present (via MemoryStore)
         const srcMemory = join(srcDir, "memory.md");
         if (existsSync(srcMemory)) {
-          const memStore = new FileMemoryStore(polpoDir);
+          // The instance's own memory store (file, sqlite or postgres), not always the file one.
+          const memStore = polpo.getMemoryStore();
           const existingMem = await memStore.get();
           const memContent = readFileSync(srcMemory, "utf-8");
           const separator = `\n\n<!-- Imported from ink: ${pkg.name} -->\n`;

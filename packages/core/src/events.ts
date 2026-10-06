@@ -9,6 +9,15 @@
 import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
 import type { BackgroundWait, TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
+/** Where a change came from: the UI or an HTTP call, Polpo's own tools, an agent's tools, a messaging channel, a schedule, or the system itself. */
+export type EventSource = "api" | "polpo" | "agent" | "channel" | "schedule" | "system";
+
+/** Who caused an event: carried by events about changes (`by` is a person: email or channel contact id). */
+export interface EventOrigin {
+  source?: EventSource;
+  by?: string;
+}
+
 export interface PolpoEventMap {
   // Task lifecycle
   "task:created": { task: Task };
@@ -165,6 +174,9 @@ export interface PolpoEventMap {
 
   // Filesystem
   "file:changed": { path: string; dir: string; action: "created" | "modified" | "deleted" | "renamed"; source: "agent" | "server" | "chat" };
+
+  // Company brain
+  "brain:changed": import("./company-brain.js").BrainChangeEvent;
 
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };
