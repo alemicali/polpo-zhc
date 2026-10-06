@@ -74,7 +74,7 @@ function hintsFor(cfg: ProviderConfig, message: string, status?: number): string
       hints.push("Endpoint or model not found — check the base URL and the model id.");
     }
   }
-  if (/econnrefused|enotfound|eai_again|socket hang up|timed out|timeout/.test(m)) {
+  if (/econnrefused|enotfound|eai_again|socket hang up|timed out|timeout|connection error|fetch failed/.test(m)) {
     hints.push("Could not reach the server — is it running and reachable from the Polpo server (not just your browser)?");
   }
   if (/private\/internal address/.test(m)) hints.push('Enable "Allow private network" for local / internal endpoints.');

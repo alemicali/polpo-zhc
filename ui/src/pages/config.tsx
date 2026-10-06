@@ -101,6 +101,9 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
+import { CustomProviderWizard, CustomProvidersSection } from "@/components/config/custom-providers";
+import { useCustomProviders } from "@/hooks/use-custom-providers";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 
@@ -2592,13 +2595,15 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
 
   // Active providers (have credentials) — derived from auth status
   const authProviders = objectOrEmpty<ProviderAuthInfo>(authStatus?.providers);
+  const isActiveProvider = (info: ProviderAuthInfo) => (info.custom ? !!info.configured : info.hasEnvKey)
+    || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active");
   const configuredProviders = Object.entries(authProviders)
-    .filter(([, info]) => info.hasEnvKey || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
+    .filter(([, info]) => isActiveProvider(info))
     .map(([name]) => name);
   const providerSources = Object.fromEntries(
     Object.entries(authProviders)
-      .filter(([, info]) => info.hasEnvKey || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
-      .map(([name, info]) => [name, info.hasEnvKey ? "env" : "oauth"]),
+      .filter(([, info]) => isActiveProvider(info))
+      .map(([name, info]) => [name, info.custom ? "custom" : info.hasEnvKey ? "env" : "oauth"]),
   );
 
   const handleReasoningChange = async (value: string) => {
@@ -2848,6 +2853,18 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 }) {
   // ── "Add provider" dialog (full AuthStep — lists all providers) ──
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addTab, setAddTab] = useState<"builtin" | "custom">("builtin");
+
+  // ── Custom endpoints / gateways ──
+  const { providers: customProviders, loaded: customLoaded, reload: reloadCustom } = useCustomProviders(api);
+  const customIds = new Set<string>([
+    ...customProviders.map((p) => p.id),
+    ...Object.entries(authStatus?.providers ?? {}).filter(([, info]) => info.custom).map(([name]) => name),
+  ]);
+  const refreshCustom = useCallback(async () => {
+    await reloadCustom();
+    await onRefresh();
+  }, [reloadCustom, onRefresh]);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
 
@@ -2962,15 +2979,15 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
             variant="outline"
             size="sm"
             className="h-7 text-xs gap-1"
-            onClick={async () => { await ensureAuthProviders(); setAddDialogOpen(true); }}
+            onClick={async () => { await ensureAuthProviders(); setAddTab("builtin"); setAddDialogOpen(true); }}
           >
             <Key className="h-3 w-3" />
             Add provider
           </Button>
         </div>
-        {allProviderNames.size > 0 ? (
+        {[...allProviderNames].some((name) => !customIds.has(name)) ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {[...allProviderNames].sort().map((name) => {
+            {[...allProviderNames].filter((name) => !customIds.has(name)).sort().map((name) => {
               const prov = providers?.[name] ?? {} as ProviderConfig;
               const agentUsage = providerAgentUsage.get(name) ?? [];
               const authInfo = authStatus?.providers[name];
@@ -2992,6 +3009,16 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
           <Empty text="No providers configured — using environment variables for auto-detection" />
         )}
       </section>
+
+      {/* ── Custom endpoints & gateways ── */}
+      <CustomProvidersSection
+        apiFetch={api}
+        providers={customProviders}
+        loaded={customLoaded}
+        agentUsage={providerAgentUsage}
+        onChanged={refreshCustom}
+        onAdd={() => { setAddTab("custom"); setAddDialogOpen(true); }}
+      />
 
       {/* ── Model Allowlist ── */}
       {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
@@ -3098,27 +3125,45 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 
       {/* ── Add Provider Dialog (full AuthStep) ── */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+        <DialogContent className={cn("p-0 gap-0 max-h-[90vh] overflow-y-auto", addTab === "custom" ? "sm:max-w-2xl" : "sm:max-w-lg")}>
           <DialogHeader className="px-6 pt-6 pb-0">
-            <DialogTitle className="text-base">Manage providers</DialogTitle>
+            <DialogTitle className="text-base">Add provider</DialogTitle>
             <DialogDescription className="text-xs">
-              Connect or disconnect LLM providers via OAuth subscription or API key.
+              Connect a built-in provider (OAuth or API key), or a custom endpoint / AI gateway.
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 py-5">
-            {authProviders.length > 0 ? (
-              <AuthStep
-                providers={authProviders}
-                onKeySave={handleSaveKey}
-                onOAuthComplete={async () => { await refreshProviderList(); }}
-                onDisconnect={handleAuthDisconnect}
-                apiFetch={api}
-              />
-            ) : (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
+            <Tabs value={addTab} onValueChange={(v) => setAddTab(v as "builtin" | "custom")}>
+              <TabsList className="mb-3">
+                <TabsTrigger value="builtin" className="text-xs">Built-in</TabsTrigger>
+                <TabsTrigger value="custom" className="text-xs">Custom endpoint / gateway</TabsTrigger>
+              </TabsList>
+              <TabsContent value="builtin">
+                {authProviders.length > 0 ? (
+                  <AuthStep
+                    providers={authProviders}
+                    onKeySave={handleSaveKey}
+                    onOAuthComplete={async () => { await refreshProviderList(); }}
+                    onDisconnect={handleAuthDisconnect}
+                    apiFetch={api}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="custom">
+                {addDialogOpen && addTab === "custom" && (
+                  <CustomProviderWizard
+                    apiFetch={api}
+                    takenIds={customIds}
+                    onCancel={() => setAddDialogOpen(false)}
+                    onSaved={async () => { setAddDialogOpen(false); await refreshCustom(); }}
+                  />
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>
