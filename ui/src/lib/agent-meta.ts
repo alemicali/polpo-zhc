@@ -40,6 +40,7 @@ import {
   Palette,
   Upload,
   Database,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 import type { TaskStatus } from "@polpo-ai/react";
@@ -108,6 +109,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: "text-cyan-400" },
   { prefix: "phone_", label: "Phone (VAPI)", tools: "phone_call, phone_get_call, phone_list_calls, phone_hangup, inbound call configuration", icon: PhoneCall, color: "text-lime-400" },
   { prefix: "data_", label: "Structured Data", tools: "source registry, scoped grants, typed queries, mutations, and native views", icon: Database, color: "text-teal-400" },
+  { prefix: "storage_", label: "Storage", tools: "storage_list, storage_read, storage_write, storage_delete, storage_presign (S3/R2 buckets granted to the agent)", icon: HardDrive, color: "text-sky-400" },
 ];
 
 // ── Task status display config ──

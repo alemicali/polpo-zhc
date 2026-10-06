@@ -45,6 +45,7 @@ import { AgentInstructionsTab } from "@/components/agents/agent-instructions-tab
 import { AgentToolsTab } from "@/components/agents/agent-tools-tab";
 import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
+import { AgentSandboxTab } from "@/components/agents/agent-sandbox-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 
@@ -154,6 +155,7 @@ function AgentDetailContent() {
             <Brain className="h-3.5 w-3.5 mr-1" />
             Memory
           </TabsTrigger>
+          <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
@@ -181,6 +183,10 @@ function AgentDetailContent() {
 
         <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
           <AgentMemoryTab />
+        </TabsContent>
+
+        <TabsContent value="sandbox" className="mt-4 flex-1 min-h-0">
+          <AgentSandboxTab />
         </TabsContent>
 
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">

@@ -214,6 +214,10 @@ const ModelConfigSchema = z.object({
 });
 
 export const UpdateSettingsSchema = z.object({
+  /** Where agents' tools run: default sandbox and what lower levels may choose (null removes it). */
+  sandbox: z.any().optional(),
+  /** Context compaction settings (null removes them). */
+  compaction: z.any().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
@@ -385,6 +389,8 @@ export const AddAgentSchema = z.object({
   reportsTo: z.string().optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
+  sandbox: z.any().optional(),
+  compaction: z.any().optional(),
 });
 
 export const UpdateAgentSchema = z.object({
@@ -400,6 +406,10 @@ export const UpdateAgentSchema = z.object({
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
   reasoning: z.string().optional(),
+  /** Where this agent's tools run (normalized server-side; see packages/core/src/sandbox.ts). */
+  sandbox: z.any().optional(),
+  /** Context compaction overrides for this agent. */
+  compaction: z.any().optional(),
   runtime: z.string().min(1).optional(),
   loops: AgentLoopsSchema.optional(),
   pipeline: PipelineSchema.optional(),

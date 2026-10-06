@@ -1156,6 +1156,10 @@ export interface UpdateAgentRequest {
 }
 
 export interface UpdateSettingsRequest {
+  /** Sandbox settings (see GET /sandbox); null removes them. */
+  sandbox?: Record<string, unknown> | null;
+  /** Context compaction settings; null removes them. */
+  compaction?: Record<string, unknown> | null;
   orchestratorModel?: string | ModelConfig;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;

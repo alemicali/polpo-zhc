@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
+import { normalizeSandboxSettings, resolveSandbox, type SandboxSettings, type StorageMountSpec } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
@@ -44,6 +45,13 @@ export class TaskRunner {
   async collectResults(onResult: (taskId: string, result: TaskResult) => Promise<void> | void): Promise<void> {
     const terminalRuns = await this.ctx.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
+      const runSandbox = (run.config as { sandbox?: { provider?: string } } | undefined)?.sandbox;
+      if (runSandbox?.provider) {
+        this.ctx.emitter.emit("sandbox:destroyed", {
+          workspaceId: run.id, provider: runSandbox.provider,
+          durationMs: Math.max(0, Date.now() - Date.parse(run.startedAt)), reason: run.status === "failed" ? "error" : "done",
+        });
+      }
       const recoveredContinuation = await this.recoverInterruptedDirections(run);
       const task = await this.ctx.registry.getTask(run.taskId);
       const queuedContinuation = (task?.status === "pending" || recoveredContinuation) && this.ctx.taskControlStore
@@ -542,6 +550,36 @@ export class TaskRunner {
       taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
     }
 
+    // Sandbox: resolve the cascade instance → agent → mission → task here, where all levels are
+    // known. Mission and task may only tighten; what they cannot get is reported.
+    // The mission document holds both levels: `sandbox` for the mission, and per task.
+    let missionSandbox: SandboxSettings | undefined;
+    let taskSandbox: SandboxSettings | undefined;
+    if (task.missionId || task.group) {
+      try {
+        const mission = task.missionId
+          ? await this.ctx.registry.getMission?.(task.missionId)
+          : await this.ctx.registry.getMissionByName?.(task.group!);
+        const doc = mission?.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
+        missionSandbox = normalizeSandboxSettings(doc?.sandbox);
+        taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
+      } catch { /* a mission document without a sandbox section */ }
+    }
+    const sandbox = resolveSandbox(
+      {
+        instance: normalizeSandboxSettings(this.ctx.config.settings.sandbox),
+        agent: normalizeSandboxSettings(agent.sandbox),
+        mission: missionSandbox,
+        task: taskSandbox,
+      },
+      { scope: "task", agentTools: agent.allowedTools, available: this.ctx.sandboxProviders?.() },
+    );
+    for (const d of sandbox.denied) {
+      this.ctx.emitter.emit("sandbox:override-denied", { scope: "task", taskId: task.id, agentName: agent.name, ...d });
+    }
+    const mounts = await this.ctx.storageMounts?.(agent.name, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host")
+      .catch(() => [] as StorageMountSpec[]) ?? [];
+
     // WhatsApp tools: if agent has whatsapp_* in allowedTools and a WhatsApp channel is configured,
     // pass the DB path and profile path so the runner can create its own store + connection
     let whatsappDbPath: string | undefined;
@@ -572,6 +610,8 @@ export class TaskRunner {
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
       reasoning: this.ctx.config.settings.reasoning,
       compaction: this.ctx.config.settings.compaction,
+      sandbox,
+      ...(mounts.length ? { mounts } : {}),
       whatsappDbPath,
       whatsappProfilePath,
     };
@@ -598,6 +638,10 @@ export class TaskRunner {
         taskId: task.id,
         agentName: agent.name,
         taskTitle: task.title,
+      });
+      this.ctx.emitter.emit("sandbox:created", {
+        workspaceId: runId, provider: sandbox.provider, scope: "task", taskId: task.id, runId,
+        agentName: agent.name, network: sandbox.network.mode,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

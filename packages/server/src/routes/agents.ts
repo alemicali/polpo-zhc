@@ -1,3 +1,4 @@
+import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
@@ -480,6 +481,8 @@ export function agentRoutes(getDeps: () => {
       ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
       ...(typeof body.reportsTo === "string" && { reportsTo }),
       ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
+      ...(body.sandbox !== undefined && { sandbox: normalizeSandboxSettings(body.sandbox) }),
+      ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
       ...(body.maxTurns !== undefined && { maxTurns: body.maxTurns }),
       ...(body.maxConcurrency !== undefined && { maxConcurrency: body.maxConcurrency }),
       ...(body.runtime !== undefined && { runtime: body.runtime }),

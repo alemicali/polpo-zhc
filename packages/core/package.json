@@ -249,6 +249,14 @@
     "./secret-redaction": {
       "types": "./dist/secret-redaction.d.ts",
       "import": "./dist/secret-redaction.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "import": "./dist/sandbox.js"
+    },
+    "./storage-registry": {
+      "types": "./dist/storage-registry.d.ts",
+      "import": "./dist/storage-registry.js"
     }
   },
   "sideEffects": false,

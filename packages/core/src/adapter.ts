@@ -54,6 +54,9 @@ export interface AgentHandle {
 
 /** Extra context passed to the engine at spawn time. */
 export interface SpawnContext {
+  /** The sandbox this run uses (resolved by the orchestrator) and the storage it mounts. */
+  sandbox?: import("./sandbox.js").EffectiveSandbox;
+  mounts?: import("./sandbox.js").StorageMountSpec[];
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
   /** Per-task output directory (.polpo/output/<taskId>/). Agents write deliverables here. */

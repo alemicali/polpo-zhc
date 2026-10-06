@@ -211,6 +211,12 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "playbook:changed": { label: "Playbook changed", description: "A playbook was created, updated, deleted or installed.", category: "mission", placeholders: ["name", "action", "source", "by"] },
   "playbook:run": { label: "Playbook run", description: "A playbook was run and became a mission.", category: "mission", placeholders: ["name", "missionId", "params", "source", "by"] },
   "context:compacted": { label: "Context compacted", description: "A chat or a task run was compacted to fit the model's context window (old tool results cleared and/or earlier messages summarized).", category: "session", placeholders: ["scope", "sessionId", "taskId", "agentName", "reason", "mode", "beforeTokens", "afterTokens", "compactionCount", "model"] },
+  "sandbox:created": { label: "Sandbox created", description: "A workspace for an agent's tools was created (local, bubblewrap, container or remote).", category: "registry", placeholders: ["workspaceId", "provider", "scope", "taskId", "sessionId", "agentName", "network"] },
+  "sandbox:ready": { label: "Sandbox ready", description: "A workspace finished preparing (mounts, context transfer, setup).", category: "registry", placeholders: ["workspaceId", "provider", "durationMs"] },
+  "sandbox:override-denied": { label: "Sandbox override denied", description: "A mission or task asked for a looser sandbox than allowed; the stricter option was applied.", category: "registry", placeholders: ["scope", "taskId", "agentName", "level", "field", "requested", "applied"] },
+  "sandbox:failed": { label: "Sandbox failed", description: "A workspace could not be created or prepared.", category: "registry", placeholders: ["provider", "scope", "taskId", "sessionId", "error"] },
+  "sandbox:destroyed": { label: "Sandbox destroyed", description: "A workspace was closed.", category: "registry", placeholders: ["workspaceId", "provider", "durationMs", "reason"] },
+  "storage:changed": { label: "Storage changed", description: "A storage bucket was added, changed, removed, mounted or unmounted.", category: "registry", placeholders: ["name", "action", "error", "source", "by"] },
   "log": { label: "System log", description: "A text message from the server (info, warning, error).", category: "orchestrator", placeholders: ["level", "message"] },
 };
 

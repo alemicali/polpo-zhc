@@ -6,6 +6,7 @@
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
 
+import type { EffectiveSandbox, StorageMountSpec } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
@@ -20,6 +21,7 @@ import {
   type CompactionInfo,
 } from "@polpo-ai/core";
 import { effectiveCompactionSettings } from "../core/config.js";
+import { createWorkspace, WorkspaceShell } from "../sandbox/manager.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -40,6 +42,7 @@ import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 import { createDataAgentTools } from "../tools/data-tools.js";
+import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { inkRegistry } from "../core/ink-config.js";
 
@@ -487,9 +490,29 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
   }
 
+  // Storage mounted on the host: visible to file tools and commands at the same path
+  const hostMounts = (ctx?.mounts ?? []).filter((m) => m.hostPath);
+  if (hostMounts.length > 0) {
+    effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), ...hostMounts.map((m) => m.hostPath!)];
+  }
+
+  // Where commands run (bash, grep, glob): the sandbox the orchestrator resolved for this run.
+  // Without one (older orchestrator, CLI) commands run as before, on the host.
+  const workspace = ctx?.sandbox
+    ? createWorkspace(ctx.sandbox, {
+        root: cwd,
+        writable: [...(outputDir ? [outputDir] : []), ...(effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p))],
+        // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
+        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
+        mounts: hostMounts,
+        hide: ctx.polpoDir ? [ctx.polpoDir] : [],
+      })
+    : undefined;
+  const shell = workspace ? new WorkspaceShell(workspace) : undefined;
+
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, undefined, shell);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -502,7 +525,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
-  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
+  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths)
+    + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox, hostMounts);
   // ── Context compaction (packages/core/src/context-compactor.ts) ──
   // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
   // between calls (the prompt cache survives), and recompacts only when the window fills again.
@@ -710,7 +734,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, undefined, shell);
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }
@@ -730,11 +754,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappSendMedia: ctx?.whatsappSendMedia,
           whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
+          shell,
         });
       }
       if (ctx?.polpoDir) {
         allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir }));
       }
       agent.state.tools = allTools;
 
@@ -812,6 +838,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         duration: Date.now() - start,
       };
     } finally {
+      await workspace?.dispose().catch(() => undefined);
       // Close agent-browser session (profile data auto-persisted by --profile)
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
@@ -876,4 +903,24 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
   if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
   if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
   return outcome;
+}
+
+/** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
+export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts: StorageMountSpec[]): string {
+  if (!sandbox || sandbox.provider === "local") return "";
+  const network = sandbox.network.mode === "open" ? "open"
+    : sandbox.network.mode === "deny" ? "disabled (no connections at all)"
+    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} (other hosts are refused by a proxy)`;
+  const limits = [
+    sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
+    sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",
+  ].filter(Boolean).join(", ");
+  return [
+    "",
+    "",
+    "## Sandbox",
+    `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${mounts.length ? " and the storage mounts below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
+    ...mounts.map((m) => `- storage "${m.name}": ${m.path}${m.readOnly ? " (read-only)" : ""}`),
+    "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
+  ].join("\n");
 }
