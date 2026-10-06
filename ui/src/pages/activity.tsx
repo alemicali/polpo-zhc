@@ -1,11 +1,12 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Collapsible,
   CollapsibleContent,
@@ -39,12 +40,13 @@ import {
   FileText,
   Pause,
   Trash2,
-  Hash,
   Loader2,
   RefreshCw,
   Radio,
   Archive,
   Bell,
+  UsersRound,
+  CalendarClock,
 } from "lucide-react";
 import { useEvents, usePolpo, useLogs } from "@polpo-ai/react";
 import type { LogEntry } from "@polpo-ai/react";
@@ -64,6 +66,9 @@ type EventCategory =
   | "session"
   | "notification"
   | "approval"
+  | "room"
+  | "channel"
+  | "schedule"
   | "log"
   | "other";
 
@@ -77,7 +82,10 @@ function getCategory(event: string): EventCategory {
   if (event.startsWith("session:") || event.startsWith("message:"))
     return "session";
   if (event.startsWith("notification:")) return "notification";
-  if (event.startsWith("approval:")) return "approval";
+  if (event.startsWith("approval:") || event.startsWith("escalation:")) return "approval";
+  if (event.startsWith("room:")) return "room";
+  if (event.startsWith("peer:") || event.startsWith("gateway:")) return "channel";
+  if (event.startsWith("schedule:") || event.startsWith("delay:") || event.startsWith("watcher:") || event.startsWith("background-wait:")) return "schedule";
   if (event === "log") return "log";
   return "other";
 }
@@ -139,6 +147,24 @@ const categoryConfig: Record<
     label: "Approvals",
     color: "text-orange-400",
     bg: "bg-orange-500/10",
+  },
+  room: {
+    icon: UsersRound,
+    label: "Groups",
+    color: "text-cyan-400",
+    bg: "bg-cyan-500/10",
+  },
+  channel: {
+    icon: MessageSquare,
+    label: "Channels",
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+  },
+  schedule: {
+    icon: CalendarClock,
+    label: "Schedules",
+    color: "text-indigo-400",
+    bg: "bg-indigo-500/10",
   },
   log: {
     icon: Info,
@@ -582,47 +608,44 @@ function CategoryStats({ events }: { events: EventRowData[] }) {
 
 // ── Filtered event list with category tabs ──
 
-function EventStream({ events }: { events: EventRowData[] }) {
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState("all");
+/** The categories in the order the filter shows them. */
+const CATEGORY_ORDER: EventCategory[] = [
+  "task", "agent", "mission", "approval", "assessment", "notification", "session", "room",
+  "channel", "schedule", "deadlock", "log", "orchestrator", "other",
+];
 
-  // Filter out tick events unless searching for them
+/** Who an event is about, when it names an agent. */
+function agentOf(data: unknown): string | undefined {
+  const d = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const task = (d.task && typeof d.task === "object" ? d.task : {}) as Record<string, unknown>;
+  for (const v of [d.agentName, d.agent, d.assignTo, task.assignTo]) if (typeof v === "string" && v) return v;
+  return undefined;
+}
+
+const ALL = "__all__";
+
+/**
+ * The events, filtered: by category, by event type, by agent and by text. The same filters for
+ * the live stream and for the history (which adds its own period and session pickers).
+ */
+function EventStream({ events, toolbar, emptyHint }: { events: EventRowData[]; toolbar?: React.ReactNode; emptyHint?: string }) {
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<EventCategory | "all">("all");
+  const [eventType, setEventType] = useState<string>(ALL);
+  const [agent, setAgent] = useState<string>(ALL);
+  const [severity, setSeverity] = useState<string>(ALL);
+
+  // The orchestrator's tick fires every few seconds: hidden unless asked for
   const baseEvents = useMemo(
     () =>
-      search.toLowerCase().includes("tick")
+      eventType === "orchestrator:tick" || search.toLowerCase().includes("tick")
         ? events
         : events.filter((e) => e.event !== "orchestrator:tick"),
-    [events, search],
+    [events, search, eventType],
   );
 
-  const filtered = useMemo(() => {
-    let result = baseEvents;
-    if (tab !== "all") {
-      result = result.filter((e) => getCategory(e.event) === tab);
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (e) =>
-          e.event.toLowerCase().includes(q) ||
-          buildNarrative(
-            e.event,
-            (e.data as Record<string, unknown>) ?? {},
-          )
-            .toLowerCase()
-            .includes(q) ||
-          JSON.stringify(e.data).toLowerCase().includes(q),
-      );
-    }
-    return result;
-  }, [baseEvents, tab, search]);
-
-  const display = useMemo(() => [...filtered].reverse(), [filtered]);
-
   const tabCounts = useMemo(() => {
-    const c: Partial<Record<EventCategory | "all", number>> = {
-      all: baseEvents.length,
-    };
+    const c: Partial<Record<EventCategory | "all", number>> = { all: baseEvents.length };
     for (const e of baseEvents) {
       const cat = getCategory(e.event);
       c[cat] = (c[cat] ?? 0) + 1;
@@ -630,52 +653,140 @@ function EventStream({ events }: { events: EventRowData[] }) {
     return c;
   }, [baseEvents]);
 
+  const inTab = useMemo(
+    () => (tab === "all" ? baseEvents : baseEvents.filter((e) => getCategory(e.event) === tab)),
+    [baseEvents, tab],
+  );
+
+  // the event types and agents present, with how many of each
+  const typeOptions = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of inTab) m.set(e.event, (m.get(e.event) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [inTab]);
+  const agentOptions = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of inTab) {
+      const a = agentOf(e.data);
+      if (a) m.set(a, (m.get(a) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [inTab]);
+
+  const filtered = useMemo(() => {
+    let result = inTab;
+    if (eventType !== ALL) result = result.filter((e) => e.event === eventType);
+    if (agent !== ALL) result = result.filter((e) => agentOf(e.data) === agent);
+    if (severity !== ALL) result = result.filter((e) => getSeverity(e.event) === severity);
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (e) =>
+          e.event.toLowerCase().includes(q) ||
+          buildNarrative(e.event, (e.data as Record<string, unknown>) ?? {}).toLowerCase().includes(q) ||
+          JSON.stringify(e.data).toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [inTab, eventType, agent, severity, search]);
+
+  const display = useMemo(() => [...filtered].reverse(), [filtered]);
+  const filtering = tab !== "all" || eventType !== ALL || agent !== ALL || severity !== ALL || search !== "";
+  const reset = () => {
+    setTab("all");
+    setEventType(ALL);
+    setAgent(ALL);
+    setSeverity(ALL);
+    setSearch("");
+  };
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      {/* Search + count */}
-      <div className="flex items-center justify-between">
-        <CategoryStats events={baseEvents} />
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="text-xs">
-            {display.length} event{display.length !== 1 ? "s" : ""}
-          </Badge>
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Filter events..."
-              className="pl-9 h-8 text-xs bg-input/50 border-border/40"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        {toolbar}
+        <Select value={eventType} onValueChange={setEventType}>
+          <SelectTrigger size="sm" className="h-8 w-[210px] text-xs" aria-label="Event type">
+            <SelectValue placeholder="All event types" />
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            <SelectItem value={ALL} className="text-xs">All event types</SelectItem>
+            {typeOptions.map(([type, n]) => (
+              <SelectItem key={type} value={type} className="text-xs">
+                <span className="font-mono">{type}</span>
+                <span className="ml-auto pl-3 text-muted-foreground">{n}</span>
+              </SelectItem>
+            ))}
+            {eventType !== ALL && !typeOptions.some(([t]) => t === eventType) && (
+              <SelectItem value={eventType} className="text-xs font-mono">{eventType}</SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        <Select value={agent} onValueChange={setAgent}>
+          <SelectTrigger size="sm" className="h-8 w-[170px] text-xs" aria-label="Agent">
+            <SelectValue placeholder="All agents" />
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            <SelectItem value={ALL} className="text-xs">All agents</SelectItem>
+            {agentOptions.map(([name, n]) => (
+              <SelectItem key={name} value={name} className="text-xs">
+                {name}
+                <span className="ml-auto pl-3 text-muted-foreground">{n}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={severity} onValueChange={setSeverity}>
+          <SelectTrigger size="sm" className="h-8 w-[130px] text-xs" aria-label="Severity">
+            <SelectValue placeholder="Any outcome" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL} className="text-xs">Any outcome</SelectItem>
+            <SelectItem value="error" className="text-xs">Errors</SelectItem>
+            <SelectItem value="warning" className="text-xs">Warnings</SelectItem>
+            <SelectItem value="success" className="text-xs">Success</SelectItem>
+            <SelectItem value="info" className="text-xs">Info</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="relative w-56">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search events…"
+            className="pl-9 h-8 text-xs bg-input/50 border-border/40"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
+        {filtering && (
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={reset}>
+            <XCircle className="h-3.5 w-3.5" />
+            Clear filters
+          </Button>
+        )}
+        <Badge variant="secondary" className="ml-auto text-xs">
+          {display.length} event{display.length !== 1 ? "s" : ""}
+        </Badge>
       </div>
 
-      {/* Category tabs + stream */}
+      <CategoryStats events={inTab} />
+
+      {/* Categories + stream */}
       <Tabs
         value={tab}
-        onValueChange={setTab}
+        onValueChange={(v) => {
+          setTab(v as EventCategory | "all");
+          setEventType(ALL);
+        }}
         className="flex flex-col flex-1 min-h-0"
       >
-        <TabsList className="flex-wrap shrink-0">
+        <TabsList className="flex-wrap h-auto shrink-0">
           <TabsTrigger value="all">
             All{" "}
             <Badge variant="secondary" className="ml-1.5 text-[10px]">
               {tabCounts.all ?? 0}
             </Badge>
           </TabsTrigger>
-          {(
-            [
-              "task",
-              "agent",
-              "assessment",
-              "mission",
-              "deadlock",
-              "session",
-              "notification",
-              "approval",
-            ] as EventCategory[]
-          ).map((cat) => {
+          {CATEGORY_ORDER.map((cat) => {
             const count = tabCounts[cat] ?? 0;
             if (count === 0) return null;
             const cfg = categoryConfig[cat];
@@ -697,11 +808,8 @@ function EventStream({ events }: { events: EventRowData[] }) {
               {display.length === 0 ? (
                 <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <Activity className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">
-                    {search || tab !== "all"
-                      ? "No matching events"
-                      : "No events yet"}
-                  </p>
+                  <p className="text-sm font-medium">{filtering ? "No matching events" : "No events yet"}</p>
+                  {!filtering && emptyHint && <p className="text-xs mt-1">{emptyHint}</p>}
                 </CardContent>
               ) : (
                 <div className="divide-y divide-border/30">
@@ -729,265 +837,133 @@ function logEntryToEventRow(entry: LogEntry, index: number): EventRowData {
   };
 }
 
-// ── History mode: session list + event viewer ──
+// ── History: the stored events, by period or by server session, with the same filters ──
+
+type Period = "1h" | "24h" | "7d" | "30d";
+const PERIODS: Array<[Period, string, number]> = [
+  ["1h", "Last hour", 60 * 60_000],
+  ["24h", "Last 24 hours", 24 * 60 * 60_000],
+  ["7d", "Last 7 days", 7 * 24 * 60 * 60_000],
+  ["30d", "Last 30 days", 30 * 24 * 60 * 60_000],
+];
+/** Sessions read at once for a period: each server start is one. */
+const MAX_SESSIONS = 60;
 
 function HistoryView() {
-  const {
-    sessions,
-    isLoading: logsLoading,
-    error: logsError,
-    getLogEntries,
-    refetch,
-  } = useLogs();
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
-  const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState(false);
-  const [entriesError, setEntriesError] = useState<string | null>(null);
+  const { sessions, isLoading: sessionsLoading, error: sessionsError, getLogEntries, refetch } = useLogs();
+  const [period, setPeriod] = useState<Period>("24h");
+  const [sessionId, setSessionId] = useState<string>(ALL);
+  const [rows, setRows] = useState<EventRowData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [capped, setCapped] = useState(false);
+  const [tick, setTick] = useState(0);
 
-  const loadEntries = useCallback(
-    async (sessionId: string) => {
-      setSelectedSession(sessionId);
-      setEntriesLoading(true);
-      setEntriesError(null);
-      try {
-        const data = await getLogEntries(sessionId);
-        setEntries(data);
-      } catch (err) {
-        setEntries([]);
-        setEntriesError((err as Error).message);
-      } finally {
-        setEntriesLoading(false);
-      }
-    },
-    [getLogEntries],
+  const ordered = useMemo(() => [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)), [sessions]);
+
+  useEffect(() => {
+    if (sessionsLoading) return;
+    let alive = true;
+    const since = Date.now() - PERIODS.find(([p]) => p === period)![2];
+    // a session runs from its start to the next one's: it counts when that overlaps the period
+    const wanted = sessionId !== ALL
+      ? ordered.filter((s) => s.sessionId === sessionId)
+      : ordered.filter((s, i) => {
+          const end = i === 0 ? Date.now() : Date.parse(ordered[i - 1]!.startedAt);
+          return end >= since && s.entries > 0;
+        });
+    const picked = wanted.slice(0, MAX_SESSIONS);
+    setCapped(wanted.length > picked.length);
+    setLoading(true);
+    setError(null);
+    void Promise.all(picked.map((s) => getLogEntries(s.sessionId).then((entries) => ({ s, entries })).catch(() => ({ s, entries: [] as LogEntry[] }))))
+      .then((lists) => {
+        if (!alive) return;
+        const out: EventRowData[] = [];
+        for (const { s, entries } of lists) {
+          entries.forEach((e, i) => {
+            const row = logEntryToEventRow(e, i);
+            if (sessionId === ALL && Date.parse(row.timestamp) < since) return;
+            out.push({ ...row, id: `${s.sessionId}-${i}` });
+          });
+        }
+        out.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        setRows(out);
+      })
+      .catch((err) => alive && setError(err instanceof Error ? err.message : "Could not read the history"))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [ordered, sessionsLoading, period, sessionId, getLogEntries, tick]);
+
+  const toolbar = (
+    <>
+      <Select value={sessionId === ALL ? period : "session"} onValueChange={(v) => { if (v !== "session") { setPeriod(v as Period); setSessionId(ALL); } }}>
+        <SelectTrigger size="sm" className="h-8 w-[150px] text-xs" aria-label="Period">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PERIODS.map(([p, label]) => (
+            <SelectItem key={p} value={p} className="text-xs">{label}</SelectItem>
+          ))}
+          {sessionId !== ALL && <SelectItem value="session" className="text-xs">One session</SelectItem>}
+        </SelectContent>
+      </Select>
+      <Select value={sessionId} onValueChange={setSessionId}>
+        <SelectTrigger size="sm" className="h-8 w-[230px] text-xs" aria-label="Server session">
+          <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+          <SelectValue placeholder="All sessions" />
+        </SelectTrigger>
+        <SelectContent className="max-h-80">
+          <SelectItem value={ALL} className="text-xs">All sessions in the period</SelectItem>
+          {ordered.map((s) => (
+            <SelectItem key={s.sessionId} value={s.sessionId} className="text-xs">
+              {new Date(s.startedAt).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+              <span className="ml-auto pl-3 text-muted-foreground">{s.entries} events</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Refresh" onClick={() => { void refetch(); setTick((n) => n + 1); }}>
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs">Refresh</TooltipContent>
+      </Tooltip>
+    </>
   );
 
-  // Convert log entries to EventRowData for reuse
-  const eventRows = useMemo(
-    () => entries.map((e, i) => logEntryToEventRow(e, i)),
-    [entries],
-  );
-
-  // Severity summary for selected session
-  const severitySummary = useMemo(() => {
-    const s = { errors: 0, warnings: 0, ok: 0 };
-    for (const e of entries) {
-      if (e.event.includes("failed") || e.event.includes("error"))
-        s.errors++;
-      else if (
-        e.event.includes("retry") ||
-        e.event.includes("fix") ||
-        e.event.includes("deadlock")
-      )
-        s.warnings++;
-      else s.ok++;
-    }
-    return s;
-  }, [entries]);
-
-  if (logsLoading) {
+  if (sessionsError || error) {
     return (
-      <div className="flex items-center justify-center flex-1">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-    </div>
-  );
+      <Card className="flex-1 flex flex-col items-center justify-center bg-card/80 border-border/40">
+        <CardContent className="flex flex-col items-center py-16 text-muted-foreground">
+          <AlertTriangle className="h-10 w-10 mb-3 opacity-40" />
+          <p className="text-sm font-medium">Could not read the history</p>
+          <p className="text-xs mt-1">{error ?? sessionsError?.message}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
-    <div className="flex flex-col lg:grid lg:grid-cols-[300px_1fr] gap-4 flex-1 min-h-0">
-      {/* Left: Session list */}
-      <Card className="flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
-        <CardHeader className="pb-3 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Archive className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm">Sessions</CardTitle>
-              <Badge variant="secondary" className="text-[10px]">
-                {sessions.length}
-              </Badge>
-            </div>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={refetch}>
-              <RefreshCw className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-hidden px-3 pb-3">
-          {logsError ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <AlertTriangle className="h-8 w-8 mb-2 opacity-40 text-red-400" />
-              <p className="text-xs font-medium">Failed to load sessions</p>
-              <p className="text-[10px] text-red-400 mt-1">
-                {logsError.message}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={refetch}
-              >
-                <RefreshCw className="h-3 w-3 mr-1.5" /> Retry
-              </Button>
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Archive className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-xs font-medium">No log sessions yet</p>
-              <p className="text-[10px] mt-1">
-                Sessions appear when the orchestrator runs
-              </p>
-            </div>
-          ) : (
-            <ScrollArea className="h-full">
-              <div className="space-y-1">
-                {sessions.map((s) => (
-                  <button
-                    key={s.sessionId}
-                    onClick={() => loadEntries(s.sessionId)}
-                    className={cn(
-                      "w-full text-left rounded-lg px-3 py-2.5 transition-colors border",
-                      selectedSession === s.sessionId
-                        ? "bg-accent/80 text-accent-foreground border-accent"
-                        : "border-transparent hover:bg-accent/30 text-muted-foreground",
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-[11px] truncate">
-                        {s.sessionId.slice(0, 20)}
-                      </span>
-                      <Badge
-                        variant="secondary"
-                        className="text-[9px] shrink-0 ml-2"
-                      >
-                        <Hash className="h-2 w-2 mr-0.5" />
-                        {s.entries}
-                      </Badge>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-2.5 w-2.5" />
-                      {formatDistanceToNow(new Date(s.startedAt), {
-                        addSuffix: true,
-                      })}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Right: Session event viewer */}
-      <Card className="flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
-        <CardHeader className="pb-3 shrink-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-sm">
-                {selectedSession ? "Session Events" : "Select a Session"}
-              </CardTitle>
-              {selectedSession && entries.length > 0 && (
-                <div className="flex items-center gap-2 mt-1.5">
-                  <Badge variant="secondary" className="text-[10px]">
-                    {entries.length} events
-                  </Badge>
-                  {severitySummary.errors > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Badge
-                          variant="destructive"
-                          className="text-[10px] cursor-help"
-                        >
-                          <XCircle className="h-2.5 w-2.5 mr-0.5" />
-                          {severitySummary.errors}
-                        </Badge>
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs">
-                        {severitySummary.errors} error events
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {severitySummary.warnings > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] text-amber-400 cursor-help"
-                        >
-                          <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
-                          {severitySummary.warnings}
-                        </Badge>
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs">
-                        {severitySummary.warnings} warning events
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {severitySummary.ok > 0 && (
-                    <div className="flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                      <span className="text-[10px] text-muted-foreground">
-                        {severitySummary.ok}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            {selectedSession && (
-              <span className="text-[10px] font-mono text-muted-foreground">
-                {selectedSession.slice(0, 16)}...
-              </span>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0">
-          {!selectedSession ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Archive className="h-10 w-10 mb-3 opacity-40" />
-              <p className="text-sm font-medium">No session selected</p>
-              <p className="text-xs mt-1">
-                Pick a session from the left to view its events
-              </p>
-            </div>
-          ) : entriesLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-          ) : entriesError ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <AlertTriangle className="h-8 w-8 mb-2 opacity-40 text-red-400" />
-              <p className="text-xs text-red-400">{entriesError}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() =>
-                  selectedSession && loadEntries(selectedSession)
-                }
-              >
-                <RefreshCw className="h-3 w-3 mr-1.5" /> Retry
-              </Button>
-            </div>
-          ) : entries.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Info className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-xs">No events in this session</p>
-            </div>
-          ) : (
-            <ScrollArea className="h-full">
-              <div className="divide-y divide-border/30">
-                {eventRows.map((event, i) => (
-                  <EventRow key={`${event.id}-${i}`} event={event} />
-                ))}
-              </div>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
+      {capped && (
+        <p className="text-[11px] text-muted-foreground">
+          Showing the {MAX_SESSIONS} most recent server sessions of the period: pick a shorter period or one session for the rest.
+        </p>
+      )}
+      <EventStream
+        events={rows}
+        toolbar={toolbar}
+        emptyHint={sessionsLoading || loading ? "Reading the history…" : "Nothing was recorded in this period."}
+      />
     </div>
   );
 }
-
-// ── Main page ──
 
 /**
  * Events: what polpo-zhc emits (tasks, agents, missions, approvals, notifications, system
