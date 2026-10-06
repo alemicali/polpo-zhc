@@ -17,7 +17,9 @@ import { useAgentDetail } from "./agent-detail-context";
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
 const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*"];
 
-function readsExternal(tools: string[]): boolean {
+function readsExternal(tools: string[] | undefined): boolean {
+  // no list means every core tool, http_fetch included
+  if (tools === undefined) return true;
   return tools.some((tool) => EXTERNAL_CONTENT_TOOLS.some((pattern) =>
     pattern.endsWith("*") ? tool.startsWith(pattern.slice(0, -1)) || tool === pattern : tool === pattern));
 }
@@ -35,7 +37,7 @@ export function AgentSandboxTab() {
 
   const dirty = JSON.stringify(compactSandbox(draft)) !== JSON.stringify(compactSandbox(stored));
   const effective = overview?.agents.find((a) => a.name === agentName);
-  const external = readsExternal(agent.allowedTools ?? []);
+  const external = readsExternal(agent.allowedTools);
 
   const save = async () => {
     setSaving(true);

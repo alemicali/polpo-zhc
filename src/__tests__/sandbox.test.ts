@@ -34,6 +34,8 @@ describe("sandbox cascade", () => {
     expect(readsExternalContent(["read", "browser_navigate"])).toBe(true);
     expect(readsExternalContent(["read", "write", "bash"])).toBe(false);
     expect(readsExternalContent(["email_*"])).toBe(true);
+    expect(readsExternalContent(undefined)).toBe(true); // no list: core tools include http_fetch
+    expect(readsExternalContent([])).toBe(false);
     const confined = resolveSandbox({ instance: { provider: "local" } }, { scope: "task", agentTools: ["http_fetch"], available: all });
     expect(confined.provider).toBe("bwrap");
     const allowed = resolveSandbox({ instance: { provider: "local" }, agent: { allowLocal: true } }, { scope: "task", agentTools: ["http_fetch"], available: all });
@@ -201,5 +203,59 @@ describe("file tools never reach .polpo through a broader grant", () => {
       setProtectedPaths([]);
       rmSync(project, { recursive: true, force: true });
     }
+  });
+});
+
+describe("agents are told about their sandbox", () => {
+  test("prompt note", async () => {
+    const { sandboxPromptNote } = await import("../adapters/engine.js");
+    expect(sandboxPromptNote(undefined, [])).toBe("");
+    expect(sandboxPromptNote({ provider: "local", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] }, [])).toBe("");
+    const note = sandboxPromptNote(
+      { provider: "bwrap", network: { mode: "allowlist", allow: ["github.com"] }, resources: { timeoutMin: 10 }, providerOptions: {}, denied: [] },
+      [{ name: "docs", path: "/p/.polpo/mounts/docs", hostPath: "/p/.polpo/mounts/docs", readOnly: true }],
+    );
+    expect(note).toContain("## Sandbox");
+    expect(note).toContain("github.com");
+    expect(note).toContain("10 min per command");
+    expect(note).toContain('storage "docs": /p/.polpo/mounts/docs (read-only)');
+  });
+});
+
+describe("Polpo's tools", () => {
+  function fakePolpo(agent: Record<string, unknown>) {
+    const agents = [agent];
+    return {
+      agents,
+      getAgents: async () => agents,
+      getConfig: () => ({ settings: { sandbox: { network: { mode: "allowlist", allow: ["github.com"] } } } }),
+      updateAgent: async (name: string, updates: Record<string, unknown>) => { Object.assign(agents[0]!, updates); return agents[0]; },
+    } as any;
+  }
+
+  test("update_agent sets a sandbox but never turns on running without isolation", async () => {
+    const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+    const polpo = fakePolpo({ name: "dev", allowedTools: ["read", "bash"] });
+    const out = await executeOrchestratorTool("update_agent", { name: "dev", sandbox: { provider: "bwrap", network: { mode: "deny" }, allowLocal: true } }, polpo);
+    expect(polpo.agents[0].sandbox).toEqual({ provider: "bwrap", network: { mode: "deny" } });
+    expect(out).toContain("can only be allowed by a person");
+    await executeOrchestratorTool("update_agent", { name: "dev", sandbox: { inherit: true } }, polpo);
+    expect(polpo.agents[0].sandbox).toBeUndefined();
+  });
+
+  test("inherit keeps a person's choice to run without isolation", async () => {
+    const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+    const polpo = fakePolpo({ name: "dev", sandbox: { allowLocal: true, provider: "local", network: { mode: "open" } } });
+    await executeOrchestratorTool("update_agent", { name: "dev", sandbox: { network: { mode: "deny" } } }, polpo);
+    expect(polpo.agents[0].sandbox).toEqual({ allowLocal: true, provider: "local", network: { mode: "deny" } });
+    await executeOrchestratorTool("update_agent", { name: "dev", sandbox: { inherit: true } }, polpo);
+    expect(polpo.agents[0].sandbox).toEqual({ allowLocal: true });
+  });
+
+  test("sandbox_status explains where commands run", async () => {
+    const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+    const out = await executeOrchestratorTool("sandbox_status", {}, fakePolpo({ name: "web", allowedTools: ["http_fetch"] }));
+    expect(out).toContain("Available on this server");
+    expect(out).toMatch(/- web: tasks (bwrap|local), network allowlist \[github.com\]/);
   });
 });

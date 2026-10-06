@@ -6,6 +6,7 @@
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
 
+import type { EffectiveSandbox, StorageMountSpec } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
@@ -524,7 +525,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
-  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
+  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths)
+    + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox, hostMounts);
   // ── Context compaction (packages/core/src/context-compactor.ts) ──
   // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
   // between calls (the prompt cache survives), and recompacts only when the window fills again.
@@ -901,4 +903,24 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
   if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
   if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
   return outcome;
+}
+
+/** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
+export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts: StorageMountSpec[]): string {
+  if (!sandbox || sandbox.provider === "local") return "";
+  const network = sandbox.network.mode === "open" ? "open"
+    : sandbox.network.mode === "deny" ? "disabled (no connections at all)"
+    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} (other hosts are refused by a proxy)`;
+  const limits = [
+    sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
+    sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",
+  ].filter(Boolean).join(", ");
+  return [
+    "",
+    "",
+    "## Sandbox",
+    `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${mounts.length ? " and the storage mounts below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
+    ...mounts.map((m) => `- storage "${m.name}": ${m.path}${m.readOnly ? " (read-only)" : ""}`),
+    "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
+  ].join("\n");
 }

@@ -134,7 +134,9 @@ function matches(pattern: string, name: string): boolean {
 
 /** True when an agent's allowed tools include one that reads external content. */
 export function readsExternalContent(allowedTools: string[] | undefined): boolean {
-  if (!allowedTools?.length) return false;
+  // No list means every core tool, http_fetch and http_download included.
+  if (allowedTools === undefined) return true;
+  if (!allowedTools.length) return false;
   return allowedTools.some((tool) => EXTERNAL_CONTENT_TOOLS.some((pattern) =>
     matches(pattern, tool) || (tool.endsWith("*") && pattern.startsWith(tool.slice(0, -1)))));
 }

@@ -5,7 +5,7 @@ import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
-import { buildSystemPrompt } from "../adapters/engine.js";
+import { buildSystemPrompt, sandboxPromptNote } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
@@ -292,7 +292,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         const entries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
         mailboxes = resolveAgentVault(entries).listMailboxes();
       } catch { /* ignore — keep prompt without mailboxes section */ }
-      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes);
+      const { sandbox, mounts } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, mounts: [] }));
+      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
+        + sandboxPromptNote(sandbox, mounts.filter((m) => m.hostPath));
     },
     resolveAgentTools: async (agentConfig: any) => {
       const { createAllTools } = await import("../tools/system-tools.js");

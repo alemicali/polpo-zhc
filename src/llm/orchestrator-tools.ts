@@ -55,6 +55,7 @@ import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
+import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 
@@ -806,7 +807,7 @@ const updateAgentTool: Tool = {
       description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
     })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', or 'phone_*' to grant those categories. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'storage_*' or 'phone_*' to grant those categories. storage_* gives the storage tools for the buckets granted to the agent on the Storage page. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
@@ -815,6 +816,26 @@ const updateAgentTool: Tool = {
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
   }),
+};
+
+/** An agent's sandbox, as Polpo may set it. "Without isolation" (allowLocal) stays a person's choice in the UI. */
+const agentSandboxParam = Type.Optional(Type.Object({
+  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker/daytona/e2b fall back to bwrap until available." })),
+  network: Type.Optional(Type.Object({
+    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny")]),
+    allow: Type.Optional(Type.Array(Type.String(), { description: "Domains for allowlist mode; *.example.com also covers example.com" })),
+  })),
+  resources: Type.Optional(Type.Object({
+    memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
+  }, { description: "Upper limits per command" })),
+  allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
+  inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
+}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Agents that read external content (web, email, messages, or no tool list) always run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
+
+const sandboxStatusTool: Tool = {
+  name: "sandbox_status",
+  description: "Show where commands run: the sandbox providers available on this server, the instance defaults, and the effective sandbox (provider, network, limits) of Polpo and of each agent for tasks and chats. Use it to explain why a command cannot reach a file, the network, ~/.ssh or git credentials.",
+  parameters: Type.Object({ agent: Type.Optional(Type.String({ description: "Only this agent" })) }),
 };
 
 const listTeamsTool: Tool = {
@@ -2023,7 +2044,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   addMissionTeamMemberTool, updateMissionTeamMemberTool, removeMissionTeamMemberTool,
   updateMissionNotificationsTool,
   // Team (7)
-  listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
+  listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool, sandboxStatusTool,
   // Vault (5)
   setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
   // Identity (2)
@@ -2396,6 +2417,7 @@ export async function executeOrchestratorTool(
 
       // ── Team ──
       case "list_teams":       return execListTeams(polpo);
+      case "sandbox_status":   return execSandboxStatus(polpo, args);
       case "add_agent":        return execAddAgent(polpo, args);
       case "remove_agent":     return execRemoveAgent(polpo, args);
       case "update_agent":     return execUpdateAgent(polpo, args);
@@ -2653,6 +2675,7 @@ export async function formatToolDetails(
       main.push(["Agent", String(args.name)]);
       if (args.model) main.push(["New model", String(args.model)]);
       if (args.role) main.push(["New role", trunc(args.role)]);
+      if (args.sandbox) main.push(["Sandbox", trunc(JSON.stringify(args.sandbox), 200)]);
       break;
     case "delete_task":
     case "retry_task":
@@ -3737,10 +3760,48 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
   if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
   if (args.team !== undefined) updates.team = args.team as string;
+  let sandboxNote = "";
+  if (args.sandbox !== undefined) {
+    const requested = (args.sandbox ?? {}) as Record<string, any>;
+    if (requested.inherit) {
+      // keep only a person's "without isolation" choice
+      updates.sandbox = existing.sandbox?.allowLocal ? { allowLocal: true } : undefined;
+    } else {
+      const { allowLocal: _ignored, inherit: _i, ...rest } = requested;
+      const inheritProvider = rest.provider === "inherit";
+      if (inheritProvider) delete rest.provider;
+      const merged = normalizeSandboxSettings({ ...(existing.sandbox ?? {}), ...rest, allowLocal: existing.sandbox?.allowLocal });
+      if (merged && inheritProvider) delete merged.provider;
+      updates.sandbox = merged && Object.keys(merged).length ? merged : undefined;
+      if ("allowLocal" in requested) sandboxNote = " (running without isolation can only be allowed by a person, in the agent's Sandbox tab)";
+    }
+  }
 
   await polpo.updateAgent(name, updates as any);
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
-  return `Agent "${name}" updated: ${changes}`;
+  return `Agent "${name}" updated: ${changes}${sandboxNote}`;
+}
+
+async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { availableProviders, effectiveSandbox } = await import("../sandbox/manager.js");
+  const instance = normalizeSandboxSettings(polpo.getConfig()?.settings?.sandbox);
+  const describe = (s: EffectiveSandbox) => {
+    const limits = Object.entries(s.resources).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ");
+    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${limits ? `, ${limits}` : ""}`;
+  };
+  const lines = [
+    `Available on this server: ${[...availableProviders()].join(", ")}`,
+    `Instance defaults: ${instance ? JSON.stringify(instance) : "none (this machine, network open)"}`,
+    `Polpo (run_command): ${describe(effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : undefined }))}`,
+  ];
+  const wanted = typeof args.agent === "string" ? args.agent : undefined;
+  for (const agent of await polpo.getAgents()) {
+    if (wanted && agent.name !== wanted) continue;
+    const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
+    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
+  }
+  lines.push("In bwrap commands see only the working directory, granted paths and granted storage mounts: no home (~/.ssh, ~/.gitconfig, gh login), no .polpo, no other projects.");
+  return lines.join("\n");
 }
 
 async function execListTeams(polpo: Orchestrator): Promise<string> {

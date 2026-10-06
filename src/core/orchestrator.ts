@@ -102,7 +102,7 @@ import { databaseStoresFor } from "./storage.js";
 import { resolveToolOutputDir } from "../tools/tool-output.js";
 import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
-import { normalizeSandboxSettings, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
+import { normalizeSandboxSettings, type EffectiveSandbox, type StorageMountProvider, type StorageMountSpec, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
@@ -266,9 +266,9 @@ export class Orchestrator extends TypedEmitter {
     };
   }
 
-  private async openChatWorkspace(agent?: AgentConfig): Promise<Workspace> {
-    const settings = this.config?.settings;
-    const instanceSandbox = normalizeSandboxSettings(settings?.sandbox);
+  /** The sandbox a chat with this agent (or with Polpo) runs its commands in, and the storage it sees. */
+  async chatSandbox(agent?: AgentConfig): Promise<{ sandbox: EffectiveSandbox; mounts: StorageMountSpec[] }> {
+    const instanceSandbox = normalizeSandboxSettings(this.config?.settings?.sandbox);
     const sandbox = effectiveSandbox({
       scope: "chat",
       cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
@@ -276,6 +276,11 @@ export class Orchestrator extends TypedEmitter {
       agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
     });
     const mounts = (await this.storageMountProvider?.mountsFor(agent?.name, "host").catch(() => [])) ?? [];
+    return { sandbox, mounts };
+  }
+
+  private async openChatWorkspace(agent?: AgentConfig): Promise<Workspace> {
+    const { sandbox, mounts } = await this.chatSandbox(agent);
     const root = this.getAgentWorkDir();
     try {
       const workspace = createWorkspace(sandbox, {
