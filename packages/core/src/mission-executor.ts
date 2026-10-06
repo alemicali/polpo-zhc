@@ -49,6 +49,17 @@ class InMemoryDelayStore implements DelayStore {
 /**
  * Mission CRUD + execution + resume + group lifecycle.
  */
+
+/** An edit inside a mission document, described for mission:updated. */
+export interface MissionEdit {
+  section: "task" | "checkpoint" | "delay" | "qualityGate" | "team" | "notifications" | "order";
+  action: "added" | "updated" | "removed" | "reordered";
+  item?: string;
+}
+
+/** Key under which an update carries its MissionEdit to the event layer (never persisted). */
+export const MISSION_EDIT: unique symbol = Symbol.for("polpo.missionEdit") as never;
+
 export class MissionExecutor {
   private cleanedGroups = new Set<string>();
   /** Quality gates parsed from mission documents, keyed by mission group name */
@@ -812,10 +823,11 @@ export class MissionExecutor {
    * Persist an updated document back onto the mission record.
    * Re-validates through Zod to ensure integrity.
    */
-  private async persistMissionData(missionId: string, doc: MissionDocumentParsed): Promise<Mission> {
+  private async persistMissionData(missionId: string, doc: MissionDocumentParsed, edit: MissionEdit): Promise<Mission> {
     // Re-validate to catch any structural issue before persisting
     parseMissionDocument(doc);
-    const mission = await this.updateMission(missionId, { data: JSON.stringify(doc) });
+    // The edit rides along (symbol key, never stored) so mission:updated can say what changed.
+    const mission = await this.updateMission(missionId, { data: JSON.stringify(doc), [MISSION_EDIT]: edit } as Partial<Mission>);
     // Notify listeners so SSE clients (e.g. mission detail page) refetch updated data
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -841,7 +853,7 @@ export class MissionExecutor {
       throw new Error(`Task title "${task.title}" already exists in this mission`);
     }
     doc.tasks.push(task as MissionDocumentParsed["tasks"][number]);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "task", action: "added", item: task.title });
   }
 
   /** Update a specific task within the mission data (matched by title). */
@@ -864,7 +876,7 @@ export class MissionExecutor {
       throw new Error(`Task title "${updates.title}" already exists in this mission`);
     }
     doc.tasks[idx] = { ...doc.tasks[idx], ...updates } as MissionDocumentParsed["tasks"][number];
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "task", action: "updated", item: taskTitle });
   }
 
   /** Remove a task from the mission data (by title). Also cleans up dependsOn references. */
@@ -904,7 +916,7 @@ export class MissionExecutor {
     }
     // Ensure at least 1 task remains (Zod will catch this, but give a nicer error)
     if (doc.tasks.length === 0) throw new Error("Cannot remove the last task from a mission");
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "task", action: "removed", item: taskTitle });
   }
 
   /** Reorder tasks within the mission data. Accepts an array of task titles in the desired order. */
@@ -919,7 +931,7 @@ export class MissionExecutor {
     if (titles.length !== doc.tasks.length) throw new Error("Reorder list must include all task titles");
     const taskMap = new Map(doc.tasks.map(t => [t.title, t]));
     doc.tasks = titles.map(t => taskMap.get(t)!);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "order", action: "reordered", item: undefined });
   }
 
   // ─── Checkpoint operations ──────────────────────────
@@ -938,7 +950,7 @@ export class MissionExecutor {
       throw new Error(`Checkpoint "${checkpoint.name}" already exists in this mission`);
     }
     doc.checkpoints.push(checkpoint);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "checkpoint", action: "added", item: checkpoint.name });
   }
 
   /** Update a checkpoint in the mission data (matched by name). */
@@ -957,7 +969,7 @@ export class MissionExecutor {
       throw new Error(`Checkpoint "${updates.name}" already exists in this mission`);
     }
     doc.checkpoints[idx] = { ...doc.checkpoints[idx], ...updates };
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "checkpoint", action: "updated", item: checkpointName });
   }
 
   /** Remove a checkpoint from the mission data (by name). */
@@ -968,7 +980,7 @@ export class MissionExecutor {
     if (idx === -1) throw new Error(`Checkpoint "${checkpointName}" not found in mission`);
     doc.checkpoints.splice(idx, 1);
     if (doc.checkpoints.length === 0) delete (doc as any).checkpoints;
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "checkpoint", action: "removed", item: checkpointName });
   }
 
   // ─── Delay operations ───────────────────────────────
@@ -990,7 +1002,7 @@ export class MissionExecutor {
       throw new Error(`Delay "${delay.name}" already exists in this mission`);
     }
     doc.delays.push(delay);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "delay", action: "added", item: delay.name });
   }
 
   /** Update a delay in the mission data (matched by name). */
@@ -1011,7 +1023,7 @@ export class MissionExecutor {
       throw new Error(`Delay "${updates.name}" already exists in this mission`);
     }
     doc.delays[idx] = { ...doc.delays[idx], ...updates };
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "delay", action: "updated", item: delayName });
   }
 
   /** Remove a delay from the mission data (by name). */
@@ -1022,7 +1034,7 @@ export class MissionExecutor {
     if (idx === -1) throw new Error(`Delay "${delayName}" not found in mission`);
     doc.delays.splice(idx, 1);
     if (doc.delays.length === 0) delete (doc as any).delays;
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "delay", action: "removed", item: delayName });
   }
 
   // ─── Quality gate operations ────────────────────────
@@ -1043,7 +1055,7 @@ export class MissionExecutor {
       throw new Error(`Quality gate "${gate.name}" already exists in this mission`);
     }
     doc.qualityGates.push(gate);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "qualityGate", action: "added", item: gate.name });
   }
 
   /** Update a quality gate in the mission data (matched by name). */
@@ -1064,7 +1076,7 @@ export class MissionExecutor {
       throw new Error(`Quality gate "${updates.name}" already exists in this mission`);
     }
     doc.qualityGates[idx] = { ...doc.qualityGates[idx], ...updates };
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "qualityGate", action: "updated", item: gateName });
   }
 
   /** Remove a quality gate from the mission data (by name). */
@@ -1075,7 +1087,7 @@ export class MissionExecutor {
     if (idx === -1) throw new Error(`Quality gate "${gateName}" not found in mission`);
     doc.qualityGates.splice(idx, 1);
     if (doc.qualityGates.length === 0) delete (doc as any).qualityGates;
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "qualityGate", action: "removed", item: gateName });
   }
 
   // ─── Team (volatile agents) operations ──────────────
@@ -1093,7 +1105,7 @@ export class MissionExecutor {
       throw new Error(`Team member "${member.name}" already exists in this mission`);
     }
     (doc.team as any[]).push(member);
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "team", action: "added", item: member.name });
   }
 
   /** Update a team member in the mission data (matched by name). */
@@ -1112,7 +1124,7 @@ export class MissionExecutor {
       throw new Error(`Team member "${updates.name}" already exists in this mission`);
     }
     team[idx] = { ...team[idx], ...updates };
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "team", action: "updated", item: memberName });
   }
 
   /** Remove a team member from the mission data (by name). */
@@ -1124,7 +1136,7 @@ export class MissionExecutor {
     if (idx === -1) throw new Error(`Team member "${memberName}" not found in mission`);
     team.splice(idx, 1);
     if (team.length === 0) delete (doc as any).team;
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "team", action: "removed", item: memberName });
   }
 
   // ─── Notifications operations ───────────────────────
@@ -1137,7 +1149,7 @@ export class MissionExecutor {
     } else {
       (doc as any).notifications = notifications;
     }
-    return this.persistMissionData(missionId, doc);
+    return this.persistMissionData(missionId, doc, { section: "notifications", action: "updated", item: undefined });
   }
 
   async buildMissionReport(missionId: string, group: string, groupTasks: Task[], allPassed: boolean): Promise<MissionReport> {

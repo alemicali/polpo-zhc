@@ -3855,8 +3855,7 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
       schedule: args.expression as string,
       status: newStatus,
     });
-    scheduler.unregisterMission(missionId);
-    scheduler.registerMission(updated);
+    scheduler.rescheduleMission(updated);
     changes.push(`expression: ${args.expression}`);
     if (args.recurring !== undefined) changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
@@ -3868,13 +3867,12 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
     // Re-register to pick up the new recurring flag
     const mission = await polpo.getMission(missionId);
     if (mission) {
-      scheduler.unregisterMission(missionId);
-      scheduler.registerMission(mission);
+      scheduler.rescheduleMission(mission);
     }
     changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
   if (args.enabled !== undefined) {
-    existing.enabled = args.enabled as boolean;
+    scheduler.setEnabled(missionId, args.enabled as boolean);
     changes.push(`enabled: ${args.enabled}`);
   }
   if (args.endDate !== undefined) {
@@ -6512,6 +6510,7 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
       name: instance.name,
     });
 
+    polpo.emit("playbook:run", { name, missionId: mission.id, params: Object.keys(params) });
     const result = await polpo.executeMission(mission.id);
     const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
     return `Playbook "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;

@@ -123,7 +123,8 @@ export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
 
 // ── MissionExecutor ─────────────────────────────────────────────────────
-export { MissionExecutor } from "./mission-executor.js";
+export { MissionExecutor, MISSION_EDIT } from "./mission-executor.js";
+export type { MissionEdit } from "./mission-executor.js";
 
 // ── TaskRunner ──────────────────────────────────────────────────────────
 export { TaskRunner } from "./task-runner.js";

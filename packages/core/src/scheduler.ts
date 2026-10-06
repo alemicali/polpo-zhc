@@ -32,14 +32,15 @@ export class Scheduler {
     for (const mission of missions) {
       if (!mission.schedule) continue;
       if (terminalStates.has(mission.status)) continue;
-      this.registerMission(mission);
+      // Rehydration at startup, not a change: no event
+      this.registerMission(mission, "none");
     }
 
     this.missionCompletedHandler = async ({ missionId }) => {
       const mission = await this.ctx.registry.getMission?.(missionId);
       if (!mission?.schedule) return;
       if (mission.status === "recurring" || mission.status === "scheduled") {
-        this.registerMission(mission);
+        this.registerMission(mission, "updated");
       }
     };
     this.ctx.emitter.on("mission:completed", this.missionCompletedHandler);
@@ -49,7 +50,11 @@ export class Scheduler {
     this.executeMissionFn = fn;
   }
 
-  registerMission(mission: Mission): ScheduleEntry | null {
+  /**
+   * Schedule a mission (replacing its previous entry). `announce` picks the event: a new
+   * schedule, a changed one, or none (startup rehydration).
+   */
+  registerMission(mission: Mission, announce: "created" | "updated" | "none" = "created"): ScheduleEntry | null {
     if (!mission.schedule) return null;
 
     const isRecurring = mission.status === "recurring";
@@ -81,18 +86,44 @@ export class Scheduler {
 
     this.schedules.set(entry.id, entry);
 
-    this.ctx.emitter.emit("schedule:created", {
-      scheduleId: entry.id,
-      missionId: mission.id,
-      nextRunAt,
-    });
+    if (announce === "created") {
+      this.ctx.emitter.emit("schedule:created", { scheduleId: entry.id, missionId: mission.id, nextRunAt });
+    } else if (announce === "updated") {
+      this.emitUpdated(entry);
+    }
 
+    return entry;
+  }
+
+  /** Re-schedule a mission whose schedule changed: one schedule:updated, or removed if it no longer runs. */
+  rescheduleMission(mission: Mission): ScheduleEntry | null {
+    const had = this.schedules.delete(`sched-${mission.id}`);
+    const entry = this.registerMission(mission, had ? "updated" : "created");
+    if (had && !entry) this.ctx.emitter.emit("schedule:removed", { scheduleId: `sched-${mission.id}`, missionId: mission.id });
+    return entry;
+  }
+
+  /** Pause or resume a schedule without changing it. */
+  setEnabled(missionId: string, enabled: boolean): ScheduleEntry | undefined {
+    const entry = this.schedules.get(`sched-${missionId}`);
+    if (!entry || entry.enabled === enabled) return entry;
+    entry.enabled = enabled;
+    this.emitUpdated(entry);
     return entry;
   }
 
   unregisterMission(missionId: string): boolean {
     const schedId = `sched-${missionId}`;
-    return this.schedules.delete(schedId);
+    const removed = this.schedules.delete(schedId);
+    if (removed) this.ctx.emitter.emit("schedule:removed", { scheduleId: schedId, missionId });
+    return removed;
+  }
+
+  private emitUpdated(entry: ScheduleEntry): void {
+    this.ctx.emitter.emit("schedule:updated", {
+      scheduleId: entry.id, missionId: entry.missionId, expression: entry.expression, enabled: entry.enabled,
+      ...(entry.nextRunAt ? { nextRunAt: entry.nextRunAt } : {}),
+    });
   }
 
   async check(): Promise<void> {
@@ -116,6 +147,7 @@ export class Scheduler {
     const mission = await this.ctx.registry.getMission?.(entry.missionId);
     if (!mission) {
       entry.enabled = false;
+      this.ctx.emitter.emit("schedule:skipped", { scheduleId: schedId, missionId: entry.missionId, reason: "mission not found" });
       return;
     }
 
@@ -148,6 +180,7 @@ export class Scheduler {
       expression: entry.expression,
     });
     if (hookResult.cancelled) {
+      this.ctx.emitter.emit("schedule:skipped", { scheduleId: schedId, missionId: entry.missionId, reason: hookResult.cancelReason ?? "refused by a hook" });
       return;
     }
 

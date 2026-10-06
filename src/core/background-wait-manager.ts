@@ -167,7 +167,10 @@ export class BackgroundWaitManager {
           if (latest?.state === "cancelled") continue;
           const message = error instanceof Error ? error.message : String(error);
           if (wait.attempts < 3) {
+            // Requeued after an error (a "deferred" busy session is requeued silently: it repeats every poll)
             await this.store.requeueBackgroundWait(wait.id);
+            const requeued = await this.store.getBackgroundWait(wait.id);
+            if (requeued) this.events.emit("background-wait:requeued", { wait: requeued });
           } else {
             await this.fail(wait.id, message);
           }

@@ -117,6 +117,10 @@ export class ApprovalManager {
         if (gate.handler === "auto") {
           if (gate.condition?.expression) {
             ctx.cancel(`Auto gate "${gate.name}" condition matched — blocking`);
+            this.ctx.emitter.emit("approval:auto-blocked", {
+              gateId: gate.id, gateName: gate.name, hook: gate.hook,
+              taskId: this.extractTaskId(ctx.data), missionId: this.extractMissionId(ctx.data),
+            });
           }
           return;
         }

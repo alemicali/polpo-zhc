@@ -1,3 +1,4 @@
+import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
 import { setAssessment } from "./types.js";
@@ -115,8 +116,11 @@ export class TaskManager {
     }
     const { valid, warnings } = sanitizeExpectations(expectations);
     for (const w of warnings) this.ctx.emitter.emit("log", { level: "warn", message: `[updateExpectations "${taskId}"] ${w}` });
-    await this.ctx.registry.updateTask(taskId, { expectations: valid });
-    this.ctx.emitter.emit("task:updated", { taskId, task: (await this.ctx.registry.getTask(taskId))! });
+    const updated = await this.ctx.registry.updateTask(taskId, { expectations: valid });
+    // The shell's registry announces every field change; a bare store does not
+    if (!(this.ctx.registry as TaskStore & { __emitsTaskTransitionEvents?: boolean }).__emitsTaskTransitionEvents) {
+      this.ctx.emitter.emit("task:updated", { taskId, task: updated, fields: ["expectations"] });
+    }
   }
 
   async retryTask(taskId: string): Promise<void> {
@@ -124,6 +128,7 @@ export class TaskManager {
     if (!task) throw new Error("Task not found");
     if (task.status !== "failed") throw new Error(`Cannot retry task in "${task.status}" state`);
     await this.ctx.registry.transition(taskId, "pending");
+    this.ctx.emitter.emit("task:retried", { taskId, title: task.title });
   }
 
   async sendDirection(
@@ -291,14 +296,19 @@ export class TaskManager {
 
   async killTask(taskId: string): Promise<boolean> {
     const run = await this.ctx.runStore.getRunByTaskId(taskId);
-    if (run && run.status === "running" && run.pid > 0) {
+    const running = !!run && run.status === "running" && run.pid > 0;
+    if (running) {
       if (this.ctx.killProcess) {
         try { this.ctx.killProcess(run.pid, "SIGTERM"); } catch { /* already dead */ }
       }
     }
     const task = await this.ctx.registry.getTask(taskId);
     if (!task) return false;
-    if (task.status !== "done" && task.status !== "failed") {
+    const active = task.status !== "done" && task.status !== "failed";
+    if (running || active) {
+      this.ctx.emitter.emit("task:killed", { taskId, title: task.title, ...(running ? { runId: run.id, pid: run.pid } : {}) });
+    }
+    if (active) {
       try {
         if (task.status === "pending") await this.ctx.registry.transition(taskId, "assigned");
         if (task.status === "assigned") await this.ctx.registry.transition(taskId, "in_progress");
@@ -327,6 +337,7 @@ export class TaskManager {
     if (mission && mission.status === "active") {
       await this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
     }
+    this.ctx.emitter.emit("mission:aborted", { missionId: mission?.id, name: mission?.name, group, killedTasks: count });
     return count;
   }
 
@@ -384,9 +395,10 @@ export class TaskManager {
   }
 
   /** Force a task through the state machine to failed (used by deadlock resolver). */
-  async forceFailTask(taskId: string): Promise<void> {
+  async forceFailTask(taskId: string, reason?: string): Promise<void> {
     const task = await this.ctx.registry.getTask(taskId);
     if (!task || task.status === "done" || task.status === "failed") return;
+    this.ctx.emitter.emit("task:force-failed", { taskId, title: task.title, ...(reason ? { reason } : {}) });
     try {
       if (task.status === "pending") await this.ctx.registry.transition(taskId, "assigned");
       if (task.status === "assigned") await this.ctx.registry.transition(taskId, "in_progress");

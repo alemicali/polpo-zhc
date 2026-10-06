@@ -110,6 +110,7 @@ export class AssessmentOrchestrator {
       taskId, task, result,
     });
     if (hookResult.cancelled) {
+      this.ctx.emitter.emit("task:complete-blocked", { taskId, reason: hookResult.cancelReason ?? "no reason" });
       this.ctx.emitter.emit("log", {
         level: "info",
         message: `[${taskId}] Completion blocked by hook: ${hookResult.cancelReason ?? "no reason"}`,
