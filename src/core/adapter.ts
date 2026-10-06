@@ -48,6 +48,8 @@ export interface AgentHandle {
 
 /** Extra context passed to the engine at spawn time. */
 export interface SpawnContext {
+  /** Instance compaction settings; the agent's own settings apply on top. */
+  compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
   /** Per-task output directory (.polpo/output/<taskId>/). Agents write deliverables here. */

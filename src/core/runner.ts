@@ -316,6 +316,7 @@ async function main(): Promise<void> {
       outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
       reasoning: config.reasoning,
+      compaction: config.compaction,
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
