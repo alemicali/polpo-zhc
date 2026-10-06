@@ -13,6 +13,7 @@ import {
   type StorageMountSpec,
   type Workspace,
 } from "@polpo-ai/core/sandbox";
+import type { NetworkDenial } from "./net-proxy.js";
 import { bashSafeEnv } from "../tools/safe-env.js";
 import { BwrapWorkspace, LocalWorkspace, bwrapAvailable, type HostWorkspaceOptions } from "./workspaces.js";
 
@@ -34,7 +35,7 @@ export interface WorkspaceRequest {
   readable?: string[];
   mounts?: StorageMountSpec[];
   hide?: string[];
-  onNetworkDenied?: (host: string) => void;
+  onNetworkDenied?: (denial: NetworkDenial) => void;
 }
 
 /** Resolve the cascade for a request on this machine. */

@@ -51,6 +51,8 @@ export interface SpawnContext {
   /** The sandbox this run uses (resolved by the orchestrator) and the storage it mounts. */
   sandbox?: import("@polpo-ai/core/sandbox").EffectiveSandbox;
   mounts?: import("@polpo-ai/core/sandbox").StorageMountSpec[];
+  /** Called when the sandbox network rule refuses a destination (commands or browser). */
+  onNetworkDenied?: (denial: import("../sandbox/net-proxy.js").NetworkDenial) => void;
   /** Instance compaction settings; the agent's own settings apply on top. */
   compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */

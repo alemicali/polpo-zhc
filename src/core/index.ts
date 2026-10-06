@@ -17,7 +17,7 @@ export { parseConfig, loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefau
 export { readSessionSummary, readSessionSummaryFromPath, getRecentMessages, findTranscriptPath } from "./session-reader.js";
 export { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 export { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
-export { startNotificationServer, notifyRunComplete, getSocketPath } from "./notification.js";
+export { startNotificationServer, notifyRunComplete, notifyNetworkDenied, getSocketPath } from "./notification.js";
 
 // Hooks
 export { HookRegistry } from "./hooks.js";

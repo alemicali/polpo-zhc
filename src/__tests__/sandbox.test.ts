@@ -147,7 +147,7 @@ describe.skipIf(!bwrapAvailable())("bubblewrap workspace", () => {
 
   test("network allowlist: allowed hosts through the proxy, others refused", async () => {
     const denied: string[] = [];
-    const ws = new BwrapWorkspace({ root, sandbox: sandbox({ mode: "allowlist", allow: ["127.0.0.1"] }), onNetworkDenied: (h) => denied.push(h) });
+    const ws = new BwrapWorkspace({ root, sandbox: sandbox({ mode: "allowlist", allow: ["127.0.0.1"] }), onNetworkDenied: (d) => denied.push(d.host) });
     const env = { NO_PROXY: "", no_proxy: "" };
     const ok = await ws.exec(`curl -s -m 5 http://127.0.0.1:${port}/`, { env });
     expect(ok.stdout).toBe("hello from the host");

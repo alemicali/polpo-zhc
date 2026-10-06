@@ -356,6 +356,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         allowedPaths: undefined,
         browserSession: agentConfig.name,
         browserProfileDir,
+        browserNetwork: await o.chatBrowserNetwork(agentConfig),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
@@ -636,6 +637,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       }),
     } });
   });
+
+  // Destinations the sandbox network rule refused recently (last ~100, in memory): the "approve a new domain" list
+  authed.get("/sandbox/network-denied", (c) => c.json({ ok: true, data: o.getNetworkDenied() }));
 
   authed.route("/counts", countsRoutes(() => ({
     getAllTasks: () => o.getStore().getAllTasks(),

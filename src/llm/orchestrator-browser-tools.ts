@@ -127,14 +127,19 @@ export async function executeOrchestratorBrowserTool(
   // Chrome"), it's CDP-attached on this port and we drive THAT browser.
   // Otherwise fall back to agent-browser's managed profile for the session.
   const cdpPort = getCdpTarget();
+  // Polpo's browser runs on the host: it follows the sandbox network rule of Polpo's chat sandbox.
+  const network = await polpo.chatBrowserNetwork?.();
+  const proxy = network && !cdpPort ? await network.proxyUrl() : undefined;
   const base = cdpPort
     ? { session, cdp: cdpPort }
-    : { session, profileDir: profileDirFor(polpo) };
+    : { session, profileDir: profileDirFor(polpo), proxy };
 
   switch (name) {
     case "browser_navigate": {
       const url = String(args.url ?? "");
       if (!url) return "Error: 'url' is required.";
+      const refusal = await network?.checkUrl(url);
+      if (refusal) return `Error: ${refusal}`;
       const r = await execBrowserAsync(["open", url], base);
       return summarize(r);
     }

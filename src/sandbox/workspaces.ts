@@ -14,7 +14,7 @@ import { nanoid } from "nanoid";
 import type {
   EffectiveSandbox, ExecOptions, ExecResult, StorageMountSpec, Workspace, WorkspaceEntry, WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
-import { startNetworkProxy, type NetworkProxy } from "./net-proxy.js";
+import { startNetworkProxy, type NetworkDenial, type NetworkProxy } from "./net-proxy.js";
 
 /** Output kept in memory per stream; the bash tool offloads anything big to a file anyway. */
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024;
@@ -34,8 +34,8 @@ export interface HostWorkspaceOptions {
    */
   hide?: string[];
   sandbox: EffectiveSandbox;
-  /** Called when the network proxy refuses a host. */
-  onNetworkDenied?: (host: string) => void;
+  /** Called when the network proxy refuses a destination (every attempt; callers deduplicate). */
+  onNetworkDenied?: (denial: NetworkDenial) => void;
 }
 
 /** Shared filesystem operations: the paths the agent sees are the host's own. */
@@ -158,7 +158,11 @@ export class BwrapWorkspace extends HostFsWorkspace {
   }
 
   private async networkProxy(): Promise<NetworkProxy> {
-    this.proxyStarting ??= startNetworkProxy(this.opts.sandbox.network.allow ?? [], this.opts.onNetworkDenied).then((p) => (this.proxy = p));
+    const { network } = this.opts.sandbox;
+    this.proxyStarting ??= startNetworkProxy({
+      rule: network.mode === "allowlist" ? { mode: "allowlist", allow: network.allow ?? [] } : { mode: "open" },
+      onDenied: this.opts.onNetworkDenied,
+    }).then((p) => (this.proxy = p));
     return this.proxyStarting;
   }
 
@@ -168,7 +172,7 @@ export class BwrapWorkspace extends HostFsWorkspace {
     const home = homedir();
     const toolDirs = ((providerOptions.toolDirs as string[] | undefined) ?? DEFAULT_TOOL_DIRS).map((d) => d.startsWith("/") ? d : join(home, d));
     const args: string[] = ["/usr/bin/bwrap", "--die-with-parent", "--new-session", "--unshare-all"];
-    if (network.mode === "open") args.push("--share-net");
+    if (network.mode === "unrestricted") args.push("--share-net");
     args.push("--clearenv");
 
     // a minimal system: read-only /usr and the few /etc files programs need
@@ -202,13 +206,16 @@ export class BwrapWorkspace extends HostFsWorkspace {
       PLAYWRIGHT_BROWSERS_PATH: join(home, ".cache/ms-playwright"),
     };
     let script = command;
-    if (network.mode === "allowlist") {
+    if (network.mode === "allowlist" || network.mode === "open") {
       const proxy = await this.networkProxy();
       args.push("--ro-bind", proxy.dir, "/run/polpo-net");
       const url = `http://127.0.0.1:${this.bridgePort}`;
-      Object.assign(env, { HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url, ALL_PROXY: url,
+      const socks = `socks5h://127.0.0.1:${this.bridgePort}`;
+      Object.assign(env, { HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url, ALL_PROXY: socks, all_proxy: socks,
         NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1", NODE_USE_ENV_PROXY: "1",
-        npm_config_proxy: url, npm_config_https_proxy: url });
+        npm_config_proxy: url, npm_config_https_proxy: url,
+        // ssh (and git over ssh) tunnels through the proxy with the helper next to the bridge
+        GIT_SSH_COMMAND: "ssh -o ProxyCommand='node /run/polpo-net/connect.cjs %h %p'" });
       // the bridge lives as long as the command; wait until it listens
       script = `/usr/bin/node /run/polpo-net/bridge.cjs ${this.bridgePort} /run/polpo-net/proxy.sock >/dev/null 2>&1 &
 __polpo_bridge=$!; trap 'kill $__polpo_bridge 2>/dev/null' EXIT

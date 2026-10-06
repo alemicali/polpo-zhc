@@ -558,6 +558,8 @@ export interface CreateAllToolsOptions {
   /** Browser profile directory for agent-browser persistent state (cookies, localStorage).
    *  Typically `.polpo/browser-profiles/<agent>/`. Passed as --profile to agent-browser. */
   browserProfileDir?: string;
+  /** The agent's sandbox network rule for the browser (see browser-network-guard.ts). */
+  browserNetwork?: import("./browser-network-guard.js").BrowserNetworkGuard;
   /** Resolved vault credentials for the agent */
   vault?: ResolvedVault;
   /** Allowed recipient email domains for email_send. */
@@ -631,7 +633,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, options.browserNetwork));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools

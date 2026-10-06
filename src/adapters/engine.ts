@@ -22,6 +22,7 @@ import {
 } from "@polpo-ai/core";
 import { effectiveCompactionSettings } from "../core/config.js";
 import { createWorkspace, WorkspaceShell } from "../sandbox/manager.js";
+import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -423,6 +424,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const activity = createActivity();
   const start = Date.now();
   let alive = true;
+  let browserNetwork: BrowserNetworkGuard | undefined;
 
   // Enforce model allowlist (throws if model not allowed)
   if (agentConfig.model) {
@@ -506,6 +508,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
         mounts: hostMounts,
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
+        onNetworkDenied: ctx.onNetworkDenied,
       })
     : undefined;
   const shell = workspace ? new WorkspaceShell(workspace) : undefined;
@@ -740,12 +743,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
 
       if (hasExtendedTools) {
+        // the browser runs on the host: it follows the sandbox network rule too
+        browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
         allTools = await createAllTools({
           cwd,
           allowedTools: agentConfig.allowedTools,
           allowedPaths: effectiveAllowedPaths,
           browserSession: agentConfig.name,
           browserProfileDir,
+          browserNetwork,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,
@@ -839,6 +845,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       };
     } finally {
       await workspace?.dispose().catch(() => undefined);
+      await browserNetwork?.close().catch(() => undefined);
       // Close agent-browser session (profile data auto-persisted by --profile)
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
@@ -908,9 +915,11 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
 /** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
 export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts: StorageMountSpec[]): string {
   if (!sandbox || sandbox.provider === "local") return "";
-  const network = sandbox.network.mode === "open" ? "open"
+  const through = "through a proxy that speaks HTTP and SOCKS5: curl, git over https, npm, pip and ssh (git over ssh is preconfigured) work; programs that ignore proxy settings cannot connect";
+  const network = sandbox.network.mode === "unrestricted" ? "unrestricted (the whole network of this machine)"
+    : sandbox.network.mode === "open" ? `every public destination, ${through}; this machine's own services, private networks and Tailscale are refused`
     : sandbox.network.mode === "deny" ? "disabled (no connections at all)"
-    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} (other hosts are refused by a proxy)`;
+    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} ("host" or "host:port"; other hosts are refused), ${through}`;
   const limits = [
     sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",

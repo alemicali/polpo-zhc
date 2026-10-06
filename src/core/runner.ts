@@ -20,7 +20,7 @@ import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
-import { notifyRunComplete } from "./notification.js";
+import { notifyRunComplete, notifyNetworkDenied } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -319,6 +319,11 @@ async function main(): Promise<void> {
       compaction: config.compaction,
       sandbox: config.sandbox,
       mounts: config.mounts,
+      onNetworkDenied: config.notifySocket
+        ? (d: { host: string; port?: number; reason: "not-allowed" | "private-address" }) => notifyNetworkDenied(config.notifySocket!, {
+            runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", ...d,
+          })
+        : undefined,
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
