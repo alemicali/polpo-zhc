@@ -47,6 +47,7 @@ import {
   Bell,
   UsersRound,
   CalendarClock,
+  Box,
 } from "lucide-react";
 import { useEvents, usePolpo, useLogs } from "@polpo-ai/react";
 import type { LogEntry } from "@polpo-ai/react";
@@ -69,6 +70,7 @@ type EventCategory =
   | "room"
   | "channel"
   | "schedule"
+  | "sandbox"
   | "log"
   | "other";
 
@@ -86,6 +88,7 @@ function getCategory(event: string): EventCategory {
   if (event.startsWith("room:")) return "room";
   if (event.startsWith("peer:") || event.startsWith("gateway:")) return "channel";
   if (event.startsWith("schedule:") || event.startsWith("delay:") || event.startsWith("watcher:") || event.startsWith("background-wait:")) return "schedule";
+  if (event.startsWith("sandbox:") || event.startsWith("storage:")) return "sandbox";
   if (event === "log") return "log";
   return "other";
 }
@@ -165,6 +168,12 @@ const categoryConfig: Record<
     label: "Schedules",
     color: "text-indigo-400",
     bg: "bg-indigo-500/10",
+  },
+  sandbox: {
+    icon: Box,
+    label: "Sandbox",
+    color: "text-teal-400",
+    bg: "bg-teal-500/10",
   },
   log: {
     icon: Info,
@@ -287,6 +296,24 @@ function buildNarrative(
     const why = data?.reason === "overflow" ? " after a context overflow" : data?.reason === "manual" ? " on request" : "";
     const facts = data?.savedFacts ? `, ${data.savedFacts} facts saved to memory` : "";
     return `${who} compacted${why}: ${k(data?.beforeTokens)} → ${k(data?.afterTokens)} tokens, ${how}${facts}`;
+  }
+
+  if (category === "sandbox") {
+    const where = data?.scope === "task"
+      ? `task ${String(data?.taskId ?? "").slice(0, 8)}${data?.agentName ? ` (${data.agentName})` : ""}`
+      : `chat${data?.agentName ? ` with ${data.agentName}` : ""}`;
+    const seconds = (ms: unknown) => `${Math.round(Number(ms ?? 0) / 100) / 10}s`;
+    switch (eventName) {
+      case "sandbox:created": return `Sandbox ${data?.provider} opened for ${where}, network ${data?.network}`;
+      case "sandbox:ready": return `Sandbox ${data?.provider} ready in ${seconds(data?.durationMs)}`;
+      case "sandbox:failed": return `Sandbox ${data?.provider} could not start for ${where}: ${data?.error}`;
+      case "sandbox:destroyed": return `Sandbox ${data?.provider} closed after ${seconds(data?.durationMs)} (${data?.reason})`;
+      case "sandbox:override-denied": {
+        const show = (v: unknown) => typeof v === "object" && v !== null ? ((v as { mode?: string }).mode ?? JSON.stringify(v)) : String(v);
+        return `${data?.level === "mission" ? "Mission" : "Task"} asked for ${data?.field} ${show(data?.requested)} for ${where}; kept ${show(data?.applied)}`;
+      }
+      case "storage:changed": return `Storage "${data?.name}" ${data?.action}${data?.error ? `: ${data.error}` : ""}`;
+    }
   }
 
   switch (category) {

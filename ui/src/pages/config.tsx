@@ -69,6 +69,7 @@ import {
   Image as ImageIcon,
   Copy,
   type LucideIcon,
+  Box as SandboxIcon,
 } from "lucide-react";
 import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
@@ -106,6 +107,7 @@ import { useCustomProviders } from "@/hooks/use-custom-providers";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
+import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -209,6 +211,7 @@ const baseSections = [
   { id: "channels", label: "Channels", icon: Send },
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
+  { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
 ] as const;
@@ -3189,7 +3192,10 @@ export function ConfigPage() {
   const { config, isLoading, error, refetch, setOptimistic } = useConfig();
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
-  const [activeSection, setActiveSection] = useState<SectionId>("general");
+  const [activeSection, setActiveSection] = useState<SectionId>(() => {
+    const requested = new URLSearchParams(window.location.search).get("section");
+    return baseSections.find((section) => section.id === requested)?.id ?? "general";
+  });
 
   // ── Rule dialog state ──
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
@@ -3506,6 +3512,9 @@ export function ConfigPage() {
             )}
           </div>
         )}
+
+        {/* ═══ SANDBOX ═══ */}
+        {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
 
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (
