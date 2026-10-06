@@ -99,6 +99,7 @@ import type { Spawner } from "./spawner.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
+import { resolveToolOutputDir } from "../tools/tool-output.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { normalizeSandboxSettings, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
@@ -278,8 +279,14 @@ export class Orchestrator extends TypedEmitter {
     try {
       const workspace = createWorkspace(sandbox, {
         root,
-        readable: [join(this.polpoDir, "tmp", "tool-output")],
+        readable: [
+          resolveToolOutputDir({ polpoDir: this.polpoDir, agentName: agent?.name ?? "polpo" }),
+          join(this.polpoDir, "skills"),
+          join(this.polpoDir, "playbooks"),
+        ],
         mounts: mounts.filter((m) => m.hostPath),
+        // config, sessions, vault, control socket: never visible to commands
+        hide: [this.polpoDir],
       });
       this.emit("sandbox:created", {
         workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName: agent?.name ?? "polpo", network: sandbox.network.mode,

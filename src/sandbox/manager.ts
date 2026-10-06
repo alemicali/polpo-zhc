@@ -33,6 +33,7 @@ export interface WorkspaceRequest {
   writable?: string[];
   readable?: string[];
   mounts?: StorageMountSpec[];
+  hide?: string[];
   onNetworkDenied?: (host: string) => void;
 }
 
@@ -44,7 +45,7 @@ export function effectiveSandbox(req: Pick<WorkspaceRequest, "scope" | "cascade"
 /** Create the workspace for an already resolved sandbox. Remote providers come with their adapters. */
 export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRequest, "scope" | "cascade" | "agentTools">): Workspace {
   const opts: HostWorkspaceOptions = {
-    root: req.root, writable: req.writable, readable: req.readable, mounts: req.mounts, sandbox, onNetworkDenied: req.onNetworkDenied,
+    root: req.root, writable: req.writable, readable: req.readable, mounts: req.mounts, hide: req.hide, sandbox, onNetworkDenied: req.onNetworkDenied,
   };
   switch (sandbox.provider) {
     case "bwrap": return new BwrapWorkspace(opts);

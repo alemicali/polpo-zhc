@@ -500,7 +500,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     ? createWorkspace(ctx.sandbox, {
         root: cwd,
         writable: [...(outputDir ? [outputDir] : []), ...(effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p))],
+        // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
+        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
         mounts: hostMounts,
+        hide: ctx.polpoDir ? [ctx.polpoDir] : [],
       })
     : undefined;
   const shell = workspace ? new WorkspaceShell(workspace) : undefined;

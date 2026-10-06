@@ -28,6 +28,11 @@ export interface HostWorkspaceOptions {
   readable?: string[];
   /** Storage mounts with a host path. */
   mounts?: StorageMountSpec[];
+  /**
+   * Directories hidden inside the jail even when they sit inside the working directory (the
+   * project's .polpo: config, sessions, control socket). Paths granted above stay visible.
+   */
+  hide?: string[];
   sandbox: EffectiveSandbox;
   /** Called when the network proxy refuses a host. */
   onNetworkDenied?: (host: string) => void;
@@ -174,12 +179,22 @@ export class BwrapWorkspace extends HostFsWorkspace {
     for (const dir of toolDirs) args.push("--ro-bind-try", dir, dir);
     args.push("--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run");
 
-    // what the agent works on (same paths as on the host)
-    for (const p of this.paths) {
-      if (!existsSync(p.path)) continue;
-      args.push(p.readOnly ? "--ro-bind" : "--bind", p.path, p.path);
+    // what the agent works on (same paths as on the host), parents before children so a
+    // read-only path inside the working directory stays read-only, and hidden directories
+    // masked before the paths granted inside them are bound again
+    type Op = { path: string; kind: "rw" | "ro" | "hide" };
+    const binds: Op[] = [{ path: this.root, kind: "rw" }];
+    for (const p of this.paths) if (existsSync(p.path)) binds.push({ path: p.path, kind: p.readOnly ? "ro" : "rw" });
+    const bound = binds.map((b) => b.path);
+    const hides: Op[] = (this.opts.hide ?? []).map((h) => resolve(h))
+      .filter((h) => existsSync(h) && bound.some((b) => h !== b && insideAny(h, [b])))
+      .map((path) => ({ path, kind: "hide" }));
+    const depth = (p: string) => p.split(sep).length;
+    const ops = [...binds, ...hides].sort((a, b) => depth(a.path) - depth(b.path) || (a.kind === "hide" ? -1 : b.kind === "hide" ? 1 : 0));
+    for (const op of ops) {
+      if (op.kind === "hide") args.push("--tmpfs", op.path);
+      else args.push(op.kind === "ro" ? "--ro-bind" : "--bind", op.path, op.path);
     }
-    args.push("--bind", this.root, this.root);
 
     const env: Record<string, string> = {
       PATH: [...toolDirs.filter((d) => d.endsWith("bin")), join(home, ".npm-global/bin"), "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin"].join(":"),

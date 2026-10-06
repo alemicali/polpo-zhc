@@ -102,6 +102,37 @@ describe.skipIf(!bwrapAvailable())("bubblewrap workspace", () => {
     rmSync(shared, { recursive: true, force: true });
   });
 
+  test(".polpo inside the working directory stays hidden; granted paths inside it keep their mode", async () => {
+    const project = mkdtempSync(join(tmpdir(), "polpo-sbx-project-"));
+    const polpoDir = join(project, ".polpo");
+    const output = join(polpoDir, "output", "t1");
+    const skills = join(polpoDir, "skills");
+    const mount = join(polpoDir, "mounts", "docs");
+    for (const dir of [output, skills, mount]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(polpoDir, "polpo.json"), "{\"botToken\":\"SECRET\"}");
+    writeFileSync(join(polpoDir, ".env"), "KEY=SECRET");
+    writeFileSync(join(skills, "run.sh"), "echo skill-ok");
+    writeFileSync(join(mount, "readme.txt"), "bucket");
+    const ws = new BwrapWorkspace({
+      root: project,
+      writable: [output],
+      readable: [skills],
+      mounts: [{ name: "docs", path: mount, hostPath: mount, readOnly: true }],
+      hide: [polpoDir],
+      sandbox: sandbox({ mode: "deny" }),
+    });
+    const r = await ws.exec([
+      `cat ${polpoDir}/polpo.json 2>&1 || true`, `cat ${polpoDir}/.env 2>&1 || true`,
+      `echo done > ${output}/result.txt`, `bash ${skills}/run.sh`, `echo x > ${skills}/new 2>/dev/null || echo SKILLS-RO`,
+      `cat ${mount}/readme.txt`, `echo x > ${mount}/new 2>/dev/null || echo MOUNT-RO`, "echo top > top.txt",
+    ].join("; "));
+    expect(r.stdout).not.toContain("SECRET");
+    expect(readFileSync(join(output, "result.txt"), "utf8").trim()).toBe("done");
+    expect(readFileSync(join(project, "top.txt"), "utf8").trim()).toBe("top");
+    for (const marker of ["skill-ok", "SKILLS-RO", "bucket", "MOUNT-RO"]) expect(r.stdout).toContain(marker);
+    rmSync(project, { recursive: true, force: true });
+  });
+
   test("network deny: no connection at all", async () => {
     const ws = new BwrapWorkspace({ root, sandbox: sandbox({ mode: "deny" }) });
     const result = await ws.exec(`curl -s -m 3 http://127.0.0.1:${port}/ || echo NO-NET`);
