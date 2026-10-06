@@ -1626,6 +1626,8 @@ export class Orchestrator extends TypedEmitter {
   private async refreshDedicatedBot(key: string): Promise<boolean> {
     const bot = this.dedicatedTelegramBots.get(key);
     if (!bot) return true;
+    // The engine exists once the stores are open: until then, retry later (not an error).
+    if (!this.engine) return false;
     try {
       const agents = await this.getAgents();
       if (!agents.some(a => a.name === bot.agent)) return false;
