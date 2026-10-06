@@ -16,8 +16,10 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { assertUrlAllowed } from "./ssrf-guard.js";
+import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
 
-const MAX_RESPONSE_BYTES = 100_000;
+/** Text bodies above this are saved in full to a file; the model gets head + tail + path. */
+const MAX_RESPONSE_BYTES = 30_000;
 const DEFAULT_TIMEOUT = 30_000;
 
 // ─── Tool: http_fetch ───
@@ -38,7 +40,7 @@ const HttpFetchSchema = Type.Object({
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 30000)" })),
 });
 
-function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
+function createHttpFetchTool(toolOutputDir: string): AgentTool<typeof HttpFetchSchema> {
   return {
     name: "http_fetch",
     label: "HTTP Fetch",
@@ -92,11 +94,12 @@ function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
           contentType.includes("svg");
 
         let body: string;
+        let offloaded: { path?: string; totalBytes: number; totalLines: number } | undefined;
         if (isText) {
           const text = await response.text();
-          body = text.length > MAX_RESPONSE_BYTES
-            ? text.slice(0, MAX_RESPONSE_BYTES) + `\n[truncated — ${text.length} total bytes]`
-            : text;
+          const off = await offloadToolOutput(text, { tool: "http_fetch", dir: toolOutputDir, maxChars: MAX_RESPONSE_BYTES });
+          body = off.text;
+          if (off.offloaded) offloaded = { path: off.path, totalBytes: off.totalBytes, totalLines: off.totalLines };
         } else {
           const buffer = await response.arrayBuffer();
           body = `[Binary response: ${buffer.byteLength} bytes, content-type: ${contentType}]`;
@@ -127,6 +130,7 @@ function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
             statusText: response.statusText,
             headers: responseHeaders,
             bodyLength: body.length,
+            ...(offloaded ? { outputPath: offloaded.path, outputBytes: offloaded.totalBytes, outputLines: offloaded.totalLines } : {}),
           },
         };
       } catch (err: any) {
@@ -229,16 +233,18 @@ export const ALL_HTTP_TOOL_NAMES: HttpToolName[] = ["http_fetch", "http_download
  * @param cwd - Working directory for resolving download paths
  * @param allowedPaths - Sandbox paths for download destination validation
  * @param allowedTools - Optional filter
+ * @param toolOutputDir - Where large response bodies are saved (default: resolveToolOutputDir())
  */
 export function createHttpTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
+  toolOutputDir: string = resolveToolOutputDir(),
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<HttpToolName, () => AgentTool<any>> = {
-    http_fetch: () => createHttpFetchTool(),
+    http_fetch: () => createHttpFetchTool(toolOutputDir),
     http_download: () => createHttpDownloadTool(cwd, sandbox),
   };
 
