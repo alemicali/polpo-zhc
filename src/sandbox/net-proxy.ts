@@ -119,7 +119,7 @@ const fail = (msg) => { process.stderr.write("polpo-connect: " + msg + "\\n"); p
 if (!host || !port) fail("usage: connect.cjs <host> <port>");
 const sock = net.createConnection(socketPath);
 sock.on("error", (e) => fail(e.message));
-sock.on("close", () => process.exit(0));
+sock.on("close", () => { process.stdin.destroy(); });
 const name = Buffer.from(host);
 let stage = 0;
 let buf = Buffer.alloc(0);
