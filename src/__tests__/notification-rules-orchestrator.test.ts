@@ -90,4 +90,32 @@ describe("Orchestrator notification rules wiring", () => {
     expect(globalCh.sent).toHaveLength(0);
   });
 
+  it("keeps executing rule actions after a config reload", async () => {
+    const actionRule: NotificationRule = {
+      id: "action-rule",
+      name: "Create follow-up",
+      events: ["mission:executed"],
+      channels: [],
+      actions: [{ type: "create_task", title: "Follow-up", description: "follow up", assignTo: "a" }],
+    };
+    await start([actionRule]);
+
+    const triggered: Array<{ ruleId: string; result?: string; error?: string }> = [];
+    orchestrator.on("action:triggered", (e) => triggered.push(e));
+
+    orchestrator.emit("mission:executed", { missionId: "none", group: "g", taskCount: 0 });
+    await vi.waitFor(() => expect(triggered).toHaveLength(1));
+    expect(triggered[0].error).toBeUndefined();
+
+    // Reload with the same rule (new title: active task titles must be unique)
+    writeConfig([{ ...actionRule, actions: [{ type: "create_task", title: "Follow-up 2", description: "follow up", assignTo: "a" }] }]);
+    expect(await orchestrator.reloadConfig()).toBe(true);
+
+    orchestrator.emit("mission:executed", { missionId: "none", group: "g", taskCount: 0 });
+    await vi.waitFor(() => expect(triggered).toHaveLength(2));
+    expect(triggered[1].ruleId).toBe("action-rule");
+    expect(triggered[1].error).toBeUndefined();
+    const titles = (await store.getAllTasks()).map((t) => t.title);
+    expect(titles).toEqual(expect.arrayContaining(["Follow-up", "Follow-up 2"]));
+  });
 });
