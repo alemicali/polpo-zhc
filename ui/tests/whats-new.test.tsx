@@ -47,7 +47,7 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   const dates = CHANGELOG.map((e) => e.date);
   expect([...dates].sort().reverse()).toEqual(dates);
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
-  expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([["2026-10-06", 5], ["2026-10-05", 1]]);
+  expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([["2026-10-06", 6], ["2026-10-05", 1]]);
   expect(CHANGELOG.find((e) => e.id === "2026-10-06-group-chats")?.cta?.to).toBe("/chat?newGroup=1");
   // group chats lead the bar, then the Telegram news
   expect(unseenHighlights(CHANGELOG, new Set()).slice(0, 2).map((e) => e.id)).toEqual(["2026-10-06-group-chats", "2026-10-06-telegram-groups"]);
