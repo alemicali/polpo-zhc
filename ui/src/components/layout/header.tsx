@@ -191,7 +191,7 @@ export function Header() {
       </div>
 
       {/* Desktop: page title */}
-      <div className="hidden lg:flex items-center gap-3">
+      <div className="hidden shrink-0 lg:flex items-center gap-3">
         <h2 className="text-lg font-bold tracking-tight">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
         <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
@@ -199,9 +199,11 @@ export function Header() {
         </span>
       </div>
 
+      {/* Chat controls sit in the flow between the title and the actions, so
+          they never overlap the title / project badge. Desktop only. */}
       {isOnChatPage && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[min(72rem,72vw)] -translate-x-1/2 -translate-y-1/2">
-          <div className="pointer-events-auto flex justify-center">
+        <div className="hidden min-w-0 flex-1 justify-center px-4 lg:flex xl:px-6">
+          <div className="w-full max-w-6xl">
             <ChatHeaderCenter />
           </div>
         </div>

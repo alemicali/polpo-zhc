@@ -4375,12 +4375,9 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 
 // ── ChatLoadingSkeleton — full-page skeleton while sessions are loading ──
 
-function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
+function ChatLoadingSkeleton() {
   return (
-    <div className={cn(
-      "flex flex-1 min-h-0",
-      !compact && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
-    )}>
+    <div className="flex flex-1 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Skeleton toolbar */}
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
@@ -4511,7 +4508,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
   const leaveGroup = useCallback(() => setActiveChatRoom(null), []);
 
   if (sessionsLoading) {
-    return <ChatLoadingSkeleton compact={compact} />;
+    return <ChatLoadingSkeleton />;
   }
 
   const groupsSection = (
@@ -4531,10 +4528,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
   const activeThreadId = activeRoomId ? null : sessionId;
 
   return (
-    <div className={cn(
-      "relative flex flex-1 min-h-0",
-      !compact && !embedded && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
-    )}>
+    <div className="relative flex flex-1 min-h-0">
       {/* Compact mode: sidebar replaces the entire chat area */}
       {compact && sidebarOpen ? (
         <SessionSidebar

@@ -11,7 +11,8 @@ import { useLayoutMode } from "@/hooks/use-layout-mode";
 
 /** Tool surfaces that should meet the surrounding pane edges. */
 function hasNoPagePadding(pathname: string): boolean {
-  return pathname === "/coding"
+  return pathname === "/chat"
+    || pathname === "/coding"
     || pathname.startsWith("/coding/")
     || pathname === "/terminal"
     || pathname === "/browser"
