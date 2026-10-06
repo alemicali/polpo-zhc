@@ -21,7 +21,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "zod";
 import type { Orchestrator } from "../../core/orchestrator.js";
-import { resolveAgentVault } from "../../vault/index.js";
+import { resolveAgentVault, loadAgentVaultEntries } from "../../vault/index.js";
 import { sendEmail, type SendEmailParams } from "../../tools/email-tools.js";
 
 const recipientSchema = z.union([z.string(), z.array(z.string())]).optional();
@@ -69,7 +69,7 @@ export function emailRoutes(getDeps: () => {
       if (!agentConfig) {
         return c.json({ ok: false, error: `Agent "${agent}" not found` }, 404);
       }
-      const vaultEntries = await orchestrator.getVaultStore()?.getAllForAgent(agent);
+      const vaultEntries = await loadAgentVaultEntries(orchestrator.getVaultStore(), agent);
       vault = resolveAgentVault(vaultEntries);
       emailAllowedDomains = agentConfig.emailAllowedDomains
         ?? orchestrator.getConfig()?.settings?.emailAllowedDomains;

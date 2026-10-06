@@ -1,5 +1,17 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { AgentConfig, AgentUpdate, Team } from "./types.js";
+import { isReservedVaultOwner } from "./vault-store.js";
+
+/**
+ * "$"-prefixed names are reserved system vault namespaces ("$data",
+ * "$providers", ...): an agent with such a name would inherit (and could
+ * overwrite) those credentials. Refuse to create, update or remove them.
+ */
+export function assertAgentNameAllowed(name: unknown): void {
+  if (isReservedVaultOwner(name)) {
+    throw new Error(`Invalid agent name "${String(name)}": names starting with "$" are reserved`);
+  }
+}
 
 /**
  * Manages multi-team agent topology: CRUD operations on teams and agents,
@@ -74,6 +86,7 @@ export class AgentManager {
   async addTeam(team: Team): Promise<void> {
     // Extract agents from the team — they go to AgentStore separately
     const { agents, ...teamData } = team;
+    for (const agent of agents ?? []) assertAgentNameAllowed(agent.name);
     await this.ctx.teamStore.createTeam({ ...teamData, agents: [] });
 
     // Add any agents that came with the team definition
@@ -131,6 +144,7 @@ export class AgentManager {
   }
 
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    assertAgentNameAllowed(agent.name);
     const team = teamName
       ? await this.ctx.teamStore.getTeam(teamName)
       : await this.getDefaultTeam();
@@ -143,6 +157,7 @@ export class AgentManager {
 
   /** Update agent fields and, when requested, its team relationship. */
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    assertAgentNameAllowed(name);
     const { team: teamName, ...agentUpdates } = updates;
 
     if (teamName !== undefined) {
@@ -166,6 +181,9 @@ export class AgentManager {
   }
 
   async removeAgent(name: string): Promise<boolean> {
+    // Removal is allowed even for a (legacy) "$"-named agent so it can be
+    // cleaned up — it only touches the agent store. NEVER cascade an agent
+    // removal to the vault for "$" names: those are system namespaces.
     const teamName = await this.ctx.agentStore.getAgentTeam(name);
     const deleted = await this.ctx.agentStore.deleteAgent(name);
     if (deleted) {
@@ -176,6 +194,7 @@ export class AgentManager {
   }
 
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> {
+    assertAgentNameAllowed(agent.name);
     const existing = await this.ctx.agentStore.getAgent(agent.name);
     if (existing) return;
 

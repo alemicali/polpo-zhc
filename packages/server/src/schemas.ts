@@ -369,7 +369,7 @@ const PipelineSchema = z.object({
 const AgentLoopsSchema = z.record(z.string().min(1), LoopConfigSchema);
 
 export const AddAgentSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
   model: z.string().optional(),
   allowedTools: z.array(z.string()).optional(),

@@ -52,6 +52,9 @@ export function validateAgents(agents: any[]): void {
     if (!agent.name || typeof agent.name !== "string") {
       throw new Error("Each agent must have a name");
     }
+    if (agent.name.trim().startsWith("$")) {
+      throw new Error(`Invalid agent name "${agent.name}": names starting with "$" are reserved`);
+    }
     // Validate allowedPaths
     if (agent.allowedPaths !== undefined) {
       if (!Array.isArray(agent.allowedPaths)) {

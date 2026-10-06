@@ -198,3 +198,19 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
     },
   };
 }
+
+// ─── Agent vault loading ─────────────────────────────
+
+/**
+ * Load the vault entries an agent may use. Returns undefined for reserved
+ * "$"-prefixed names ("$data", "$providers", ...): those are system
+ * namespaces and must never be exposed to an agent, even one (wrongly)
+ * named like them.
+ */
+export async function loadAgentVaultEntries(
+  vaultStore: { getAllForAgent(agent: string): Promise<Record<string, VaultEntry>> } | undefined | null,
+  agentName: string,
+): Promise<Record<string, VaultEntry> | undefined> {
+  if (!vaultStore || typeof agentName !== "string" || agentName.trim().startsWith("$")) return undefined;
+  return vaultStore.getAllForAgent(agentName);
+}
