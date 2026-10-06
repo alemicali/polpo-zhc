@@ -7,8 +7,9 @@
  * single call to a System One model (TypeSafe Jev), which answers every question in one
  * parallel pass with a calibrated probability. Each agent above its threshold answers.
  *
- * Every bot of the group receives its own copy of the message, with the same message id: the
- * first copy runs the classification for all the agents, the others read the same result.
+ * Every bot of the group receives its own copy of the message, with the same message id. The
+ * copies are gathered for a moment (windowMs): the agents asked about are the bots that really
+ * got the message, then one classification answers them all.
  *
  * Without a key, or when the call fails, nobody joins: the group falls back to mentions only.
  */
@@ -50,12 +51,12 @@ export type IntentClassifier = (context: ClassifierContext, options: { apiKey: s
 export interface GroupIntentOptions {
   /** API key of the classifier; unset = intent mode stays off (mentions only). */
   apiKey: () => string | undefined;
-  /** The bots that may join this conversation (asked when a message arrives). */
-  candidates: (conversation: string) => Promise<IntentCandidate[]>;
   classify?: IntentClassifier;
   log?: (level: "info" | "warn", message: string) => void;
   /** Give up on the classifier after this long: the message stays context. Default 4 s. */
   timeoutMs?: number;
+  /** How long the bots' copies of a message are gathered before the call. Default 700 ms. */
+  windowMs?: number;
 }
 
 /** How long a decision is kept for the other bots' copies of the message. */
@@ -72,7 +73,7 @@ const defaultClassify: IntentClassifier = (context, options) => typesafeClassify
 const clip = (s: string, n = LINE_CHARS) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 export class GroupIntentArbiter {
-  private decisions = new Map<string, { at: number; result: Promise<IntentDecision> }>();
+  private decisions = new Map<string, { at: number; candidates: Map<string, IntentCandidate>; result: Promise<IntentDecision> }>();
   private replies = new Map<string, Array<{ name: string; at: number }>>();
   private classify: IntentClassifier;
 
@@ -85,15 +86,22 @@ export class GroupIntentArbiter {
     return !!this.opts.apiKey();
   }
 
-  /** The decision for this message: computed once, shared by every bot of the group. */
-  decide(msg: IntentMessage): Promise<IntentDecision> {
+  /**
+   * The decision for this message, for the bot asking (one of the group's agents). The bots that
+   * ask within the window are classified together, once; a bot asking later gets no say (0).
+   */
+  decide(msg: IntentMessage, me: IntentCandidate): Promise<IntentDecision> {
     const now = Date.now();
     for (const [k, v] of this.decisions) if (now - v.at > DECISION_TTL_MS) this.decisions.delete(k);
     const key = `${msg.conversation}#${msg.messageId}`;
     const hit = this.decisions.get(key);
-    if (hit) return hit.result;
-    const result = this.run(msg);
-    this.decisions.set(key, { at: now, result });
+    if (hit) {
+      hit.candidates.set(me.key, me);
+      return hit.result;
+    }
+    const candidates = new Map([[me.key, me]]);
+    const result = new Promise<void>((r) => setTimeout(r, this.opts.windowMs ?? 700)).then(() => this.run(msg, [...candidates.values()]));
+    this.decisions.set(key, { at: now, candidates, result });
     return result;
   }
 
@@ -110,11 +118,9 @@ export class GroupIntentArbiter {
     return (this.replies.get(conversation) ?? []).filter((r) => now - r.at < RECENT_REPLY_MS).map((r) => r.name);
   }
 
-  private async run(msg: IntentMessage): Promise<IntentDecision> {
+  private async run(msg: IntentMessage, candidates: IntentCandidate[]): Promise<IntentDecision> {
     const apiKey = this.opts.apiKey();
-    if (!apiKey) return {};
-    const candidates = await this.opts.candidates(msg.conversation);
-    if (candidates.length === 0) return {};
+    if (!apiKey || candidates.length === 0) return {};
 
     const context = intentContext(msg, candidates, this.recentRepliers(msg.conversation));
     const started = Date.now();
@@ -127,7 +133,7 @@ export class GroupIntentArbiter {
         decision[c.key] = a?.type === "bool" ? a.probability : 0;
       }
       const summary = candidates.map((c) => `${c.name} ${decision[c.key]!.toFixed(2)}`).join(", ");
-      this.opts.log?.("info", `[group intent] ${msg.conversation} #${msg.messageId} (${Date.now() - started} ms): ${summary}`);
+      this.opts.log?.("info", `[group intent] ${msg.title ?? msg.conversation} #${msg.messageId} "${clip(msg.text, 60)}" (${Date.now() - started} ms): ${summary}`);
       return decision;
     } catch (err) {
       this.opts.log?.("warn", `[group intent] classification failed, nobody joins: ${err instanceof Error ? err.message : String(err)}`);

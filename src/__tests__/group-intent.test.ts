@@ -40,22 +40,31 @@ describe("GroupIntentArbiter", () => {
     expect(state.agentsInGroup).toHaveLength(2);
   });
 
-  it("classifies a message once for every bot of the group", async () => {
+  it("classifies a message once, for the bots whose copies arrive within the window", async () => {
     const classify = fakeClassifier({ "growth-bot": 0.94, "ops-bot": 0.08 });
-    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", candidates: async () => [GROWTH, OPS], classify });
-    const [a, b] = await Promise.all([arbiter.decide(message()), arbiter.decide(message())]);
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 20 });
+    const [a, b] = await Promise.all([arbiter.decide(message(), GROWTH), arbiter.decide(message(), OPS)]);
     expect(a).toEqual({ "growth-bot": 0.94, "ops-bot": 0.08 });
     expect(b).toBe(a);
     expect(classify).toHaveBeenCalledTimes(1);
-    await arbiter.decide(message({ messageId: "11" }));
+    await arbiter.decide(message({ messageId: "11" }), GROWTH);
     expect(classify).toHaveBeenCalledTimes(2);
+  });
+
+  it("only the bots that got the message are asked about; a late copy gets no say", async () => {
+    const classify = fakeClassifier({ "growth-bot": 0.9, "ops-bot": 0.9 });
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 5 });
+    await arbiter.decide(message(), GROWTH);
+    expect(Object.keys(classify.mock.calls[0]![0].questions)).toEqual(["growth-bot"]);
+    expect(await arbiter.decide(message(), OPS)).toEqual({ "growth-bot": 0.9 });
+    expect(classify).toHaveBeenCalledTimes(1);
   });
 
   it("without a key nobody joins and nothing is called", async () => {
     const classify = fakeClassifier({ "growth-bot": 1 });
-    const arbiter = new GroupIntentArbiter({ apiKey: () => undefined, candidates: async () => [GROWTH], classify });
+    const arbiter = new GroupIntentArbiter({ apiKey: () => undefined, classify, windowMs: 0 });
     expect(arbiter.available).toBe(false);
-    expect(await arbiter.decide(message())).toEqual({});
+    expect(await arbiter.decide(message(), GROWTH)).toEqual({});
     expect(classify).not.toHaveBeenCalled();
   });
 
@@ -64,16 +73,16 @@ describe("GroupIntentArbiter", () => {
     const classify = vi.fn<IntentClassifier>(async () => ({
       api: "typesafe-system-one", provider: "typesafe", model: "jev-latest", answers: {}, stopReason: "error", errorMessage: "429", timestamp: 0,
     }));
-    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", candidates: async () => [GROWTH], classify, log });
-    expect(await arbiter.decide(message())).toEqual({});
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, log, windowMs: 0 });
+    expect(await arbiter.decide(message(), GROWTH)).toEqual({});
     expect(log).toHaveBeenCalledWith("warn", expect.stringContaining("429"));
   });
 
   it("remembers who answered recently, for follow-ups", async () => {
     const classify = fakeClassifier({});
-    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", candidates: async () => [GROWTH], classify });
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 0 });
     arbiter.noteReply(GROUP_ID, "Giulia");
-    await arbiter.decide(message());
+    await arbiter.decide(message(), GROWTH);
     expect((classify.mock.calls[0]![0].state as { answeredRecently: string[] }).answeredRecently).toEqual(["Giulia"]);
   });
 });
@@ -109,19 +118,14 @@ describe("ChannelGateway — joining in by intent", () => {
       gateway("growth-bot", { agent: "growth", groupReplies: "intent", ...growth }),
       gateway("ops-bot", { agent: "ops", groupReplies: "intent", ...ops }),
     ];
-    const arbiter = new GroupIntentArbiter({
-      apiKey: () => "k",
-      candidates: async (c) => (await Promise.all(gws.map((g) => g.intentCandidate(c)))).filter((x): x is IntentCandidate => !!x),
-      classify,
-    });
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 20 });
     gws.forEach((g) => g.setIntentArbiter(arbiter));
     return { growth: gws[0]!, ops: gws[1]!, classify };
   }
 
   it("the agent above the threshold joins, the other keeps quiet, with one call", async () => {
     const { growth, ops, classify } = pair({ "growth-bot": 0.94, "ops-bot": 0.08 });
-    expect(await growth.joinsByIntent(inbound())).toBe(true);
-    expect(await ops.joinsByIntent(inbound())).toBe(false);
+    expect(await Promise.all([growth.joinsByIntent(inbound()), ops.joinsByIntent(inbound())])).toEqual([true, false]);
     expect(classify).toHaveBeenCalledTimes(1);
     const state = classify.mock.calls[0]![0].state as { agentsInGroup: Array<{ name: string; role: string; responsibilities: string[] }> };
     expect(state.agentsInGroup[0]).toEqual({ name: "Giulia", role: "Growth lead", responsibilities: ["Social: campaigns"] });
@@ -134,21 +138,19 @@ describe("ChannelGateway — joining in by intent", () => {
 
   it("several agents can join the same message", async () => {
     const { growth, ops } = pair({ "growth-bot": 0.8, "ops-bot": 0.75 });
-    expect(await growth.joinsByIntent(inbound())).toBe(true);
-    expect(await ops.joinsByIntent(inbound())).toBe(true);
+    expect(await Promise.all([growth.joinsByIntent(inbound()), ops.joinsByIntent(inbound())])).toEqual([true, true]);
   });
 
   it("a bot in mentions mode is not a candidate and never joins", async () => {
     const { growth, ops, classify } = pair({ "growth-bot": 0.9, "ops-bot": 0.9 }, {}, { groupReplies: "mentions" });
-    expect(await ops.joinsByIntent(inbound())).toBe(false);
-    await growth.joinsByIntent(inbound({ messageId: "11" }));
+    expect(await Promise.all([ops.joinsByIntent(inbound()), growth.joinsByIntent(inbound())])).toEqual([false, true]);
     expect(Object.keys(classify.mock.calls[0]![0].questions)).toEqual(["growth-bot"]);
   });
 
   it("nothing is asked for addressed messages, commands, or groups not enabled", async () => {
     const classify = fakeClassifier({ "x-bot": 1 });
     const gw = gateway("x-bot", { agent: "growth", groupReplies: "intent" }, { enabled: false });
-    gw.setIntentArbiter(new GroupIntentArbiter({ apiKey: () => "k", candidates: async (c) => [await gw.intentCandidate(c)].filter((x): x is IntentCandidate => !!x), classify }));
+    gw.setIntentArbiter(new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 0 }));
     expect(await gw.joinsByIntent(inbound())).toBe(false);
     expect(await gw.joinsByIntent(inbound({ text: "/tasks", messageId: "12" }))).toBe(false);
     expect(await gw.joinsByIntent(inbound({ group: { addressed: true }, messageId: "13" }))).toBe(false);

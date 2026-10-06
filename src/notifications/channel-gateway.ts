@@ -453,6 +453,8 @@ export class ChannelGateway {
     if (!msg.group || msg.group.addressed || !this.intentMode() || !msg.messageId) return false;
     if (!msg.text.trim() || msg.text.startsWith("/")) return false;
     const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    const me = await this.intentCandidate(conversation);
+    if (!me) return false;
     const now = Date.now();
     const earlier = (this.groupContext.get(conversation) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
     const decision = await this.intent!.decide({
@@ -462,7 +464,7 @@ export class ChannelGateway {
       speaker: msg.displayName ?? msg.externalId,
       text: msg.text,
       earlier: earlier.map(l => ({ name: l.name, text: l.text })),
-    });
+    }, me);
     const p = decision[this.key] ?? 0;
     return p >= (this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD);
   }
