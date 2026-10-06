@@ -95,7 +95,7 @@ interface EventCacheEntry {
 }
 
 const eventCacheByFilter = new Map<string, EventCacheEntry>();
-const MAX_EVENT_CACHE_ENTRIES = 8;
+const MAX_EVENT_CACHE_ENTRIES = 64;
 
 export function selectEvents(state: StoreState, filter?: string[]): SSEEvent[] {
   const filterKey = filter?.join(",") ?? "";
@@ -108,6 +108,11 @@ export function selectEvents(state: StoreState, filter?: string[]): SSEEvent[] {
   let events = state.recentEvents;
   if (filter?.length) {
     events = events.filter((e) => matchesEventFilter(e.event, filter));
+    // Events of other kinds arrived: same selection, same array, so subscribers don't re-render
+    if (cached && sameEvents(cached.result, events)) {
+      cached.eventsRef = state.recentEvents;
+      return cached.result;
+    }
   }
 
   if (eventCacheByFilter.size >= MAX_EVENT_CACHE_ENTRIES) {
@@ -117,6 +122,12 @@ export function selectEvents(state: StoreState, filter?: string[]): SSEEvent[] {
 
   eventCacheByFilter.set(filterKey, { eventsRef: state.recentEvents, result: events });
   return events;
+}
+
+function sameEvents(a: SSEEvent[], b: SSEEvent[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function matchesEventFilter(eventName: string, patterns: string[]): boolean {

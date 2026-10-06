@@ -1,3 +1,4 @@
+import { ErrorBoundary } from "@/components/error-boundary";
 import { lazy, Suspense, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
@@ -67,7 +68,9 @@ export function PersistentPageOutlet() {
         )}
         aria-hidden={isPersistentPage}
       >
-        <Outlet />
+        <ErrorBoundary area="questa pagina" resetKey={pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </div>
     </div>
   );

@@ -56,12 +56,14 @@ export function useDataSources() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Only the first load shows the loading state: a background refresh must not unmount the page
+  const loadedRef = useRef(false);
   const refetch = useCallback(async () => {
-    setLoading(true);
+    if (!loadedRef.current) setLoading(true);
     try {
       setSources(await request<DataSource[]>("")); setError(null);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setLoading(false); }
+    finally { loadedRef.current = true; setLoading(false); }
   }, []);
 
   useEffect(() => { void refetch(); }, [refetch]);
@@ -70,6 +72,10 @@ export function useDataSources() {
   useEffect(() => {
     if (!latestEvent || handledEventRef.current === latestEvent.id) return;
     handledEventRef.current = latestEvent.id;
+    // Every query is logged as "activity" (and rows written as "data"): neither changes the list
+    // of sources, and refetching on them looped (query → activity event → refetch → query…).
+    const action = (latestEvent.data as { action?: string } | undefined)?.action;
+    if (action === "activity" || action === "data") return;
     void refetch();
   }, [latestEvent, refetch]);
 
@@ -96,11 +102,12 @@ export function useDataViews() {
   const [views, setViews] = useState<DataView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadedRef = useRef(false);
   const refetch = useCallback(async () => {
-    setLoading(true);
+    if (!loadedRef.current) setLoading(true);
     try { setViews(await viewRequest<DataView[]>("")); setError(null); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setLoading(false); }
+    finally { loadedRef.current = true; setLoading(false); }
   }, []);
   useEffect(() => { void refetch(); }, [refetch]);
   const latestEvent = events.at(-1);

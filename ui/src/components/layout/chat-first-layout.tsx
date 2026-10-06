@@ -9,6 +9,7 @@
  * work seamlessly. Tab icons call navigate() for top-level sections.
  */
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -681,13 +682,17 @@ export function ChatFirstLayout() {
             <ChatPanelHeader />
             <ChatTabs />
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={<ChatLoader />}>
-                <ChatPage embedded />
-              </Suspense>
+              <ErrorBoundary area="la chat">
+                <Suspense fallback={<ChatLoader />}>
+                  <ChatPage embedded />
+                </Suspense>
+              </ErrorBoundary>
             </div>
           </div>
         ) : (
-          <RightPanelContent />
+          <ErrorBoundary area="questa pagina" resetKey={pathname}>
+            <RightPanelContent />
+          </ErrorBoundary>
         )}
       </>
     );
@@ -701,9 +706,11 @@ export function ChatFirstLayout() {
           <ChatPanelHeader />
           <ChatTabs />
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-            <Suspense fallback={<ChatLoader />}>
-              <ChatPage embedded />
-            </Suspense>
+            <ErrorBoundary area="la chat">
+              <Suspense fallback={<ChatLoader />}>
+                <ChatPage embedded />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </ResizablePanel>
@@ -712,7 +719,9 @@ export function ChatFirstLayout() {
 
       {/* Right: Pages via Outlet (supports detail routes) */}
       <ResizablePanel defaultSize={60} minSize={20} id="nav-panel">
-        <RightPanelContent />
+        <ErrorBoundary area="questa pagina" resetKey={pathname}>
+          <RightPanelContent />
+        </ErrorBoundary>
       </ResizablePanel>
     </ResizablePanelGroup>
   );
