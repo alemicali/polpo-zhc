@@ -70,3 +70,43 @@ export async function contextCheckpointProjection(
     },
   };
 }
+
+
+/** A stored checkpoint, verified against the conversation it is applied to. */
+export interface LoadedContextCheckpoint {
+  /** Leading messages of `original` the summary covers. */
+  covered: number;
+  summary: string;
+  count: number;
+  revision: string;
+}
+
+/** The session's checkpoint, when its covered prefix is still the start of this conversation. */
+export async function loadContextCheckpoint(
+  store: ContextCheckpointStore | undefined, sessionId: string | null, scope: string, original: any[],
+): Promise<LoadedContextCheckpoint | null> {
+  if (!store || !sessionId) return null;
+  const saved = await store.load(sessionId).catch(() => null);
+  if (!saved || saved.scope !== scope || saved.prefixHashes.length > original.length) return null;
+  const current = await Promise.all(saved.prefixHashes.map((_, i) => fingerprint(original[i])));
+  if (!current.every((hash, i) => hash === saved.prefixHashes[i])) return null;
+  return { covered: current.length, summary: saved.summary, count: saved.count ?? 1, revision: saved.revision };
+}
+
+/**
+ * Store the checkpoint for the first `covered` messages of `original` (the caller-visible
+ * history). Compare-and-swap on the previous revision; returns the new revision when saved.
+ */
+export async function saveContextCheckpoint(
+  store: ContextCheckpointStore | undefined, sessionId: string | null, scope: string, original: any[],
+  covered: number, summary: string, count: number, previousRevision: string | null,
+): Promise<string | null> {
+  if (!store || !sessionId || covered <= 0) return null;
+  const next: ContextCheckpoint = {
+    version: 1, revision: crypto.randomUUID(), scope,
+    prefixHashes: await Promise.all(original.slice(0, covered).map((message) => fingerprint(message))),
+    summary: summary.length > 60_000 ? `${summary.slice(0, 59_900)}\n[summary truncated]` : summary,
+    count,
+  };
+  return (await store.save(sessionId, next, previousRevision)) ? next.revision : null;
+}

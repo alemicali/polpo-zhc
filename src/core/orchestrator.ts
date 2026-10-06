@@ -67,7 +67,7 @@ import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ChannelCompactRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { GroupIntentArbiter } from "../notifications/group-intent.js";
 import { POLPO, RoomEngine } from "../rooms/room-engine.js";
 import { TelegramAgentRelay, type RelayBot } from "../rooms/telegram-relay.js";
@@ -179,6 +179,7 @@ export class Orchestrator extends TypedEmitter {
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
+  private channelCompactRunner?: ChannelCompactRunner;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private logRetentionTimer?: ReturnType<typeof setTimeout>;
@@ -220,6 +221,8 @@ export class Orchestrator extends TypedEmitter {
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
+  getChannelCompactRunner(): ChannelCompactRunner | undefined { return this.channelCompactRunner; }
+  setChannelCompactRunner(runner: ChannelCompactRunner): void { this.channelCompactRunner = runner; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }

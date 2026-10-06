@@ -4,7 +4,7 @@ import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimpleWithAuth } from "../llm/pi-client.js";
+import { streamSimpleWithAuth, completeSimpleWithAuth, resolveModel } from "../llm/pi-client.js";
 import { buildSystemPrompt } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -446,6 +446,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return { tools, executor: attributed, isInteractive };
     },
     streamLLM: streamSimpleWithAuth as any,
+    completeLLM: completeSimpleWithAuth as any,
+    resolveModel: (spec: string) => resolveModel(spec),
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
@@ -571,6 +573,25 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     }
     // Only the agents' workspace is shareable — never the project root (.polpo holds config and tokens).
     return interpretChannelCompletion(payload?.choices?.[0], [o.getAgentWorkDir()]);
+  });
+
+  // /compact from a messaging channel: the same completion route, asked to compact instead of answering
+  o?.setChannelCompactRunner(async ({ agent, sessionId, messages, focus }) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": sessionId,
+      "x-polpo-lease-wait": String(10 * 60 * 1000),
+      ...internalCallHeaders(),
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages, compact: focus ? { focus } : {} }),
+    }));
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok) throw new Error(payload?.error?.message ?? `Compaction failed (${response.status})`);
+    return payload?.data?.compaction ?? null;
   });
 
   authed.route("/counts", countsRoutes(() => ({

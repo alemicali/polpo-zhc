@@ -7,6 +7,12 @@ import type { ChannelGatewayConfig, ChannelType } from "../core/types.js";
 
 // ── Stateful fakes ──────────────────────────────────────
 
+
+const history = [
+  { id: "m1", role: "user", content: "earlier question", ts: new Date().toISOString() },
+  { id: "m2", role: "assistant", content: "earlier answer", ts: new Date().toISOString() },
+  { id: "m3", role: "assistant", content: "", ts: new Date().toISOString() },
+];
 function createPeerStore(overrides: Partial<PeerStore> = {}): PeerStore & { sessions: Map<string, string> } {
   const sessions = new Map<string, string>();
   const allowlist = new Set<string>();
@@ -60,12 +66,9 @@ function createSessionStore() {
       return id;
     }),
     addMessage: vi.fn(),
-    getMessages: vi.fn().mockResolvedValue([]),
-    getRecentMessages: vi.fn().mockResolvedValue([
-      { id: "m1", role: "user", content: "earlier question", ts: new Date().toISOString() },
-      { id: "m2", role: "assistant", content: "earlier answer", ts: new Date().toISOString() },
-      { id: "m3", role: "assistant", content: "", ts: new Date().toISOString() },
-    ]),
+    // the conversation so far (agent turns get the whole history, compaction keeps it in the window)
+    getMessages: vi.fn().mockResolvedValue(history),
+    getRecentMessages: vi.fn().mockResolvedValue(history),
     listSessions: vi.fn().mockResolvedValue([]),
     getSession: vi.fn().mockImplementation(async (id: string) => sessions.get(id)),
     getLatestSession: vi.fn().mockImplementation(async (agent?: string | null) => {

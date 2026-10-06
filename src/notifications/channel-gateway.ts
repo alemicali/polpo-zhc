@@ -197,6 +197,10 @@ export interface ChannelOutboundFile { path: string; filename: string }
 /** Runs one chat turn and returns the reply. The host persists both messages. */
 export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string; files?: ChannelOutboundFile[] }>;
 
+/** Compacts a session's context now (manual /compact) and says what it did. */
+export type ChannelCompactRunner = (request: { agent?: string; sessionId: string; messages: ChannelChatRequest["messages"]; focus?: string }) =>
+  Promise<{ beforeTokens: number; afterTokens: number; mode: string; removedMessages: number } | null>;
+
 /** One-time link that pairs whoever opens it (e.g. t.me/<bot>?start=<token>). */
 export interface ChannelInvite {
   token: string;
@@ -249,6 +253,7 @@ const COMMANDS: Record<string, string> = {
   "/approve": "Approve a pending approval (usage: /approve REQUEST_ID)",
   "/reject":  "Reject a pending approval (usage: /reject REQUEST_ID [reason])",
   "/new":     "Reset your conversation session",
+  "/compact": "Summarize the conversation so far to free context (usage: /compact [focus])",
   "/agent":   "Talk directly to an agent (usage: /agent NAME)",
   "/polpo":   "Go back to talking with the orchestrator",
   "/pair":    "Approve a pairing code (usage: /pair CODE)",
@@ -920,6 +925,8 @@ export class ChannelGateway {
         return this.cmdReject(args, peerId, this.pendingKey(msg));
       case "/new":
         return this.cmdNewSession(conversation, !!msg.group);
+      case "/compact":
+        return this.cmdCompact(args.join(" "), conversation);
       case "/agent":
         return this.cmdAgent(args, conversation, !!msg.group);
       case "/polpo":
@@ -1082,6 +1089,28 @@ export class ChannelGateway {
     this.forceNewSession.add(key);
     this.groupContext.delete(conversation);
     return { text: `Session reset. ${inGroup ? "The next message here" : "Your next message"} starts a new conversation with ${agent ?? "Polpo"}.` };
+  }
+
+  /** /compact [focus]: summarize this conversation's earlier messages now (agent conversations). */
+  private async cmdCompact(focus: string, conversation: string): Promise<CommandResult> {
+    const agent = await this.getActiveAgent(conversation);
+    if (!agent) {
+      return { text: "The conversation with Polpo here keeps only its recent messages, so there is nothing to compact. /compact works in conversations with an agent." };
+    }
+    const compact = this.orchestrator.getChannelCompactRunner?.();
+    if (!compact) return { text: "Compaction is not available on this instance." };
+    const sessionId = await this.peerStore.getSessionId(await this.sessionKey(conversation, agent));
+    if (!sessionId) return { text: "There is no conversation to compact yet." };
+    const messages = (typeof this.sessionStore.getMessages === "function"
+      ? await this.sessionStore.getMessages(sessionId)
+      : await this.sessionStore.getRecentMessages(sessionId, 200))
+      .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
+      .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+    if (messages.length < 2) return { text: "There is not enough conversation to compact yet." };
+    const done = await compact({ agent, sessionId, messages, ...(focus.trim() ? { focus: focus.trim() } : {}) });
+    if (!done) return { text: "Nothing to compact." };
+    const k = (n: number) => `${Math.round(n / 1000)}k`;
+    return { text: `Context compacted: ${k(done.beforeTokens)} → ${k(done.afterTokens)} tokens (${done.removedMessages} earlier messages summarized). ${agent} keeps the summary and the recent messages.` };
   }
 
   private dedicatedMessage(): CommandResult {
@@ -1450,7 +1479,11 @@ export class ChannelGateway {
     const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
     if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
 
-    const history = await this.sessionStore.getRecentMessages(sessionId, 40);
+    // The whole conversation: compaction keeps it within the window and reuses its checkpoint,
+    // which a sliding window of recent messages would invalidate at every turn.
+    const history = typeof this.sessionStore.getMessages === "function"
+      ? await this.sessionStore.getMessages(sessionId)
+      : await this.sessionStore.getRecentMessages(sessionId, 40);
     const messages: ChannelChatRequest["messages"] = history
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
