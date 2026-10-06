@@ -577,7 +577,9 @@ export class TaskRunner {
     for (const d of sandbox.denied) {
       this.ctx.emitter.emit("sandbox:override-denied", { scope: "task", taskId: task.id, agentName: agent.name, ...d });
     }
-    const mounts = await this.ctx.storageMounts?.(agent.name, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host")
+    // temporary bucket keys (remote sandboxes) live as long as the task may run, plus a margin
+    const ttlSeconds = task.maxDuration ? Math.ceil(task.maxDuration / 1000) + 300 : undefined;
+    const mounts = await this.ctx.storageMounts?.(agent.name, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host", { ttlSeconds })
       .catch(() => [] as StorageMountSpec[]) ?? [];
 
     // WhatsApp tools: if agent has whatsapp_* in allowedTools and a WhatsApp channel is configured,

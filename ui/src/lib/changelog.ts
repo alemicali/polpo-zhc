@@ -120,7 +120,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       "",
       "La sandbox è **opzionale**: di base i comandi girano sulla macchina come prima. Con l'interruttore **Isola gli agenti che leggono contenuti esterni** (Impostazioni → Sandbox), Polpo e gli agenti con strumenti web, email o messaggi girano almeno in bubblewrap, salvo eccezioni che decidi tu agente per agente.",
       "",
-      "Le sandbox remote (Daytona, poi E2B) per i task arrivano nei prossimi passi.",
+      "- **Rete aperta** ora passa da un proxy: internet sì, ma mai i servizi di questa macchina o le reti private. **Senza limiti** è l'opzione esplicita per chi ne ha davvero bisogno. Con la lista di domini funzionano anche git via ssh e le connessioni non HTTP.",
+      "- I domini **rifiutati** compaiono in Events e in Impostazioni → Sandbox, con un clic per consentirli a un agente o a tutti.",
+      "- **Sandbox remote**: collega **Daytona** o **E2B** in Impostazioni → Sandbox (chiave, test di connessione). I task possono girare in una VM remota: la cartella di lavoro ci viene copiata (senza node_modules, .polpo e i file esclusi da .gitignore, quindi i segreti nei .env restano qui) e i file modificati tornano alla fine.",
     ].join("\n"),
   },
   {

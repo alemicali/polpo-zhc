@@ -235,6 +235,7 @@ export interface PolpoEventMap {
   "sandbox:created": { workspaceId: string; provider: string; scope: "chat" | "task"; taskId?: string; runId?: string; sessionId?: string; agentName?: string; network: string };
   "sandbox:ready": { workspaceId: string; provider: string; durationMs: number; steps?: Record<string, number> };
   "sandbox:override-denied": { scope: "chat" | "task"; taskId?: string; agentName?: string; level: "mission" | "task"; field: string; requested: unknown; applied: unknown };
+  "sandbox:network-denied": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; agentName?: string; host: string; port?: number; reason: "not-allowed" | "private-address" };
   "sandbox:failed": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; sessionId?: string; error: string };
   "sandbox:destroyed": { workspaceId: string; provider: string; durationMs: number; reason: "done" | "idle" | "error" | "shutdown" };
   "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;

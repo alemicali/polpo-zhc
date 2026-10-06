@@ -30,6 +30,17 @@ export interface StorageCacheOptions {
   maxAgeHours?: number;
 }
 
+/**
+ * Optional: remote sandboxes get temporary keys minted per task run (scoped to the bucket, the
+ * agent's prefix and read-only or read-write) instead of the entry's fixed sandbox key.
+ * Non-secret settings only; the Cloudflare API token lives in the vault.
+ */
+export type StorageTemporaryCredentials =
+  /** Cloudflare R2: POST /accounts/{accountId}/r2/temp-access-credentials. */
+  | { kind: "r2"; accountId: string; parentAccessKeyId: string }
+  /** AWS S3, MinIO and other S3-compatible: STS AssumeRole signed with the entry's main keys. */
+  | { kind: "sts"; roleArn: string; /** Default: AWS regional STS, or the entry's endpoint. */ endpoint?: string };
+
 export interface StorageEntry {
   id: string;
   name: string;
@@ -48,6 +59,8 @@ export interface StorageEntry {
   driver: StorageDriver;
   readOnly: boolean;
   cache?: StorageCacheOptions;
+  /** Per-run temporary keys for remote sandboxes (default: the fixed sandbox key). */
+  temporaryCredentials?: StorageTemporaryCredentials;
   /** Enabled entries are mounted on the host at server start. */
   enabled: boolean;
   grants: StorageGrant[];
@@ -85,6 +98,9 @@ export const storageCredentialsService = (entryId: string): string => `storage:$
 /** Vault service of an entry's dedicated, limited credentials for remote sandboxes. */
 export const storageSandboxCredentialsService = (entryId: string): string => `storage-sandbox:${entryId}`;
 
+/** Vault service of the Cloudflare API token an entry uses to mint temporary keys (credentials.apiToken). */
+export const storageTemporaryTokenService = (entryId: string): string => `storage-temp:${entryId}`;
+
 export interface StorageCredentials {
   accessKeyId: string;
   secretAccessKey: string;
@@ -95,6 +111,8 @@ export interface StorageCredentials {
 export interface StorageCredentialStatus {
   credentials: "set" | "not set";
   sandboxCredentials: "set" | "not set";
+  /** The API token for minting temporary keys (R2). */
+  temporaryToken: "set" | "not set";
 }
 
 // ── Paths, prefixes and grants ──────────────────────────────────────────
@@ -180,7 +198,7 @@ export function scopeStorageListing(grantPrefix: string, requested: string | und
 }
 
 /** Validation shared by the API, the tools and the stores' callers. Returns the first problem. */
-export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants">): string | undefined {
+export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants"> & { temporaryCredentials?: StorageTemporaryCredentials }): string | undefined {
   if (!STORAGE_SLUG_PATTERN.test(entry.slug)) return "Slug must be lowercase letters, digits and dashes";
   if (!entry.bucket.trim() || /[\s/]/.test(entry.bucket)) return "Bucket must be a bucket name (no spaces or slashes)";
   if (entry.driver === "mountpoint-s3" && !entry.readOnly) return 'The "mountpoint-s3" driver is allowed only for read-only storage';
@@ -189,6 +207,16 @@ export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket"
       const url = new URL(entry.endpoint);
       if (url.protocol !== "https:" && url.protocol !== "http:") return "Endpoint must be an http(s) URL";
     } catch { return "Endpoint must be a URL, e.g. https://<account>.r2.cloudflarestorage.com"; }
+  }
+  const temp = entry.temporaryCredentials;
+  if (temp) {
+    if (temp.kind === "r2" && (!temp.accountId?.trim() || !temp.parentAccessKeyId?.trim())) return "Temporary keys on R2 need the account id and the parent access key id";
+    if (temp.kind === "sts") {
+      if (!/^arn:\S+$/.test(temp.roleArn ?? "")) return "Temporary keys need an IAM role ARN (arn:aws:iam::<account>:role/<name>)";
+      if (temp.endpoint) {
+        try { if (!/^https?:$/.test(new URL(temp.endpoint).protocol)) return "STS endpoint must be an http(s) URL"; } catch { return "STS endpoint must be a URL"; }
+      }
+    }
   }
   const agents = new Set<string>();
   for (const grant of entry.grants) {

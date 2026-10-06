@@ -21,7 +21,9 @@ import {
   type CompactionInfo,
 } from "@polpo-ai/core";
 import { effectiveCompactionSettings } from "../core/config.js";
-import { createWorkspace, WorkspaceShell } from "../sandbox/manager.js";
+import { createWorkspace, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
+import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
+import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -423,6 +425,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const activity = createActivity();
   const start = Date.now();
   let alive = true;
+  let browserNetwork: BrowserNetworkGuard | undefined;
 
   // Enforce model allowlist (throws if model not allowed)
   if (agentConfig.model) {
@@ -504,15 +507,20 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         writable: [...(outputDir ? [outputDir] : []), ...(effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p))],
         // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
         readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
-        mounts: hostMounts,
+        // host mounts are bound by local workspaces, remote ones are mounted inside remote VMs
+        mounts: (ctx.mounts ?? []).filter((m) => m.hostPath || m.remote),
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
+        onRemoteEvent: (e) => { if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`); },
+        onNetworkDenied: ctx.onNetworkDenied,
       })
     : undefined;
   const shell = workspace ? new WorkspaceShell(workspace) : undefined;
+  // Remote sandboxes keep the agent's files in the VM: file tools read and write there too.
+  const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, undefined, shell);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -526,7 +534,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
   const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths)
-    + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox, hostMounts);
+    + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox,
+      isRemoteWorkspace(workspace) ? (ctx?.mounts ?? []).filter((m) => m.remote) : hostMounts);
   // ── Context compaction (packages/core/src/context-compactor.ts) ──
   // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
   // between calls (the prompt cache survives), and recompacts only when the window fills again.
@@ -734,18 +743,21 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, undefined, shell);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell);
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }
 
       if (hasExtendedTools) {
+        // the browser runs on the host: it follows the sandbox network rule too
+        browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
         allTools = await createAllTools({
           cwd,
           allowedTools: agentConfig.allowedTools,
           allowedPaths: effectiveAllowedPaths,
           browserSession: agentConfig.name,
           browserProfileDir,
+          browserNetwork,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,
@@ -755,6 +767,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
           shell,
+          fs: remoteFs,
         });
       }
       if (ctx?.polpoDir) {
@@ -839,6 +852,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       };
     } finally {
       await workspace?.dispose().catch(() => undefined);
+      await browserNetwork?.close().catch(() => undefined);
       // Close agent-browser session (profile data auto-persisted by --profile)
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
@@ -908,9 +922,11 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
 /** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
 export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts: StorageMountSpec[]): string {
   if (!sandbox || sandbox.provider === "local") return "";
-  const network = sandbox.network.mode === "open" ? "open"
+  const through = "through a proxy that speaks HTTP and SOCKS5: curl, git over https, npm, pip and ssh (git over ssh is preconfigured) work; programs that ignore proxy settings cannot connect";
+  const network = sandbox.network.mode === "unrestricted" ? "unrestricted (the whole network of this machine)"
+    : sandbox.network.mode === "open" ? `every public destination, ${through}; this machine's own services, private networks and Tailscale are refused`
     : sandbox.network.mode === "deny" ? "disabled (no connections at all)"
-    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} (other hosts are refused by a proxy)`;
+    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} ("host" or "host:port"; other hosts are refused), ${through}`;
   const limits = [
     sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",
@@ -920,6 +936,9 @@ export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts:
     "",
     "## Sandbox",
     `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${mounts.length ? " and the storage mounts below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
+    ...(sandbox.provider === "daytona" || sandbox.provider === "e2b"
+      ? ["This sandbox is a remote VM: your working directory was copied there (without node_modules, .polpo and files .gitignore excludes, such as .env), and the files you change come back when the task ends. Install what you need there; nothing outside your working directory and the output directory comes back."]
+      : []),
     ...mounts.map((m) => `- storage "${m.name}": ${m.path}${m.readOnly ? " (read-only)" : ""}`),
     "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
   ].join("\n");

@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SandboxEditor } from "./sandbox-editor";
+import { NetworkDeniedCard } from "./network-denied-card";
+import { RemoteProvidersCard } from "./remote-providers-card";
 import {
   compactSandbox,
   describeSandbox,
@@ -62,6 +64,7 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
 
   return (
     <div className="space-y-8">
+      <NetworkDeniedCard overview={overview} onChanged={() => { void reload(); onSaved?.(); }} />
       <section>
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5" /> Isolation
@@ -95,6 +98,8 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
           </Button>
         </div>
       </section>
+
+      <RemoteProvidersCard onChanged={() => void reload()} />
 
       <section>
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">

@@ -18,7 +18,7 @@ import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogPruneResult, LogStore } from "./log-store.js";
-import { assessTask } from "../assessment/assessor.js";
+import { sandboxedAssessFn } from "../assessment/sandboxed.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
@@ -55,10 +55,13 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
+import type { RunRecord } from "./run-store.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
 import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../llm/custom-providers.js";
 import { readProviderSecrets } from "../llm/provider-secrets.js";
 import { startNotificationServer, getSocketPath } from "./notification.js";
+import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
+import { NetworkDeniedLog, type NetworkDeniedReport } from "../sandbox/denied-log.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
@@ -236,7 +239,29 @@ export class Orchestrator extends TypedEmitter {
   private storageMountProvider?: StorageMountProvider;
   private chatWorkspaces = new Map<string, { workspace: Promise<Workspace>; timer?: ReturnType<typeof setTimeout> }>();
 
+  private networkDenied = new NetworkDeniedLog();
+
+  /** Destinations the sandbox network rule refused recently (Settings → Sandbox). */
+  getNetworkDenied() { return this.networkDenied.list(); }
+
+  /** Record a refused destination and tell the bus the first time a workspace hits it. */
+  reportNetworkDenied(report: NetworkDeniedReport): void {
+    if (this.networkDenied.record(report)) this.emit("sandbox:network-denied", report);
+  }
+
   /** The storage feature registers what each agent may mount. */
+  /** Remote sandbox adapters: the workspace a finished task's checks run in (see assessment/sandboxed.ts). */
+  workspaceForAssessment?: (taskId: string, run: RunRecord) => Promise<Workspace | undefined>;
+
+  /** Assessment commands run in the sandbox the task ran in; without one, as before on this machine. */
+  private defaultAssessFn(): AssessFn {
+    return sandboxedAssessFn({
+      getRunByTaskId: (taskId) => this.runStore.getRunByTaskId(taskId),
+      workspaceForAssessment: (taskId, run) => this.workspaceForAssessment?.(taskId, run) ?? Promise.resolve(undefined),
+      hostMounts: async (agentName) => (await this.storageMountProvider?.mountsFor(agentName, "host")) ?? [],
+    });
+  }
+
   setStorageMountProvider(provider: StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
 
   /**
@@ -282,8 +307,10 @@ export class Orchestrator extends TypedEmitter {
   private async openChatWorkspace(agent?: AgentConfig): Promise<Workspace> {
     const { sandbox, mounts } = await this.chatSandbox(agent);
     const root = this.getAgentWorkDir();
+    let workspaceId: string | undefined;
     try {
       const workspace = createWorkspace(sandbox, {
+        onNetworkDenied: (d) => this.reportNetworkDenied({ ...d, workspaceId, provider: sandbox.provider, scope: "chat", agentName: agent?.name ?? "polpo" }),
         root,
         readable: [
           resolveToolOutputDir({ polpoDir: this.polpoDir, agentName: agent?.name ?? "polpo" }),
@@ -294,6 +321,7 @@ export class Orchestrator extends TypedEmitter {
         // config, sessions, vault, control socket: never visible to commands
         hide: [this.polpoDir],
       });
+      workspaceId = workspace.id;
       this.emit("sandbox:created", {
         workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName: agent?.name ?? "polpo", network: sandbox.network.mode,
       });
@@ -302,6 +330,28 @@ export class Orchestrator extends TypedEmitter {
       this.emit("sandbox:failed", { provider: sandbox.provider, scope: "chat", error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
+  }
+
+  private chatBrowserGuards = new Map<string, { signature: string; guard: BrowserNetworkGuard }>();
+
+  /**
+   * The network rule for the browser in this agent's chats (or Polpo's): undefined when the
+   * sandbox does not isolate. One guard per agent, rebuilt when the effective rule changes.
+   */
+  async chatBrowserNetwork(agent?: AgentConfig): Promise<BrowserNetworkGuard | undefined> {
+    const key = agent?.name ?? "polpo";
+    const { sandbox } = await this.chatSandbox(agent);
+    const signature = JSON.stringify([sandbox.provider, sandbox.network]);
+    const existing = this.chatBrowserGuards.get(key);
+    if (existing?.signature === signature) return existing.guard;
+    await existing?.guard.close().catch(() => undefined);
+    this.chatBrowserGuards.delete(key);
+    const guard = createBrowserNetworkGuard({
+      sandbox, session: key === "polpo" ? "orchestrator" : key,
+      onDenied: (d) => this.reportNetworkDenied({ ...d, provider: sandbox.provider, scope: "chat", agentName: key }),
+    });
+    if (guard) this.chatBrowserGuards.set(key, { signature, guard });
+    return guard;
   }
 
   private async closeChatWorkspace(key: string, reason: "idle" | "shutdown"): Promise<void> {
@@ -349,13 +399,13 @@ export class Orchestrator extends TypedEmitter {
       const workDir = workDirOrOptions ?? ".";
       this.workDir = resolve(workDir);
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = assessTask;
+      this.assessFn = this.defaultAssessFn();
       this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = opts.assessFn ?? assessTask;
+      this.assessFn = opts.assessFn ?? this.defaultAssessFn();
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
       this.injectedTaskControlStore = opts.taskControlStore;
@@ -757,7 +807,7 @@ export class Orchestrator extends TypedEmitter {
       taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
       sandboxProviders: () => availableProviders(),
-      storageMounts: (agentName, target) => this.storageMountProvider?.mountsFor(agentName, target) ?? Promise.resolve([]),
+      storageMounts: (agentName, target, options) => this.storageMountProvider?.mountsFor(agentName, target, options) ?? Promise.resolve([]),
       logStore: this.logStore,
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
@@ -816,6 +866,10 @@ export class Orchestrator extends TypedEmitter {
       () => {
         this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
       },
+      (msg) => this.reportNetworkDenied({
+        workspaceId: msg.runId, provider: msg.provider, scope: "task", taskId: msg.taskId, agentName: msg.agentName,
+        host: msg.host, port: msg.port, reason: msg.reason,
+      }),
     );
 
     // Initialize approval gates if configured
@@ -1567,6 +1621,8 @@ export class Orchestrator extends TypedEmitter {
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
     for (const key of [...this.chatWorkspaces.keys()]) await this.closeChatWorkspace(key, "shutdown");
+    for (const { guard } of this.chatBrowserGuards.values()) await guard.close().catch(() => undefined);
+    this.chatBrowserGuards.clear();
     const activeRuns = await this.runStore.getActiveRuns();
     this.emit("orchestrator:stopping", { activeRuns: activeRuns.length });
 

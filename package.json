@@ -78,10 +78,11 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.9",
-    "@hono/zod-openapi": "^1.2.2",
+    "@daytonaio/sdk": "0.222.0",
     "@earendil-works/pi-agent-core": "^1.0.4",
     "@earendil-works/pi-ai": "^1.0.4",
+    "@hono/node-server": "^1.19.9",
+    "@hono/zod-openapi": "^1.2.2",
     "@polpo-ai/core": "workspace:^0.3.12",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",
@@ -90,6 +91,7 @@
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "croner": "^10.0.1",
+    "e2b": "2.53.1",
     "execa": "^9.6.1",
     "expo-server-sdk": "^3.10.0",
     "hono": "^4.11.9",

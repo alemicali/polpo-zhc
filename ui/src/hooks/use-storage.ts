@@ -9,6 +9,14 @@ export type MountState = "unmounted" | "mounting" | "mounted" | "error";
 export type MountStatus = { entryId: string; slug: string; state: MountState; path: string; error?: string; since: string; restarts: number; pid?: number };
 export type StorageCredentialsInput = { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
 
+/** Per-run temporary keys for remote sandboxes (settings only; the API token is write-only). */
+export type StorageTemporarySettings =
+  | { kind: "r2"; accountId: string; parentAccessKeyId: string }
+  | { kind: "sts"; roleArn: string; endpoint?: string };
+export type StorageTemporaryInput =
+  | { kind: "r2"; accountId: string; parentAccessKeyId: string; apiToken?: string }
+  | { kind: "sts"; roleArn: string; endpoint?: string };
+
 /** An entry as the API returns it: credentials are only "set" / "not set", never their values. */
 export type StorageEntry = {
   id: string; name: string; slug: string; description?: string; provider: "s3";
@@ -16,17 +24,20 @@ export type StorageEntry = {
   driver: StorageDriver; readOnly: boolean; enabled: boolean;
   cache?: { mode?: "writes" | "full"; maxSizeMb?: number; maxAgeHours?: number };
   grants: StorageGrant[];
-  credentials: "set" | "not set"; sandboxCredentials: "set" | "not set";
+  credentials: "set" | "not set"; sandboxCredentials: "set" | "not set"; temporaryToken?: "set" | "not set";
+  temporaryCredentials?: StorageTemporarySettings;
   mount: MountStatus;
   createdAt: string; updatedAt: string;
 };
 
-export type StorageEntryInput = Omit<StorageEntry, "id" | "credentials" | "sandboxCredentials" | "mount" | "createdAt" | "updatedAt" | "provider"> & {
+export type StorageEntryInput = Omit<StorageEntry, "id" | "credentials" | "sandboxCredentials" | "temporaryToken" | "temporaryCredentials" | "mount" | "createdAt" | "updatedAt" | "provider"> & {
   provider?: "s3";
   /** Write-only. Omit to keep the stored ones. */
   credentials?: StorageCredentialsInput;
   /** Write-only. Omit to keep, null to remove. */
   sandboxCredentials?: StorageCredentialsInput | null;
+  /** Write-only. Omit to keep, null for the fixed sandbox key. */
+  temporary?: StorageTemporaryInput | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
