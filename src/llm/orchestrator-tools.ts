@@ -1699,6 +1699,7 @@ Available targets:
 - "app" — Specific registered app (requires id)
 - "app_preview" — App Preview page (optional url selects a running app/service)
 - "data" — Data sources and query explorer
+- "storage" — Storage buckets (S3/R2) and their mount status
 - "views" / "view" — Generated view registry or a specific view (id)
 
 Examples:
@@ -1710,7 +1711,7 @@ Examples:
 - navigate_to({ target: "view", id: "view-id" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, storage, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
