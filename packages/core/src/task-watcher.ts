@@ -46,12 +46,14 @@ export class TaskWatcherManager {
 
         if (this.actionExecutor) {
           this.actionExecutor(watcher.action).then((result) => {
+            this.emitter.emit("watcher:action-completed", { watcherId: id, taskId: watcher.taskId, actionType: watcher.action.type, result });
             this.emitter.emit("log", {
               level: "info",
               message: `[watcher] Action completed for watcher ${id}: ${result}`,
             });
           }).catch((err) => {
             const msg = err instanceof Error ? err.message : String(err);
+            this.emitter.emit("watcher:action-failed", { watcherId: id, taskId: watcher.taskId, actionType: watcher.action.type, error: msg });
             this.emitter.emit("log", {
               level: "error",
               message: `[watcher] Action failed for watcher ${id}: ${msg}`,

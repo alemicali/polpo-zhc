@@ -378,6 +378,7 @@ async function forceFailTask(orchestrator: Orchestrator, taskId: string): Promis
   try {
     const task = await store.getTask(taskId);
     if (!task || task.status === "done" || task.status === "failed") return;
+    orchestrator.emit("task:force-failed", { taskId, title: task.title, reason: "deadlock unresolvable" });
     // Walk through state machine to reach failed
     if (task.status === "pending") await store.transition(taskId, "assigned");
     const t2 = await store.getTask(taskId);

@@ -78,6 +78,7 @@ import { getCompanyBrainRuntime } from "./company-brain-runtime.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
+import { withEventOrigin, currentEventOrigin } from "../core/events.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -439,7 +440,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // pre-authorised by the user when they're queued. See
       // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
       const isInteractive = (name: string) => name === "ask_user" || isClientSideChatTool(name) || isSideEffectGated(name);
-      return { tools, executor, isInteractive };
+      // Whatever the agent's tools change is attributed to the agent
+      const attributed = (name: string, args: Record<string, unknown>) =>
+        withEventOrigin({ source: "agent", by: agentConfig.name }, () => executor(name, args));
+      return { tools, executor: attributed, isInteractive };
     },
     streamLLM: streamSimpleWithAuth as any,
     resolveOrchestratorContext: async () => {
@@ -456,11 +460,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
         tools: ALL_ORCHESTRATOR_TOOLS,
-        executor: (name: string, args: Record<string, unknown>, context) => executeOrchestratorTool(name, args, o, context),
+        executor: (name: string, args: Record<string, unknown>, context) =>
+          withEventOrigin({ source: "polpo" }, () => executeOrchestratorTool(name, args, o, context)),
         isInteractive,
       };
     },
   }), opts?.apiKeys);
+  // Chat turns from outside (web UI, API clients) are "api"; internal channel turns keep their origin
+  app.use("/v1/chat/completions", (c, next) => currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next()));
   app.route("/v1/chat/completions", completionApp);
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
@@ -472,6 +479,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     authed.use("*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
+
+  // Events caused by an API call carry source "api" and, with instance auth, the person's email
+  authed.use("*", (c, next) => {
+    if (currentEventOrigin()) return next();
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return withEventOrigin({ source: "api", ...(email ? { by: email } : {}) }, () => next());
+  });
 
   // Gate: orchestrator must be initialized for these routes
   authed.use("*", async (c, next) => {
@@ -677,12 +691,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
   // Backward-compat: keep /templates as alias
   authed.route("/templates", playbookRoutes(() => ({
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
 
   authed.route("/config", configRoutes(() => ({

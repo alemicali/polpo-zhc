@@ -137,7 +137,7 @@ export interface DeadlockFacade {
   getMemory(): Promise<string>;
   getStore(): TaskStore;
   emit<K extends PolpoEvent>(event: K, payload: PolpoEventMap[K]): boolean;
-  forceFailTask(taskId: string): Promise<void>;
+  forceFailTask(taskId: string, reason?: string): Promise<void>;
   addTask(opts: {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
@@ -251,10 +251,11 @@ export class OrchestratorEngine {
     onBeforeLoop?.();
 
     // Supervisor loop
+    let reason: "done" | "stopped" = "stopped";
     while (!this.stopped) {
       try {
         const allDone = await this.tick();
-        if (allDone && !interactive) break;
+        if (allDone && !interactive) { reason = "done"; break; }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.ctx.emitter.emit("log", { level: "error", message: `[supervisor] Error in tick: ${message}` });
@@ -262,6 +263,7 @@ export class OrchestratorEngine {
       await sleep(POLL_INTERVAL);
     }
 
+    this.ctx.emitter.emit("orchestrator:stopped", { reason });
     onAfterLoop?.();
   }
 
@@ -419,7 +421,7 @@ export class OrchestratorEngine {
           // Async LLM resolution (same pattern as question detection)
           this.deadlockResolver.resolveDeadlock(analysis, facade).catch(async err => {
             this.ctx.emitter.emit("log", { level: "error", message: `Deadlock resolution failed: ${(err as Error).message}` });
-            for (const t of pending) await this.forceFailTask(t.id);
+            for (const t of pending) await this.forceFailTask(t.id, "deadlock resolution failed");
           });
 
           return false; // Don't terminate loop — resolution pending
@@ -428,7 +430,7 @@ export class OrchestratorEngine {
 
       // Only missing deps (unresolvable) → force-fail all
       this.ctx.emitter.emit("orchestrator:deadlock", { taskIds: pending.map(t => t.id) });
-      for (const t of pending) await this.forceFailTask(t.id);
+      for (const t of pending) await this.forceFailTask(t.id, "deadlock: missing dependencies");
       return true;
     }
 
@@ -523,7 +525,7 @@ export class OrchestratorEngine {
       getMemory: () => this.getMemory(),
       getStore: () => this.getStore(),
       emit: (event, payload) => this.ctx.emitter.emit(event, payload),
-      forceFailTask: (taskId: string) => this.forceFailTask(taskId),
+      forceFailTask: (taskId: string, reason?: string) => this.forceFailTask(taskId, reason ?? "deadlock"),
       addTask: (opts) => this.addTask(opts),
     };
   }
@@ -568,7 +570,7 @@ export class OrchestratorEngine {
   }
 
   async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.taskMgr.clearTasks(filter); }
-  async forceFailTask(taskId: string): Promise<void> { return this.taskMgr.forceFailTask(taskId); }
+  async forceFailTask(taskId: string, reason?: string): Promise<void> { return this.taskMgr.forceFailTask(taskId, reason); }
 
   // ── Approval Management ─────────────────────────────────────────────
 

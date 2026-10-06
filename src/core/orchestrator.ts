@@ -21,8 +21,9 @@ import type { LogPruneResult, LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
-import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
-import { TypedEmitter } from "./events.js";
+import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
+import { MISSION_EDIT } from "@polpo-ai/core";
+import { TypedEmitter, withEventOrigin } from "./events.js";
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -283,6 +284,9 @@ export class Orchestrator extends TypedEmitter {
    * use registry.transition(...) directly.
    */
   private withTaskTransitionEvents(store: TaskStore): TaskStore {
+    const removedPayload = (taskId: string, task: Task | undefined) => ({
+      taskId, ...(task ? { title: task.title, group: task.group, missionId: task.missionId } : {}),
+    });
     const cached = this.eventingTaskStores.get(store);
     if (cached) return cached;
 
@@ -317,6 +321,63 @@ export class Orchestrator extends TypedEmitter {
                 from: before.status,
                 to: updated.status,
                 task: updated,
+                reason,
+              });
+            }
+            return updated;
+          };
+        }
+
+        // Field changes: one event per write, naming the fields (status goes through transition).
+        if (prop === "updateTask") {
+          return async (taskId: string, updates: Partial<Task>) => {
+            const updated = await target.updateTask(taskId, updates);
+            orchestrator.emit("task:updated", { taskId, task: updated, fields: Object.keys(updates) });
+            return updated;
+          };
+        }
+
+        if (prop === "removeTask") {
+          return async (taskId: string) => {
+            const before = await target.getTask(taskId);
+            const removed = await target.removeTask(taskId);
+            if (removed) orchestrator.emit("task:removed", removedPayload(taskId, before));
+            return removed;
+          };
+        }
+
+        if (prop === "removeTasks") {
+          return async (filter: (task: Task) => boolean) => {
+            const doomed = (await target.getAllTasks()).filter(filter);
+            const count = await target.removeTasks(filter);
+            if (count > 0) {
+              const still = new Set((await target.getAllTasks()).map((t) => t.id));
+              for (const task of doomed) if (!still.has(task.id)) orchestrator.emit("task:removed", removedPayload(task.id, task));
+            }
+            return count;
+          };
+        }
+
+        if (prop === "saveMission" && target.saveMission) {
+          return async (mission: Parameters<NonNullable<TaskStore["saveMission"]>>[0]) => {
+            const saved = await target.saveMission!(mission);
+            orchestrator.emit("mission:created", { missionId: saved.id, name: saved.name, status: saved.status });
+            return saved;
+          };
+        }
+
+        if (prop === "updateMission" && target.updateMission) {
+          return async (missionId: string, updates: Parameters<NonNullable<TaskStore["updateMission"]>>[1]) => {
+            const edit = (updates as Record<symbol, MissionEdit | undefined>)[MISSION_EDIT];
+            const { [MISSION_EDIT]: _edit, ...plain } = updates as typeof updates & { [MISSION_EDIT]?: MissionEdit };
+            const before = await target.getMission?.(missionId);
+            const updated = await target.updateMission!(missionId, plain);
+            const fields = Object.keys(plain).filter((k) => k !== "updatedAt");
+            if (fields.length > 0) {
+              orchestrator.emit("mission:updated", {
+                missionId, name: updated.name, status: updated.status,
+                ...(edit ? { section: edit.section, action: edit.action, ...(edit.item ? { item: edit.item } : {}) } : { fields }),
+                ...(before && before.status !== updated.status ? { prevStatus: before.status } : {}),
               });
             }
             return updated;
@@ -330,6 +391,32 @@ export class Orchestrator extends TypedEmitter {
 
     this.eventingTaskStores.set(store, wrapped);
     return wrapped;
+  }
+
+  /** Playbook writes announce themselves (playbook:changed), whoever makes them. */
+  private withPlaybookEvents(store: PlaybookStore): PlaybookStore {
+    const orchestrator = this;
+    return new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "save") {
+          return async (definition: Parameters<PlaybookStore["save"]>[0]) => {
+            const existed = !!(await target.get(definition.name).catch(() => null));
+            const location = await target.save(definition);
+            orchestrator.emit("playbook:changed", { name: definition.name, action: existed ? "updated" : "created" });
+            return location;
+          };
+        }
+        if (prop === "delete") {
+          return async (name: string) => {
+            const deleted = await target.delete(name);
+            if (deleted) orchestrator.emit("playbook:changed", { name, action: "deleted" });
+            return deleted;
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
   }
 
   /** Create task + run stores based on the configured storage backend. */
@@ -467,7 +554,7 @@ export class Orchestrator extends TypedEmitter {
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
 
-    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
+    this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
   }
 
   /**
@@ -720,7 +807,7 @@ export class Orchestrator extends TypedEmitter {
     // Initialize scheduler (always available — zero cost when no schedules exist)
     if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+      this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
       this.scheduler.init();
     }
 
@@ -906,7 +993,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.initVaultStore();
     await refreshCustomProviderSecretStatus();
-    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
+    this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
     this.interactive = true;
     await this.registry.setState({
       project,
@@ -990,7 +1077,7 @@ export class Orchestrator extends TypedEmitter {
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
   async abortGroup(group: string): Promise<number> { return this.engine.abortGroup(group); }
   async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.engine.clearTasks(filter); }
-  async forceFailTask(taskId: string): Promise<void> { return this.engine.forceFailTask(taskId); }
+  async forceFailTask(taskId: string, reason?: string): Promise<void> { return this.engine.forceFailTask(taskId, reason); }
 
   // ── Approval Management (delegates to OrchestratorEngine) ──
 
@@ -1369,6 +1456,7 @@ export class Orchestrator extends TypedEmitter {
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
     const activeRuns = await this.runStore.getActiveRuns();
+    this.emit("orchestrator:stopping", { activeRuns: activeRuns.length });
 
     if (activeRuns.length > 0) {
       this.emit("log", { level: "warn", message: `Shutting down ${activeRuns.length} running agent(s)...` });
@@ -1600,7 +1688,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.enableScheduler !== false) {
       if (!this.scheduler) {
         this.scheduler = new Scheduler(ctx);
-        this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+        this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
       }
       this.scheduler.init();
     } else {

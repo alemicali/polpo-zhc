@@ -30,6 +30,8 @@ export class TaskRunner {
   private lastActivity = new Map<string, string>();
   /** Tracks files already seen per task to emit incremental file:changed events */
   private knownFiles = new Map<string, Set<string>>();
+  /** Outcome ids already announced per running task (task:outcome). */
+  private knownOutcomes = new Map<string, Set<string>>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -310,6 +312,20 @@ export class TaskRunner {
       }
     }
 
+    // Announce outcomes as the agent registers them, not only when the task ends
+    for (const r of active) {
+      if (!r.outcomes?.length) continue;
+      let known = this.knownOutcomes.get(r.taskId);
+      if (!known) { known = new Set(); this.knownOutcomes.set(r.taskId, known); }
+      const fresh = r.outcomes.filter((o) => !known!.has(o.id));
+      if (fresh.length === 0) continue;
+      for (const o of fresh) known.add(o.id);
+      this.ctx.emitter.emit("task:outcome", {
+        taskId: r.taskId,
+        outcomes: fresh.map((o) => ({ id: o.id, type: o.type, label: o.label, ...(o.mimeType ? { mimeType: o.mimeType } : {}), ...(o.path ? { path: o.path } : {}) })),
+      });
+    }
+
     // Cleanup stale entries for tasks no longer active
     for (const taskId of this.lastActivity.keys()) {
       if (!seenTaskIds.has(taskId)) {
@@ -317,6 +333,7 @@ export class TaskRunner {
         this.knownFiles.delete(taskId);
       }
     }
+    for (const taskId of this.knownOutcomes.keys()) if (!seenTaskIds.has(taskId)) this.knownOutcomes.delete(taskId);
 
     await this.ctx.registry.setState({
       processes: active.map(r => ({
