@@ -28,7 +28,7 @@ import {
 import type { VaultStore } from "../core/vault-store.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileStorageRegistryStore } from "../stores/file-storage-registry-store.js";
-import { StorageMountManager, type MountStatus } from "./mount-manager.js";
+import { StorageMountManager, type MountManagerOptions, type MountStatus } from "./mount-manager.js";
 import { S3Client, s3TargetFor } from "./s3.js";
 
 export type StorageChangeAction = "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed";
@@ -66,6 +66,8 @@ export class StorageRuntime implements StorageMountProvider {
     readonly polpoDir: string,
     private vaultStore?: VaultStore,
     private emit?: StorageEventEmitter,
+    /** Mount manager overrides (binaries, timeouts; tests). */
+    private mountOptions: Partial<Omit<MountManagerOptions, "polpoDir" | "credentialsFor" | "onEvent">> = {},
   ) {
     this.store = databaseStoresFor(polpoDir)?.storageRegistryStore ?? new FileStorageRegistryStore(polpoDir);
     this.store.setEmitter?.((event) => this.emit?.({ name: event.slug, action: event.action }));
@@ -84,6 +86,7 @@ export class StorageRuntime implements StorageMountProvider {
   /** The mount manager; mounting is started explicitly by the server (never in runners or the CLI). */
   get mounts(): StorageMountManager {
     this.mountManager ??= new StorageMountManager({
+      ...this.mountOptions,
       polpoDir: this.polpoDir,
       credentialsFor: (entry) => this.credentials(entry.id),
       onEvent: (entry, action, error) => this.emit?.({ name: entry.slug, action, ...(error ? { error } : {}) }),
