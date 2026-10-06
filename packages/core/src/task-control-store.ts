@@ -43,7 +43,11 @@ export interface BackgroundWait {
 export interface BackgroundWaitStore {
   createBackgroundWait(input: { taskId: string; sessionId: string; targetStatus?: string }): Promise<BackgroundWait>;
   getBackgroundWait(id: string): Promise<BackgroundWait | undefined>;
-  listBackgroundWaits(sessionId?: string): Promise<BackgroundWait[]>;
+  /**
+   * Newest first. `states` narrows the list to waits in those states; a store may ignore it
+   * and return every wait, so callers still check `state`.
+   */
+  listBackgroundWaits(sessionId?: string, states?: readonly BackgroundWaitState[]): Promise<BackgroundWait[]>;
   markBackgroundWaitReady(id: string, taskStatus: string): Promise<boolean>;
   claimBackgroundWait(id: string): Promise<BackgroundWait | undefined>;
   completeBackgroundWait(id: string): Promise<void>;

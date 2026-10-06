@@ -11,6 +11,7 @@ import { nanoid } from "nanoid";
 import type {
   AgentConversationCheckpoint,
   BackgroundWait,
+  BackgroundWaitState,
   TaskControlStore,
   TaskDirection,
 } from "../core/task-control-store.js";
@@ -180,9 +181,9 @@ export class FileTaskControlStore implements TaskControlStore {
     return readJson<BackgroundWait>(this.backgroundWaitPath(id));
   }
 
-  async listBackgroundWaits(sessionId?: string): Promise<BackgroundWait[]> {
-    const waits = this.readBackgroundWaits();
-    return sessionId ? waits.filter((wait) => wait.sessionId === sessionId) : waits;
+  async listBackgroundWaits(sessionId?: string, states?: readonly BackgroundWaitState[]): Promise<BackgroundWait[]> {
+    return this.readBackgroundWaits().filter((wait) =>
+      (!sessionId || wait.sessionId === sessionId) && (!states || states.includes(wait.state)));
   }
 
   async markBackgroundWaitReady(id: string, taskStatus: string): Promise<boolean> {
