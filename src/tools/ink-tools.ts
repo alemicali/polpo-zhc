@@ -14,7 +14,6 @@
 
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { execSync } from "node:child_process";
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync,
 } from "node:fs";
@@ -30,10 +29,13 @@ import {
   isInkSourceInstalled,
   uninstallInkPackages,
   stripInkMetadata,
+  mergeInkSettings,
+  mergeInkProviders,
   type InkPackage,
   type InkLockEntry,
 } from "../core/ink.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
 import type { PolpoFileConfig, AgentConfig, Team } from "../core/types.js";
 import { createCliStores } from "../cli/stores.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
@@ -217,12 +219,13 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         // Clone to temp dir (use same cache dir as CLI)
         const cacheDir = join(polpoDir, "ink-cache");
         mkdirSync(cacheDir, { recursive: true });
-        const repoDir = join(cacheDir, sourceLabel.replace(/\//g, "--"));
+        const repoDir = join(cacheDir, sourceCacheKey(sourceLabel));
         if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
-        execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+        // parsed.url is a validated GitHub URL or local path; no shell involved.
+        gitClone(parsed.url, repoDir, { timeout: 30000 });
 
         // Get commit hash
-        const commitHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+        const commitHash = gitHeadCommit(repoDir);
 
         // Discover packages
         let { packages, errors } = discoverInkPackages(repoDir);
@@ -264,6 +267,7 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
           settings: { maxRetries: 3, workDir: ".", logLevel: "normal" },
         } as any;
         let configChanged = false;
+        const notices: string[] = [];
 
         for (const pkg of packages) {
           switch (pkg.type) {
@@ -323,14 +327,24 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
                 }
               }
 
-              // Merge settings (fill missing only)
+              // Merge settings (fill missing only, allowlisted keys only)
               if (companyContent.settings && config.settings) {
-                const settings = config.settings as unknown as Record<string, unknown>;
-                const inc = companyContent.settings as unknown as Record<string, unknown>;
-                for (const [key, value] of Object.entries(inc)) {
-                  if (settings[key] == null && value != null) settings[key] = value;
+                const { applied, skipped } = mergeInkSettings(
+                  config.settings as unknown as Record<string, unknown>,
+                  companyContent.settings,
+                );
+                if (applied.length > 0) configChanged = true;
+                if (skipped.length > 0) notices.push(`${pkg.name}: ignored settings ${skipped.join(", ")}`);
+              }
+
+              // Providers are never applied from the agent tool path: a package
+              // could otherwise point a built-in provider at another host and
+              // receive the user's API key. Report what was skipped.
+              if (companyContent.providers) {
+                const decisions = await mergeInkProviders({ ...(config.providers ?? {}) }, companyContent.providers, { allowCustom: false });
+                for (const d of decisions) {
+                  if (d.reason !== "already configured") notices.push(`${pkg.name}: provider "${d.name}" not imported — ${d.reason}`);
                 }
-                configChanged = true;
               }
 
               // Append memory.md if present (via MemoryStore)
@@ -387,10 +401,13 @@ function createInkAddTool(polpoDir: string): AgentTool<typeof InkAddSchema> {
         reportInstall(sourceLabel, packages);
 
         // Clean up cache
-        execSync(`rm -rf "${repoDir}"`);
+        rmSync(repoDir, { recursive: true, force: true });
 
+        const noticeText = notices.length > 0
+          ? `\n\nNot imported (security):\n${notices.map((n) => `  - ${n}`).join("\n")}\nAsk the user to configure these manually if needed.`
+          : "";
         return ok(
-          `Installed ${packages.length} package(s) from "${sourceLabel}":\n\n${installed.map((i) => `  - ${i}`).join("\n")}\n\nLock file updated.`,
+          `Installed ${packages.length} package(s) from "${sourceLabel}":\n\n${installed.map((i) => `  - ${i}`).join("\n")}\n\nLock file updated.${noticeText}`,
           { source: sourceLabel, count: packages.length, packages: installed },
         );
       } catch (e: any) {
@@ -430,9 +447,9 @@ function createInkRemoveTool(polpoDir: string): AgentTool<typeof InkRemoveSchema
         writeInkLock(polpoDir, removeInkLockEntry(lock, params.source));
 
         // Clean up cache directory
-        const cacheDir = join(polpoDir, "ink-cache", params.source.replace(/\//g, "--"));
+        const cacheDir = join(polpoDir, "ink-cache", sourceCacheKey(params.source));
         if (existsSync(cacheDir)) {
-          execSync(`rm -rf "${cacheDir}"`);
+          rmSync(cacheDir, { recursive: true, force: true });
         }
 
         return ok(
@@ -480,24 +497,30 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
         let updatedLock = { ...lock, registries: [...lock.registries] };
 
         for (const entry of entries) {
-          const parsed = parseInkSource(entry.source);
+          let parsed: ReturnType<typeof parseInkSource>;
+          try {
+            parsed = parseInkSource(entry.source);
+          } catch (e: any) {
+            results.push(`${entry.source}: ${e.message}`);
+            continue;
+          }
           const cacheDir = join(polpoDir, "ink-cache");
           mkdirSync(cacheDir, { recursive: true });
-          const repoDir = join(cacheDir, entry.source.replace(/\//g, "--"));
+          const repoDir = join(cacheDir, sourceCacheKey(entry.source));
 
-          // Clone or pull
+          // Clone or pull (argument arrays, no shell)
           if (existsSync(repoDir)) {
             try {
-              execSync("git pull --ff-only", { cwd: repoDir, stdio: "pipe", timeout: 30000 });
+              gitPullFastForward(repoDir, { timeout: 30000 });
             } catch {
               rmSync(repoDir, { recursive: true, force: true });
-              execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+              gitClone(parsed.url, repoDir, { timeout: 30000 });
             }
           } else {
-            execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+            gitClone(parsed.url, repoDir, { timeout: 30000 });
           }
 
-          const newHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+          const newHash = gitHeadCommit(repoDir);
 
           // Check if anything changed
           if (newHash === entry.commitHash) {
@@ -596,7 +619,7 @@ function createInkUpdateTool(polpoDir: string): AgentTool<typeof InkUpdateSchema
           results.push(`${entry.source}: updated ${entry.commitHash.slice(0, 7)} → ${newHash.slice(0, 7)} (${installed.length} packages)`);
 
           // Clean up cache
-          execSync(`rm -rf "${repoDir}"`);
+          rmSync(repoDir, { recursive: true, force: true });
         }
 
         writeInkLock(polpoDir, updatedLock);

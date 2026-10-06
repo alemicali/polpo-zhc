@@ -16,7 +16,7 @@ import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, Ag
 import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "@polpo-ai/core/app-registry";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
@@ -37,6 +37,8 @@ import {
   stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
+import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { createCliStores } from "../cli/stores.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
@@ -4328,11 +4330,15 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
 //  VAULT IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
+/** "$"-prefixed owners ("$data", "$providers") are system namespaces — never reachable from tools. */
+const RESERVED_VAULT_OWNER_ERROR = 'Error: vault owners starting with "$" are reserved for system use.';
+
 async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
@@ -4340,6 +4346,7 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
   const service = args.service as string;
   // Filter allowedAgents: drop owner (implicit), de-dupe.
   const rawAllowed = Array.isArray(args.allowedAgents) ? (args.allowedAgents as string[]) : undefined;
+  if (rawAllowed?.some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
   const allowedAgents = rawAllowed
     ? Array.from(new Set(rawAllowed.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)))
     : undefined;
@@ -4364,6 +4371,7 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
@@ -4376,6 +4384,7 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   // allowedAgents semantics: present → REPLACES. omitted → preserved.
   const rawAllowed = args.allowedAgents;
   let allowedAgents: string[] | undefined;
+  if (Array.isArray(rawAllowed) && (rawAllowed as unknown[]).some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
   if (Array.isArray(rawAllowed)) {
     allowedAgents = Array.from(new Set((rawAllowed as string[]).filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
   }
@@ -4397,6 +4406,7 @@ async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unk
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -4404,6 +4414,7 @@ async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unk
   const service = args.service as string;
   const action = args.action as "add" | "remove" | "replace";
   const withAgents = Array.isArray(args.withAgents) ? (args.withAgents as string[]) : [];
+  if (withAgents.some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
 
   // Validate target agents exist (defensive — orchestrator may resolve aliases).
   const known = new Set(agents.map(a => a.name));
@@ -4441,6 +4452,7 @@ async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, un
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -4457,6 +4469,7 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -5090,11 +5103,20 @@ function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): 
     // Use find/glob via shell — more reliable for glob patterns
     try {
       const cwd = polpo.getAgentWorkDir();
-      const result = execSync(`find . -path '${pathArg}' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200`, {
-        cwd,
-        encoding: "utf-8",
-        timeout: 10000,
-      }).trim();
+      // Argument array, no shell: the pattern is passed verbatim to find.
+      let out: string;
+      try {
+        out = execFileSync("find", [".", "-path", pathArg, "-not", "-path", "*/node_modules/*", "-not", "-path", "*/.git/*"], {
+          cwd,
+          encoding: "utf-8",
+          timeout: 10000,
+          maxBuffer: 16 * 1024 * 1024,
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+      } catch (e: any) {
+        out = typeof e?.stdout === "string" ? e.stdout : "";
+      }
+      const result = out.split("\n").filter(Boolean).slice(0, 200).join("\n").trim();
       return result || "(no matches)";
     } catch {
       return "(no matches)";
@@ -5125,20 +5147,21 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
   const searchPath = resolveFilePath(polpo, (args.path as string | undefined) ?? ".");
   const include = args.include as string | undefined;
 
-  // Build grep command
-  let cmd = `grep -rn --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.md' --include='*.yaml' --include='*.yml' --include='*.toml' --include='*.css' --include='*.html'`;
-  if (include) {
-    // Override with user-specified include
-    cmd = `grep -rn --include='${include}'`;
-  }
-  cmd += ` -E '${pattern.replace(/'/g, "'\\''")}' '${searchPath}' 2>/dev/null | head -100`;
+  // Build grep argv (no shell — pattern, include and path are passed verbatim)
+  const includes = include
+    ? [`--include=${include}`]
+    : ["*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "*.md", "*.yaml", "*.yml", "*.toml", "*.css", "*.html"].map((g) => `--include=${g}`);
+  const argv = ["-rn", ...includes, "-E", "-e", pattern, "--", searchPath];
 
   try {
-    const result = execSync(cmd, {
+    const raw = execFileSync("grep", argv, {
       cwd: polpo.getAgentWorkDir(),
       encoding: "utf-8",
       timeout: 15000,
-    }).trim();
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const result = raw.split("\n").filter(Boolean).slice(0, 100).join("\n").trim();
     if (!result) return "(no matches)";
 
     // Make paths relative
@@ -5983,7 +6006,12 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
   if (!source) return "Error: 'source' is required (e.g. 'lumea-labs/ink-registry').";
 
   const polpoDir = polpo.getPolpoDir();
-  const parsed = parseInkSource(source);
+  let parsed: ReturnType<typeof parseInkSource>;
+  try {
+    parsed = parseInkSource(source);
+  } catch (e: any) {
+    return `Error: ${e.message}`;
+  }
   const sourceLabel = parsed.ownerRepo ?? source;
 
   // Check if already installed
@@ -5995,16 +6023,17 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
   // Clone to temp dir
   const cacheDir = join(polpoDir, "ink-cache");
   mkdirSync(cacheDir, { recursive: true });
-  const repoDir = join(cacheDir, sourceLabel.replace(/\//g, "--"));
+  const repoDir = join(cacheDir, sourceCacheKey(sourceLabel));
   if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
 
   try {
-    execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+    // Validated URL/path + argument array: no shell interpretation.
+    gitClone(parsed.url, repoDir, { timeout: 30000 });
   } catch (e: any) {
     return `Error cloning "${parsed.url}": ${e.message}`;
   }
 
-  const commitHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+  const commitHash = gitHeadCommit(repoDir);
 
   // Discover packages
   let { packages, errors } = discoverInkPackages(repoDir);
@@ -6173,7 +6202,7 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   writeInkLock(polpoDir, removeInkLockEntry(lock, source));
 
   // Clean cache
-  const cacheDir = join(polpoDir, "ink-cache", source.replace(/\//g, "--"));
+  const cacheDir = join(polpoDir, "ink-cache", sourceCacheKey(source));
   if (existsSync(cacheDir)) {
     try { rmSync(cacheDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
@@ -6212,28 +6241,34 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
   let updatedLock = { ...lock, registries: [...lock.registries] };
 
   for (const entry of entries) {
-    const parsed = parseInkSource(entry.source);
+    let parsed: ReturnType<typeof parseInkSource>;
+    try {
+      parsed = parseInkSource(entry.source);
+    } catch (e: any) {
+      results.push(`${entry.source}: ${e.message}`);
+      continue;
+    }
     const cacheDir = join(polpoDir, "ink-cache");
     mkdirSync(cacheDir, { recursive: true });
-    const repoDir = join(cacheDir, entry.source.replace(/\//g, "--"));
+    const repoDir = join(cacheDir, sourceCacheKey(entry.source));
 
     try {
       if (existsSync(repoDir)) {
         try {
-          execSync("git pull --ff-only", { cwd: repoDir, stdio: "pipe", timeout: 30000 });
+          gitPullFastForward(repoDir, { timeout: 30000 });
         } catch {
           rmSync(repoDir, { recursive: true, force: true });
-          execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+          gitClone(parsed.url, repoDir, { timeout: 30000 });
         }
       } else {
-        execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+        gitClone(parsed.url, repoDir, { timeout: 30000 });
       }
     } catch (e: any) {
       results.push(`${entry.source}: git error — ${e.message}`);
       continue;
     }
 
-    const newHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+    const newHash = gitHeadCommit(repoDir);
 
     if (newHash === entry.commitHash) {
       results.push(`${entry.source}: already up to date (${newHash.slice(0, 7)})`);
