@@ -13,6 +13,7 @@ import {
   setProviderOverrides,
   validateProviderKeys,
   hasProviderCredentials,
+  completeWithAuth,
 } from "../llm/pi-client.js";
 import { parseProviders } from "../core/config.js";
 import type { ProviderConfig } from "../core/types.js";
@@ -41,8 +42,9 @@ beforeEach(() => {
 afterEach(() => {
   setProviderOverrides({});
   resetCustomProvidersForTests();
-  delete process.env.LOCALGW_API_KEY;
-  delete process.env.MY_GW_KEY;
+  delete process.env.CUSTOM_LOCALGW_API_KEY;
+  delete process.env.CUSTOM_MY_GW_KEY;
+  delete process.env.OPENAI_API_KEY_TEST_SENTINEL;
 });
 
 function local(cfg: Partial<ProviderConfig>): ProviderConfig {
@@ -72,6 +74,10 @@ describe("buildRequestAuth", () => {
   it("custom header with prefix", () => {
     const r = buildRequestAuth("openai-completions", { type: "header", headerName: "cf-aig-authorization", prefix: "Bearer " }, "k1");
     expect(r.headers).toEqual({ authorization: null, "cf-aig-authorization": "Bearer k1" });
+  });
+  it("Anthropic OAuth tokens keep the SDK's Authorization handling", () => {
+    expect(buildRequestAuth("anthropic-messages", { type: "x-api-key" }, "sk-ant-oat01-abc")).toEqual({ apiKey: "sk-ant-oat01-abc", headers: {} });
+    expect(buildRequestAuth("anthropic-messages", { type: "bearer" }, "sk-ant-oat01-abc")).toEqual({ apiKey: "sk-ant-oat01-abc", headers: {} });
   });
   it("keyless suppresses every auth header", () => {
     expect(buildRequestAuth("anthropic-messages", { type: "none" }, undefined).headers).toEqual({ "x-api-key": null, authorization: null });
@@ -119,8 +125,8 @@ describe("custom provider runtime (fake OpenAI-compatible server)", () => {
   });
 
   it("falls back to the env var when no key is in the vault", async () => {
-    process.env.MY_GW_KEY = "env-key-456";
-    setProviderOverrides({ localgw: local({ auth: { type: "x-api-key", envVar: "MY_GW_KEY" } }) });
+    process.env.CUSTOM_MY_GW_KEY = "env-key-456";
+    setProviderOverrides({ localgw: local({ auth: { type: "x-api-key", envVar: "CUSTOM_MY_GW_KEY" } }) });
     const res = await completeSimpleWithAuth(resolveModel("localgw:fake-model"), ctx());
     expect(res.stopReason).not.toBe("error");
     const req = server.requests.find((r) => r.path === "/v1/chat/completions")!;
@@ -132,7 +138,7 @@ describe("custom provider runtime (fake OpenAI-compatible server)", () => {
     setProviderOverrides({ localgw: local({ auth: { type: "bearer" } }) });
     const res = await completeSimpleWithAuth(resolveModel("localgw:fake-model"), ctx());
     expect(res.stopReason).toBe("error");
-    expect(res.errorMessage).toMatch(/No API key for custom provider "localgw".*LOCALGW_API_KEY/);
+    expect(res.errorMessage).toMatch(/No API key for custom provider "localgw".*CUSTOM_LOCALGW_API_KEY/);
     expect(server.requests).toHaveLength(0);
   });
 
@@ -155,11 +161,50 @@ describe("custom provider runtime (fake OpenAI-compatible server)", () => {
     expect(server.requests).toHaveLength(0);
   });
 
-  it("legacy entries (baseUrl/api/models only) keep working keyless", async () => {
-    const parsed = parseProviders({ ollama: { baseUrl: `${server.url}/v1`, api: "openai-completions", models: [{ id: "fake-model", name: "F" }], allowPrivateNetwork: true } });
+  it("legacy entries (baseUrl/api/models only, no flag) keep working keyless on localhost", async () => {
+    // Real pre-feature shape, hand-written in polpo.json: no preset, no auth, no allowPrivateNetwork.
+    const parsed = parseProviders({ ollama: { baseUrl: `${server.url}/v1`, api: "openai-completions", models: [{ id: "fake-model", name: "F" }] } });
+    expect(parsed.ollama.allowPrivateNetwork).toBeUndefined();
     setProviderOverrides(parsed);
     const res = await completeSimpleWithAuth(resolveModel("ollama:fake-model"), ctx());
     expect(res.stopReason).not.toBe("error");
+    expect(textOf(res)).toBe("OK");
+  });
+
+  it("legacy entries still never reach metadata addresses", async () => {
+    setProviderOverrides(parseProviders({ legacy: { baseUrl: "http://169.254.169.254/v1", models: [{ id: "m", name: "m" }] } }));
+    const res = await completeSimpleWithAuth(resolveModel("legacy:m"), ctx());
+    expect(res.stopReason).toBe("error");
+    expect(res.errorMessage).toMatch(/metadata/);
+  });
+
+  it("ignores env vars outside the custom-provider policy at runtime (built-in keys, foreign names)", async () => {
+    process.env.OPENAI_API_KEY_TEST_SENTINEL = "x";
+    const saved = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-should-never-leave-0000";
+    try {
+      // Hand-edited config pointing a non-proxy provider at a built-in key: never used.
+      setProviderOverrides({ localgw: local({ auth: { type: "bearer", envVar: "ANTHROPIC_API_KEY" } }) });
+      const res = await completeSimpleWithAuth(resolveModel("localgw:fake-model"), ctx());
+      expect(res.stopReason).toBe("error");
+      expect(res.errorMessage).toMatch(/No API key/);
+      expect(server.requests).toHaveLength(0);
+    } finally {
+      if (saved === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved;
+    }
+  });
+
+  it("completeWithAuth (llm-review scoring path) goes through the custom registry with provider options", async () => {
+    setProviderOverrides({ localgw: local({ auth: { type: "bearer" }, compat: { supportsStore: false } }) });
+    setProviderSecretsSource({ get: async () => ({ apiKey: "review-key-123", headers: {} }) });
+    const res = await completeWithAuth(resolveModel("localgw:fake-model"), {
+      ...ctx(),
+      tools: [{ name: "submit_review", description: "submit", parameters: { type: "object", properties: {} } as any }],
+    }, { toolChoice: { type: "tool", name: "submit_review" } });
+    expect(res.stopReason).not.toBe("error");
+    const req = server.requests.find((r) => r.path === "/v1/chat/completions")!;
+    expect(req.headers.authorization).toBe("Bearer review-key-123");
+    expect(req.body.tools?.[0]?.function?.name).toBe("submit_review");
   });
 });
 

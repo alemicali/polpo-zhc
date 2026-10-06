@@ -115,16 +115,74 @@ export function sanitizeCompat(api: ProviderApi, compat: unknown): Record<string
 export const HEADER_NAME_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
 export const ENV_VAR_RE = /^[A-Za-z_][A-Za-z0-9_]{0,100}$/;
 
+/** Prefix reserved for custom-provider key env vars (collision-free with other secrets). */
+export const CUSTOM_ENV_PREFIX = "CUSTOM_";
+const CUSTOM_ENV_RE = /^CUSTOM_[A-Z0-9_]{1,80}$/;
+
 /**
- * Env vars usable as key fallback. Restricted to key-looking names so a provider definition
- * cannot be used to ship arbitrary process secrets (vault key, database URL…) to an endpoint.
+ * Gateway env vars that may only be sent to the gateway's own official hosts
+ * (a leading "." means "any subdomain of").
  */
-export function isAllowedKeyEnvVar(name: string): boolean {
-  if (!ENV_VAR_RE.test(name)) return false;
-  const upper = name.toUpperCase();
-  if (upper.startsWith("POLPO_")) return false;
-  if (upper === "AWS_SECRET_ACCESS_KEY" || upper === "AWS_SESSION_TOKEN") return false;
-  return /(API_KEY|_TOKEN|_KEY)$/.test(upper);
+export const GATEWAY_ENV_HOSTS: Record<string, string[]> = {
+  OPENROUTER_API_KEY: ["openrouter.ai"],
+  AI_GATEWAY_API_KEY: ["ai-gateway.vercel.sh"],
+  CLOUDFLARE_API_KEY: ["gateway.ai.cloudflare.com"],
+  AZURE_OPENAI_API_KEY: [".openai.azure.com", ".cognitiveservices.azure.com", ".ai.azure.com"],
+};
+
+/**
+ * Env vars owned by built-in providers (pi-ai + Polpo). A custom provider may only use one of
+ * these as key fallback when it is a proxy for that provider and the admin confirmed it, or when
+ * it is a gateway variable sent to the gateway's official host (GATEWAY_ENV_HOSTS).
+ */
+export const BUILTIN_PROVIDER_ENV_VARS = new Set([
+  "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY",
+  "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "NVIDIA_API_KEY",
+  "DEEPSEEK_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "XAI_API_KEY", "TYPESAFE_API_KEY", "RADIUS_API_KEY",
+  "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_API_KEY", "ZAI_CODING_CN_API_KEY", "MISTRAL_API_KEY",
+  "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY", "MOONSHOT_API_KEY", "HF_TOKEN", "FIREWORKS_API_KEY", "TOGETHER_API_KEY",
+  "BASETEN_API_KEY", "OPENCODE_API_KEY", "KIMI_API_KEY", "META_API_KEY", "CLOUDFLARE_API_KEY", "XIAOMI_API_KEY",
+  "XIAOMI_TOKEN_PLAN_CN_API_KEY", "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+  "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY", "ANT_LING_API_KEY", "COPILOT_GITHUB_TOKEN",
+  "GH_TOKEN", "GITHUB_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+]);
+
+function hostMatches(hostname: string, patterns: string[]): boolean {
+  const h = hostname.toLowerCase();
+  return patterns.some((p) => (p.startsWith(".") ? h.endsWith(p) && h.length > p.length : h === p));
+}
+
+/**
+ * Policy for the env var used as key fallback by a custom provider.
+ * Allowed:
+ *  - CUSTOM_* names (namespace dedicated to custom providers)
+ *  - a gateway variable (OPENROUTER_API_KEY, …) when the base URL is that gateway's official host
+ *  - the proxied provider's own variable (ANTHROPIC_API_KEY / OPENAI_API_KEY) for a proxyFor
+ *    provider, only when `confirmedBuiltinReuse` (explicit admin confirmation) is set
+ * Returns an error message, or undefined when allowed.
+ */
+export function envVarPolicyError(
+  envVar: string | undefined,
+  cfg: { baseUrl?: string; proxyFor?: string },
+  opts: { confirmedBuiltinReuse?: boolean } = {},
+): string | undefined {
+  if (!envVar) return undefined;
+  if (!ENV_VAR_RE.test(envVar)) return "invalid environment variable name";
+  if (CUSTOM_ENV_RE.test(envVar)) return undefined;
+  const gatewayHosts = GATEWAY_ENV_HOSTS[envVar];
+  if (gatewayHosts) {
+    let host = "";
+    try { host = new URL(cfg.baseUrl ?? "").hostname; } catch { /* invalid */ }
+    if (host && hostMatches(host, gatewayHosts)) return undefined;
+    return `${envVar} can only be sent to ${gatewayHosts.map((h) => (h.startsWith(".") ? `*${h}` : h)).join(", ")} — use a CUSTOM_* variable for other hosts`;
+  }
+  const proxied = cfg.proxyFor ? PROXYABLE_PROVIDERS[cfg.proxyFor] : undefined;
+  if (proxied && proxied.envVar === envVar) {
+    return opts.confirmedBuiltinReuse ? undefined : `Reusing ${envVar} sends your ${cfg.proxyFor} key to this endpoint — confirm it explicitly`;
+  }
+  if (BUILTIN_PROVIDER_ENV_VARS.has(envVar)) return `${envVar} belongs to a built-in provider and cannot be used by a custom provider`;
+  return `Fallback variables must start with ${CUSTOM_ENV_PREFIX} (e.g. ${CUSTOM_ENV_PREFIX}MY_GATEWAY_API_KEY)`;
 }
 
 /** Headers Polpo manages itself — never configurable as static/secret headers. */
@@ -212,9 +270,9 @@ export function effectiveAuth(cfg: Pick<ProviderConfig, "auth" | "api" | "preset
   return defaultAuthFor(cfg.api ?? "openai-completions");
 }
 
-/** Conventional fallback env var for a custom provider id: "my-gw" → "MY_GW_API_KEY". */
+/** Conventional fallback env var for a custom provider id: "my-gw" → "CUSTOM_MY_GW_API_KEY" (collision-free). */
 export function defaultProviderEnvVar(id: string): string {
-  return `${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+  return `${CUSTOM_ENV_PREFIX}${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
 }
 
 /**

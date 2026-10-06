@@ -15,15 +15,15 @@ import {
   PROVIDER_ID_RE,
   customProviderSchema,
   effectiveAuth,
-  defaultProviderEnvVar,
   providerSecretsSchema,
   validateCustomProvider,
   type DiscoveryKind,
 } from "@polpo-ai/core/provider-config";
 import type { ProviderConfig } from "../../core/types.js";
 import type { VaultStore } from "../../core/vault-store.js";
-import { mutatePolpoProviders } from "../../core/config.js";
+import { loadPolpoConfig, mutatePolpoProviders } from "../../core/config.js";
 import {
+  allowedProviderEnvVar,
   customProviderHasCredentials,
   getCustomProviderConfig,
   isBuiltinProvider,
@@ -58,18 +58,27 @@ const SECRET_HEADER_RE = /(authorization|api[-_]?key|token|secret|password|cooki
 
 const DiscoveryKindSchema = z.enum(["openai", "anthropic", "litellm", "openrouter", "ollama", "none"]);
 
+/**
+ * Explicit admin confirmation to reuse a built-in provider's env key (ANTHROPIC_API_KEY /
+ * OPENAI_API_KEY) for a "proxy for a built-in provider" endpoint.
+ */
+const ConfirmSchema = z.boolean().optional();
+
 const CreateSchema = z.object({
   id: z.string(),
   provider: z.unknown(),
   secrets: providerSecretsSchema.optional(),
+  confirmEnvReuse: ConfirmSchema,
 });
 
 const UpdateSchema = z.object({
   provider: z.unknown(),
   secrets: providerSecretsSchema.optional(),
+  confirmEnvReuse: ConfirmSchema,
 });
 
 const DraftSchema = z.object({
+  confirmEnvReuse: ConfirmSchema,
   /** Saved provider id (uses stored secrets as a base). */
   id: z.string().optional(),
   /** Draft definition; when omitted, the saved definition of `id` is used. */
@@ -102,14 +111,39 @@ function secretHeaderViolations(cfg: ProviderConfig): string[] {
   return Object.keys(cfg.headers ?? {}).filter((h) => SECRET_HEADER_RE.test(h));
 }
 
-function validate(input: unknown): { ok: true; config: ProviderConfig } | { ok: false; error: string } {
-  const result = validateCustomProvider(input);
+function validate(input: unknown, confirmEnvReuse?: boolean): { ok: true; config: ProviderConfig } | { ok: false; error: string } {
+  const result = validateCustomProvider(input, { confirmedBuiltinReuse: confirmEnvReuse === true });
   if (!result.ok) return { ok: false, error: result.errors.join("; ") };
   const violations = secretHeaderViolations(result.config);
   if (violations.length > 0) {
     return { ok: false, error: `Header(s) ${violations.join(", ")} look secret — add them as secret headers (stored in the vault), not static headers` };
   }
   return result;
+}
+
+function originOf(url: string | undefined): string | undefined {
+  try {
+    const u = new URL(url ?? "");
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Where the key ends up: endpoint origin + auth header target. */
+function secretTarget(cfg: ProviderConfig): string {
+  const auth = effectiveAuth(cfg);
+  const header = auth.type === "header" ? `${auth.headerName ?? ""}|${auth.prefix ?? ""}`.toLowerCase() : "";
+  return `${originOf(cfg.baseUrl) ?? "?"}|${auth.type}|${header}`;
+}
+
+/**
+ * Stored secrets (vault key, secret headers) may only travel to the endpoint they were saved
+ * for: same origin (scheme + host + port) and same auth target. Otherwise they must be
+ * entered again.
+ */
+export function sameSecretTarget(a: ProviderConfig, b: ProviderConfig): boolean {
+  return !!originOf(a.baseUrl) && secretTarget(a) === secretTarget(b);
 }
 
 /** Merge stored secrets with a write-only patch, without persisting (for drafts). */
@@ -127,7 +161,7 @@ async function publicView(id: string, cfg: ProviderConfig, vault: VaultStore | u
   const secrets = await readProviderSecrets(vault, id).catch(() => undefined);
   const status = secretStatusOf(secrets);
   const auth = effectiveAuth(cfg);
-  const envVar = auth.type === "none" ? undefined : (auth.envVar ?? defaultProviderEnvVar(id));
+  const envVar = allowedProviderEnvVar(id, cfg);
   const envKeyPresent = envVar ? !!process.env[envVar] : false;
   return {
     id,
@@ -145,6 +179,8 @@ async function publicView(id: string, cfg: ProviderConfig, vault: VaultStore | u
 
 export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
+  /** Ids with a create in flight (per route instance). */
+  const creating = new Set<string>();
 
   app.use("*", async (c, next) => {
     if (!getDeps().isInitialized()) return fail(c, 409, "Instance not initialized — finish setup first");
@@ -166,7 +202,7 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     if (!body.success) return fail(c, 400, body.error.issues.map((i) => i.message).join("; "));
     const resolved = await resolveDraft(body.data);
     if ("error" in resolved) return fail(c, resolved.status, resolved.error);
-    const result = await testCustomProvider({ id: resolved.id, config: resolved.config, secrets: resolved.secrets, model: body.data.model });
+    const result = await testCustomProvider({ id: resolved.id, config: resolved.config, secrets: resolved.secrets, model: body.data.model, allowEnv: resolved.allowEnv });
     return c.json({ ok: true, data: result });
   });
 
@@ -177,7 +213,7 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     const resolved = await resolveDraft(body.data);
     if ("error" in resolved) return fail(c, resolved.status, resolved.error);
     try {
-      const result = await discoverCustomProviderModels({ id: resolved.id, config: resolved.config, secrets: resolved.secrets, kind: body.data.kind as DiscoveryKind | undefined });
+      const result = await discoverCustomProviderModels({ id: resolved.id, config: resolved.config, secrets: resolved.secrets, kind: body.data.kind as DiscoveryKind | undefined, allowEnv: resolved.allowEnv });
       return c.json({ ok: true, data: result });
     } catch (err) {
       return fail(c, 400, (err as Error).message);
@@ -200,26 +236,49 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
     const id = body.data.id.trim();
     const idError = checkId(id);
     if (idError) return fail(c, 400, idError);
-    if (getCustomProviderConfig(id)) return fail(c, 409, `Custom provider "${id}" already exists`);
-    const v = validate(body.data.provider);
+    if (getCustomProviderConfig(id) || creating.has(id)) return fail(c, 409, `Custom provider "${id}" already exists`);
+    const v = validate(body.data.provider, body.data.confirmEnvReuse);
     if (!v.ok) return fail(c, 400, v.error);
-    const net = await checkEndpoint(v.config.baseUrl!, { allowPrivateNetwork: !!v.config.allowPrivateNetwork });
-    if (!net.ok) return fail(c, 400, net.error ?? "Endpoint not allowed", { addressClass: net.addressClass });
-    return save(c, deps, id, v.config, body.data.secrets, net.unresolved ? [net.error!] : [], 201);
+    // Claim the id synchronously so concurrent creates for the same id cannot both pass.
+    creating.add(id);
+    try {
+      const net = await checkEndpoint(v.config.baseUrl!, { allowPrivateNetwork: !!v.config.allowPrivateNetwork });
+      if (!net.ok) return fail(c, 400, net.error ?? "Endpoint not allowed", { addressClass: net.addressClass });
+      if (getCustomProviderConfig(id)) return fail(c, 409, `Custom provider "${id}" already exists`);
+      return await save(c, deps, id, v.config, body.data.secrets, net.unresolved ? [net.error!] : [], 201, "create");
+    } finally {
+      creating.delete(id);
+    }
   });
 
   // PUT /providers/custom/:id — replace definition; secrets are a write-only patch
   app.put("/:id", async (c) => {
     const deps = getDeps();
     const id = c.req.param("id");
-    if (!getCustomProviderConfig(id)) return fail(c, 404, `Custom provider "${id}" not found`);
+    const current = getCustomProviderConfig(id);
+    if (!current) return fail(c, 404, `Custom provider "${id}" not found`);
     const body = UpdateSchema.safeParse(await readJson(c));
     if (!body.success) return fail(c, 400, body.error.issues.map((i) => i.message).join("; "));
-    const v = validate(body.data.provider);
+    const v = validate(body.data.provider, body.data.confirmEnvReuse);
     if (!v.ok) return fail(c, 400, v.error);
     const net = await checkEndpoint(v.config.baseUrl!, { allowPrivateNetwork: !!v.config.allowPrivateNetwork });
     if (!net.ok) return fail(c, 400, net.error ?? "Endpoint not allowed", { addressClass: net.addressClass });
-    return save(c, deps, id, v.config, body.data.secrets, net.unresolved ? [net.error!] : [], 200);
+    const warnings = net.unresolved ? [net.error!] : [];
+    let secrets = body.data.secrets;
+    if (!sameSecretTarget(current, v.config)) {
+      // Endpoint origin or auth target changed: stored secrets must not follow to the new
+      // target. Drop everything that was not re-entered in this request.
+      const stored = await readProviderSecrets(deps.getVaultStore(), id).catch(() => undefined);
+      const secretHeaders: Record<string, string | null> = {};
+      for (const name of Object.keys(stored?.headers ?? {})) secretHeaders[name] = null;
+      Object.assign(secretHeaders, secrets?.secretHeaders ?? {});
+      const reentered = secrets?.apiKey !== undefined && secrets.apiKey.trim() !== "";
+      if ((stored?.apiKey && !reentered) || Object.values(secretHeaders).some((x) => x === null)) {
+        warnings.push("Endpoint or auth method changed — stored secrets were removed; enter the key again");
+      }
+      secrets = { apiKey: reentered ? secrets!.apiKey : "", secretHeaders };
+    }
+    return save(c, deps, id, v.config, secrets, warnings, 200, "update");
   });
 
   // DELETE /providers/custom/:id — remove definition + vault secrets
@@ -262,24 +321,36 @@ export function customProviderRoutes(getDeps: () => CustomProviderRouteDeps): Op
   });
 
   async function resolveDraft(body: z.infer<typeof DraftSchema>): Promise<
-    { id: string; config: ProviderConfig; secrets: ProviderSecrets } | { error: string; status: 400 | 404 }
+    { id: string; config: ProviderConfig; secrets: ProviderSecrets; allowEnv: boolean } | { error: string; status: 400 | 404 }
   > {
     const deps = getDeps();
-    const savedId = body.id?.trim();
-    const saved = savedId ? getCustomProviderConfig(savedId) : undefined;
-    if (savedId && !saved && body.provider === undefined) return { error: `Custom provider "${savedId}" not found`, status: 404 };
+    const requestedId = body.id?.trim();
+    const saved = requestedId ? getCustomProviderConfig(requestedId) : undefined;
+    if (requestedId && !saved) {
+      if (body.provider === undefined) return { error: `Custom provider "${requestedId}" not found`, status: 404 };
+      const idError = checkId(requestedId);
+      if (idError) return { error: idError, status: 400 };
+    }
     let config: ProviderConfig;
     if (body.provider !== undefined) {
-      const v = validate(body.provider);
+      const v = validate(body.provider, body.confirmEnvReuse);
       if (!v.ok) return { error: v.error, status: 400 };
       config = v.config;
     } else {
       config = saved!;
     }
-    // Stored secrets are only reused for the SAME saved provider (never for another id).
-    const stored = saved && savedId ? await readProviderSecrets(deps.getVaultStore(), savedId).catch(() => undefined) : undefined;
-    const id = savedId && PROVIDER_ID_RE.test(savedId) ? savedId : "draft";
-    return { id, config, secrets: overlaySecrets(stored, body.secrets) };
+    // Stored secrets / env fallback are only reused for the SAME saved provider, and only while
+    // the draft still targets the same origin + auth header (and the same env var). Otherwise
+    // the caller must provide the secret again.
+    let stored: ProviderSecrets | undefined;
+    let allowEnv = false;
+    if (saved && requestedId && sameSecretTarget(saved, config)) {
+      stored = await readProviderSecrets(deps.getVaultStore(), requestedId).catch(() => undefined);
+      const savedEnv = allowedProviderEnvVar(requestedId, saved);
+      allowEnv = !!savedEnv && savedEnv === allowedProviderEnvVar(requestedId, config);
+    }
+    const id = requestedId ?? "draft";
+    return { id, config, secrets: overlaySecrets(stored, body.secrets), allowEnv };
   }
 
   return app;
@@ -293,8 +364,15 @@ async function save(
   secrets: z.infer<typeof providerSecretsSchema> | undefined,
   warnings: string[],
   status: 200 | 201,
+  mode: "create" | "update",
 ) {
   const vault = deps.getVaultStore();
+  if (mode === "create") {
+    // The id may exist in polpo.json without being registered yet (hand edit): never let a
+    // create overwrite another provider's secrets.
+    const raw = loadPolpoConfig(deps.getPolpoDir())?.providers as Record<string, unknown> | undefined;
+    if (raw && Object.prototype.hasOwnProperty.call(raw, id)) return fail(c, 409, `Custom provider "${id}" already exists`);
+  }
   // Secrets first: if the vault is unavailable we refuse before touching polpo.json.
   let secretStatus;
   try {
@@ -303,17 +381,28 @@ async function save(
     return fail(c, 503, (err as Error).message);
   }
   try {
-    mutatePolpoProviders(deps.getPolpoDir(), (providers) => { providers[id] = config; });
+    mutatePolpoProviders(deps.getPolpoDir(), (providers) => {
+      if (mode === "create" && Object.prototype.hasOwnProperty.call(providers, id)) throw new ConflictError(id);
+      providers[id] = config;
+    });
   } catch (err) {
+    if (err instanceof ConflictError) return fail(c, 409, err.message);
     return fail(c, 500, `Failed to update polpo.json: ${(err as Error).message}`);
   }
   setCustomProviderSecretStatus(id, secretStatus);
   await deps.applyProviders();
   const auth = effectiveAuth(config);
   if (auth.type !== "none" && !customProviderHasCredentials(id)) {
-    warnings.push(`No key stored and ${auth.envVar ?? defaultProviderEnvVar(id)} is not set — requests will fail until a key is added`);
+    const envVar = allowedProviderEnvVar(id, config);
+    warnings.push(`No key stored${envVar ? ` and ${envVar} is not set` : ""} — requests will fail until a key is added`);
   }
   return c.json({ ok: true, data: { ...(await publicView(id, config, vault)), warnings } }, status);
+}
+
+class ConflictError extends Error {
+  constructor(id: string) {
+    super(`Custom provider "${id}" already exists`);
+  }
 }
 
 /** Re-export for the OpenAPI-less schema consumers (tests). */

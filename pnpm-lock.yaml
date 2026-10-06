@@ -29,7 +29,7 @@ importers:
         specifier: ^1.2.2
         version: 1.2.2(hono@4.11.9)(zod@4.3.6)
       '@polpo-ai/core':
-        specifier: workspace:*
+        specifier: workspace:^0.3.12
         version: link:packages/core
       '@polpo-ai/server':
         specifier: workspace:*

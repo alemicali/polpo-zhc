@@ -449,6 +449,11 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
+    // Vault first: custom provider keys live there ("$providers"), and the key check below
+    // must see them (otherwise vault-only custom providers are reported as missing).
+    this.initVaultStore();
+    await refreshCustomProviderSecretStatus();
+
     // Validate API keys (after stores are available so we can read per-agent models)
     await this.validateProviders();
 
@@ -457,8 +462,6 @@ export class Orchestrator extends TypedEmitter {
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
 
-    this.initVaultStore();
-    await refreshCustomProviderSecretStatus();
     this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
   }
 

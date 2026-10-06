@@ -68,6 +68,8 @@ function classifyV4(ip: number): AddressClass {
   // multicast / reserved / broadcast.
   if (inV4(ip, "169.254.0.0", 16)) return "blocked";
   if (ip === parseIPv4("100.100.100.200")) return "blocked";
+  // Azure WireServer / host agent (public range, but only reachable from inside Azure VMs).
+  if (ip === parseIPv4("168.63.129.16")) return "blocked";
   if (inV4(ip, "224.0.0.0", 4) || inV4(ip, "240.0.0.0", 4)) return "blocked";
   // Private / internal.
   if (inV4(ip, "0.0.0.0", 8)) return "private";
@@ -123,6 +125,8 @@ function classifyV6(ip: string): AddressClass {
   const embeddedV4 = (hi: number, lo: number) => classifyV4(hi * 65536 + lo);
   // fd00:ec2::254 — AWS IMDS over IPv6.
   if (g[0] === 0xfd00 && g[1] === 0x0ec2 && g.slice(2, 7).every((x) => x === 0) && g[7] === 0x254) return "blocked";
+  // fd20:ce::254 — GCP metadata over IPv6.
+  if (g[0] === 0xfd20 && g[1] === 0x00ce && g.slice(2, 7).every((x) => x === 0) && g[7] === 0x254) return "blocked";
   // :: (unspecified) and ::1 (loopback)
   if (g.slice(0, 7).every((x) => x === 0) && (g[7] === 0 || g[7] === 1)) return "private";
   // IPv4-mapped ::ffff:a.b.c.d and IPv4-compatible ::a.b.c.d

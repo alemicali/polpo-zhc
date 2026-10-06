@@ -32,6 +32,7 @@ import { getBuiltinModel, getBuiltinProviders, type BuiltinProvider } from "@ear
 import {
   defaultProviderEnvVar,
   effectiveAuth,
+  envVarPolicyError,
   sanitizeCompat,
 } from "@polpo-ai/core/provider-config";
 import type { CustomModelDef, ProviderApi, ProviderAuthConfig, ProviderConfig } from "../core/types.js";
@@ -127,7 +128,7 @@ export function syncCustomProviders(all: Record<string, ProviderConfig> | undefi
   const next: Record<string, ProviderConfig> = {};
   for (const [id, cfg] of Object.entries(all ?? {})) {
     if (!cfg || isBuiltinProvider(id)) continue;
-    next[id] = cfg;
+    next[id] = normalizeLegacy(cfg);
   }
   customConfigs = next;
   if (modelsInstance || Object.keys(next).length > 0) {
@@ -138,6 +139,35 @@ export function syncCustomProviders(all: Record<string, ProviderConfig> | undefi
     }
   }
   for (const id of [...secretStatus.keys()]) if (!next[id]) secretStatus.delete(id);
+}
+
+/**
+ * Legacy entries ({ baseUrl, api, models } written by hand in polpo.json, no `auth`/`preset`)
+ * pointed at local servers before the private-network policy existed. An explicit base URL
+ * written by the admin is treated as consent (metadata/link-local stay blocked regardless).
+ * Entries created through the API always carry `auth`, so this never applies to them.
+ */
+function normalizeLegacy(cfg: ProviderConfig): ProviderConfig {
+  if (!cfg.auth && !cfg.preset && cfg.baseUrl && cfg.allowPrivateNetwork === undefined) {
+    return { ...cfg, allowPrivateNetwork: true };
+  }
+  return cfg;
+}
+
+/**
+ * Env var a SAVED custom provider may fall back to, or undefined when not allowed:
+ * keyless providers have none; names outside the policy (built-in provider keys,
+ * non-CUSTOM_* names, gateway vars aimed at a foreign host) are ignored at runtime too.
+ */
+export function allowedProviderEnvVar(id: string, cfg: ProviderConfig): string | undefined {
+  const auth = effectiveAuth(cfg);
+  if (auth.type === "none") return undefined;
+  const envVar = auth.envVar ?? defaultProviderEnvVar(id);
+  // Saved config = admin intent: proxy reuse of the proxied provider's key is allowed here
+  // (the API only saves it with an explicit confirmation).
+  return envVarPolicyError(envVar, { baseUrl: cfg.baseUrl, proxyFor: cfg.proxyFor }, { confirmedBuiltinReuse: true })
+    ? undefined
+    : envVar;
 }
 
 // ── Auth ───────────────────────────────────────────────────────────
@@ -156,6 +186,11 @@ function nativeAuthHeader(api: ProviderApi): string {
  */
 export function buildRequestAuth(api: ProviderApi, auth: ProviderAuthConfig, key: string | undefined): { apiKey: string; headers: ProviderHeaders } {
   const native = nativeAuthHeader(api);
+  if (api === "anthropic-messages" && key && auth.type !== "none" && key.startsWith("sk-ant-oat")) {
+    // Anthropic OAuth tokens: the SDK sends them as Authorization: Bearer with the OAuth beta
+    // headers — don't suppress Authorization (that would leave the request unauthenticated).
+    return { apiKey: key, headers: {} };
+  }
   if (auth.type === "none" || !key) {
     const headers: ProviderHeaders = { [native]: null };
     if (native !== "authorization") headers.authorization = null;
@@ -200,7 +235,12 @@ export interface ResolvedCustomAuth {
 export async function resolveCustomProviderAuth(
   id: string,
   cfg: ProviderConfig,
-  overrides?: { apiKey?: string; secrets?: ProviderSecrets },
+  overrides?: {
+    apiKey?: string;
+    secrets?: ProviderSecrets;
+    /** Fall back to the env var (saved providers only — never for drafts). Default true. */
+    allowEnv?: boolean;
+  },
 ): Promise<ResolvedCustomAuth | undefined> {
   const api = cfg.api ?? "openai-completions";
   const auth = effectiveAuth(cfg);
@@ -210,10 +250,10 @@ export async function resolveCustomProviderAuth(
     const built = buildRequestAuth(api, auth, undefined);
     return { apiKey: built.apiKey, headers: { ...built.headers, ...secretHeaders }, source: "none" };
   }
-  const envVar = auth.envVar ?? defaultProviderEnvVar(id);
+  const envVar = overrides?.allowEnv === false ? undefined : allowedProviderEnvVar(id, cfg);
   let key = overrides?.apiKey || secrets?.apiKey;
   let source: ResolvedCustomAuth["source"] = "vault";
-  if (!key) {
+  if (!key && envVar) {
     key = process.env[envVar] || undefined;
     source = "env";
   }
@@ -229,7 +269,8 @@ export function customProviderHasCredentials(id: string): boolean {
   const auth = effectiveAuth(cfg);
   if (auth.type === "none") return true;
   if (secretStatus.get(id)?.hasKey) return true;
-  return !!process.env[auth.envVar ?? defaultProviderEnvVar(id)];
+  const envVar = allowedProviderEnvVar(id, cfg);
+  return !!(envVar && process.env[envVar]);
 }
 
 function apiKeyAuthFor(id: string): ApiKeyAuth {
@@ -340,12 +381,11 @@ function stripAuthOptions<T>(options: T): T {
   return rest as T;
 }
 
-function notConfiguredError(id: string, cfg: ProviderConfig): Error {
-  const auth = effectiveAuth(cfg);
-  const envVar = auth.envVar ?? defaultProviderEnvVar(id);
-  return new Error(
-    `No API key for custom provider "${id}". Add one in Settings → Providers (stored encrypted in the vault) or set ${envVar}.`,
-  );
+function notConfiguredError(id: string, cfg: ProviderConfig, draft = false): Error {
+  const envVar = allowedProviderEnvVar(id, cfg);
+  return new Error(draft
+    ? `No API key provided for "${id}" (drafts never read server environment variables — enter the key).`
+    : `No API key for custom provider "${id}". Add one in Settings → Providers (stored encrypted in the vault)${envVar ? ` or set ${envVar}` : ""}.`);
 }
 
 const preflightCache = new Map<string, { at: number; error?: string }>();
@@ -412,7 +452,10 @@ export function streamWithDraftProvider(
   model: Model<Api>,
   context: Context,
   options?: SimpleStreamOptions,
+  /** Env fallback is only allowed for an unchanged saved provider (decided by the caller). */
+  draftOpts: { allowEnv?: boolean } = {},
 ): AssistantMessageEventStream {
+  const allowEnv = draftOpts.allowEnv === true;
   const draftModels = createModels();
   const api = cfg.api ?? "openai-completions";
   const draftSecrets = secrets ?? { headers: {} };
@@ -423,7 +466,7 @@ export function streamWithDraftProvider(
       apiKey: {
         name: `${id} API key`,
         resolve: async () => {
-          const r = await resolveCustomProviderAuth(id, cfg, { secrets: draftSecrets });
+          const r = await resolveCustomProviderAuth(id, cfg, { secrets: draftSecrets, allowEnv });
           return r ? { auth: { apiKey: r.apiKey, headers: r.headers }, source: r.source } : undefined;
         },
       },
@@ -432,8 +475,8 @@ export function streamWithDraftProvider(
     api: { [api]: withTransport(cfg, API_IMPLS[api]()) } as Partial<Record<Api, ProviderStreams>>,
   }));
   return lazyStream(model, async () => {
-    if (effectiveAuth(cfg).type !== "none" && !(await resolveCustomProviderAuth(id, cfg, { secrets: draftSecrets }))) {
-      throw notConfiguredError(id, cfg);
+    if (effectiveAuth(cfg).type !== "none" && !(await resolveCustomProviderAuth(id, cfg, { secrets: draftSecrets, allowEnv }))) {
+      throw notConfiguredError(id, cfg, !allowEnv);
     }
     return draftModels.streamSimple(model, context, stripAuthOptions(options));
   });

@@ -35,6 +35,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel } from "../core/types.js";
 import {
+  allowedProviderEnvVar,
   buildCustomModel,
   completeCustomProviderRaw,
   customProviderHasCredentials,
@@ -46,14 +47,11 @@ import {
   streamCustomProvider,
   syncCustomProviders,
 } from "./custom-providers.js";
-import { defaultProviderEnvVar, effectiveAuth } from "@polpo-ai/core/provider-config";
-
 export { isBuiltinProvider, isCustomProvider };
 
-/** Env var used as key fallback for a custom provider (undefined when keyless). */
+/** Env var used as key fallback for a custom provider (undefined when keyless or not allowed). */
 export function customProviderEnvVar(id: string, cfg: ProviderConfig): string | undefined {
-  const auth = effectiveAuth(cfg);
-  return auth.type === "none" ? undefined : (auth.envVar ?? defaultProviderEnvVar(id));
+  return allowedProviderEnvVar(id, cfg);
 }
 
 // ─── Constants ──────────────────────────────────────

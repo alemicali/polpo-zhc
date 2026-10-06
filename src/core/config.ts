@@ -324,8 +324,10 @@ function validatePipelineStep(step: unknown, path: string, loopNames: Set<string
 
 /**
  * Parse the polpo.json `providers` map. Keeps every known field (custom providers /
- * gateways: label, preset, auth, headers, compat, allowPrivateNetwork, timeouts, models…),
- * drops unknown keys and invalid values, and skips ids that are not valid slugs.
+ * gateways: label, preset, auth, headers, compat, allowPrivateNetwork, timeouts, models…)
+ * and drops unknown keys and invalid values. Ids are kept as written (legacy hand-written
+ * ids may not match the slug rule enforced by the API for new providers); only prototype
+ * keys are skipped.
  */
 export function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
   const providers: Record<string, ProviderConfig> = {};

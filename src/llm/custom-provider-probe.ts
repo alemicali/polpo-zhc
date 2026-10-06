@@ -82,6 +82,20 @@ function hintsFor(cfg: ProviderConfig, message: string, status?: number): string
   return hints;
 }
 
+/** Status-only message for private targets (no upstream text). */
+export function genericError(raw: string): string {
+  const status = /\b([45]\d\d)\b/.exec(raw)?.[1];
+  if (status) return `Request failed (HTTP ${status})`;
+  if (/timed? ?out|timeout|abort/i.test(raw)) return "Request timed out";
+  return "Request failed (connection error or unexpected response)";
+}
+
+function secretValuesOf(secrets: ProviderSecrets | undefined, resolved?: { apiKey: string; headers: Record<string, string | null> }): string[] {
+  const out = [secrets?.apiKey, ...Object.values(secrets?.headers ?? {}), resolved?.apiKey, ...Object.values(resolved?.headers ?? {})];
+  return out.filter((v): v is string => typeof v === "string" && v.length >= 4 && v !== "polpo-no-key")
+    .flatMap((v) => (v.toLowerCase().startsWith("bearer ") ? [v, v.slice(7)] : [v]));
+}
+
 // ── Test connection ──────────────────────────────────────────────
 
 export interface ProviderTestResult {
@@ -105,13 +119,14 @@ async function runCompletion(
   secrets: ProviderSecrets | undefined,
   modelId: string,
   timeoutMs: number,
+  allowEnv: boolean,
 ): Promise<{ ok: boolean; text?: string; error?: string; latencyMs: number }> {
   const model: Model<Api> = buildCustomModel(id, cfg, modelId);
   const started = Date.now();
   const signal = AbortSignal.timeout(timeoutMs);
   const stream = streamWithDraftProvider(id, cfg, secrets, model, {
     messages: [{ role: "user", content: "Reply with the single word: OK", timestamp: Date.now() }],
-  }, { maxTokens: 64, signal, maxRetries: 0 } as never);
+  }, { maxTokens: 64, signal, maxRetries: 0 } as never, { allowEnv });
   const result = await stream.result();
   const latencyMs = Date.now() - started;
   if (result.stopReason === "error" || result.stopReason === "aborted") {
@@ -136,10 +151,12 @@ export async function testCustomProvider(input: {
   secrets?: ProviderSecrets;
   model?: string;
   timeoutMs?: number;
+  /** Env-var key fallback — only for an unchanged saved provider. Default false. */
+  allowEnv?: boolean;
 }): Promise<ProviderTestResult> {
   const { id, config } = input;
   const api = config.api ?? "openai-completions";
-  const secretValues = [input.secrets?.apiKey, ...Object.values(input.secrets?.headers ?? {})];
+  const allowEnv = input.allowEnv === true;
   if (!config.baseUrl) return { ok: false, stage: "config", error: "Base URL is required", hints: [] };
 
   const net = await checkEndpoint(config.baseUrl, { allowPrivateNetwork: !!config.allowPrivateNetwork });
@@ -147,13 +164,22 @@ export async function testCustomProvider(input: {
     return { ok: false, stage: "network", error: net.error, addressClass: net.addressClass, hints: hintsFor(config, net.error ?? "") };
   }
 
-  if (effectiveAuth(config).type !== "none" && !(await resolveCustomProviderAuth(id, config, { secrets: input.secrets ?? { headers: {} } }))) {
-    return { ok: false, stage: "auth", error: "No API key provided (enter one, or set the fallback environment variable)", hints: [] };
+  const resolvedAuth = await resolveCustomProviderAuth(id, config, { secrets: input.secrets ?? { headers: {} }, allowEnv });
+  if (effectiveAuth(config).type !== "none" && !resolvedAuth) {
+    return {
+      ok: false,
+      stage: "auth",
+      error: allowEnv ? "No API key stored and the fallback environment variable is not set" : "No API key provided — enter the key to test this configuration",
+      hints: [],
+    };
   }
+  // Everything that could carry a secret (vault, env or typed) is scrubbed from echoed errors.
+  const secretValues = secretValuesOf(input.secrets, resolvedAuth);
+  const isPrivate = net.addressClass === "private";
 
   let modelId = input.model ?? config.models?.[0]?.id;
   if (!modelId) {
-    const discovered = await discoverCustomProviderModels({ id, config, secrets: input.secrets }).catch(() => undefined);
+    const discovered = await discoverCustomProviderModels({ id, config, secrets: input.secrets, allowEnv }).catch(() => undefined);
     modelId = discovered?.models[0]?.id;
   }
   if (!modelId) {
@@ -161,9 +187,12 @@ export async function testCustomProvider(input: {
   }
 
   const timeoutMs = Math.min(input.timeoutMs ?? config.timeoutMs ?? 30_000, 60_000);
-  const first = await runCompletion(id, config, input.secrets, modelId, timeoutMs);
+  const first = await runCompletion(id, config, input.secrets, modelId, timeoutMs, allowEnv);
+  // Private/internal targets: never echo upstream content (the endpoint could be any internal
+  // HTTP service) — status code and generic messages only.
+  const sampleOf = (text?: string) => (isPrivate ? undefined : text?.slice(0, 80));
   if (first.ok) {
-    return { ok: true, latencyMs: first.latencyMs, model: modelId, sample: first.text?.slice(0, 120), hints: [], addressClass: net.addressClass };
+    return { ok: true, latencyMs: first.latencyMs, model: modelId, sample: sampleOf(first.text), hints: [], addressClass: net.addressClass };
   }
 
   const rawError = first.error ?? "Request failed";
@@ -173,13 +202,13 @@ export async function testCustomProvider(input: {
       ...(config.compat ?? {}),
       ...Object.fromEntries(suggestions.map((s) => [s.flag, s.value])),
     }) ?? {};
-    const retry = await runCompletion(id, { ...config, compat: suggestedCompat }, input.secrets, modelId, timeoutMs);
+    const retry = await runCompletion(id, { ...config, compat: suggestedCompat }, input.secrets, modelId, timeoutMs, allowEnv);
     if (retry.ok) {
       return {
         ok: true,
         latencyMs: retry.latencyMs,
         model: modelId,
-        sample: retry.text?.slice(0, 120),
+        sample: sampleOf(retry.text),
         suggestedCompat,
         suggestions,
         hints: ["Works with adjusted compatibility settings — apply them before saving."],
@@ -187,7 +216,7 @@ export async function testCustomProvider(input: {
       };
     }
   }
-  const error = sanitizeProviderError(rawError, secretValues);
+  const error = isPrivate ? genericError(rawError) : sanitizeProviderError(rawError, secretValues).slice(0, 300);
   return {
     ok: false,
     stage: "request",
@@ -214,11 +243,17 @@ export interface DiscoveryResult {
 }
 
 /** Headers for a raw HTTP call, equivalent to what the SDK would send. */
-async function discoveryHeaders(id: string, cfg: ProviderConfig, secrets: ProviderSecrets | undefined): Promise<Record<string, string>> {
+async function discoveryHeaders(
+  id: string,
+  cfg: ProviderConfig,
+  secrets: ProviderSecrets | undefined,
+  allowEnv: boolean,
+): Promise<{ headers: Record<string, string>; secretValues: string[] }> {
   const api = cfg.api ?? "openai-completions";
-  const resolved = await resolveCustomProviderAuth(id, cfg, secrets ? { secrets } : undefined);
+  const resolved = await resolveCustomProviderAuth(id, cfg, { secrets: secrets ?? { headers: {} }, allowEnv });
   const headers: Record<string, string> = { ...(cfg.headers ?? {}) };
-  if (!resolved) return headers;
+  const secretValues = secretValuesOf(secrets, resolved);
+  if (!resolved) return { headers, secretValues };
   const native = api === "anthropic-messages" ? "x-api-key" : api === "azure-openai-responses" ? "api-key" : "authorization";
   const lower = new Map(Object.entries(resolved.headers).map(([k, v]) => [k.toLowerCase(), v]));
   if (!lower.has(native)) {
@@ -232,7 +267,7 @@ async function discoveryHeaders(id: string, cfg: ProviderConfig, secrets: Provid
     }
   }
   if (api === "anthropic-messages") headers["anthropic-version"] = "2023-06-01";
-  return headers;
+  return { headers, secretValues };
 }
 
 function rootOf(baseUrl: string): string {
@@ -333,10 +368,11 @@ export async function discoverCustomProviderModels(input: {
   secrets?: ProviderSecrets;
   kind?: DiscoveryKind;
   fetchImpl?: typeof fetch;
+  /** Env-var key fallback — only for an unchanged saved provider. Default false. */
+  allowEnv?: boolean;
 }): Promise<DiscoveryResult> {
   const { id, config } = input;
   const warnings: string[] = [];
-  const secretValues = [input.secrets?.apiKey, ...Object.values(input.secrets?.headers ?? {})];
   const policy = { allowPrivateNetwork: !!config.allowPrivateNetwork };
   const base = (config.baseUrl ?? "").replace(/\/+$/, "");
   const kind = input.kind ?? discoveryKindFor(config);
@@ -356,11 +392,16 @@ export async function discoverCustomProviderModels(input: {
   }
 
   if (base && kind !== "none") {
+    let isPrivate = !!config.allowPrivateNetwork;
     if (!input.fetchImpl) {
       const net = await checkEndpoint(base, policy);
       if (!net.ok) throw new Error(net.error ?? "Endpoint not allowed");
+      isPrivate = net.addressClass === "private";
     }
-    const headers = await discoveryHeaders(id, config, input.secrets);
+    const { headers, secretValues } = await discoveryHeaders(id, config, input.secrets, input.allowEnv === true);
+    // Private targets: model ids are returned, upstream bodies / errors are not echoed.
+    const detail = (text: string | undefined, max: number) =>
+      !text || isPrivate ? "" : `: ${sanitizeProviderError(text, secretValues).slice(0, max)}`;
     const get = async (url: string) => fetchJsonGuarded(url, { headers, policy, timeoutMs: 15_000, maxBytes: 8 * 1024 * 1024, fetchImpl: input.fetchImpl });
     const attempts: Array<{ url: string; parse: (j: unknown) => DiscoveredModel[] }> = [];
     if (kind === "litellm") {
@@ -379,7 +420,7 @@ export async function discoverCustomProviderModels(input: {
       try {
         const res = await get(attempt.url);
         if (res.status >= 400) {
-          warnings.push(`${new URL(attempt.url).pathname} → HTTP ${res.status}${res.text ? `: ${sanitizeProviderError(res.text, secretValues).slice(0, 160)}` : ""}`);
+          warnings.push(`${new URL(attempt.url).pathname} → HTTP ${res.status}${detail(res.text, 120)}`);
           continue;
         }
         const parsed = attempt.parse(res.json);
@@ -389,7 +430,7 @@ export async function discoverCustomProviderModels(input: {
         }
         warnings.push(`${new URL(attempt.url).pathname} returned no models`);
       } catch (err) {
-        warnings.push(`${new URL(attempt.url).pathname}: ${sanitizeProviderError((err as Error).message, secretValues)}`);
+        warnings.push(`${new URL(attempt.url).pathname}: ${isPrivate ? genericError((err as Error).message) : sanitizeProviderError((err as Error).message, secretValues).slice(0, 200)}`);
       }
     }
     if (found) {

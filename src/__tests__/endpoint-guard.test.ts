@@ -37,6 +37,11 @@ describe("classifyAddress", () => {
     ["64:ff9b::a9fe:a9fe", "blocked"], // NAT64-embedded metadata
     ["2002:a9fe:a9fe::1", "blocked"], // 6to4-embedded metadata
     ["2606:4700:4700::1111", "public"],
+    // Cloud metadata / host agents — always blocked
+    ["fd20:ce::254", "blocked"], // GCP metadata over IPv6
+    ["fd20:00ce:0000:0000:0000:0000:0000:0254", "blocked"],
+    ["168.63.129.16", "blocked"], // Azure WireServer
+    ["168.63.129.17", "public"],
   ])("%s → %s", (ip, cls) => {
     expect(classifyAddress(ip)).toBe(cls);
   });
@@ -61,6 +66,20 @@ describe("checkEndpoint", () => {
     const allowed = await checkEndpoint("https://llm.corp.example/v1", { allowPrivateNetwork: true });
     expect(allowed.ok).toBe(true);
     expect(allowed.addressClass).toBe("private");
+  });
+
+  it.each([
+    ["AWS IMDS v4", "http://169.254.169.254/latest/meta-data"],
+    ["AWS IMDS v6", "http://[fd00:ec2::254]/latest/meta-data"],
+    ["GCP metadata v4", "http://169.254.169.254/computeMetadata/v1/"],
+    ["GCP metadata v6", "http://[fd20:ce::254]/computeMetadata/v1/"],
+    ["GCP metadata name", "http://metadata.google.internal/computeMetadata/v1/"],
+    ["Azure IMDS", "http://169.254.169.254/metadata/instance?api-version=2021-02-01"],
+    ["Azure WireServer", "http://168.63.129.16/machine?comp=goalstate"],
+  ])("blocks %s even with allowPrivateNetwork", async (_name, url) => {
+    const r = await checkEndpoint(url, { allowPrivateNetwork: true });
+    expect(r.ok).toBe(false);
+    await expect(createGuardedFetch({ allowPrivateNetwork: true })(url)).rejects.toThrow(/metadata/);
   });
 
   it("never allows metadata, even with the private toggle", async () => {

@@ -3017,7 +3017,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
         loaded={customLoaded}
         agentUsage={providerAgentUsage}
         onChanged={refreshCustom}
-        onAdd={() => { setAddTab("custom"); setAddDialogOpen(true); }}
+        onAdd={async () => { await ensureAuthProviders(); setAddTab("custom"); setAddDialogOpen(true); }}
       />
 
       {/* ── Model Allowlist ── */}
@@ -3153,8 +3153,9 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
                   </div>
                 )}
               </TabsContent>
-              <TabsContent value="custom">
-                {addDialogOpen && addTab === "custom" && (
+              {/* forceMount: switching tabs must not discard a half-filled wizard */}
+              <TabsContent value="custom" forceMount className="data-[state=inactive]:hidden">
+                {addDialogOpen && (
                   <CustomProviderWizard
                     apiFetch={api}
                     takenIds={customIds}

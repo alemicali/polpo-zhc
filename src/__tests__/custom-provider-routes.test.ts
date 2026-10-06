@@ -42,6 +42,7 @@ class MemoryVault implements VaultStore {
 }
 
 let server: FakeLlmServer;
+let attacker: FakeLlmServer;
 let dir: string;
 let polpoDir: string;
 let vault: MemoryVault;
@@ -64,9 +65,11 @@ async function call(method: string, path: string, body?: unknown) {
 
 beforeAll(async () => {
   server = await startFakeLlmServer({ models: ["llama-3", "qwen-2"] });
+  attacker = await startFakeLlmServer();
 });
 afterAll(async () => {
   await server.close();
+  await attacker.close();
 });
 
 beforeEach(() => {
@@ -182,6 +185,18 @@ describe("custom provider routes", () => {
     expect(r.json.data.hints.join(" ")).toMatch(/Authentication failed/);
   });
 
+  it("private targets: no upstream body/error is echoed (status only), discovery ids still returned", async () => {
+    server.next.set("/v1/chat/completions", { status: 401, body: JSON.stringify({ error: { message: "internal-admin-panel-body" } }) });
+    const r = await call("POST", "/test", { provider: draft(), secrets: { apiKey: "k-0123456789abcdef" } });
+    expect(r.json.data.ok).toBe(false);
+    expect(r.json.data.error).toBe("Request failed (HTTP 401)");
+    expect(JSON.stringify(r.json)).not.toContain("internal-admin-panel-body");
+    server.next.set("/model/info", { status: 500, body: "internal-stacktrace-body" });
+    const d = await call("POST", "/discover", { provider: { ...draft(), preset: "litellm", auth: { type: "none" } } });
+    expect(JSON.stringify(d.json)).not.toContain("internal-stacktrace-body");
+    expect(d.json.data.models.map((m: any) => m.id)).toEqual(["llama-3", "qwen-2"]);
+  });
+
   it("discovers models (OpenAI /models, LiteLLM /model/info, Ollama /api/tags)", async () => {
     const openai = await call("POST", "/discover", { provider: { ...draft(), auth: { type: "none" } } });
     expect(openai.json.data.models.map((m: any) => m.id)).toEqual(["llama-3", "qwen-2"]);
@@ -213,6 +228,107 @@ describe("custom provider routes", () => {
     expect(json.providers["local-llm"]).toBeUndefined();
     expect(json.providers.anthropic).toBeDefined();
     expect((await call("GET", "/local-llm")).status).toBe(404);
+  });
+});
+
+describe("secret binding (review findings)", () => {
+  const saveLocal = (secrets?: Record<string, unknown>) => call("POST", "/", { id: "local-llm", provider: draft(), secrets: secrets ?? { apiKey: "stored-key-0123456789", secretHeaders: { "X-Org-Token": "org-secret" } } });
+  const attackerDraft = () => ({ ...draft(), baseUrl: `${attacker.url}/v1` });
+
+  it("never sends a saved provider's stored key to a draft with a different origin", async () => {
+    await saveLocal();
+    attacker.requests.length = 0;
+    const t = await call("POST", "/test", { id: "local-llm", provider: attackerDraft() });
+    expect(t.json.data.ok).toBe(false);
+    expect(t.json.data.stage).toBe("auth");
+    await call("POST", "/discover", { id: "local-llm", provider: attackerDraft() });
+    for (const req of attacker.requests) {
+      expect(req.headers.authorization).toBeUndefined();
+      expect(req.headers["x-org-token"]).toBeUndefined();
+    }
+    // Same origin but different auth target (custom header) is also a new target.
+    server.requests.length = 0;
+    await call("POST", "/discover", { id: "local-llm", provider: { ...draft(), auth: { type: "header", headerName: "X-Leak" } } });
+    expect(server.requests[0]?.headers["x-leak"]).toBeUndefined();
+    // Unchanged target still reuses the stored key.
+    server.requests.length = 0;
+    await call("POST", "/discover", { id: "local-llm", provider: draft() });
+    expect(server.requests[0].headers.authorization).toBe("Bearer stored-key-0123456789");
+  });
+
+  it("PUT that changes origin drops stored secrets unless re-entered", async () => {
+    await saveLocal();
+    const same = await call("PUT", "/local-llm", { provider: { ...draft(), label: "x" } });
+    expect(same.json.data.hasKey).toBe(true);
+    const moved = await call("PUT", "/local-llm", { provider: attackerDraft() });
+    expect(moved.status).toBe(200);
+    expect(moved.json.data.hasKey).toBe(false);
+    expect(moved.json.data.secretHeaderNames).toEqual([]);
+    expect(moved.json.data.warnings.join(" ")).toMatch(/stored secrets were removed/);
+    expect(await vault.get("$providers", "local-llm")).toBeUndefined();
+    const reentered = await call("PUT", "/local-llm", { provider: draft(), secrets: { apiKey: "new-key-0123456789ab" } });
+    expect(reentered.json.data.hasKey).toBe(true);
+  });
+
+  it("drafts never fall back to env vars; saved, unchanged providers do", async () => {
+    process.env.CUSTOM_LOCAL_LLM_API_KEY = "env-key-0123456789";
+    try {
+      server.requests.length = 0;
+      const d = await call("POST", "/test", { provider: { ...draft(), auth: { type: "bearer", envVar: "CUSTOM_LOCAL_LLM_API_KEY" } } });
+      expect(d.json.data.stage).toBe("auth");
+      expect(server.requests).toHaveLength(0);
+      // Unsaved draft id cannot borrow the default env name either
+      const d2 = await call("POST", "/test", { id: "local-llm", provider: draft() });
+      expect(d2.json.data.stage).toBe("auth");
+      // Saved without a vault key → env fallback for the saved, unchanged provider
+      await call("POST", "/", { id: "local-llm", provider: draft() });
+      const saved = await call("POST", "/test", { id: "local-llm" });
+      expect(saved.json.data.ok).toBe(true);
+      expect(server.requests.at(-1)!.headers.authorization).toBe("Bearer env-key-0123456789");
+      // ...but not once the draft points elsewhere
+      attacker.requests.length = 0;
+      await call("POST", "/test", { id: "local-llm", provider: attackerDraft() });
+      expect(attacker.requests.every((r) => r.headers.authorization === undefined)).toBe(true);
+    } finally {
+      delete process.env.CUSTOM_LOCAL_LLM_API_KEY;
+    }
+  });
+
+  it("validates draft ids", async () => {
+    expect((await call("POST", "/test", { id: "openai", provider: draft() })).status).toBe(400);
+    expect((await call("POST", "/discover", { id: "Bad Id", provider: draft() })).status).toBe(400);
+  });
+
+  it("refuses built-in / foreign env names; proxy reuse needs explicit confirmation", async () => {
+    for (const envVar of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "STRIPE_SECRET_KEY", "GEMINI_API_KEY", "MY_GW_KEY"]) {
+      const r = await call("POST", "/", { id: "gw", provider: { ...draft(), auth: { type: "bearer", envVar } } });
+      expect(r.status, envVar).toBe(400);
+    }
+    const foreignHost = await call("POST", "/", { id: "gw", provider: { ...draft(), auth: { type: "bearer", envVar: "OPENROUTER_API_KEY" } } });
+    expect(foreignHost.json.error).toMatch(/openrouter\.ai/);
+    const proxy = { preset: "proxy", proxyFor: "anthropic", api: "anthropic-messages", baseUrl: server.url, allowPrivateNetwork: true, auth: { type: "x-api-key", envVar: "ANTHROPIC_API_KEY" } };
+    const unconfirmed = await call("POST", "/", { id: "ant-proxy", provider: proxy });
+    expect(unconfirmed.status).toBe(400);
+    expect(unconfirmed.json.error).toMatch(/confirm/);
+    const confirmed = await call("POST", "/", { id: "ant-proxy", provider: proxy, confirmEnvReuse: true });
+    expect(confirmed.status).toBe(201);
+    expect(confirmed.json.data.envVar).toBe("ANTHROPIC_API_KEY");
+    const custom = await call("POST", "/", { id: "gw2", provider: { ...draft(), auth: { type: "bearer", envVar: "CUSTOM_GW2_KEY" } } });
+    expect(custom.status).toBe(201);
+  });
+
+  it("rejects cloud-metadata request headers (static or secret)", async () => {
+    const st = await call("POST", "/", { id: "gw", provider: { ...draft(), headers: { "Metadata-Flavor": "Google" } } });
+    expect(st.status).toBe(400);
+    const sec = await call("POST", "/", { id: "gw", provider: draft(), secrets: { secretHeaders: { "X-aws-ec2-metadata-token": "t" } } });
+    expect(sec.status).toBe(400);
+  });
+
+  it("concurrent creates of the same id: exactly one wins", async () => {
+    const [a, b] = await Promise.all([saveLocal({ apiKey: "first-key-0123456789" }), saveLocal({ apiKey: "second-key-0123456789" })]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    const winner = a.status === 201 ? "first-key-0123456789" : "second-key-0123456789";
+    expect((await vault.get("$providers", "local-llm"))?.credentials.apiKey).toBe(winner);
   });
 });
 

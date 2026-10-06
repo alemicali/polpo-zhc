@@ -9,10 +9,11 @@
 import { z } from "zod";
 import type { CustomModelDef, ProviderAuthConfig, ProviderConfig } from "./types.js";
 import {
+  ENV_VAR_RE,
   HEADER_NAME_RE,
   PROVIDER_APIS,
   defaultAuthFor,
-  isAllowedKeyEnvVar,
+  envVarPolicyError,
   normalizeBaseUrl,
   sanitizeCompat,
 } from "./provider-presets.js";
@@ -21,7 +22,19 @@ export * from "./provider-presets.js";
 
 // ── Zod schemas ─────────────────────────────────────────────────────
 
-const RESERVED_HEADERS = new Set(["host", "content-length", "connection", "transfer-encoding", "content-type"]);
+/**
+ * Headers that can never be configured (static or secret): transport headers Polpo manages,
+ * and cloud-metadata request headers (IMDSv2 / GCP / Azure) that only make sense for SSRF.
+ */
+const RESERVED_HEADERS = new Set([
+  "host", "content-length", "connection", "transfer-encoding", "content-type",
+  "metadata-flavor", "metadata", "x-google-metadata-request",
+  "x-aws-ec2-metadata-token", "x-aws-ec2-metadata-token-ttl-seconds", "x-identity-header",
+]);
+
+export function isReservedHeader(name: string): boolean {
+  return RESERVED_HEADERS.has(name.toLowerCase());
+}
 
 export const providerApiSchema = z.enum(PROVIDER_APIS);
 
@@ -29,7 +42,7 @@ export const providerAuthSchema = z.object({
   type: z.enum(["none", "bearer", "x-api-key", "header"]),
   headerName: z.string().regex(HEADER_NAME_RE, "invalid header name").optional(),
   prefix: z.string().max(40).regex(/^[^\r\n]*$/, "invalid prefix").optional(),
-  envVar: z.string().refine(isAllowedKeyEnvVar, "env var must be a key-like name (…_API_KEY, …_TOKEN, …_KEY) and not POLPO_*").optional(),
+  envVar: z.string().regex(ENV_VAR_RE, "invalid environment variable name").optional(),
 }).refine((a) => a.type !== "header" || !!a.headerName, { message: "headerName is required for header auth", path: ["headerName"] });
 
 export const headerMapSchema = z.record(
@@ -84,7 +97,10 @@ export const providerSecretsSchema = z.object({
   ).optional(),
 });
 
-export function validateCustomProvider(input: unknown): { ok: true; config: ProviderConfig } | { ok: false; errors: string[] } {
+export function validateCustomProvider(
+  input: unknown,
+  opts: { confirmedBuiltinReuse?: boolean } = {},
+): { ok: true; config: ProviderConfig } | { ok: false; errors: string[] } {
   const parsed = customProviderSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, errors: parsed.error.issues.map((i) => `${i.path.join(".") || "provider"}: ${i.message}`) };
@@ -93,6 +109,10 @@ export function validateCustomProvider(input: unknown): { ok: true; config: Prov
   const api = p.api;
   const base = normalizeBaseUrl(p.baseUrl, api);
   if (base.error || !base.url) return { ok: false, errors: [`baseUrl: ${base.error ?? "invalid"}`] };
+  if (p.auth && p.auth.type !== "none") {
+    const envError = envVarPolicyError(p.auth.envVar, { baseUrl: base.url, proxyFor: p.proxyFor }, opts);
+    if (envError) return { ok: false, errors: [`auth.envVar: ${envError}`] };
+  }
   const seen = new Set<string>();
   const models: CustomModelDef[] = [];
   for (const m of p.models ?? []) {

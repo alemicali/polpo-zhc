@@ -117,6 +117,15 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 41);
 }
 
+function originOf(url: string | undefined): string | undefined {
+  try {
+    const u = new URL(url ?? "");
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -219,7 +228,7 @@ function toProviderPayload(d: Draft) {
 function toSecretsPayload(d: Draft) {
   const secrets: { apiKey?: string; secretHeaders?: Record<string, string | null> } = {};
   if (d.authType !== "none") {
-    if (d.keyAction === "replace" && d.apiKey.trim()) secrets.apiKey = d.apiKey.trim();
+    if (d.keyAction !== "remove" && d.apiKey.trim()) secrets.apiKey = d.apiKey.trim();
     if (d.keyAction === "remove") secrets.apiKey = "";
   }
   const sh: Record<string, string | null> = {};
@@ -321,6 +330,12 @@ export function CustomProviderWizard({
     ? (!PROVIDER_ID_RE.test(draft.id) ? "2-41 chars: lowercase letters, digits, dashes" : takenIds.has(draft.id) ? "Already in use" : undefined)
     : undefined;
   const reusesBuiltinKey = !!draft?.proxyFor && draft.envVar === PROXYABLE_PROVIDERS[draft.proxyFor]?.envVar;
+  // Stored secrets only follow the provider while origin + auth target stay the same (server rule).
+  const secretTargetChanged = !!existing && !!draft && (
+    originOf(urlCheck.url ?? baseUrl) !== originOf(existing.baseUrl)
+    || draft.authType !== (existing.auth?.type ?? defaultAuthFor((existing.api ?? "openai-completions") as ProviderApi).type)
+    || (draft.authType === "header" && (draft.headerName.trim().toLowerCase() !== (existing.auth?.headerName ?? "").toLowerCase() || draft.prefix !== (existing.auth?.prefix ?? "")))
+  );
   const missingFields = preset?.fields?.filter((f) => !draft?.fields[f.key]?.trim() && !draft?.baseUrl) ?? [];
   const connectionValid = !!draft && !idError && !urlCheck.error && missingFields.length === 0
     && (draft.authType !== "header" || !!draft.headerName.trim());
@@ -336,6 +351,8 @@ export function CustomProviderWizard({
     id: editing ? d.id : undefined,
     provider: { ...toProviderPayload(d), baseUrl: normalizeBaseUrl(effectiveBaseUrl(d), d.api).url ?? effectiveBaseUrl(d) },
     secrets: toSecretsPayload(d),
+    // The UI only sets the proxied provider's env var through the explicit "Reuse …" toggle.
+    confirmEnvReuse: !!d.proxyFor && d.envVar === PROXYABLE_PROVIDERS[d.proxyFor]?.envVar ? true : undefined,
     ...extra,
   }), [editing]);
 
@@ -398,10 +415,11 @@ export function CustomProviderWizard({
     setSaveError(null);
     try {
       const body = requestBody(draft);
-      const parsed = JSON.parse(body) as { provider: unknown; secrets: unknown };
+      const parsed = JSON.parse(body) as { provider: unknown; secrets: unknown; confirmEnvReuse?: boolean };
+      const payload = { provider: parsed.provider, secrets: parsed.secrets, confirmEnvReuse: parsed.confirmEnvReuse };
       const r = editing
-        ? await apiFetch(`/providers/custom/${encodeURIComponent(draft.id)}`, { method: "PUT", body: JSON.stringify({ provider: parsed.provider, secrets: parsed.secrets }) })
-        : await apiFetch("/providers/custom", { method: "POST", body: JSON.stringify({ id: draft.id, provider: parsed.provider, secrets: parsed.secrets }) });
+        ? await apiFetch(`/providers/custom/${encodeURIComponent(draft.id)}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch("/providers/custom", { method: "POST", body: JSON.stringify({ id: draft.id, ...payload }) });
       if (!r.ok) {
         setSaveError(r.error ?? "Save failed");
         return;
@@ -589,7 +607,13 @@ export function CustomProviderWizard({
             </div>
             {draft.authType !== "none" && (
               <>
-                {editing && existing?.hasKey && draft.keyAction !== "replace" ? (
+                {secretTargetChanged && (existing?.hasKey || (existing?.secretHeaderNames?.length ?? 0) > 0) && (
+                  <Callout tone="warn">
+                    <ShieldAlert className="inline h-3 w-3 mr-1" />
+                    The endpoint or auth method changed: stored secrets will not be sent to the new target and are removed on save — enter the key again.
+                  </Callout>
+                )}
+                {editing && existing?.hasKey && draft.keyAction !== "replace" && !secretTargetChanged ? (
                   <div className="flex items-center gap-2 text-xs">
                     <Lock className="h-3.5 w-3.5 text-emerald-500" />
                     {draft.keyAction === "keep"
@@ -615,8 +639,11 @@ export function CustomProviderWizard({
                     />
                   </Field>
                 )}
-                <Field label="Environment variable fallback" help="Used when no key is stored in the vault.">
-                  <Input value={draft.envVar} onChange={(e) => update({ envVar: e.target.value.toUpperCase() })} placeholder={`${(draft.id || "my-gateway").toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`} className="font-mono text-xs" />
+                <Field
+                  label="Environment variable fallback"
+                  help={<>Used for the saved provider when no key is stored in the vault (never for tests of unsaved drafts). Must start with <code className="font-mono">CUSTOM_</code>, or be the gateway&apos;s own variable for its official host.</>}
+                >
+                  <Input value={draft.envVar} onChange={(e) => update({ envVar: e.target.value.toUpperCase() })} placeholder={`CUSTOM_${(draft.id || "my-gateway").toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`} className="font-mono text-xs" />
                 </Field>
                 {draft.proxyFor && (
                   <Toggle
