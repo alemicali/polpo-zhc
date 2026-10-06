@@ -1019,7 +1019,7 @@ export class PolpoClient {
 
   /** Health check (instance method — uses configured base URL, no auth). */
   async getHealth(): Promise<HealthResponse> {
-    const res = await this.fetchFn(`${this.baseUrl}/health`);
+    const res = await this.fetchFn(`${this.baseUrl}${this.apiPrefix}/health`);
     return res.json();
   }
 

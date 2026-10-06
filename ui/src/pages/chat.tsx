@@ -3263,7 +3263,10 @@ function ChatMessages() {
   // is done on `isScrolling=false` (scroll settled) and on `rangeChanged`
   // (item-size measurements grew) — both cheap, both synchronous.
   const sessionKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
-  const restoredState = chatScrollStates.get(sessionKey);
+  // Read once per session: handing Virtuoso a fresh snapshot on every render (the map is
+  // rewritten on each scroll/range change) made it restore itself in a loop (React #185).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const restoredState = useMemo(() => chatScrollStates.get(sessionKey), [sessionKey]);
   const captureScrollState = useCallback(() => {
     const handle = virtuosoRef.current;
     if (!handle) return;
@@ -3293,6 +3296,10 @@ function ChatMessages() {
       />
     ),
   } : undefined, [currentSession?.id, currentSession?.parentSessionId, parentSession?.title]);
+
+  // Stable identities: a new components object each render makes Virtuoso rebuild its parts
+  const virtuosoContext = useMemo(() => ({ isLoading }), [isLoading]);
+  const virtuosoAllComponents = useMemo(() => ({ ...virtuosoComponents, Footer: ChatWorkingFooter }), [virtuosoComponents]);
 
   return (
     <div className="relative flex-1 min-h-0">
@@ -3594,25 +3601,8 @@ function ChatMessages() {
               </div>
             );
           }}
-          components={{
-            ...virtuosoComponents,
-            Footer: () => isLoading ? (
-              <div className="w-full py-2 px-4">
-                <div className="mx-auto max-w-3xl">
-                  <div className="flex items-center gap-2.5 pl-10 py-1.5">
-                    <span className="relative flex h-4 w-4 items-center justify-center">
-                      <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
-                      <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Agent is working
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : null,
-          }}
+          context={virtuosoContext}
+          components={virtuosoAllComponents}
         />
       )}
 
@@ -4738,4 +4728,24 @@ function RenameSessionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Footer of the message list while the agent works (reads `isLoading` from the Virtuoso context). */
+function ChatWorkingFooter({ context }: { context?: { isLoading: boolean } }) {
+  return context?.isLoading ? (
+    <div className="w-full py-2 px-4">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center gap-2.5 pl-10 py-1.5">
+          <span className="relative flex h-4 w-4 items-center justify-center">
+            <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
+            <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            Agent is working
+          </span>
+        </div>
+      </div>
+    </div>
+  ) : null;
 }

@@ -387,19 +387,8 @@ export function GroupConversation({
             atBottomThreshold={80}
             increaseViewportBy={600}
             itemContent={(_, message) => renderMessage(message)}
-            components={{
-              Header: () => <div className="h-2" />,
-              Footer: () => (typingNames.length > 0 ? (
-                <div className="w-full px-4 py-2">
-                  <div className="mx-auto flex max-w-3xl items-center gap-2.5 py-1.5">
-                    <div className="flex w-7 shrink-0 justify-center">
-                      <TypingDots />
-                    </div>
-                    <span className="text-[11px] text-muted-foreground" aria-live="polite">{typingLabel(typingNames)}</span>
-                  </div>
-                </div>
-              ) : <div className="h-3" />),
-            }}
+            context={{ typingNames }}
+            components={GROUP_LIST_COMPONENTS}
           />
         )}
 
@@ -430,3 +419,18 @@ export function GroupConversation({
     </div>
   );
 }
+
+/** Stable list parts (a new components object each render makes Virtuoso rebuild them). */
+const GROUP_LIST_COMPONENTS = {
+  Header: () => <div className="h-2" />,
+  Footer: ({ context }: { context?: { typingNames: string[] } }) => (context?.typingNames.length ? (
+    <div className="w-full px-4 py-2">
+      <div className="mx-auto flex max-w-3xl items-center gap-2.5 py-1.5">
+        <div className="flex w-7 shrink-0 justify-center">
+          <TypingDots />
+        </div>
+        <span className="text-[11px] text-muted-foreground" aria-live="polite">{typingLabel(context.typingNames)}</span>
+      </div>
+    </div>
+  ) : <div className="h-3" />),
+};
