@@ -36,7 +36,10 @@ type SteerReturnedEvent = { reason: "turn_ended" | "aborted"; scheduled?: boolea
 type ContextCompactionNotice = {
   beforeTokens: number;
   afterTokens: number;
-  reason: "budget" | "overflow_recovery";
+  reason: "budget" | "overflow" | "manual" | "overflow_recovery";
+  mode?: "prune" | "summary" | "fallback" | "truncate";
+  removedMessages?: number;
+  prunedToolResults?: number;
 };
 
 function showContextCompaction(notice: ContextCompactionNotice): void {
@@ -44,8 +47,14 @@ function showContextCompaction(notice: ContextCompactionNotice): void {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
-  toast.info(notice.reason === "overflow_recovery" ? "Context recovered" : "Conversation context compacted", {
-    description: `${format(notice.beforeTokens)} → ${format(notice.afterTokens)} tokens`,
+  const title = notice.reason === "overflow" || notice.reason === "overflow_recovery"
+    ? "Context recovered"
+    : notice.reason === "manual" ? "Context compacted" : "Conversation context compacted";
+  const what = notice.mode === "prune"
+    ? `${notice.prunedToolResults ?? 0} old tool results cleared`
+    : notice.removedMessages ? `${notice.removedMessages} earlier messages summarized` : undefined;
+  toast.info(title, {
+    description: `${format(notice.beforeTokens)} → ${format(notice.afterTokens)} tokens${what ? ` · ${what}` : ""}`,
   });
 }
 
@@ -1836,8 +1845,48 @@ export function useChat() {
   }, [appendConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
 
   // Send a message (streaming). Optionally attach images (data URLs).
+  /**
+   * Compact the open conversation now (`/compact [focus]`): the earlier messages are summarized
+   * on the server and the checkpoint is kept for the next turns. Nothing is added to the chat.
+   */
+  const compactContext = useCallback(async (focus?: string) => {
+    const key = activeSessionKeyRef.current;
+    const history = conversationBySessionRef.current.get(key) ?? [];
+    const sid = sessions.find((s) => s.id === key)?.id;
+    if (!sid || history.length < 2) {
+      toast.info("Nothing to compact yet", { description: "Compaction works on a conversation with some history." });
+      return;
+    }
+    const agent = sessions.find((s) => s.id === sid)?.agent ?? selectedAgentRef.current;
+    const headers: Record<string, string> = { "Content-Type": "application/json", "x-session-id": sid };
+    if (appConfig.apiKey) headers["Authorization"] = `Bearer ${appConfig.apiKey}`;
+    const pending = toast.loading("Compacting the conversation…");
+    try {
+      const res = await fetch(`${appConfig.baseUrl || ""}/v1/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ messages: history, compact: focus ? { focus } : {}, ...(agent ? { agent } : {}) }),
+      });
+      const payload = await res.json().catch(() => null) as { data?: { compaction?: ContextCompactionNotice | null }; error?: { message?: string } } | null;
+      toast.dismiss(pending);
+      if (!res.ok) { toast.error("Compaction failed", { description: payload?.error?.message ?? `HTTP ${res.status}` }); return; }
+      if (payload?.data?.compaction) showContextCompaction(payload.data.compaction);
+      else toast.info("Nothing to compact");
+    } catch (error) {
+      toast.dismiss(pending);
+      toast.error("Compaction failed", { description: error instanceof Error ? error.message : String(error) });
+    }
+  }, [sessions]);
+
   const send = useCallback(
     async (message: string, images?: { url: string; mimeType: string; filename?: string }[], context?: string, options?: { onAccepted?: () => void }) => {
+      // `/compact [focus]` is a command, not a message
+      const compactCommand = !images?.length && /^\/compact(?:\s+([\s\S]*))?$/i.exec(message.trim());
+      if (compactCommand) {
+        options?.onAccepted?.();
+        await compactContext(compactCommand[1]?.trim() || undefined);
+        return;
+      }
       const sessionKey = activeSessionKeyRef.current;
       clearSessionPending(sessionKey);
       const modelMessage = context
@@ -1860,7 +1909,7 @@ export function useChat() {
       wantsNewSessionRef.current = false;
       await appendUserAndStream(message, content, { forceNew, onAccepted: options?.onAccepted });
     },
-    [appendUserAndStream, clearSessionPending]
+    [appendUserAndStream, clearSessionPending, compactContext]
   );
 
   // Stop the current streaming response.
@@ -2407,6 +2456,7 @@ export function useChat() {
     pendingOpenTab,
     pendingSetDesign,
     send,
+    compactContext,
     stop,
     answerQuestions,
     respondToMission,

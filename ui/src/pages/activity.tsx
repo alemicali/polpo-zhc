@@ -79,7 +79,7 @@ function getCategory(event: string): EventCategory {
   if (event.startsWith("mission:")) return "mission";
   if (event.startsWith("deadlock:")) return "deadlock";
   if (event.startsWith("orchestrator:")) return "orchestrator";
-  if (event.startsWith("session:") || event.startsWith("message:"))
+  if (event.startsWith("session:") || event.startsWith("message:") || event.startsWith("chat:") || event.startsWith("context:"))
     return "session";
   if (event.startsWith("notification:")) return "notification";
   if (event.startsWith("approval:") || event.startsWith("escalation:")) return "approval";
@@ -273,6 +273,21 @@ function buildNarrative(
 ): string {
   const category = getCategory(eventName);
   const action = eventName.split(":")[1] ?? eventName;
+
+  if (eventName === "context:compacted") {
+    const k = (n: unknown) => `${Math.round(Number(n ?? 0) / 1000)}k`;
+    const who = data?.scope === "task"
+      ? `Task run${data?.agentName ? ` (${data.agentName})` : ""}`
+      : `Chat${data?.agentName ? ` with ${data.agentName}` : ""}`;
+    const how = data?.mode === "prune"
+      ? `${data?.prunedToolResults ?? 0} old tool results cleared`
+      : data?.mode === "fallback"
+        ? `${data?.removedMessages ?? 0} messages summarized (fallback extract)`
+        : `${data?.removedMessages ?? 0} messages summarized${data?.model ? ` by ${data.model}` : ""}`;
+    const why = data?.reason === "overflow" ? " after a context overflow" : data?.reason === "manual" ? " on request" : "";
+    const facts = data?.savedFacts ? `, ${data.savedFacts} facts saved to memory` : "";
+    return `${who} compacted${why}: ${k(data?.beforeTokens)} → ${k(data?.afterTokens)} tokens, ${how}${facts}`;
+  }
 
   switch (category) {
     case "task": {
