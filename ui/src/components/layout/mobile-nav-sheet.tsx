@@ -24,6 +24,7 @@ import {
   Database,
   ChartNoAxesCombined,
   BrainCircuit,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -68,6 +69,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
+      { to: "/events", icon: Radio, label: "Events" },
       { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },

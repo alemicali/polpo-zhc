@@ -27,6 +27,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-06-events",
+    date: "2026-10-06",
+    kind: "improved",
+    title: "Activity e Logs diventano Events",
+    summary: "Una sola pagina per tutto quello che succede: Live e History.",
+    body: [
+      "Polpo funziona a **eventi**: ogni cosa che succede (un task che cambia stato, un agente che parte o finisce, una missione, un'approvazione, una notifica…) è un evento.",
+      "",
+      "- **Events → Live**: gli eventi mentre succedono.",
+      "- **Events → History**: gli eventi salvati, una sessione per ogni avvio del server.",
+      "- I messaggi testuali del server ora si chiamano **System**.",
+      "- Nel dettaglio di un task, quello che ha fatto l'agente passo per passo è la scheda **Execution**.",
+      "",
+      "La trovi nel menu, sotto System.",
+    ].join("\n"),
+    cta: { label: "Apri Events", to: "/events" },
+  },
+  {
     id: "2026-10-06-group-chats",
     date: "2026-10-06",
     kind: "new",
