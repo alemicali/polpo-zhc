@@ -171,7 +171,6 @@ import {
   useNewGroupRequest,
 } from "@/hooks/use-chat-room";
 import { ORCHESTRATOR_MEMBER_ID, type RoomInput } from "@/lib/rooms-api";
-import { WhatsNewBanner } from "@/components/whats-new/whats-new-banner";
 
 const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
@@ -3027,7 +3026,6 @@ function ChatEmptyState() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center-safe overflow-y-auto px-4 py-8">
-      <WhatsNewBanner className="mb-6 w-full max-w-xl" />
       {/* Avatar */}
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
         {agentConfig ? (
