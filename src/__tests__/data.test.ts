@@ -85,6 +85,45 @@ describe("structured data runtime", () => {
     await expect(runtime.rawSql(source.id, "DELETE FROM customers", { agent: "analyst" })).rejects.toThrow("Only SELECT");
   });
 
+  it("raw SQL is read-only at the database too, not only by the text check", async () => {
+    const { runtime, source } = await fixture();
+    const executeRaw = (runtime as unknown as { executeRaw: (s: unknown, q: string) => Promise<unknown> }).executeRaw.bind(runtime);
+    await expect(executeRaw(source, "UPDATE customers SET name = 'x' RETURNING id")).rejects.toThrow(/readonly/i);
+    const rows = await executeRaw(source, "SELECT count(*) AS n FROM customers") as Array<{ n: number }>;
+    expect(rows[0]!.n).toBe(3);
+  });
+
+  it("finds relative files in the agents' working directory, never creates empty databases", async () => {
+    const root = await mkdtemp(join(tmpdir(), "polpo-data-rel-"));
+    roots.push(root);
+    const polpoDir = join(root, ".polpo");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(polpoDir, { recursive: true });
+    await writeFile(join(polpoDir, "polpo.json"), JSON.stringify({ project: "p", teams: [{ name: "t", agents: [] }], settings: { workDir: "./workspace" } }));
+    await mkdir(join(root, "workspace", "exports"), { recursive: true });
+    const db = new Database(join(root, "workspace", "exports", "plan.db"));
+    db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT); INSERT INTO items (title) VALUES ('one')");
+    db.close();
+    const runtime = new DataRuntime(polpoDir);
+    expect(runtime.resolveLocation("exports/plan.db")).toBe(join(root, "workspace", "exports", "plan.db"));
+    expect(runtime.resolveLocation("/abs/x.db")).toBe("/abs/x.db");
+
+    const source = await runtime.store.createSource({
+      name: "Plan", slug: "plan", kind: "sqlite", environment: "development",
+      config: { location: "exports/plan.db" }, tags: [], grants: [],
+    });
+    const frame = await runtime.query({ sourceId: source.id, dataset: "items" }, { admin: true });
+    expect(frame.rows).toEqual([{ id: 1, title: "one" }]);
+
+    const missing = await runtime.store.createSource({
+      name: "Missing", slug: "missing", kind: "sqlite", environment: "development",
+      config: { location: "nope/missing.db" }, tags: [], grants: [],
+    });
+    await expect(runtime.query({ sourceId: missing.id, dataset: "items" }, { admin: true })).rejects.toThrow();
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(root, "workspace", "nope", "missing.db"))).toBe(false);
+  });
+
   it("persists independent generated views", async () => {
     const { runtime, source } = await fixture();
     const view = await runtime.store.createView({
