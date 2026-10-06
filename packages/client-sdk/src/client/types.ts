@@ -570,6 +570,10 @@ export interface ChannelGatewayConfig {
   agent?: string;
   /** Conversation pipe: deliver chat replies through another channel (e.g. in from a webhook, out on Telegram). */
   replyTo?: { channel: string; chatId?: string; echoInbound?: boolean };
+  /** "mentions" (default) or "intent": also answer group messages a classifier judges are for this agent. */
+  groupReplies?: "mentions" | "intent";
+  /** groupReplies "intent": how sure the classifier must be (0–1). Default 0.7. */
+  intentThreshold?: number;
 }
 
 export interface NotificationChannelConfig {

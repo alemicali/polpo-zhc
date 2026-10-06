@@ -436,6 +436,8 @@ const ChannelGatewaySchema = z.object({
     chatId: z.string().optional(),
     echoInbound: z.boolean().optional(),
   }).strict().optional(),
+  groupReplies: z.enum(["mentions", "intent"]).optional(),
+  intentThreshold: z.number().min(0).max(1).optional(),
 }).strict();
 
 /** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */

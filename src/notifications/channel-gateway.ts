@@ -36,6 +36,7 @@ import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type { InboundGroup } from "./telegram-groups.js";
+import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
 import type {
   ChannelGatewayConfig,
   ChannelReplyTarget,
@@ -60,6 +61,8 @@ export interface ChannelGatewayOptions {
   approvalResolver?: ApprovalCallbackResolver;
   /** Called periodically during long-running operations (e.g. to send typing indicators). */
   onTyping?: (chatId: string, target?: ChannelSendTarget) => Promise<void>;
+  /** Channel key (notifications.channels): names this bot among the group's agents. */
+  key?: string;
 }
 
 /** Where a message goes inside a chat: a forum topic, as a reply to a message (groups). */
@@ -89,6 +92,8 @@ interface GroupLine { name: string; text: string; at: number }
 /** Context lines kept per group conversation, and for how long. */
 const GROUP_CONTEXT_LINES = 30;
 const GROUP_CONTEXT_MS = 12 * 60 * 60 * 1000;
+/** groupReplies "intent": the probability above which an agent joins in unprompted. */
+const DEFAULT_INTENT_THRESHOLD = 0.7;
 const GROUP_CONTEXT_CONVERSATIONS = 500;
 
 interface CommandResult {
@@ -258,6 +263,8 @@ export class ChannelGateway {
   private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
   private replyRouter?: ReplyRouter;
   private partialOverride = new Map<string, (text: string) => Promise<void>>(); // chatId → routed partials
+  private key: string;
+  private intent?: GroupIntentArbiter;
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -267,6 +274,7 @@ export class ChannelGateway {
     this.gatewayConfig = opts.channelConfig.gateway ?? {};
     this.approvalResolver = opts.approvalResolver;
     this.onTyping = opts.onTyping;
+    this.key = opts.key ?? "default";
   }
 
   /** Emit a structured log via the orchestrator's event bus. */
@@ -398,6 +406,67 @@ export class ChannelGateway {
     return msg.group.threadId !== undefined ? `${this.groupId(msg)}:topic:${msg.group.threadId}` : this.groupId(msg);
   }
 
+  // ── Groups: joining in by intent ──────────────────────────────────
+
+  /** The instance's group arbiter (gateway.groupReplies = "intent"). */
+  setIntentArbiter(arbiter: GroupIntentArbiter): void {
+    this.intent = arbiter;
+  }
+
+  private intentMode(): boolean {
+    return this.gatewayConfig.groupReplies === "intent" && !!this.intent?.available;
+  }
+
+  /**
+   * This bot as one of the agents of a group conversation, when it answers by intent there:
+   * intent mode on and the group enabled. The orchestrator's bot speaks as Polpo.
+   */
+  async intentCandidate(conversation: string): Promise<IntentCandidate | undefined> {
+    if (this.gatewayConfig.groupReplies !== "intent") return undefined;
+    const groupId = conversation.replace(/:topic:.*$/, "");
+    if (!await this.peerStore.isAllowed(groupId, this.gatewayConfig)) return undefined;
+    const name = this.gatewayConfig.agent;
+    if (!name) {
+      return {
+        key: this.key,
+        name: "Polpo",
+        role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents, answers about tasks, missions and agents",
+        responsibilities: [],
+      };
+    }
+    const agent = (await this.orchestrator.getAgents()).find(a => a.name === name);
+    const id = agent?.identity;
+    const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    return {
+      key: this.key,
+      name: id?.displayName ?? name,
+      role: short(id?.title ?? agent?.role ?? "an agent of the company", 160),
+      responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+    };
+  }
+
+  /**
+   * An unaddressed group message: should this bot answer it anyway? Asked before the message is
+   * kept as context. True only in intent mode, in an enabled group, above the threshold.
+   */
+  async joinsByIntent(msg: InboundMessage): Promise<boolean> {
+    if (!msg.group || msg.group.addressed || !this.intentMode() || !msg.messageId) return false;
+    if (!msg.text.trim() || msg.text.startsWith("/")) return false;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    const now = Date.now();
+    const earlier = (this.groupContext.get(conversation) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
+    const decision = await this.intent!.decide({
+      conversation,
+      messageId: msg.messageId,
+      title: msg.group.title,
+      speaker: msg.displayName ?? msg.externalId,
+      text: msg.text,
+      earlier: earlier.map(l => ({ name: l.name, text: l.text })),
+    });
+    const p = decision[this.key] ?? 0;
+    return p >= (this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD);
+  }
+
   /** Key of per-person pending state (reject feedback, suggestion placeholder). */
   private pendingKey(msg: Pick<InboundMessage, "chatId" | "externalId" | "group">): string {
     return msg.group ? `${msg.chatId}:${msg.externalId}` : msg.chatId;
@@ -438,6 +507,7 @@ export class ChannelGateway {
       return `I'm not enabled in this group yet. Someone already authorized to talk to ${this.interlocutorName()} can enable me by sending /enable here.`;
     }
     if (command === "/disable") return this.disableGroup(msg, peerId);
+    this.intent?.noteReply(this.conversationId(msg, peerId), this.interlocutorName());
     await this.peerStore.upsertPeer({
       channel: msg.channel,
       externalId: msg.externalId,
@@ -452,7 +522,9 @@ export class ChannelGateway {
     const who = this.interlocutorName();
     return [
       `Enabled: everyone in this group can now talk to ${who}.`,
-      "Mention me or reply to one of my messages and I'll answer; I read the rest of the conversation as context.",
+      this.gatewayConfig.groupReplies === "intent"
+        ? "Mention me or reply to one of my messages and I'll answer; I also join in when a message is for me, and read the rest as context."
+        : "Mention me or reply to one of my messages and I'll answer; I read the rest of the conversation as context.",
       this.gatewayConfig.agent ? "" : "/agent picks who answers in this group, /polpo goes back to the orchestrator.",
       "/new starts a fresh conversation, /disable turns me off here.",
     ].filter(Boolean).join("\n");

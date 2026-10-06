@@ -1077,6 +1077,14 @@ export interface ChannelGatewayConfig {
    * (e.g. messages in from a webhook, replies out on Telegram). Unset = reply here.
    */
   replyTo?: ChannelReplyTarget;
+  /**
+   * Which group messages get an answer. "mentions" (default): mentions, replies to the bot and
+   * commands. "intent": those, plus the messages a fast classifier (TypeSafe Jev, needs
+   * TYPESAFE_API_KEY) judges this bot's agent should answer; without a key it stays "mentions".
+   */
+  groupReplies?: "mentions" | "intent";
+  /** groupReplies "intent": how sure the classifier must be (0–1) before the agent joins in. Default 0.7. */
+  intentThreshold?: number;
 }
 
 /** Channel a conversation reply is delivered through. */

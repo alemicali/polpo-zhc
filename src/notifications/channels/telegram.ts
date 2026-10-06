@@ -528,7 +528,13 @@ export class TelegramCallbackPoller {
     const group: InboundGroup = { title, threadId, addressed };
     if (!addressed) {
       const line = [mediaLabel(message), text].filter(Boolean).join(" ").trim();
-      if (line) await gateway.handleInboundMessage(senderId, chatId, line, senderName, String(message.message_id), [], group);
+      if (!line) return;
+      // groupReplies "intent": the agent may join in, then it answers as if it had been called
+      if (text.trim() && await gateway.joinsByIntent?.(senderId, chatId, text, senderName, String(message.message_id), group)) {
+        await this.respond(chatId, { threadId, replyTo: message.message_id }, text, inboundMediaOf(message), senderId, senderName, String(message.message_id), { ...group, addressed: true });
+        return;
+      }
+      await gateway.handleInboundMessage(senderId, chatId, line, senderName, String(message.message_id), [], group);
       return;
     }
     const media = inboundMediaOf(message);
@@ -746,6 +752,12 @@ export interface TelegramGatewayHandler {
     /** Set for group messages; unaddressed ones are context only. */
     group?: InboundGroup,
   ): Promise<string | TelegramReply | undefined>;
+
+  /**
+   * A group message nobody addressed: should this bot answer it anyway (groupReplies "intent")?
+   * Asked before the message is kept as context.
+   */
+  joinsByIntent?(senderId: string, chatId: string, text: string, senderName: string | undefined, messageId: string, group: InboundGroup): Promise<boolean>;
 
   /** Non-approval inline buttons (e.g. "agent:<name>"). */
   handleMenuCallback?(action: string, value: string, chatId: string, senderId: string, senderName?: string, group?: InboundGroup): Promise<string | undefined>;
