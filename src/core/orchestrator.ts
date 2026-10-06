@@ -921,11 +921,17 @@ export class Orchestrator extends TypedEmitter {
       this.configWatcher = watch(configPath, () => {
         // Debounce: wait 500ms after the last change event
         if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
-    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
         this.configReloadTimer = setTimeout(() => {
           this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
           this.reloadConfig().catch(() => {});
         }, 500);
+      });
+      // Without a listener an FSWatcher error is an uncaught exception that kills the process.
+      // Windows emits EPERM when the watched file or its folder is deleted or moved.
+      this.configWatcher.on("error", (err) => {
+        this.configWatcher?.close();
+        this.configWatcher = undefined;
+        this.emit("log", { level: "warn", message: `[watch] Stopped watching polpo.json: ${err.message}` });
       });
 
       this.emit("log", { level: "info", message: "[watch] Watching polpo.json for changes" });
@@ -1318,6 +1324,7 @@ export class Orchestrator extends TypedEmitter {
     // Clear process list in state and close stores
     await this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
     this.stopDedicatedTelegramPollers();

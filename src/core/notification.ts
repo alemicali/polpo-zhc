@@ -1,8 +1,9 @@
 /**
- * Push notification via Unix Domain Socket.
+ * Push notification via Unix Domain Socket (a named pipe on Windows).
  *
- * Server (orchestrator): listens on .polpo/orchestrator.sock for runner
- * completion notifications and triggers immediate result collection.
+ * Server (orchestrator): listens on .polpo/orchestrator.sock (on Windows,
+ * \\.\pipe\polpo-<hash of the .polpo path>) for runner completion
+ * notifications and triggers immediate result collection.
  *
  * Client (runner): connects, sends a single JSON message, disconnects.
  * Fire-and-forget — if the socket is unreachable, the orchestrator's
@@ -10,8 +11,9 @@
  */
 
 import { createServer, createConnection, type Server } from "node:net";
+import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const SOCKET_NAME = "orchestrator.sock";
 
@@ -27,10 +29,10 @@ export function startNotificationServer(
   polpoDir: string,
   onRunComplete: (runId: string, taskId: string, status: string) => void,
 ): Server {
-  const socketPath = join(polpoDir, SOCKET_NAME);
+  const socketPath = getSocketPath(polpoDir);
 
-  // Clean up stale socket from previous crash
-  if (existsSync(socketPath)) {
+  // Clean up stale socket from previous crash (named pipes vanish with their process)
+  if (process.platform !== "win32" && existsSync(socketPath)) {
     try { unlinkSync(socketPath); } catch { /* race — another process removed it */ }
   }
 
@@ -71,7 +73,14 @@ export function notifyRunComplete(
   } catch { /* orchestrator not listening — it will poll */ }
 }
 
-/** Get the UDS path for the notification socket. */
+/**
+ * Get the path for the notification socket. Windows cannot listen on a file path
+ * (EACCES), only on a named pipe, so there the pipe name is derived from the .polpo path.
+ */
 export function getSocketPath(polpoDir: string): string {
+  if (process.platform === "win32") {
+    const id = createHash("sha256").update(resolve(polpoDir).toLowerCase()).digest("hex").slice(0, 16);
+    return `\\\\.\\pipe\\polpo-${id}`;
+  }
   return join(polpoDir, SOCKET_NAME);
 }
