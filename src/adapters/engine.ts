@@ -21,7 +21,8 @@ import {
   type CompactionInfo,
 } from "@polpo-ai/core";
 import { effectiveCompactionSettings } from "../core/config.js";
-import { createWorkspace, WorkspaceShell } from "../sandbox/manager.js";
+import { createWorkspace, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
+import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -506,13 +507,16 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
         mounts: hostMounts,
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
+        onRemoteEvent: (e) => { if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`); },
       })
     : undefined;
   const shell = workspace ? new WorkspaceShell(workspace) : undefined;
+  // Remote sandboxes keep the agent's files in the VM: file tools read and write there too.
+  const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, undefined, shell);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell);
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -734,7 +738,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, undefined, shell);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell);
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }
@@ -755,6 +759,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
           shell,
+          fs: remoteFs,
         });
       }
       if (ctx?.polpoDir) {
