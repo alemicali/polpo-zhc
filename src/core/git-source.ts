@@ -36,8 +36,17 @@ export function resolveSource(input: string): ResolvedSource {
     return { type: "github", url: parsed.url, ownerRepo: parsed.ownerRepo };
   } catch (err) {
     // Fallback: a bare relative path that exists on disk (e.g. "my-registry").
-    // eslint-disable-next-line no-control-regex
-    if (typeof input === "string" && input.length > 0 && !/[\u0000-\u001f\u007f]/.test(input) && !input.startsWith("-") && existsSync(input)) {
+    // Never for anything with "." / ".." segments: on Windows existsSync()
+    // normalises "owner/.." to "." (true even when "owner" doesn't exist),
+    // and a rejected GitHub-looking ref must stay rejected on every OS.
+    if (
+      typeof input === "string" && input.length > 0 &&
+      // eslint-disable-next-line no-control-regex
+      !/[\u0000-\u001f\u007f]/.test(input) &&
+      !input.startsWith("-") &&
+      !input.split(/[\\/]/).some((seg) => seg === "." || seg === "..") &&
+      existsSync(input)
+    ) {
       return { type: "local", url: resolve(input) };
     }
     if (err instanceof InvalidSourceError) throw err;

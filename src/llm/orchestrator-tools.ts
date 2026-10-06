@@ -5097,29 +5097,64 @@ function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): strin
   return `Edited ${relative(polpo.getAgentWorkDir(), filePath)}`;
 }
 
+/** Convert a `find -path` style glob to a RegExp (`*`/`?` match any char incl. "/", `[...]` classes). */
+function findPathGlobToRegExp(pattern: string): RegExp {
+  let re = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else if (ch === "[") {
+      const end = pattern.indexOf("]", i + 2);
+      if (end === -1) { re += "\\["; continue; }
+      let cls = pattern.slice(i + 1, end).replace(/\\/g, "\\\\");
+      if (cls.startsWith("!")) cls = `^${cls.slice(1)}`;
+      re += `[${cls}]`;
+      i = end;
+    } else re += ch.replace(/[.+^${}()|\\/\]]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/** Walk `root` (no symlink following) and return "./rel/path" entries matching `pattern`. */
+function globWorkDir(root: string, pattern: string, limit: number): string[] {
+  const re = findPathGlobToRegExp(pattern.replace(/\\/g, "/"));
+  const results: string[] = [];
+  if (re.test(".")) results.push(".");
+  const queue: string[] = ["."];
+  let visited = 0;
+  while (queue.length > 0 && results.length < limit && visited < 200_000) {
+    const rel = queue.shift()!;
+    let entries: import("fs").Dirent[];
+    try {
+      entries = readdirSync(join(root, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      visited++;
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const childRel = `${rel}/${entry.name}`;
+      if (re.test(childRel)) {
+        results.push(childRel);
+        if (results.length >= limit) break;
+      }
+      if (entry.isDirectory()) queue.push(childRel);
+    }
+  }
+  return results;
+}
+
 function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): string {
   const pathArg = (args.path as string | undefined) ?? ".";
 
-  // Check if it looks like a glob pattern
+  // Glob pattern: matched in-process (no shell, no external `find`, works on
+  // Windows too). Semantics of `find . -path PATTERN`: paths look like
+  // "./dir/file", `*` and `?` also match "/", node_modules/.git are skipped.
   if (pathArg.includes("*") || pathArg.includes("?")) {
-    // Use find/glob via shell — more reliable for glob patterns
     try {
-      const cwd = polpo.getAgentWorkDir();
-      // Argument array, no shell: the pattern is passed verbatim to find.
-      let out: string;
-      try {
-        out = execFileSync("find", [".", "-path", pathArg, "-not", "-path", "*/node_modules/*", "-not", "-path", "*/.git/*"], {
-          cwd,
-          encoding: "utf-8",
-          timeout: 10000,
-          maxBuffer: 16 * 1024 * 1024,
-          stdio: ["ignore", "pipe", "ignore"],
-        });
-      } catch (e: any) {
-        out = typeof e?.stdout === "string" ? e.stdout : "";
-      }
-      const result = out.split("\n").filter(Boolean).slice(0, 200).join("\n").trim();
-      return result || "(no matches)";
+      const matches = globWorkDir(polpo.getAgentWorkDir(), pathArg, 200);
+      return matches.length > 0 ? matches.join("\n") : "(no matches)";
     } catch {
       return "(no matches)";
     }

@@ -10,7 +10,7 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { resolve, join, basename } from "node:path";
+import { resolve, join, basename, posix } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
 import type { Shell } from "@polpo-ai/core";
 import { parseGitSource, shellQuote } from "@polpo-ai/core/git-source";
@@ -375,7 +375,9 @@ export function skillRoutes(getDeps: () => SkillRouteDeps): OpenAPIHono {
             return c.json({ ok: false, error: "Failed to create a temporary directory" }, 400);
           }
           tmpRoot = created;
-          const cloneDir = join(created, "repo");
+          // Shell commands here (mktemp, git, rm, cp) target a POSIX shell, and
+        // `created` is a POSIX path from mktemp: build it with posix.join.
+        const cloneDir = posix.join(created, "repo");
           const cloneResult = await shell.execute(
             `git -c protocol.ext.allow=never clone --depth 1 --quiet -- ${shellQuote(parsedSource.url)} ${shellQuote(cloneDir)}`,
             { timeout: 60_000 },

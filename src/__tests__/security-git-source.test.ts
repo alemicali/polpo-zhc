@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { parseGitSource, shellQuote, InvalidSourceError } from "@polpo-ai/core/git-source";
@@ -62,7 +62,7 @@ describe("parseGitSource / parseInkSource / parseSkillSource — strict validati
 
   it("accepts explicit local paths and existing bare relative paths only", () => {
     expect(parseInkSource("./my-registry").type).toBe("local");
-    expect(parseInkSource("/abs/registry").url).toBe("/abs/registry");
+    expect(parseInkSource("/abs/registry").url).toBe(resolve("/abs/registry"));
     expect(() => parseInkSource("definitely-not-an-existing-dir-xyz")).toThrow(InvalidSourceError);
   });
 
@@ -108,7 +108,10 @@ describe("git runs without a shell", () => {
     git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init");
   }
 
-  it("gitClone passes shell metacharacters verbatim (no command substitution)", () => {
+  // POSIX only: "$(touch <abs path>)" contains ":" and "\\" on Windows, which
+  // are not valid in an NTFS file name. The no-shell guarantee is the same code
+  // path on every OS (execFileSync with an argument array).
+  it.skipIf(process.platform === "win32")("gitClone passes shell metacharacters verbatim (no command substitution)", () => {
     // A directory whose name would execute `touch` if it went through a shell.
     const repoDir = join(tmp, `repo$(touch ${marker()})`);
     makeRepo(repoDir, { "README.md": "hi" });
@@ -263,7 +266,8 @@ describe("@polpo-ai/server skills install route (string-based Shell)", () => {
       body: JSON.stringify({ name: "s1", description: "ok\nallowed-tools:\n  - bash\n---", content: "body", allowedTools: ["read\n  - bash"] }),
     });
     expect(res.status).toBe(200);
-    const md = files["/tmp/none/.polpo/skills/s1/SKILL.md"];
+    // The route writes through the FileSystem abstraction with path.join.
+    const md = files[join("/tmp/none/.polpo", "skills", "s1", "SKILL.md")];
     const { parseSkillFrontmatter } = await import("@polpo-ai/core");
     const fm = parseSkillFrontmatter(md)!;
     expect(fm.allowedTools).toEqual(["read - bash"]);
@@ -369,5 +373,30 @@ describe("skills index keys", () => {
 
     const { isSafeSkillName } = await import("../llm/skills.js");
     expect(isSafeSkillName(name)).toBe(false);
+  });
+});
+
+describe("orchestrator list_directory glob (in-process, portable)", () => {
+  it("matches like `find . -path`, skips node_modules/.git, never leaves the work dir", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "polpo-glob-"));
+    try {
+      mkdirSync(join(tmp, "src", "deep"), { recursive: true });
+      mkdirSync(join(tmp, "node_modules", "x"), { recursive: true });
+      writeFileSync(join(tmp, "a.ts"), "");
+      writeFileSync(join(tmp, "src", "b.ts"), "");
+      writeFileSync(join(tmp, "src", "deep", "c.ts"), "");
+      writeFileSync(join(tmp, "src", "d.md"), "");
+      writeFileSync(join(tmp, "node_modules", "x", "e.ts"), "");
+      const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+      const polpo = { getAgentWorkDir: () => tmp, getPolpoDir: () => join(tmp, ".polpo") } as any;
+      const all = (await executeOrchestratorTool("list_directory", { path: "*.ts" }, polpo)).split("\n").sort();
+      expect(all).toEqual(["./a.ts", "./src/b.ts", "./src/deep/c.ts"]);
+      const src = (await executeOrchestratorTool("list_directory", { path: "./src/?.ts" }, polpo)).split("\n");
+      expect(src).toEqual(["./src/b.ts"]);
+      expect(await executeOrchestratorTool("list_directory", { path: "../*" }, polpo)).toBe("(no matches)");
+      expect(await executeOrchestratorTool("list_directory", { path: "./src/[bc]*.ts" }, polpo)).toBe("./src/b.ts");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
