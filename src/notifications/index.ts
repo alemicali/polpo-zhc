@@ -46,8 +46,8 @@ export class NotificationRouter {
   /** Optional callback to execute notification actions (create_task, execute_plan, etc.) */
   private actionExecutor?: (action: NotificationAction) => Promise<string>;
   /** Optional callback to resolve scoped notification rules from event payload.
-   *  Returns task-level and plan-level notifications for scope resolution. */
-  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>;
+   *  Returns task-level and mission-level notifications for scope resolution. */
+  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined>;
 
   private polpoDir?: string;
 
@@ -61,7 +61,7 @@ export class NotificationRouter {
 
   /** Set a callback that resolves scoped notification rules from event data.
    *  Used to look up task.notifications / plan.notifications for scope resolution. */
-  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>): void {
+  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined>): void {
     this.scopeResolver = resolver;
   }
 
@@ -163,7 +163,7 @@ export class NotificationRouter {
       try {
         const scope = await this.scopeResolver(data);
         taskNotifications = scope?.taskNotifications;
-        planNotifications = scope?.planNotifications;
+        planNotifications = scope?.missionNotifications;
       } catch {
         // Scope resolution failed — fall back to global rules only
       }
