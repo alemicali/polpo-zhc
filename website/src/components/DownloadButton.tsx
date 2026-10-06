@@ -15,7 +15,7 @@ interface PlatformInfo {
 
 // ── GitHub Release URL builder ──
 
-const REPO = "lumea-labs/polpo";
+const REPO = "alemicali/polpo-zhc";
 
 function releaseUrl(tag: string, filename: string): string {
   return `https://github.com/${REPO}/releases/download/${tag}/${filename}`;
