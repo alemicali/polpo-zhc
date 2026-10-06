@@ -479,6 +479,7 @@ export class ChannelGateway {
       title: msg.group.title,
       speaker: msg.displayName ?? msg.externalId,
       text: msg.text,
+      members: msg.group.members,
     }, me);
     const p = decision[this.key] ?? 0;
     return p >= (this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD);
