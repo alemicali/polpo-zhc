@@ -12,7 +12,7 @@ import type {
   DataQuery,
   DataSource,
   DataCapability,
-} from "../core/data-registry.js";
+} from "@polpo-ai/core/data-registry";
 import { FileDataRegistryStore, type DataRegistryChangeEmitter } from "../stores/file-data-registry-store.js";
 
 const require = createRequire(import.meta.url);

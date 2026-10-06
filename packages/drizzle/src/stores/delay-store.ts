@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DelayStore, DelayState } from "@polpo-ai/core/delay-store";
-import { type Dialect, deserializeJson } from "../utils.js";
+import { type Dialect, deserializeJson, serializeJson } from "../utils.js";
 
 type AnyTable = any;
 
@@ -23,7 +23,7 @@ export class DrizzleDelayStore implements DelayStore {
   }
 
   async save(state: DelayState): Promise<void> {
-    const value = JSON.stringify(state);
+    const value = serializeJson(state, this.dialect);
     await this.db.insert(this.metadata).values({ key: DELAY_KEY, value })
       .onConflictDoUpdate({ target: this.metadata.key, set: { value } });
   }

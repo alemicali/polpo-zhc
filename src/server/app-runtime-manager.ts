@@ -8,7 +8,7 @@ import type {
   AppRuntimeStatus,
   AppService,
   RegisteredApp,
-} from "../core/app-registry.js";
+} from "@polpo-ai/core/app-registry";
 import { FileAppRegistryStore, type AppChangeEmitter } from "../stores/file-app-registry-store.js";
 
 type Runtime = AppRuntimeStatus & { process: ChildProcessWithoutNullStreams };

@@ -13,7 +13,7 @@ import { nanoid } from "nanoid";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team, Task, TaskStatus } from "../core/types.js";
-import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "../core/app-registry.js";
+import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "@polpo-ai/core/app-registry";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
 import { execSync } from "child_process";

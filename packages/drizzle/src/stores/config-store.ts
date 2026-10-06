@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { ConfigStore } from "@polpo-ai/core/config-store";
 import type { PolpoConfig } from "@polpo-ai/core/types";
-import { type Dialect, deserializeJson } from "../utils.js";
+import { type Dialect, deserializeJson, serializeJson } from "../utils.js";
 
 type AnyTable = any;
 
@@ -28,7 +28,7 @@ export class DrizzleConfigStore implements ConfigStore {
   }
 
   async save(config: PolpoConfig): Promise<void> {
-    const value = JSON.stringify(config);
+    const value = serializeJson(config, this.dialect);
     await this.db.insert(this.metadata).values({ key: CONFIG_KEY, value })
       .onConflictDoUpdate({ target: this.metadata.key, set: { value } });
   }

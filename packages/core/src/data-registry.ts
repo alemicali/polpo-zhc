@@ -162,6 +162,12 @@ export interface DataActivity {
   createdAt: string;
 }
 
+export type DataRegistryChangeEvent =
+  | { type: "source"; sourceId: string; action: "created" | "updated" | "deleted" | "activity" | "data"; timestamp: string }
+  | { type: "view"; viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
+
+export type DataRegistryChangeEmitter = (event: DataRegistryChangeEvent) => void;
+
 export interface DataRegistryStore {
   listSources(): Promise<DataSource[]>;
   getSource(id: string): Promise<DataSource | null>;
@@ -175,6 +181,7 @@ export interface DataRegistryStore {
   deleteView(id: string): Promise<boolean>;
   addActivity(input: Omit<DataActivity, "id" | "createdAt">): Promise<DataActivity>;
   listActivity(sourceId?: string, limit?: number): Promise<DataActivity[]>;
+  setEmitter?(emitChange?: DataRegistryChangeEmitter): void;
 }
 
 export function normalizeDataTags(tags: string[]): string[] {

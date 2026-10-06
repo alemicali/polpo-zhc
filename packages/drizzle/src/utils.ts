@@ -8,22 +8,26 @@
  */
 export type Dialect = "pg" | "sqlite";
 
-/** Serialize a value for storage in a JSON/text column. Always stringifies. */
-export function serializeJson(value: unknown, _dialect: Dialect): unknown {
+/**
+ * Value for a JSON column: PostgreSQL columns are jsonb (the driver encodes the object once),
+ * SQLite columns are TEXT (stringified here). Only use for jsonb columns on PostgreSQL.
+ */
+export function serializeJson(value: unknown, dialect: Dialect): unknown {
   if (value === undefined || value === null) return null;
-  return JSON.stringify(value);
+  return dialect === "pg" ? value : JSON.stringify(value);
 }
 
-/** Deserialize a value read from a JSON/text column. Parses strings, passes objects through. */
-export function deserializeJson<T>(value: unknown, fallback: T, _dialect: Dialect): T {
+/**
+ * Value read from a JSON column. jsonb comes back parsed; TEXT is parsed here. A PostgreSQL string
+ * that is not JSON is a genuine string value and is returned as is.
+ */
+export function deserializeJson<T>(value: unknown, fallback: T, dialect: Dialect): T {
   if (value === undefined || value === null) return fallback;
-  // Already a parsed object (e.g. from a jsonb column)
   if (typeof value === "object") return value as T;
-  // String from a text column — parse it
   if (typeof value === "string") {
-    try { return JSON.parse(value) as T; } catch { return fallback; }
+    try { return JSON.parse(value) as T; } catch { return dialect === "pg" ? (value as T) : fallback; }
   }
-  return fallback;
+  return dialect === "pg" ? (value as T) : fallback;
 }
 
 /**

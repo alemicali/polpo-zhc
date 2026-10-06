@@ -18,7 +18,7 @@ import {
   type BrainStats,
   type BrainStatus,
   type CompanyBrainSnapshot,
-} from "../core/company-brain.js";
+} from "@polpo-ai/core/company-brain";
 import { queryOrchestratorText } from "../llm/query.js";
 import { FileCompanyBrainStore } from "../stores/file-company-brain-store.js";
 import type { DataRuntime } from "./data-runtime.js";

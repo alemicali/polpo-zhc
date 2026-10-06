@@ -15,6 +15,20 @@
       "when": 1791246804568,
       "tag": "0001_reconcile_search",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791247856927,
+      "tag": "0002_registries_usage_whatsapp",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791247866002,
+      "tag": "0003_unwrap_jsonb",
+      "breakpoints": true
     }
   ]
 }

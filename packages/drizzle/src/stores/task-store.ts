@@ -193,7 +193,7 @@ export class DrizzleTaskStore implements TaskStore {
     const d = this.dialect;
 
     // SQLite transactions require synchronous callbacks — execute directly.
-    const upsertMeta = (db: any, key: string, value: string) =>
+    const upsertMeta = (db: any, key: string, value: unknown) =>
       db.insert(metadata).values({ key, value })
         .onConflictDoUpdate({ target: metadata.key, set: { value } });
 
@@ -202,7 +202,7 @@ export class DrizzleTaskStore implements TaskStore {
         await upsertMeta(db, "project", partial.project);
       }
       if (partial.teams !== undefined) {
-        const val = JSON.stringify(partial.teams);
+        const val = serializeJson(partial.teams, this.dialect);
         await upsertMeta(db, "teams", val);
       }
       if (partial.startedAt !== undefined) {

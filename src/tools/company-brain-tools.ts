@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { BrainChangeEmitter, BrainPrincipal } from "../core/company-brain.js";
+import type { BrainChangeEmitter, BrainPrincipal } from "@polpo-ai/core/company-brain";
 import { getCompanyBrainRuntime } from "../server/company-brain-runtime.js";
 import { getDataRegistryRuntime } from "../server/data-runtime.js";
 import type { VaultStore } from "../core/vault-store.js";

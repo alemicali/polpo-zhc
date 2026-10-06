@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { normalizeAppTags, type CreateRegisteredApp } from "../core/app-registry.js";
+import { normalizeAppTags, type CreateRegisteredApp } from "@polpo-ai/core/app-registry";
 import { ALL_ORCHESTRATOR_TOOLS, READ_TOOLS, WRITE_TOOLS } from "../llm/orchestrator-tools.js";
 import { AppRuntimeManager, appRuntimePath, resolveAppCwd } from "../server/app-runtime-manager.js";
 import { appsRoutes } from "../server/routes/apps.js";
