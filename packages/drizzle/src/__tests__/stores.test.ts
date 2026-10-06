@@ -536,6 +536,113 @@ describe.each(DIALECTS)("%s", (dialect) => {
       const msgs = await stores.sessionStore.getMessages(sid);
       expect(msgs[0].content).toBe("final");
     });
+
+    it("forkSession copies the conversation up to a message, in one piece", async () => {
+      const parent = await stores.sessionStore.create("Plan", "backend", { scope: "telegram:group:-7" });
+      const u1 = await stores.sessionStore.addMessage(parent, "user", "first");
+      await new Promise((r) => setTimeout(r, 2));
+      const a1 = await stores.sessionStore.addMessage(parent, "assistant", "answer", [{ id: "t1", name: "read", state: "completed", result: "ok" }], [{ type: "tool", toolId: "t1" }, { type: "text", content: "answer" }]);
+      await new Promise((r) => setTimeout(r, 2));
+      const u2 = await stores.sessionStore.addMessage(parent, "user", "second");
+      await new Promise((r) => setTimeout(r, 2));
+      await stores.sessionStore.addMessage(parent, "assistant", "later");
+
+      const fork = await stores.sessionStore.forkSession!(parent, u2.id);
+      expect(fork).toBeDefined();
+      const { session, messageIds } = fork!;
+      expect(session.id).not.toBe(parent);
+      expect(session).toMatchObject({ title: "Plan", agent: "backend", scope: "telegram:group:-7", parentSessionId: parent, forkMessageId: u2.id, messageCount: 3 });
+      expect(Object.keys(messageIds)).toEqual([u1.id, a1.id, u2.id]);
+
+      const copied = await stores.sessionStore.getMessages(session.id);
+      expect(copied.map((m) => m.content)).toEqual(["first", "answer", "second"]);
+      expect(copied.map((m) => m.ts)).toEqual([u1.ts, a1.ts, u2.ts]);
+      expect(copied.map((m) => m.id)).toEqual([messageIds[u1.id], messageIds[a1.id], messageIds[u2.id]]);
+      expect(copied.some((m) => [u1.id, a1.id, u2.id].includes(m.id))).toBe(false);
+      expect(copied[1].toolCalls?.[0]).toMatchObject({ id: "t1", result: "ok" });
+      expect(copied[1].segments).toEqual([{ type: "tool", toolId: "t1" }, { type: "text", content: "answer" }]);
+      // The parent is untouched; the branch is listed with its origin.
+      expect(await stores.sessionStore.getMessages(parent)).toHaveLength(4);
+      expect((await stores.sessionStore.listSessions()).find((x) => x.id === session.id)?.parentSessionId).toBe(parent);
+      // Branches of a scoped conversation stay scoped (never "the latest" chat).
+      expect((await stores.sessionStore.getLatestSession("backend"))).toBeUndefined();
+
+      expect(await stores.sessionStore.forkSession!(parent, "missing")).toBeUndefined();
+      expect(await stores.sessionStore.forkSession!("missing", u2.id)).toBeUndefined();
+    });
+  });
+
+  describe("DrizzleChatQueueStore", () => {
+    it("keeps a per-session ordered queue with edit, reorder, shift and auto-send", async () => {
+      const sid = await stores.sessionStore.create("q");
+      const other = await stores.sessionStore.create("other");
+      const q = stores.chatQueueStore;
+      expect(await q.get(sid)).toEqual({ items: [], autoSend: true });
+
+      const a = await q.add(sid, "a");
+      const b = await q.add(sid, "b");
+      const c = await q.add(sid, "c");
+      const z = await q.add(sid, "z", { front: true });
+      await q.add(other, "elsewhere");
+      expect((await q.get(sid)).items.map((i) => i.content)).toEqual(["z", "a", "b", "c"]);
+
+      expect((await q.update(sid, b.id, "B"))?.content).toBe("B");
+      expect(await q.update(other, b.id, "nope")).toBeUndefined();
+      expect((await q.reorder(sid, [c.id, a.id])).map((i) => i.content)).toEqual(["c", "a", "z", "B"]);
+      expect((await q.get(sid)).items.map((i) => i.content)).toEqual(["c", "a", "z", "B"]);
+
+      expect((await q.remove(sid, z.id))?.content).toBe("z");
+      expect(await q.remove(sid, z.id)).toBeUndefined();
+      expect((await q.shift(sid))?.content).toBe("c");
+      expect((await q.get(sid)).items.map((i) => i.content)).toEqual(["a", "B"]);
+
+      await q.setAutoSend(sid, false);
+      await q.setAutoSend(sid, false);
+      expect((await q.get(sid)).autoSend).toBe(false);
+      await q.setAutoSend(sid, true);
+      expect((await q.get(sid)).autoSend).toBe(true);
+
+      expect((await q.sessionsWithItems!()).sort()).toEqual([sid, other].sort());
+      expect(await q.clear(sid)).toBe(2);
+      expect(await q.sessionsWithItems!()).toEqual([other]);
+      expect(await q.shift(sid)).toBeUndefined();
+      expect((await q.get(other)).items).toHaveLength(1);
+    });
+
+    it("keeps marked (send-next) items and an auto-send hold", async () => {
+      const sid = await stores.sessionStore.create("q");
+      const q = stores.chatQueueStore;
+      await q.add(sid, "plain");
+      const marked = await q.add(sid, "carried", { front: true, steerId: "steer-1" });
+      expect(marked.steerId).toBe("steer-1");
+      expect((await q.get(sid)).items.map((i) => [i.content, i.steerId])).toEqual([["carried", "steer-1"], ["plain", undefined]]);
+      await q.setHold!(sid, "error");
+      expect(await q.get(sid)).toMatchObject({ autoSend: true, hold: "error" });
+      await q.setHold!(sid, null);
+      expect((await q.get(sid)).hold).toBeUndefined();
+      await q.setHold!(sid, "aborted");
+      await q.setAutoSend(sid, true); // resuming clears the hold
+      expect((await q.get(sid)).hold).toBeUndefined();
+      expect((await q.remove(sid, marked.id))?.steerId).toBe("steer-1");
+    });
+
+    it("drops the queue with its session", async () => {
+      const sid = await stores.sessionStore.create("q");
+      await stores.chatQueueStore.add(sid, "a");
+      await stores.chatQueueStore.setAutoSend(sid, false);
+      await stores.sessionStore.deleteSession(sid);
+      expect(await stores.chatQueueStore.get(sid)).toEqual({ items: [], autoSend: true });
+    });
+  });
+
+  describe("DrizzleAttachmentStore", () => {
+    it("finds every row sharing a file path", async () => {
+      const base = { filename: "a.png", mimeType: "image/png", size: 1, path: "workspace/attachments/s1/x.png", createdAt: new Date().toISOString() };
+      await stores.attachmentStore.save({ ...base, id: "att1", sessionId: "s1", messageId: "m1" });
+      await stores.attachmentStore.save({ ...base, id: "att2", sessionId: "s2", messageId: "m2" });
+      await stores.attachmentStore.save({ ...base, id: "att3", sessionId: "s1", path: "workspace/attachments/s1/y.png" });
+      expect((await stores.attachmentStore.getByPath!(base.path)).map((a) => a.id).sort()).toEqual(["att1", "att2"]);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════

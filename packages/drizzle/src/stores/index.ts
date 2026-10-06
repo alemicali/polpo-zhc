@@ -28,3 +28,4 @@ export { DrizzleAppRegistryStore } from "./app-registry-store.js";
 export { DrizzleDataRegistryStore } from "./data-registry-store.js";
 export { DrizzleCompanyBrainStore } from "./company-brain-store.js";
 export { DrizzleWhatsAppStore } from "./whatsapp-store.js";
+export { DrizzleChatQueueStore } from "./chat-queue-store.js";

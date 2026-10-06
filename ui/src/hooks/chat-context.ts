@@ -125,8 +125,10 @@ export interface ChatStateValue {
   messages: ChatMessageWithQuestions[];
   isLoading: boolean;
   messagesLoading: boolean;
+  /** Key of the conversation on screen: the session id, or a local key for a new chat. */
+  activeSessionKey: string;
   sessionId: string | null;
-  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean }[];
+  sessions: { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean; parentSessionId?: string; forkMessageId?: string }[];
   sessionsLoading: boolean;
   streamingSessionIds: string[];
   pendingQuestions: AskUserQuestion[] | null;
@@ -164,6 +166,14 @@ export interface ChatActionsValue {
   /** Toggle the star flag (PATCH starred). Does NOT bump updatedAt. */
   setStarred: (id: string, starred: boolean) => Promise<void>;
   setSelectedAgent: (agent: string | null) => void;
+  /** Send text to the running turn (joins at its next safe point). */
+  steer: (text: string) => Promise<"sent" | "restored">;
+  /** Withdraw a steer that was not delivered yet (its text goes back to the composer). */
+  cancelSteer: (id: string) => Promise<void>;
+  /** Branch at a user message; resolves to the new session id. */
+  forkSession: (messageId: string) => Promise<string | undefined>;
+  /** Undo a branch; "confirm" when the user wrote in it and must confirm first. */
+  undoFork: (forkId: string, opts?: { force?: boolean }) => Promise<{ parentSessionId: string; forkMessageId: string | null } | "confirm">;
 }
 
 export const ChatStateContext = createContext<ChatStateValue | null>(null);

@@ -14,6 +14,7 @@ test("the browser SDK forwards named chat events used for cross-device reconcili
   const manager = new EventSourceManager({ url: "http://localhost/events", onEvent, onStatusChange: () => {} });
   manager.connect();
   const names = ["session:created", "session:updated", "session:deleted", "message:added",
+    "chat:turn-started", "chat:queue-updated",
     "background-wait:completed", "background-wait:failed", "background-wait:cancelled"];
   for (const name of names) {
     source!.dispatchEvent(new MessageEvent(name, { data: JSON.stringify({ sessionId: "qa" }), lastEventId: name }));

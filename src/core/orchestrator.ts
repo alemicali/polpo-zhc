@@ -11,6 +11,7 @@ import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
+import { FileChatQueueStore } from "../stores/file-chat-queue-store.js";
 import type { SessionStore } from "./session-store.js";
 import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
@@ -1014,6 +1015,12 @@ export class Orchestrator extends TypedEmitter {
   getAttachmentStore(): import("@polpo-ai/core/attachment-store").AttachmentStore | undefined {
     return this.drizzleStores?.attachmentStore;
   }
+
+  /** Per-session chat prompt queue: database-backed with sqlite/postgres, `.polpo/chat-queue.json` otherwise. */
+  getChatQueueStore(): import("@polpo-ai/core/session-store").ChatQueueStore {
+    return this.drizzleStores?.chatQueueStore ?? (this.fileChatQueueStore ??= new FileChatQueueStore(this.polpoDir));
+  }
+  private fileChatQueueStore?: FileChatQueueStore;
 
   /**
    * Initialize the vault store: the `vault` table when the project runs on a database (each entry

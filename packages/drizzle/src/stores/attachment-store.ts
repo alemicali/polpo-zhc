@@ -57,6 +57,12 @@ export class DrizzleAttachmentStore implements AttachmentStore {
     return affected > 0;
   }
 
+  async getByPath(path: string): Promise<Attachment[]> {
+    const rows: any[] = await this.db.select().from(this.attachments)
+      .where(eq(this.attachments.path, path));
+    return rows.map((r) => this.rowToAttachment(r));
+  }
+
   async deleteBySession(sessionId: string): Promise<number> {
     const result = await this.db.delete(this.attachments)
       .where(eq(this.attachments.sessionId, sessionId));

@@ -42,6 +42,11 @@ import type {
   LogSession,
   LogEntry,
   ChatSession,
+  ChatQueueItem,
+  ChatQueueState,
+  ChatQueueSendResult,
+  SteerResult,
+  ForkSessionResult,
   ChatMessage,
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -863,6 +868,82 @@ export class PolpoClient {
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
     return this.del<{ deleted: boolean }>(`/chat/sessions/${sessionId}`);
+  }
+
+  // ── Branches ────────────────────────────────────────────
+
+  /** Branch the conversation at one of the user's messages; the assistant answers it again in the branch. */
+  forkSession(sessionId: string, messageId: string): Promise<ForkSessionResult> {
+    return this.post<ForkSessionResult>(`/chat/sessions/${sessionId}/fork`, { messageId });
+  }
+
+  /**
+   * Undo a branch: delete it and get back the parent and fork point. Fails with code
+   * FORK_HAS_MESSAGES when the user already wrote in the branch, unless `force`.
+   */
+  undoFork(sessionId: string, opts?: { force?: boolean }): Promise<{ deleted: boolean; parentSessionId: string; forkMessageId: string | null }> {
+    return this.del(`/chat/sessions/${sessionId}/fork${opts?.force ? "?force=1" : ""}`);
+  }
+
+  // ── Prompt queue ────────────────────────────────────────
+
+  getChatQueue(sessionId: string): Promise<ChatQueueState> {
+    return this.request<ChatQueueState>("GET", this.apiUrl(`/chat/sessions/${sessionId}/queue`));
+  }
+
+  /** Queue a prompt; `next` sends it right after the running turn, whatever auto-send says. */
+  addToChatQueue(sessionId: string, content: string, opts?: { front?: boolean; next?: boolean }): Promise<ChatQueueItem> {
+    return this.post<ChatQueueItem>(`/chat/sessions/${sessionId}/queue`, {
+      content, ...(opts?.front ? { front: true } : {}), ...(opts?.next ? { next: true } : {}),
+    });
+  }
+
+  updateChatQueueItem(sessionId: string, itemId: string, content: string): Promise<ChatQueueItem> {
+    return this.patch<ChatQueueItem>(`/chat/sessions/${sessionId}/queue/${itemId}`, { content });
+  }
+
+  removeChatQueueItem(sessionId: string, itemId: string): Promise<{ removed: boolean }> {
+    return this.del<{ removed: boolean }>(`/chat/sessions/${sessionId}/queue/${itemId}`);
+  }
+
+  reorderChatQueue(sessionId: string, ids: string[]): Promise<{ items: ChatQueueItem[] }> {
+    return this.put<{ items: ChatQueueItem[] }>(`/chat/sessions/${sessionId}/queue/order`, { ids });
+  }
+
+  clearChatQueue(sessionId: string): Promise<{ cleared: number }> {
+    return this.del<{ cleared: number }>(`/chat/sessions/${sessionId}/queue`);
+  }
+
+  setChatQueueAutoSend(sessionId: string, autoSend: boolean): Promise<ChatQueueState> {
+    return this.patch<ChatQueueState>(`/chat/sessions/${sessionId}/queue`, { autoSend });
+  }
+
+  /** Send a queued prompt now: it steers the running turn, or starts one when the session is idle. */
+  sendChatQueueItem(sessionId: string, itemId: string): Promise<ChatQueueSendResult> {
+    return this.post<ChatQueueSendResult>(`/chat/sessions/${sessionId}/queue/${itemId}/send`);
+  }
+
+  // ── Steering ────────────────────────────────────────────
+
+  /** Add a message to a running turn (joins at its next safe point). */
+  steerTurn(turnId: string, steer: { id?: string; content: string }): Promise<SteerResult> {
+    return this.request<SteerResult>("POST", `${this.baseUrl}/v1/chat/completions/steer/${encodeURIComponent(turnId)}`, steer);
+  }
+
+  /** Withdraw a steer that was not delivered yet (fails with code already_delivered otherwise). */
+  cancelSteer(turnId: string, steerId: string): Promise<{ cancelled: boolean }> {
+    return this.request<{ cancelled: boolean }>("DELETE", `${this.baseUrl}/v1/chat/completions/steer/${encodeURIComponent(turnId)}/${encodeURIComponent(steerId)}`);
+  }
+
+  /** Stop a running turn. Steers it had not delivered come back, never sent. */
+  async abortTurn(turnId: string): Promise<{ ok: boolean; returnedSteers: Array<{ id: string; content: string }> }> {
+    const res = await this.fetchFn(`${this.baseUrl}/v1/chat/completions/abort/${encodeURIComponent(turnId)}`, {
+      method: "POST",
+      headers: { ...this.headers },
+      credentials: "include",
+    });
+    const json = await res.json().catch(() => ({})) as { ok?: boolean; returnedSteers?: Array<{ id: string; content: string }> };
+    return { ok: !!json.ok, returnedSteers: json.returnedSteers ?? [] };
   }
 
   // ── Notifications ────────────────────────────────────────

@@ -16,6 +16,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "task:recovered",
   "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
   "session:created", "session:updated", "session:deleted", "message:added",
+  "chat:turn-started", "chat:queue-updated",
   "background-wait:created", "background-wait:ready", "background-wait:running",
   "background-wait:completed", "background-wait:failed", "background-wait:cancelled",
   "approval:requested", "approval:resolved", "approval:rejected", "approval:timeout",

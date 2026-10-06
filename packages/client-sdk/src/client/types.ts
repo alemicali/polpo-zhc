@@ -1285,6 +1285,50 @@ export interface ChatSession {
   agent?: string;
   /** True when the user starred this session — surfaced in the sidebar "Starred" section. */
   starred?: boolean;
+  /** Channel conversation the session belongs to (e.g. a Telegram group). */
+  scope?: string;
+  /** Set on a branch: the session it was forked from. */
+  parentSessionId?: string;
+  /** Set on a branch: the parent's message the branch starts after. */
+  forkMessageId?: string;
+}
+
+/** A prompt waiting in a session's server-side queue. */
+export interface ChatQueueItem {
+  id: string;
+  sessionId: string;
+  content: string;
+  createdAt: string;
+  /** Set on a message that goes out next whatever auto-send says (a steer that missed its turn…). */
+  steerId?: string;
+}
+
+export interface ChatQueueState {
+  items: ChatQueueItem[];
+  autoSend: boolean;
+  /** Auto-send is held: the last turn errored, was stopped or waits for the user. */
+  hold?: string;
+}
+
+/** Result of "send now" on a queued prompt. */
+export type ChatQueueSendResult =
+  | { mode: "steer"; turnId: string; steerId: string }
+  | { mode: "turn"; turnId: string }
+  | { mode: "scheduled" };
+
+/** Result of steering a running turn. */
+export interface SteerResult {
+  id: string;
+  turnId: string;
+  /** pending: joins the turn at its next safe point; scheduled: the turn was over, it becomes the next message. */
+  status: "pending" | "scheduled";
+}
+
+export interface ForkSessionResult {
+  session: ChatSession;
+  /** The turn answering the branch's last message, when it could start. */
+  turnId: string | null;
+  turnError?: string;
 }
 
 export interface ChatMessage {

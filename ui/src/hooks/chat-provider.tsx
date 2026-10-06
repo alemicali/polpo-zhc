@@ -22,6 +22,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     messages: chat.messages,
     isLoading: chat.isLoading,
     messagesLoading: chat.messagesLoading,
+    activeSessionKey: chat.activeSessionKey,
     sessionId: chat.sessionId,
     sessions: chat.sessions,
     sessionsLoading: chat.sessionsLoading,
@@ -37,7 +38,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     pendingSetDesign: chat.pendingSetDesign,
     selectedAgent: chat.selectedAgent,
   }), [
-    chat.messages, chat.isLoading, chat.messagesLoading,
+    chat.messages, chat.isLoading, chat.messagesLoading, chat.activeSessionKey,
     chat.sessionId, chat.sessions, chat.sessionsLoading, chat.streamingSessionIds,
     chat.pendingQuestions, chat.pendingMission, chat.pendingVault,
     chat.pendingWhatsApp, chat.pendingEmail,
@@ -64,6 +65,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     renameSession: chat.renameSession,
     setStarred: chat.setStarred,
     setSelectedAgent: chat.setSelectedAgent,
+    steer: chat.steer,
+    cancelSteer: chat.cancelSteer,
+    forkSession: chat.forkSession,
+    undoFork: chat.undoFork,
   }), [
     chat.send, chat.stop, chat.answerQuestions,
     chat.respondToMission, chat.respondToVault,
@@ -73,6 +78,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     chat.clear, chat.loadSession, chat.newSession, chat.deleteSession,
     chat.renameSession, chat.setStarred,
     chat.setSelectedAgent,
+    chat.steer, chat.cancelSteer, chat.forkSession, chat.undoFork,
   ]);
 
   // Session chrome must not re-render for every streamed token. Keep this

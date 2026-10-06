@@ -77,6 +77,10 @@ export interface PolpoEventMap {
   "session:updated": { sessionId: string; title?: string; starred?: boolean };
   "session:deleted": { sessionId: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
+  /** The server started a chat turn on its own (queued prompt, undelivered steer, branch answer). */
+  "chat:turn-started": { sessionId: string; turnId: string; reason: "queue" | "steer" | "fork" | "send-now"; userMessageId?: string };
+  /** A session's prompt queue changed (items or auto-send). */
+  "chat:queue-updated": { sessionId: string };
 
   // Durable background task waits
   "background-wait:created": { wait: BackgroundWait };

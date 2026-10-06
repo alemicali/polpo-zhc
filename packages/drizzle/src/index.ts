@@ -63,6 +63,9 @@ import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
 import {
   whatsappMessagesPg, whatsappMessagesSqlite, whatsappContactsPg, whatsappContactsSqlite,
 } from "./schema/whatsapp.js";
+import {
+  chatQueueItemsPg, chatQueueItemsSqlite, chatQueueSettingsPg, chatQueueSettingsSqlite,
+} from "./schema/chat-queue.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -95,13 +98,14 @@ import { DrizzleAppRegistryStore } from "./stores/app-registry-store.js";
 import { DrizzleDataRegistryStore } from "./stores/data-registry-store.js";
 import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
 import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
+import { DrizzleChatQueueStore } from "./stores/chat-queue-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
 import type { TaskStore } from "@polpo-ai/core/task-store";
 import type { RunStore } from "@polpo-ai/core/run-store";
 import type { BackgroundWaitStore, TaskControlStore } from "@polpo-ai/core";
-import type { SessionStore } from "@polpo-ai/core/session-store";
+import type { ChatQueueStore, SessionStore } from "@polpo-ai/core/session-store";
 import type { NotificationStore } from "@polpo-ai/core/notification-store";
 import type { LogStore } from "@polpo-ai/core/log-store";
 import type { ApprovalStore } from "@polpo-ai/core/approval-store";
@@ -149,6 +153,7 @@ export interface DrizzleStores {
   dataRegistryStore: DrizzleDataRegistryStore & DataRegistryStore;
   companyBrainStore: CompanyBrainStore;
   whatsappStore: WhatsAppMessageStore;
+  chatQueueStore: ChatQueueStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -191,6 +196,7 @@ export function createPgStores(db: any): DrizzleStores {
     dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesPg, views: dataViewsPg, activity: dataActivityPg }, "pg"),
     companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsPg, "pg"),
     whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesPg, contacts: whatsappContactsPg }, "pg"),
+    chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsPg, chatQueueSettingsPg, "pg"),
   };
 }
 
@@ -234,6 +240,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesSqlite, views: dataViewsSqlite, activity: dataActivitySqlite }, "sqlite"),
     companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsSqlite, "sqlite"),
     whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesSqlite, contacts: whatsappContactsSqlite }, "sqlite"),
+    chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsSqlite, chatQueueSettingsSqlite, "sqlite"),
   };
 }
 
@@ -275,6 +282,8 @@ export const pgSchema = {
   brainItems: brainItemsPg,
   whatsappMessages: whatsappMessagesPg,
   whatsappContacts: whatsappContactsPg,
+  chatQueueItems: chatQueueItemsPg,
+  chatQueueSettings: chatQueueSettingsPg,
 };
 
 export const sqliteSchema = {
@@ -313,4 +322,6 @@ export const sqliteSchema = {
   brainItems: brainItemsSqlite,
   whatsappMessages: whatsappMessagesSqlite,
   whatsappContacts: whatsappContactsSqlite,
+  chatQueueItems: chatQueueItemsSqlite,
+  chatQueueSettings: chatQueueSettingsSqlite,
 };

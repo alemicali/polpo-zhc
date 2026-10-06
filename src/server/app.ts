@@ -1,3 +1,5 @@
+import { readFile, unlink } from "node:fs/promises";
+import { join as joinPath } from "node:path";
 import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
@@ -33,6 +35,9 @@ import {
   attachmentRoutes,
   countsRoutes,
   streamRegistry,
+  createTurnScheduler,
+  sessionLeases,
+  internalCallHeaders,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
@@ -193,7 +198,30 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
+  // Server-side turns: queued prompts, steers that missed their turn, a branch's answer.
+  const CHAT_ATTACHMENT_PATH = /^workspace\/attachments\/[\w-]+\/[^/\\]+$/;
+  const turnScheduler = createTurnScheduler({
+    getSessionStore: () => o.getSessionStore(),
+    getAttachmentStore: () => o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
+    getQueueStore: () => o.getChatQueueStore(),
+    readAttachment: (path) => {
+      // Only chat attachments, never anything else under the project.
+      if (!CHAT_ATTACHMENT_PATH.test(path)) return Promise.reject(new Error("Not a chat attachment"));
+      return readFile(joinPath(o.getWorkDir(), path));
+    },
+    emit: (event, data) => o.emit(event as any, data as any),
+    request: (req) => completionApp.request(req),
+    apiKey: opts?.apiKeys?.[0],
+  });
+  // After a restart, queues that were waiting to auto-send get their chance.
+  if (orchestrator) {
+    const resumeTimer = setTimeout(() => {
+      if (orchestrator.isInitialized) void turnScheduler.resumePending().catch(() => undefined);
+    }, 3000);
+    resumeTimer.unref?.();
+  }
   const completionApp = completionRoutes(() => ({
+    turnScheduler,
     contextCheckpoints: databaseStoresFor(o.getPolpoDir())?.contextCheckpointStore ?? new FileContextCheckpointStore(o.getPolpoDir()),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
     saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
@@ -430,7 +458,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const o = orchestrator; // short alias
 
   o?.setBackgroundWaitContinuation(async (wait, task, signal) => {
-    if (streamRegistry.getActiveTurnForSession(wait.sessionId)) return "deferred";
+    // One turn per session: wait for whatever runs there now.
+    if (sessionLeases.isHeld(wait.sessionId)) return "deferred";
     const session = await o.getSessionStore()?.getSession(wait.sessionId);
     if (!session) throw new Error(`Chat session "${wait.sessionId}" no longer exists`);
 
@@ -438,6 +467,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       "content-type": "application/json",
       "x-session-id": wait.sessionId,
       "x-polpo-internal-continuation": "background-wait",
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
     const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
@@ -460,6 +490,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ],
       }),
     }));
+    if (response.status === 409) return "deferred";
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as any;
       throw new Error(payload?.error?.message ?? payload?.error ?? `Continuation failed (${response.status})`);
@@ -474,6 +505,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-session-id": sessionId,
+      // One turn per session: a channel message waits for the running answer instead of failing.
+      "x-polpo-lease-wait": String(10 * 60 * 1000),
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
     const response = await completionApp.request(new Request("http://polpo.internal/", {
@@ -567,6 +601,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     sessionStore: o.getSessionStore(),
     emit: (event: string, data: unknown) => o.emit(event as any, data),
+    chatQueueStore: o.getChatQueueStore(),
+    turnScheduler,
+    removeAttachmentFile: async (path: string) => {
+      // Only chat attachments, never anything else under the project.
+      if (!CHAT_ATTACHMENT_PATH.test(path)) return;
+      await unlink(joinPath(o.getWorkDir(), path)).catch(() => undefined);
+    },
   })));
 
   authed.route("/skills", skillRoutes(() => ({

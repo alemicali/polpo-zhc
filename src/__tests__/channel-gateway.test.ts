@@ -646,3 +646,36 @@ describe("TelegramGatewayAdapter", () => {
     expect(resolver.approve).toHaveBeenCalledWith("req-1", "telegram:42");
   });
 });
+
+describe("ChannelGateway — one turn per session", () => {
+  it("its own chat loop waits for a turn already running in the conversation", async () => {
+    const { sessionLeases } = await import("@polpo-ai/server");
+    const sessionStore = createMockSessionStore();
+    const { gateway } = createGateway({ sessionStore });
+    expect(sessionLeases.tryAcquire("session-1", "web-turn")).toBe(true);
+    const reply = gateway.handleMessage({ channel: "telegram", externalId: "42", chatId: "chat-1", text: "hello" });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(sessionStore.addMessage).not.toHaveBeenCalled();
+    sessionLeases.release("session-1", "web-turn");
+    await reply;
+    expect(sessionStore.addMessage).toHaveBeenCalledWith("session-1", "user", "hello");
+    expect(sessionLeases.isHeld("session-1")).toBe(false);
+  });
+
+  it("gives up politely when the conversation stays busy", async () => {
+    const { sessionLeases } = await import("@polpo-ai/server");
+    const sessionStore = createMockSessionStore();
+    const { gateway } = createGateway({ sessionStore });
+    const previous = ChannelGateway.LEASE_WAIT_MS;
+    ChannelGateway.LEASE_WAIT_MS = 100;
+    sessionLeases.tryAcquire("session-1", "long-turn");
+    try {
+      const reply = await gateway.handleMessage({ channel: "telegram", externalId: "42", chatId: "chat-1", text: "hello" });
+      expect(reply).toContain("still working on the previous message");
+      expect(sessionStore.addMessage).not.toHaveBeenCalled();
+    } finally {
+      ChannelGateway.LEASE_WAIT_MS = previous;
+      sessionLeases.release("session-1", "long-turn");
+    }
+  });
+});

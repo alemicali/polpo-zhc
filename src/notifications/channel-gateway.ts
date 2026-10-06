@@ -30,6 +30,7 @@
  */
 
 import { nanoid } from "nanoid";
+import { sessionLeases } from "@polpo-ai/server";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
@@ -1033,6 +1034,8 @@ export class ChannelGateway {
   }
 
   private async runChat(msg: InboundMessage, conversation: string): Promise<string | GatewayReply | undefined> {
+    /** Session lease held by this gateway's own loop (one turn per session, like every turn). */
+    let leased: { sessionId: string; owner: string } | undefined;
     try {
       const agent = await this.getActiveAgent(conversation);
       const attachments = msg.attachments ?? [];
@@ -1042,6 +1045,13 @@ export class ChannelGateway {
       const sessionId = await this.resolveSessionId(conversation, agent, title, msg.group ? conversation : undefined);
       // Agents, and any turn with media, go through the host pipeline (vision + attachment storage).
       if (agent || attachments.length > 0) return await this.handleRunnerChat(msg, agent, sessionId);
+
+      // One turn per session: wait for a web/queued answer running in this conversation.
+      const owner = `channel-${nanoid(10)}`;
+      if (!(await sessionLeases.acquire(sessionId, owner, { waitMs: ChannelGateway.LEASE_WAIT_MS }))) {
+        return "I'm still working on the previous message in this conversation — please try again in a moment.";
+      }
+      leased = { sessionId, owner };
 
       // Store user message
       await this.sessionStore.addMessage(sessionId, "user", msg.text);
@@ -1170,8 +1180,13 @@ export class ChannelGateway {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
+    } finally {
+      if (leased) sessionLeases.release(leased.sessionId, leased.owner);
     }
   }
+
+  /** How long a channel message waits for an answer already running in its conversation. */
+  static LEASE_WAIT_MS = 10 * 60 * 1000;
 
   /**
    * Turn through the host's chat pipeline (agent-direct, or orchestrator when

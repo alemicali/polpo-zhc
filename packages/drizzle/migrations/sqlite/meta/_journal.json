@@ -43,6 +43,13 @@
       "when": 1791283281429,
       "tag": "0005_task_version",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791290575018,
+      "tag": "0006_chat_fork_queue",
+      "breakpoints": true
     }
   ]
 }

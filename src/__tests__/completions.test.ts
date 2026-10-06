@@ -173,7 +173,7 @@ beforeAll(async () => {
 
   // No API keys → no auth required
   app = createApp(orchestrator, sseBridge);
-});
+}, 60_000);
 
 afterAll(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });

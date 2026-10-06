@@ -30,7 +30,10 @@ export { fileRoutes, type FileRouteDeps } from "./routes/files.js";
 export { skillRoutes, type SkillRouteDeps } from "./routes/skills.js";
 export { attachmentRoutes } from "./routes/attachments.js";
 export { countsRoutes } from "./routes/counts.js";
-export { streamRegistry } from "./stream-registry.js";
+export { streamRegistry, type PendingSteer, type SteerResult } from "./stream-registry.js";
+export { sessionLeases, MAX_LEASE_MS } from "./session-lease.js";
+export { internalCallHeaders, isInternalCall, INTERNAL_CALL_HEADER } from "./internal-call.js";
+export { TurnScheduler, SessionBusyError, createTurnScheduler, type TurnSchedulerDeps, type TurnOutcome, type TurnStartReason, type CarriedSteer, type SendNowResult } from "./turn-scheduler.js";
 
 // Dependency types
 export type {
