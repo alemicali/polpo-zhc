@@ -17,8 +17,8 @@ const LOG_EXCLUDED = new Set<string>(["orchestrator:tick", "newListener", "remov
 export class TypedEmitter extends EventEmitter implements EventBus {
   private logSink?: LogStore;
 
-  /** Attach a persistent log store. All emitted events will be written to it. */
-  setLogSink(store: LogStore): void {
+  /** Attach a persistent log store (undefined detaches it). All emitted events will be written to it. */
+  setLogSink(store: LogStore | undefined): void {
     this.logSink = store;
   }
 
@@ -27,11 +27,14 @@ export class TypedEmitter extends EventEmitter implements EventBus {
   override emit(event: string | symbol, ...args: unknown[]): boolean {
     if (this.logSink && typeof event === "string" && !LOG_EXCLUDED.has(event)) {
       try {
-        this.logSink.append({
+        // append is async: a failed write (e.g. the database is down or already closed) must not
+        // become an unhandled rejection. The rejection handler logs it, which appends again,
+        // which fails again: an endless microtask loop that starves timers and blocks shutdown.
+        void Promise.resolve(this.logSink.append({
           ts: new Date().toISOString(),
           event,
           data: args[0],
-        });
+        })).catch(() => { /* never let logging break the system */ });
       } catch { /* never let logging break the system */ }
     }
     return super.emit(event, ...args);

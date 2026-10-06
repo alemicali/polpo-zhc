@@ -1336,6 +1336,8 @@ export class Orchestrator extends TypedEmitter {
     await this.runStore.close();
     this.emit("orchestrator:shutdown", {});
     await this.hookRegistry.runAfter("orchestrator:shutdown", {});
+    // Nothing may write to the log store once its database is closing.
+    this.setLogSink(undefined);
     await this.logStore?.close();
     await this.sessionStore?.close();
     await this.storage?.close().catch(() => {});
