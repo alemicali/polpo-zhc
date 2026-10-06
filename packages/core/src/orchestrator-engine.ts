@@ -177,6 +177,11 @@ function sleep(ms: number): Promise<void> {
 
 const POLL_INTERVAL = 5000; // 5s safety net (push notification is primary)
 
+/** Task events that mean a task's status, group or existence may have changed. */
+const TASK_CHANGE_EVENTS = ["task:transition", "task:created", "task:updated", "task:removed"] as const;
+/** Above this many tasks touched during one tick, re-read all tasks instead of one by one. */
+const MAX_TOUCHED_REFRESH = 25;
+
 // ── OrchestratorEngine ──────────────────────────────────────────────────
 
 /**
@@ -263,6 +268,24 @@ export class OrchestratorEngine {
    * Single tick of the supervisor loop. Returns true when all work is done.
    */
   async tick(): Promise<boolean> {
+    // Record the tasks changed in this process while the tick runs (from before the snapshot
+    // read on), so the end-of-tick group cleanup sees fresh data for them without re-reading
+    // every task. Changes made between ticks are already in the next tick's snapshot.
+    const touched = new Set<string>();
+    const touch = (payload: unknown): void => {
+      const p = payload as { taskId?: string; task?: { id?: string } } | undefined;
+      const id = p?.taskId ?? p?.task?.id;
+      if (id) touched.add(id);
+    };
+    for (const event of TASK_CHANGE_EVENTS) this.ctx.emitter.on(event, touch);
+    try {
+      return await this.runTick(touched);
+    } finally {
+      for (const event of TASK_CHANGE_EVENTS) this.ctx.emitter.off(event, touch);
+    }
+  }
+
+  private async runTick(touched: Set<string>): Promise<boolean> {
     // Scheduler checks FIRST — must run before early-return guards because
     // scheduled/recurring missions have zero tasks until triggered, and the
     // scheduler is what creates them via executeMission.
@@ -447,14 +470,38 @@ export class OrchestratorEngine {
     });
 
     // Clean up volatile agents for completed mission groups.
-    // Re-read tasks fresh — assessment callbacks (async) may have transitioned
+    // Use fresh data — assessment callbacks (async) may have transitioned
     // tasks to done/failed since the snapshot at the top of tick().
-    await this.missionExec.cleanupCompletedGroups(await this.ctx.registry.getAllTasks());
+    await this.missionExec.cleanupCompletedGroups(await this.refreshTouchedTasks(tasks, touched));
 
     // Sync process list from RunStore for backward compat
     await this.runner.syncProcessesFromRunStore();
 
     return false;
+  }
+
+  /**
+   * The tick's task snapshot with the tasks changed since it was read replaced by fresh copies
+   * (dropped if deleted, appended if created). Equivalent to re-reading every task for changes
+   * made in this process; anything else (other processes, removals without an event) shows up
+   * in the next tick's snapshot. Stores that don't emit task:transition for every status
+   * change, or many changes at once, fall back to a full re-read.
+   */
+  private async refreshTouchedTasks(snapshot: Task[], touched: Set<string>): Promise<Task[]> {
+    const evented = (this.ctx.registry as TaskStore & { __emitsTaskTransitionEvents?: boolean }).__emitsTaskTransitionEvents;
+    if (!evented || touched.size > MAX_TOUCHED_REFRESH) return this.ctx.registry.getAllTasks();
+    if (touched.size === 0) return snapshot;
+    const fresh = new Map<string, Task | undefined>();
+    for (const id of touched) fresh.set(id, await this.ctx.registry.getTask(id));
+    const tasks: Task[] = [];
+    for (const task of snapshot) {
+      if (!fresh.has(task.id)) { tasks.push(task); continue; }
+      const current = fresh.get(task.id);
+      if (current) tasks.push(current);
+      fresh.delete(task.id);
+    }
+    for (const created of fresh.values()) if (created) tasks.push(created);
+    return tasks;
   }
 
   /** Build the minimal facade that the deadlock resolver needs. */
