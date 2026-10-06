@@ -37,7 +37,9 @@ import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type { InboundGroup } from "./telegram-groups.js";
 import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
-import type { RoomKind, RoomStore } from "@polpo-ai/core";
+import type { RoomKind, RoomMessage, RoomStore } from "@polpo-ai/core";
+import type { TelegramAgentRelay } from "../rooms/telegram-relay.js";
+import type { AgentProfile } from "../rooms/room-engine.js";
 import { ROOM_TURN_LINES, roomTurnText } from "../rooms/transcript.js";
 import type {
   ChannelGatewayConfig,
@@ -275,6 +277,9 @@ export class ChannelGateway {
   private key: string;
   private intent?: GroupIntentArbiter;
   private roomStore?: RoomStore;
+  private relay?: TelegramAgentRelay;
+  /** Group conversations this bot has seen a message in (it is a member). */
+  private presentIn = new Set<string>();
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -324,8 +329,13 @@ export class ChannelGateway {
     const reply = await this.routeMessage(msg);
     const out = typeof reply === "string" ? { text: reply } : reply;
     if (msg.group) {
-      if (this.roomStore) await this.recordAgentReply(msg, out?.text);
-      else await this.hearGroup(msg, out?.text);
+      const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+      this.presentIn.add(conversation);
+      if (this.roomStore) {
+        const stored = await this.recordAgentReply(msg, out?.text);
+        // the other agents of the group may answer this reply (they never see it on Telegram)
+        if (stored && this.relay) this.relay.agentReplied(conversation, stored, this.key);
+      } else await this.hearGroup(msg, out?.text);
     }
     return out;
   }
@@ -628,6 +638,8 @@ export class ChannelGateway {
   private async recordPerson(msg: InboundMessage, peerId: string): Promise<void> {
     if (!this.roomStore || !msg.text.trim()) return;
     const conversation = this.conversationId(msg, peerId);
+    this.presentIn.add(conversation);
+    if (msg.messageId) this.relay?.personSpoke(conversation, msg.messageId);
     try {
       await this.roomOf(msg, conversation);
       const saved = await this.roomStore.addMessage(conversation, {
@@ -644,18 +656,76 @@ export class ChannelGateway {
     }
   }
 
-  /** This bot's reply into the room, answering the person's message. */
-  private async recordAgentReply(msg: InboundMessage, reply: string | undefined): Promise<void> {
-    if (!this.roomStore || !msg.roomMessageId || !reply?.trim()) return;
+  /** This bot's reply into the room, answering the person's (or agent's) message. */
+  private async recordAgentReply(msg: InboundMessage, reply: string | undefined): Promise<RoomMessage | undefined> {
+    if (!this.roomStore || !msg.roomMessageId || !reply?.trim()) return undefined;
     const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
     try {
       const me = await this.speaker(conversation);
-      await this.roomStore.addMessage(conversation, {
+      return await this.roomStore.addMessage(conversation, {
         authorKind: "agent", authorId: me.id, authorName: me.name, text: reply, replyToId: msg.roomMessageId,
       });
     } catch (err) {
       this.log("warn", `Room ${conversation}: could not store a reply: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
     }
+  }
+
+  // ── Groups: agents answering each other (the relay) ───────────────
+
+  setAgentRelay(relay: TelegramAgentRelay): void {
+    this.relay = relay;
+  }
+
+  /** This bot has seen the group conversation (it is a member). */
+  isIn(conversation: string): boolean {
+    return this.presentIn.has(conversation);
+  }
+
+  /** How this bot answers in the group: by intent, mentions only, or not at all (not enabled). */
+  async relayMode(conversation: string): Promise<"intent" | "mentions" | undefined> {
+    const groupId = conversation.replace(/:topic:.*$/, "");
+    if (!await this.peerStore.isAllowed(groupId, this.gatewayConfig)) return undefined;
+    return this.gatewayConfig.groupReplies === "intent" ? "intent" : "mentions";
+  }
+
+  relayThreshold(): number {
+    return this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD;
+  }
+
+  /** Who this bot speaks as in a group. */
+  async relayProfile(conversation: string): Promise<AgentProfile> {
+    const me = await this.speaker(conversation);
+    if (me.id === "polpo") return { id: me.id, name: me.name, role: "the orchestrator: plans and coordinates the company's work", responsibilities: [] };
+    const def = (await this.orchestrator.getAgents()).find(a => a.name === me.id);
+    const id = def?.identity;
+    const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    return {
+      id: me.id,
+      name: me.name,
+      role: short(id?.title ?? def?.role ?? "an agent of the company", 160),
+      responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+    };
+  }
+
+  /** Answer another agent's message in a group (the relay); the reply is stored and returned, not sent. */
+  async answerAgent(conversation: string, message: RoomMessage): Promise<RoomMessage | undefined> {
+    const m = /^([^:]+):group:([^:]+)(?::topic:(\d+))?$/.exec(conversation);
+    if (!m) return undefined;
+    const room = await this.roomStore?.getRoom(conversation);
+    const msg: InboundMessage = {
+      channel: m[1] as InboundMessage["channel"],
+      externalId: `agent:${message.authorId}`,
+      chatId: m[2]!,
+      displayName: `${message.authorName} (agent)`,
+      text: message.text,
+      group: { title: room?.title.replace(/ · topic \d+$/, ""), ...(m[3] ? { threadId: Number(m[3]) } : {}), addressed: true },
+      roomMessageId: message.id,
+      replyTo: "origin",
+    };
+    const reply = await this.handleChat(msg, conversation);
+    const text = typeof reply === "string" ? reply : reply?.text;
+    return this.recordAgentReply(msg, text);
   }
 
   /**
@@ -666,7 +736,11 @@ export class ChannelGateway {
     const current = { id: msg.roomMessageId, speaker: msg.displayName ?? msg.externalId, text: msg.text };
     try {
       const me = await this.speaker(conversation);
-      return roomTurnText(await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20), me.id, current);
+      const text = roomTurnText(await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20), me.id, current);
+      const peers = this.relay ? await this.relay.peers(conversation, this.key).catch(() => []) : [];
+      if (peers.length === 0) return text;
+      const list = peers.map(p => `${p.name} (@${p.id}: ${p.role})`).join(", ");
+      return `[Other agents in this group: ${list}. Lines marked "(agent)" are theirs; to ask one of them, write @its-id. Do not repeat what another agent already said.]\n\n${text}`;
     } catch {
       return `${current.speaker}: ${current.text}`;
     }

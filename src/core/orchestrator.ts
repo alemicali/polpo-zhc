@@ -68,6 +68,7 @@ import type { ApprovalCallbackResolver } from "../notifications/channels/telegra
 import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { GroupIntentArbiter } from "../notifications/group-intent.js";
 import { POLPO, RoomEngine } from "../rooms/room-engine.js";
+import { TelegramAgentRelay, type RelayBot } from "../rooms/telegram-relay.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
@@ -1663,6 +1664,32 @@ export class Orchestrator extends TypedEmitter {
     // groupReplies "intent": one arbiter for all the bots, so a group message is classified once
     const roomStore = this.getRoomStore();
     const intent = this.getGroupIntent();
+    // agents answering each other in groups: every bot of the instance, through one relay
+    const relay = new TelegramAgentRelay({
+      rooms: roomStore,
+      intent,
+      log: (level, message) => this.emit("log", { level, message }),
+      bots: () => [...this.channelGateways.entries()].flatMap(([key, gateway]) => {
+        const poller = this.telegramPollersByChannel.get(key);
+        if (!poller) return [];
+        const bot: RelayBot = {
+          key,
+          isIn: (c) => gateway.isIn(c),
+          mode: (c) => gateway.relayMode(c),
+          threshold: () => gateway.relayThreshold(),
+          profile: async (c) => {
+            const me = await poller.getIdentity().catch(() => undefined);
+            return { ...await gateway.relayProfile(c), aliases: me?.username ? [me.username] : [] };
+          },
+          answer: (c, m) => gateway.answerAgent(c, m),
+          post: async (c, text) => {
+            const m = /^[^:]+:group:([^:]+)(?::topic:(\d+))?$/.exec(c);
+            if (m) await poller.sendPartial(m[1]!, text, m[2] ? { threadId: Number(m[2]) } : undefined);
+          },
+        };
+        return [bot];
+      }),
+    });
 
     const usedTokens = new Set<string>();
     for (const key of ordered) {
@@ -1697,6 +1724,7 @@ export class Orchestrator extends TypedEmitter {
           roomStore,
         });
         gateway.setIntentArbiter(intent);
+        gateway.setAgentRelay(relay);
         gateway.setPartialResponseHandler((chatId, text, target) => poller.sendPartial(chatId, text, target));
         gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
