@@ -229,6 +229,14 @@
     "./whatsapp-store": {
       "types": "./dist/whatsapp-store.d.ts",
       "import": "./dist/whatsapp-store.js"
+    },
+    "./git-source": {
+      "types": "./dist/git-source.d.ts",
+      "import": "./dist/git-source.js"
+    },
+    "./secret-redaction": {
+      "types": "./dist/secret-redaction.d.ts",
+      "import": "./dist/secret-redaction.js"
     }
   },
   "sideEffects": false,

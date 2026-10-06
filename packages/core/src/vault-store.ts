@@ -1,6 +1,19 @@
 import type { VaultEntry } from "./types.js";
 
 /**
+ * Vault owners starting with "$" are reserved system namespaces (e.g. "$data"
+ * for data-source connection secrets, "$providers" for provider keys). They
+ * may only be read/written by internal code — never through user- or
+ * agent-facing routes and tools, and no agent may be named like one.
+ */
+export const RESERVED_VAULT_OWNER_PREFIX = "$";
+
+/** True when `name` is a reserved system vault namespace (e.g. "$data"). */
+export function isReservedVaultOwner(name: unknown): boolean {
+  return typeof name === "string" && name.trim().startsWith(RESERVED_VAULT_OWNER_PREFIX);
+}
+
+/**
  * Persistent store for encrypted agent vault credentials.
  *
  * Each agent can have multiple service entries (SMTP, OAuth, API keys, etc.).
