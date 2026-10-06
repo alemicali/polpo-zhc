@@ -66,6 +66,8 @@ import { tokenUsageRoutes } from "./routes/token-usage.js";
 import { appsRoutes } from "./routes/apps.js";
 import { dataRoutes } from "./routes/data.js";
 import { dataViewRoutes } from "./routes/data-views.js";
+import { storageRoutes } from "./routes/storage.js";
+import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
@@ -117,6 +119,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { type: _type, ...payload } = event;
       orchestrator.emit("data-view:changed", payload);
     }
+  });
+  const activeStorage = () => getStorageRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (payload) => {
+    orchestrator.emit("storage:changed", payload);
   });
   const activeCompanyBrain = () => getCompanyBrainRuntime(activePolpoDir(), activeDataRegistry(), (event) => {
     orchestrator.emit("brain:changed", event);
@@ -294,6 +299,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
       const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
+      const { createStorageAgentTools } = await import("../tools/storage-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
       const {
         CLIENT_SIDE_CHAT_TOOLS,
@@ -372,6 +378,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       }));
       tools.push(...createCompanyBrainAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
         o.emit("brain:changed", event);
+      }));
+      // Buckets through host-side tools: credentials stay on the host.
+      tools.push(...createStorageAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, {
+        vaultStore: o.getVaultStore(),
+        cwd: o.getAgentWorkDir(),
+        emit: (payload) => o.emit("storage:changed", payload),
+        emitFileChanged: (payload) => o.emit("file:changed", payload),
       }));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
@@ -779,6 +792,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
   }));
   authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
+  authed.route("/storage", storageRoutes(activeStorage));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({
@@ -795,6 +809,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     agentWorkDir: o.getAgentWorkDir(),
     fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
+    // Mounted buckets appear as extra roots (their files are browsed through the mount).
+    storageRoots: async () => (await activeStorage().list())
+      .filter((entry) => entry.mount.state === "mounted")
+      .map((entry) => ({ slug: entry.slug, name: entry.name, path: entry.mount.path, readOnly: entry.readOnly })),
   })));
 
   authed.route("/audio", audioRoutes());
