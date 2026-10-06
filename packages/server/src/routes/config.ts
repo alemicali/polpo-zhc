@@ -1,8 +1,10 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
+import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
+  StoredNotificationChannelConfigSchema,
   UpsertNotificationRuleSchema,
   UpsertApprovalGateSchema,
 } from "../schemas.js";
@@ -80,6 +82,10 @@ const upsertChannelRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Channel saved",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Invalid channel config (or a masked secret that cannot be restored)",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -335,18 +341,30 @@ export function configRoutes(getDeps: () => {
   app.openapi(upsertChannelRoute, async (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const channelConfig = c.req.valid("json");
+    const incoming = c.req.valid("json");
+
+    // Clients read channels redacted ("••••1234"): restore the stored secret
+    // wherever the incoming value is still the masked placeholder, THEN
+    // validate the result as a stored channel. A masked value with nothing
+    // stored under this name (e.g. a renamed channel) is a client error.
+    const storedChannel = deps.getConfig()?.settings?.notifications?.channels?.[name];
+    let channelConfig: unknown;
+    try {
+      channelConfig = restoreRedactedSecrets(incoming, storedChannel, { strict: true });
+    } catch (err) {
+      if (err instanceof UnrestorableSecretError) return c.json({ ok: false, error: err.message }, 400);
+      throw err;
+    }
+    const checked = StoredNotificationChannelConfigSchema.safeParse(channelConfig);
+    if (!checked.success) {
+      return c.json({ ok: false, error: `Invalid channel config: ${checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` }, 400);
+    }
 
     const result = await mutateConfig(deps, (config) => {
       const settings = config.settings ?? {};
       if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
       if (!settings.notifications.channels) settings.notifications.channels = {};
-      // Clients read channels redacted ("••••1234"): keep the stored secret
-      // wherever the incoming value is still the masked placeholder.
-      settings.notifications.channels[name] = restoreRedactedSecrets(
-        channelConfig,
-        settings.notifications.channels[name],
-      );
+      settings.notifications.channels[name] = checked.data;
       config.settings = settings;
     });
 

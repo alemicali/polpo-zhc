@@ -438,10 +438,15 @@ const ChannelGatewaySchema = z.object({
   }).strict().optional(),
 }).strict();
 
-export const NotificationChannelConfigSchema = z.object({
+/** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */
+const MaskedSecret = z.string().refine((v) => v.includes("••••"), { message: "not a masked value" });
+const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
+  allowMasked ? z.union([schema, MaskedSecret]) : schema;
+
+const channelConfigSchema = (allowMasked: boolean) => z.object({
   type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
   // Slack
-  webhookUrl: z.string().url().optional(),
+  webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email
   to: z.array(z.string().email()).optional(),
   provider: z.string().optional(),
@@ -456,9 +461,9 @@ export const NotificationChannelConfigSchema = z.object({
   // WhatsApp
   profileDir: z.string().optional(),
   // Webhook
-  url: z.string().url().optional(),
+  url: orMasked(z.string().url(), allowMasked).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  inboundSecret: z.string().min(16).optional(),
+  inboundSecret: orMasked(z.string().min(16), allowMasked).optional(),
   // Push
   vapidPublicKey: z.string().optional(),
   vapidPrivateKey: z.string().optional(),
@@ -468,6 +473,15 @@ export const NotificationChannelConfigSchema = z.object({
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });
+
+/**
+ * Request body for PUT /config/channels/:name. Secret fields may carry the
+ * masked value returned by GET /config — the route restores the stored
+ * secret, then validates the result with StoredNotificationChannelConfigSchema.
+ */
+export const NotificationChannelConfigSchema = channelConfigSchema(true);
+/** A channel config as persisted (no masked placeholders allowed). */
+export const StoredNotificationChannelConfigSchema = channelConfigSchema(false);
 
 // ── Direct notification schema ─────────────────────────────────────────
 

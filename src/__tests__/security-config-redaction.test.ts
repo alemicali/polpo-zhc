@@ -36,7 +36,7 @@ function makeConfig() {
             inboundSecret: INBOUND,
             headers: { Authorization: "Bearer abcdefghijklmnopqrstuvwxyz", "X-Trace": "${TRACE_ID}" },
           },
-          mail: { type: "email", provider: "resend", apiKey: RESEND, from: "a@b.c", to: ["x@y.z"] },
+          mail: { type: "email", provider: "resend", apiKey: RESEND, from: "a@example.com", to: ["x@example.com"] },
           slack: { type: "slack", webhookUrl: SLACK },
           push: { type: "push", vapidPublicKey: "BPUBLICKEY", vapidPrivateKey: "private-vapid-key-0123456789" },
         },
@@ -58,7 +58,9 @@ describe("redactSecrets / redactPolpoConfig", () => {
     expect(ch.tg.botToken).toBe(`••••${BOT_TOKEN.slice(-4)}`);
     expect(ch.tg.chatId).toBe("-1001234");
     expect(ch.tgEnv.botToken).toBe("${TELEGRAM_BOT_TOKEN}");
-    expect(ch.hook.url).toBe("https://example.com/hook");
+    // capability URL: scheme + host visible, path/query masked
+    expect(ch.hook.url).toBe("https://example.com/••••hook");
+    expect(ch.slack.webhookUrl).toBe("https://hooks.slack.com/••••slck");
     expect(ch.hook.headers["X-Trace"]).toBe("${TRACE_ID}");
     expect(isRedactedValue(ch.hook.headers.Authorization)).toBe(true);
     expect(ch.push.vapidPublicKey).toBe("BPUBLICKEY");
@@ -184,5 +186,142 @@ describe("peers telegram verify with a redacted token", () => {
     });
     expect(res.status).toBe(200);
     expect(seen[0]).toContain(encodeURIComponent(BOT_TOKEN));
+  });
+});
+
+describe("redaction coverage (review follow-ups)", () => {
+  it("masks pass/key/routingKey/apiKeys and capability URLs with tokens in path or query", () => {
+    const red = redactSecrets({
+      smtpPass: "smtp-password-123",
+      key: "plain-secret-key-value-1234",
+      routingKey: "pagerduty-routing-key-0123456789",
+      apiKeys: ["key-one-0123456789abc", "key-two-0123456789xyz"],
+      vapidPublicKey: "BPUBLICKEY",
+      url: "https://hooks.zapier.com/hooks/catch/123/abcdef?token=SECRETTOKEN",
+      n8n: { url: "https://n8n.example.com/webhook/0f9c-secret-uuid" },
+      plainOrigin: { url: "https://example.com" },
+      maxTokens: 4096,
+    }) as any;
+    const json = JSON.stringify(red);
+    for (const s of ["smtp-password-123", "plain-secret-key-value-1234", "pagerduty-routing-key", "key-one-0123", "key-two-0123", "SECRETTOKEN", "abcdef", "0f9c-secret-uuid"]) {
+      expect(json).not.toContain(s);
+    }
+    expect(red.url.startsWith("https://hooks.zapier.com/••••")).toBe(true);
+    expect(red.n8n.url.startsWith("https://n8n.example.com/••••")).toBe(true);
+    expect(red.plainOrigin.url).toBe("https://example.com");
+    expect(red.vapidPublicKey).toBe("BPUBLICKEY");
+    expect(red.maxTokens).toBe(4096);
+  });
+
+  it("only pure ${VAR} references stay visible; mixed literal text is masked", () => {
+    const red = redactSecrets({
+      aToken: "${TOKEN}",
+      bToken: "${A}${B}",
+      headers: { Authorization: "Bearer ${TOKEN}" },
+      dApiKey: "sk-live-0123456789-${SUFFIX}",
+    }) as any;
+    expect(red.aToken).toBe("${TOKEN}");
+    expect(red.bToken).toBe("${A}${B}");
+    expect(isRedactedValue(red.headers.Authorization)).toBe(true);
+    expect(isRedactedValue(red.dApiKey)).toBe(true);
+  });
+
+  it("strict restore reports masked values with nothing stored", async () => {
+    const { UnrestorableSecretError } = await import("@polpo-ai/core/secret-redaction");
+    expect(() => restoreRedactedSecrets({ botToken: "••••abcd" }, undefined, { strict: true })).toThrow(UnrestorableSecretError);
+  });
+});
+
+describe("PUT /config/channels round-trip for every channel type", () => {
+  function setup() {
+    let config: any = makeConfig();
+    config.settings.notifications.channels.wa = { type: "whatsapp", profileDir: "whatsapp-profiles/default", chatId: "39333" };
+    config.settings.notifications.channels.hook.url = "https://hooks.zapier.com/hooks/catch/1/secretpath";
+    const app = configRoutes(() => ({
+      getConfig: () => config,
+      reloadConfig: async () => true,
+      saveConfig: async (c: any) => { config = c; },
+      getNotificationRouter: () => null,
+    }));
+    return { app, get config() { return config; } };
+  }
+
+  it.each(["tg", "tgEnv", "hook", "mail", "slack", "push", "wa"])("saving the redacted %s channel unchanged returns 200 and keeps secrets", async (name) => {
+    const ctx = setup();
+    const original = JSON.parse(JSON.stringify(ctx.config.settings.notifications.channels[name]));
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await ctx.app.request(`/channels/${name}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(listed.data[name]),
+    });
+    expect(res.status).toBe(200);
+    expect(ctx.config.settings.notifications.channels[name]).toEqual(original);
+  });
+
+  it("an edited non-secret field is saved while masked secrets are restored", async () => {
+    const ctx = setup();
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await ctx.app.request("/channels/slack", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...listed.data.hook, headers: { ...listed.data.hook.headers, "X-New": "1" } }),
+    });
+    expect(res.status).toBe(400); // hook secrets masked under another name → cannot be restored
+    const ok = await ctx.app.request("/channels/hook", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...listed.data.hook, headers: { ...listed.data.hook.headers, "X-New": "1" } }),
+    });
+    expect(ok.status).toBe(200);
+    const hook = ctx.config.settings.notifications.channels.hook;
+    expect(hook.url).toBe("https://hooks.zapier.com/hooks/catch/1/secretpath");
+    expect(hook.headers["X-New"]).toBe("1");
+    expect(hook.inboundSecret).toBe(INBOUND);
+  });
+
+  it("a masked value saved under a new channel name is rejected (400), not silently dropped", async () => {
+    const ctx = setup();
+    const listed = await (await ctx.app.request("/channels")).json() as any;
+    const res = await ctx.app.request("/channels/tg-copy", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(listed.data.tg),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toMatch(/botToken/);
+    expect(ctx.config.settings.notifications.channels["tg-copy"]).toBeUndefined();
+  });
+
+  it("still validates the restored config (invalid new URL → 400)", async () => {
+    const ctx = setup();
+    const res = await ctx.app.request("/channels/slack", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "slack", webhookUrl: "not a url" }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("telegram detect-chat with a masked token", () => {
+  it("answers 400 with guidance (not the misleading 409)", async () => {
+    const app = peerRoutes(() => ({ peerStore: {} as any, getGateway: () => undefined }) as any);
+    const res = await app.request("/telegram/detect-chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ botToken: "••••abcd" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toMatch(/hidden/);
+  });
+});
+
+describe("orchestrator get_config", () => {
+  it("never returns secrets to the LLM", async () => {
+    const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+    const out = await executeOrchestratorTool("get_config", {}, { getConfig: () => makeConfig() } as any);
+    for (const secret of [BOT_TOKEN, INBOUND, RESEND, SLACK, "db-p4ssw0rd"]) expect(out).not.toContain(secret);
+    expect(out).toContain("${TELEGRAM_BOT_TOKEN}");
   });
 });

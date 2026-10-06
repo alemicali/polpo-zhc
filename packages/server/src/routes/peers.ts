@@ -415,7 +415,11 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
     const { botToken: rawToken, offset, timeout = 25 } = c.req.valid("json");
     const botToken = rawToken.trim();
     if (isRedactedValue(botToken)) {
-      return c.json({ ok: false, error: "This bot is already active on a saved channel. Use \"Connect my Telegram\" on that channel instead." }, 409);
+      // The UI got this token from GET /config (masked): we can't long-poll with it.
+      return c.json({
+        ok: false,
+        error: "This is the saved (hidden) bot token. Use \"Connect my Telegram\" on the saved channel, or paste the token again to detect the chat.",
+      }, 400);
     }
     if (getConfiguredTelegramTokens?.().includes(botToken)) {
       return c.json({ ok: false, error: "This bot is already active on a saved channel. Use \"Connect my Telegram\" on that channel instead." }, 409);

@@ -1,12 +1,15 @@
 /**
  * Secret redaction for config objects exposed through the API.
  *
- * - Values under secret-looking keys (botToken, apiKey, inboundSecret,
- *   vapidPrivateKey, webhookUrl, password, ...) are masked as "••••last4".
+ * - Values under secret-looking keys (botToken, apiKey(s), inboundSecret,
+ *   vapidPrivateKey, routingKey, password/pass, ...) are masked as "••••last4".
  * - Every value inside a `headers` map is masked (Authorization, X-Api-Key, ...).
- * - Passwords embedded in URLs (e.g. settings.databaseUrl) are masked in place:
- *   postgres://user:••••@host/db
- * - `${ENV_VAR}` references are left visible: they are pointers, not secrets.
+ * - Capability URLs (`url`, `webhookUrl`: Slack/Zapier/n8n hooks, tokens in
+ *   path or query) keep only scheme + host: "https://hooks.zapier.com/••••abcd".
+ * - Passwords embedded in any URL (e.g. settings.databaseUrl) are masked in
+ *   place: postgres://user:••••@host/db
+ * - Pure `${ENV_VAR}` references are left visible: they are pointers, not
+ *   secrets. Mixed values ("Bearer ${X}", "abc${X}") are masked.
  *
  * `restoreRedactedSecrets()` is the inverse used on save: any value that still
  * carries the mask is replaced by the stored secret at the same path, so a
@@ -18,7 +21,13 @@
 export const REDACTED_MARK = "••••";
 
 const SECRET_KEY_RE =
-  /(api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|signing[-_]?key|token|secret|password|passwd|credentials?|webhook[-_]?url|connection[-_]?string|dsn)$/i;
+  /(keys?|tokens?|secrets?|passwords?|passwd|pass|credentials?|connection[-_]?string|dsn)$/i;
+
+/** Public keys are not secrets (e.g. push vapidPublicKey). */
+const PUBLIC_KEY_RE = /public[-_]?keys?$/i;
+
+/** URL fields whose path/query act as a capability (anyone with the URL can post). */
+const CAPABILITY_URL_KEY_RE = /^(url|webhook[-_]?url)$/i;
 
 const HEADERS_KEY_RE = /^headers$/i;
 
@@ -27,9 +36,12 @@ const ENV_REF_RE = /\$\{\w+\}/g;
 /** URL with a userinfo password: scheme://user:password@host... */
 const URL_WITH_PASSWORD_RE = /^([a-z][a-z0-9+.-]*:\/\/[^/\s:@]*:)([^@/\s]+)(@.*)$/i;
 
+/** scheme://host[:port] followed by a non-trivial path, query or fragment. */
+const URL_WITH_PATH_RE = /^([a-z][a-z0-9+.-]*:\/\/[^/?#\s]+)([/?#].*)$/i;
+
 /** True when a key name denotes a secret value. */
 export function isSecretKey(key: string): boolean {
-  return SECRET_KEY_RE.test(key);
+  return SECRET_KEY_RE.test(key) && !PUBLIC_KEY_RE.test(key);
 }
 
 /** True when a value is a masked placeholder produced by this module. */
@@ -38,14 +50,14 @@ export function isRedactedValue(value: unknown): boolean {
 }
 
 /**
- * True when the value is (essentially) an env-var reference such as
- * "${TELEGRAM_BOT_TOKEN}" or "Bearer ${API_TOKEN}" — safe to show.
+ * True when the value consists only of `${ENV_VAR}` references (e.g.
+ * "${TELEGRAM_BOT_TOKEN}") — safe to show. Any literal text mixed in
+ * ("Bearer ${X}", "sk-live-${X}") disqualifies it.
  */
 export function isEnvReference(value: string): boolean {
   if (!value.includes("${")) return false;
   const literal = value.replace(ENV_REF_RE, "");
-  if (literal === value) return false;
-  return literal.trim().length <= 16;
+  return literal !== value && literal.trim().length === 0;
 }
 
 /** Mask a literal secret, keeping env references and empty values intact. */
@@ -62,6 +74,22 @@ export function maskUrlPassword(value: string): string {
   const password = m[2];
   if (isEnvReference(password) || isRedactedValue(password)) return value;
   return `${m[1]}${REDACTED_MARK}${m[3]}`;
+}
+
+/**
+ * Mask a capability URL, keeping scheme + host visible:
+ * "https://hooks.slack.com/services/T/B/xyz1234" → "https://hooks.slack.com/••••1234".
+ * Non-URL values are masked entirely; origin-only URLs stay visible.
+ */
+export function maskCapabilityUrl(value: string): string {
+  if (value.length === 0 || isEnvReference(value) || isRedactedValue(value)) return value;
+  const withoutPassword = maskUrlPassword(value);
+  const m = withoutPassword.match(URL_WITH_PATH_RE);
+  if (!m) {
+    return /^[a-z][a-z0-9+.-]*:\/\/[^/?#\s]+\/?$/i.test(withoutPassword) ? withoutPassword : maskSecret(value);
+  }
+  if (m[2] === "/") return withoutPassword;
+  return `${m[1]}/${REDACTED_MARK}${value.slice(-4)}`;
 }
 
 function maskAllStrings(value: unknown): unknown {
@@ -83,6 +111,7 @@ export function redactSecrets<T>(value: T): T {
 }
 
 function redactNode(value: unknown, key: string | undefined): unknown {
+  if (key !== undefined && CAPABILITY_URL_KEY_RE.test(key) && typeof value === "string") return maskCapabilityUrl(value);
   if (key !== undefined && isSecretKey(key)) return maskAllStrings(value);
   if (key !== undefined && HEADERS_KEY_RE.test(key) && value && typeof value === "object" && !Array.isArray(value)) {
     return maskAllStrings(value);
@@ -97,20 +126,41 @@ function redactNode(value: unknown, key: string | undefined): unknown {
   return value;
 }
 
+/** Thrown by restoreRedactedSecrets({ strict: true }) when a masked value has no stored counterpart. */
+export class UnrestorableSecretError extends Error {
+  constructor(public readonly paths: string[]) {
+    super(
+      `Masked secret value(s) cannot be restored: ${paths.join(", ")}. ` +
+      `Re-enter the secret (the hidden "••••" value only works for an unchanged, already saved field).`,
+    );
+    this.name = "UnrestorableSecretError";
+  }
+}
+
 /**
  * Merge an incoming (possibly redacted) object with the stored version:
  * every string that still carries the redaction mark is replaced with the
- * stored value at the same path. A masked value with no stored counterpart
- * is dropped, so placeholders are never persisted. Returns a new object.
+ * stored value at the same path.
+ *
+ * A masked value with no stored counterpart (e.g. a channel saved under a
+ * new name) cannot be restored: with `strict: true` this throws
+ * UnrestorableSecretError (callers answer 400); otherwise the field is
+ * dropped. Placeholders are never persisted. Returns a new object.
  */
-export function restoreRedactedSecrets<T>(incoming: T, stored: unknown): T {
-  return restoreNode(incoming, stored) as T;
+export function restoreRedactedSecrets<T>(incoming: T, stored: unknown, opts: { strict?: boolean } = {}): T {
+  const missing: string[] = [];
+  const out = restoreNode(incoming, stored, "", missing) as T;
+  if (opts.strict && missing.length > 0) throw new UnrestorableSecretError(missing);
+  return out;
 }
 
-function restoreNode(incoming: unknown, stored: unknown): unknown {
+function restoreNode(incoming: unknown, stored: unknown, path: string, missing: string[]): unknown {
   if (typeof incoming === "string") {
     if (!isRedactedValue(incoming)) return incoming;
-    if (typeof stored !== "string") return undefined;
+    if (typeof stored !== "string") {
+      missing.push(path || "(value)");
+      return undefined;
+    }
     if (incoming === stored) return stored;
     // URL with a masked password: keep the (possibly edited) URL, restore the password.
     const inUrl = incoming.match(URL_WITH_PASSWORD_RE);
@@ -123,7 +173,7 @@ function restoreNode(incoming: unknown, stored: unknown): unknown {
   if (Array.isArray(incoming)) {
     const storedArr = Array.isArray(stored) ? stored : [];
     return incoming
-      .map((v, i) => restoreNode(v, storedArr[i]))
+      .map((v, i) => restoreNode(v, storedArr[i], `${path}[${i}]`, missing))
       .filter((v, i) => !(v === undefined && isRedactedValue(incoming[i])));
   }
   if (incoming && typeof incoming === "object") {
@@ -132,7 +182,7 @@ function restoreNode(incoming: unknown, stored: unknown): unknown {
       : {};
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(incoming as Record<string, unknown>)) {
-      const restored = restoreNode(v, storedObj[k]);
+      const restored = restoreNode(v, storedObj[k], path ? `${path}.${k}` : k, missing);
       if (restored === undefined && isRedactedValue(v)) continue;
       out[k] = restored;
     }

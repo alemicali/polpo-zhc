@@ -16,7 +16,7 @@ import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, Ag
 import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "@polpo-ai/core/app-registry";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
-import { execSync, execFileSync } from "child_process";
+import { execSync, execFileSync, spawnSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
@@ -39,6 +39,7 @@ import {
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
+import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { createCliStores } from "../cli/stores.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
@@ -3216,7 +3217,8 @@ async function execGetMemory(polpo: Orchestrator, args: Record<string, unknown>)
 function execGetConfig(polpo: Orchestrator): string {
   const config = polpo.getConfig();
   if (!config) return "No configuration loaded.";
-  return JSON.stringify(config, null, 2);
+  // Never put bot tokens, API keys, webhook secrets or DB passwords in the LLM context.
+  return JSON.stringify(redactSecrets(config), null, 2);
 }
 
 async function execListApprovals(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -5151,16 +5153,19 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
   const includes = include
     ? [`--include=${include}`]
     : ["*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "*.md", "*.yaml", "*.yml", "*.toml", "*.css", "*.html"].map((g) => `--include=${g}`);
-  const argv = ["-rn", ...includes, "-E", "-e", pattern, "--", searchPath];
+  const argv = ["-rn", ...includes, "--exclude-dir=node_modules", "--exclude-dir=.git", "-E", "-e", pattern, "--", searchPath];
 
   try {
-    const raw = execFileSync("grep", argv, {
+    // spawnSync keeps whatever grep printed even when it exits 2 (an
+    // unreadable file), times out, or overflows maxBuffer.
+    const proc = spawnSync("grep", argv, {
       cwd: polpo.getAgentWorkDir(),
       encoding: "utf-8",
       timeout: 15000,
       maxBuffer: 16 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
+    const raw = typeof proc.stdout === "string" ? proc.stdout : "";
     const result = raw.split("\n").filter(Boolean).slice(0, 100).join("\n").trim();
     if (!result) return "(no matches)";
 
