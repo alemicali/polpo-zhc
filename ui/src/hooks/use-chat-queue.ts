@@ -97,21 +97,71 @@ export function refreshQueue(client: QueueClient, sessionId: string): Promise<vo
 
 // ─── Legacy (localStorage) queues ─────────────────────────────────────
 
-function takeLegacyItems(sessionId: string): string[] {
-  if (typeof window === "undefined") return [];
+type LegacyStore = Record<string, { items?: Array<{ text?: unknown }>; autoSend?: unknown }>;
+
+function readLegacy(): LegacyStore {
+  if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Record<string, { items?: Array<{ text?: unknown }> }>;
-    const entry = parsed?.[sessionId];
-    if (!entry) return [];
-    delete parsed[sessionId];
-    if (Object.keys(parsed).length === 0) localStorage.removeItem(LEGACY_STORAGE_KEY);
-    else localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(parsed));
-    return (entry.items ?? []).map((i) => (typeof i.text === "string" ? i.text.trim() : "")).filter(Boolean);
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) ?? "{}") as LegacyStore;
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    return [];
+    return {};
   }
+}
+
+function writeLegacy(store: LegacyStore) {
+  try {
+    if (Object.keys(store).length === 0) localStorage.removeItem(LEGACY_STORAGE_KEY);
+    else localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(store));
+  } catch { /* storage unavailable: the next open retries */ }
+}
+
+/** Prompts an older version queued in this browser for the session (nothing is removed here). */
+export function legacyQueuedPrompts(sessionId: string): string[] {
+  return (readLegacy()[sessionId]?.items ?? [])
+    .map((i) => (typeof i.text === "string" ? i.text.trim() : ""))
+    .filter(Boolean);
+}
+
+/** Forget the first legacy prompt of the session (it is on the server now). */
+function dropFirstLegacyPrompt(sessionId: string) {
+  const store = readLegacy();
+  const entry = store[sessionId];
+  if (!entry) return;
+  const items = (entry.items ?? []).filter((i) => typeof i.text === "string" && i.text.trim());
+  items.shift();
+  if (items.length === 0) delete store[sessionId];
+  else store[sessionId] = { ...entry, items };
+  writeLegacy(store);
+}
+
+const migratingLegacy = new Set<string>();
+
+/**
+ * Move the prompts an older version kept in localStorage to the server queue. They may be stale,
+ * so auto-send is paused first: nothing fires on its own. Each prompt leaves localStorage only
+ * once the server has it; on failure the rest stays for the next attempt and the error is shown.
+ * Returns how many prompts were moved.
+ */
+export async function migrateLegacyQueue(client: QueueClient, sessionId: string, notify: (message: string, error?: boolean) => void = () => {}): Promise<number> {
+  const prompts = legacyQueuedPrompts(sessionId);
+  if (prompts.length === 0 || migratingLegacy.has(sessionId)) return 0;
+  migratingLegacy.add(sessionId);
+  let moved = 0;
+  try {
+    await client.setChatQueueAutoSend(sessionId, false);
+    for (const text of prompts) {
+      await client.addToChatQueue(sessionId, text);
+      dropFirstLegacyPrompt(sessionId);
+      moved++;
+    }
+    notify(`${moved} queued prompt${moved === 1 ? "" : "s"} restored — auto-send is paused`);
+  } catch (error) {
+    notify(`Could not restore ${prompts.length - moved} queued prompt(s): ${error instanceof Error ? error.message : "unknown error"}. They are kept on this device.`, true);
+  } finally {
+    migratingLegacy.delete(sessionId);
+  }
+  return moved;
 }
 
 /**
@@ -127,7 +177,13 @@ export function migrateNewSessionQueue(newSessionId: string, client?: QueueClien
   setState(newSessionId, { ...current, items: [...current.items, ...pending.items] });
   if (!client) return;
   void (async () => {
-    for (const item of pending.items) await client.addToChatQueue(newSessionId, item.text).catch(() => undefined);
+    for (const item of pending.items) {
+      try {
+        await client.addToChatQueue(newSessionId, item.text);
+      } catch (error) {
+        toast.error(`A queued prompt could not be saved: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    }
     await refreshQueue(client, newSessionId);
   })();
 }
@@ -158,9 +214,8 @@ export function useChatQueue(sessionId: string | null | undefined, injectedClien
   // Load on open, moving any queue an older version kept in localStorage.
   useEffect(() => {
     if (!remote) return;
-    const legacy = takeLegacyItems(key);
     void (async () => {
-      for (const text of legacy) await client.addToChatQueue(key, text).catch(() => undefined);
+      await migrateLegacyQueue(client, key, (message, error) => (error ? toast.error(message) : toast.info(message)));
       await refreshQueue(client, key);
     })();
   }, [client, key, remote]);

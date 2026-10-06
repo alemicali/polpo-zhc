@@ -82,6 +82,29 @@ export const pendingSteers = {
   },
 };
 
+/**
+ * A steer request is over: drop it from the pending list and, when `restore`, give its text back
+ * to the composer of its own conversation — but only if it was still pending there. Whoever took
+ * it first (Stop takes every pending steer and restores them itself) owns the restore, so the
+ * text never comes back twice.
+ */
+export function settleSteer(key: string, id: string, restore: boolean): boolean {
+  const removed = pendingSteers.remove(key, [id]);
+  if (restore && removed.length > 0) requestComposerRestore(key, removed.map((s) => s.content));
+  return removed.length > 0;
+}
+
+/** Follow a conversation key through its migrations (a new chat getting its server id). */
+export function resolveSessionKey(migrations: ReadonlyMap<string, string>, key: string): string {
+  let current = key;
+  for (let hops = 0; hops < 10; hops++) {
+    const next = migrations.get(current);
+    if (!next || next === current) break;
+    current = next;
+  }
+  return current;
+}
+
 export function usePendingSteers(key: string | null | undefined): PendingSteer[] {
   const getSnapshot = useCallback(() => (key ? store.get(key) ?? EMPTY : EMPTY), [key]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

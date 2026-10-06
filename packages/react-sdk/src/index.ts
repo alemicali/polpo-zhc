@@ -139,7 +139,6 @@ export type {
   LogEntry,
   RunActivityEntry,
   ChatSession,
-  ChatSessionFork,
   ChatQueueItem,
   ChatQueueState,
   ChatQueueSendResult,

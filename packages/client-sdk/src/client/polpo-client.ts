@@ -42,7 +42,6 @@ import type {
   LogSession,
   LogEntry,
   ChatSession,
-  ChatSessionFork,
   ChatQueueItem,
   ChatQueueState,
   ChatQueueSendResult,
@@ -869,11 +868,6 @@ export class PolpoClient {
 
   deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
     return this.del<{ deleted: boolean }>(`/chat/sessions/${sessionId}`);
-  }
-
-  /** Messages plus the branches started from this session (when the server reports them). */
-  getSessionMessagesWithForks(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[]; forks?: ChatSessionFork[] }> {
-    return this.get<{ session: ChatSession; messages: ChatMessage[]; forks?: ChatSessionFork[] }>(`/chat/sessions/${sessionId}/messages`);
   }
 
   // ── Branches ────────────────────────────────────────────

@@ -1293,15 +1293,6 @@ export interface ChatSession {
   forkMessageId?: string;
 }
 
-/** A branch started from a session (listed with the session's messages). */
-export interface ChatSessionFork {
-  id: string;
-  title?: string;
-  /** Parent message the branch starts after. */
-  forkMessageId?: string;
-  createdAt: string;
-}
-
 /** A prompt waiting in a session's server-side queue. */
 export interface ChatQueueItem {
   id: string;

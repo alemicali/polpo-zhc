@@ -17,7 +17,7 @@ import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react"
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
 import { toast } from "sonner";
-import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, type SteerAppliedEvent } from "./use-chat-steering";
+import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, resolveSessionKey, settleSteer, type SteerAppliedEvent } from "./use-chat-steering";
 
 /** Chunk choice fields the server emits beyond the SDK's ChatCompletionChunk type. */
 type ServerChunkChoice = ChatCompletionChunk["choices"][number] & {
@@ -368,6 +368,8 @@ export function useChat() {
   const lastMessageEventRef = useRef<string | undefined>(undefined);
   const remoteRefreshVersionRef = useRef(0);
   const followServerTurnsRef = useRef<((sid: string) => void) | null>(null);
+  /** Local new-chat key → server session id, so in-flight work follows its own conversation. */
+  const keyMigrationsRef = useRef<Map<string, string>>(new Map());
   const lastTurnEventRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -503,6 +505,7 @@ export function useChat() {
       turnIdsBySessionRef.current.delete(fromKey);
     }
     pendingSteers.migrate(fromKey, toKey);
+    keyMigrationsRef.current.set(fromKey, toKey);
     const resumeAbort = resumeAbortBySessionRef.current.get(fromKey);
     if (resumeAbort) {
       resumeAbortBySessionRef.current.set(toKey, resumeAbort);
@@ -1756,6 +1759,25 @@ export function useChat() {
     try {
       await streamCompletion(assistantId, { sessionKey, requestSessionId, agent, userMessageId: userMsg.attachments?.length ? userMsg.id : undefined, onAccepted: opts?.onAccepted });
     } catch (e) {
+      if ((e as { status?: number }).status === 409 && !isLocalNewSessionKey(sessionKey)) {
+        // Another response is running in this chat (started by the server or another device).
+        // Undo the optimistic bubbles and follow it; the message goes to the queue (text) or
+        // stays in the composer (attachments).
+        streamsBySessionRef.current.delete(sessionKey);
+        setSessionStreaming(sessionKey, false);
+        updateSessionMessages(sessionKey, (prev) => prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId));
+        const history = conversationBySessionRef.current.get(sessionKey) ?? [];
+        setConversation(sessionKey, history.slice(0, -1));
+        if (typeof conversationContent === "string") {
+          await client.addToChatQueue(sessionKey, conversationContent, { front: true });
+          opts?.onAccepted?.();
+          toast.info("A response is already running — your message was queued next");
+        } else {
+          toast.info("A response is already running — send it when it finishes");
+        }
+        followServerTurnsRef.current?.(sessionKey);
+        return;
+      }
       const stream = streamsBySessionRef.current.get(sessionKey);
       if (stream?.aborted) {
         streamsBySessionRef.current.delete(sessionKey);
@@ -1771,7 +1793,7 @@ export function useChat() {
       setSessionStreaming(sessionKey, false);
       throw e;
     }
-  }, [appendConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
+  }, [appendConversation, client, setConversation, setSessionStreaming, streamCompletion, updateSessionMessages]);
 
   const appendSystemAndStream = useCallback(async (content: string) => {
     const sessionKey = activeSessionKeyRef.current;
@@ -1788,6 +1810,14 @@ export function useChat() {
     try {
       await streamCompletion(assistantId, { sessionKey, requestSessionId, agent });
     } catch (e) {
+      if ((e as { status?: number }).status === 409) {
+        // A response already runs here (e.g. a carried-over message): drop this acknowledgement.
+        streamsBySessionRef.current.delete(sessionKey);
+        setSessionStreaming(sessionKey, false);
+        updateSessionMessages(sessionKey, (prev) => prev.filter((m) => m.id !== assistantId));
+        followServerTurnsRef.current?.(sessionKey);
+        return;
+      }
       const stream = streamsBySessionRef.current.get(sessionKey);
       if (stream?.aborted) {
         streamsBySessionRef.current.delete(sessionKey);
@@ -1872,12 +1902,14 @@ export function useChat() {
   }, [client, setSessionStreaming]);
 
   /** Wait (briefly) for the running turn's id — it arrives with the response headers. */
+  // Only the steer's own conversation counts (followed through a new chat getting its id),
+  // never whichever chat happens to be on screen now.
   const waitForTurnId = useCallback(async (key: string): Promise<string | undefined> => {
     for (let i = 0; i < 50; i++) {
-      const current = activeSessionKeyRef.current;
-      const turnId = turnIdsBySessionRef.current.get(key) ?? turnIdsBySessionRef.current.get(current);
+      const own = resolveSessionKey(keyMigrationsRef.current, key);
+      const turnId = turnIdsBySessionRef.current.get(own);
       if (turnId) return turnId;
-      if (!streamsBySessionRef.current.has(key) && !streamsBySessionRef.current.has(current)) return undefined;
+      if (!streamsBySessionRef.current.has(own)) return undefined;
       await new Promise((r) => setTimeout(r, 100));
     }
     return undefined;
@@ -1892,35 +1924,30 @@ export function useChat() {
     const content = text.trim();
     if (!content) return "restored";
     const key = activeSessionKeyRef.current;
+    const own = () => resolveSessionKey(keyMigrationsRef.current, key);
     const id = newSteerId();
     pendingSteers.add(key, { id, content, status: "sending" });
     const turnId = await waitForTurnId(key);
-    const owner = activeSessionKeyRef.current === key || !isLocalNewSessionKey(key) ? key : activeSessionKeyRef.current;
     if (!turnId) {
-      pendingSteers.remove(owner, [id]);
-      pendingSteers.remove(key, [id]);
-      requestComposerRestore(activeSessionKeyRef.current, [content]);
+      // Back to its own conversation's composer (unless Stop already took it).
+      settleSteer(own(), id, true);
       return "restored";
     }
     try {
       const result = await client.steerTurn(turnId, { id, content });
-      const sessionKey = activeSessionKeyRef.current;
       if (result.status === "scheduled") {
         // The turn was already over: the server sends it as the next message.
-        pendingSteers.remove(sessionKey, [id]);
-        pendingSteers.remove(key, [id]);
+        settleSteer(own(), id, false);
       } else {
-        pendingSteers.update(sessionKey, id, { status: "pending", turnId });
-        pendingSteers.update(key, id, { status: "pending", turnId });
+        pendingSteers.update(own(), id, { status: "pending", turnId });
       }
       return "sent";
     } catch (error) {
-      pendingSteers.remove(activeSessionKeyRef.current, [id]);
-      pendingSteers.remove(key, [id]);
-      // Stopped or unknown turn: give the text back rather than losing it.
-      requestComposerRestore(activeSessionKeyRef.current, [content]);
+      // Stopped or unknown turn: give the text back rather than losing it — once. If Stop got
+      // here first it already took this steer and restored it.
+      const restored = settleSteer(own(), id, true);
       const code = (error as { code?: string }).code;
-      if (code !== "turn_aborted") toast.error(error instanceof Error ? error.message : "Could not send the message");
+      if (restored && code !== "turn_aborted") toast.error(error instanceof Error ? error.message : "Could not send the message");
       return "restored";
     }
   }, [client, waitForTurnId]);

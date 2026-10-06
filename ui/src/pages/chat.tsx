@@ -3844,27 +3844,23 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     if (text) void steer(text);
   }, [steer, takeDraft]);
 
-  // Send a queued prompt now: while a response runs it joins it (steer), otherwise it is sent.
+  // Send a queued prompt now, through the server so it is atomic (the prompt leaves the queue
+  // only when it is actually sent): while a response runs it joins it (steer), otherwise it
+  // starts a turn, which this chat follows like any server-started turn.
   const handleManualSend = useCallback((id: string) => {
     if (inputDisabled) return;
     const item = queue.items.find((i) => i.id === id);
     if (!item) return;
-    if (!isLoading) {
-      queue.remove(id);
-      void send(item.text).catch((err) => {
-        console.warn("[queue] manual send failed:", err);
-        toast.error("Failed to send queued prompt");
-      });
-      return;
-    }
     void queue.sendNow(id).then((result) => {
       if (result?.mode === "steer") {
         pendingSteers.add(activeSessionKey, { id: result.steerId, content: item.text, turnId: result.turnId, status: "pending" });
+      } else if (result?.mode === "scheduled") {
+        toast.info("It will be sent as soon as the current response ends");
       }
     }).catch((err) => {
       toast.error(err instanceof Error ? err.message : "Failed to send queued prompt");
     });
-  }, [activeSessionKey, queue, isLoading, inputDisabled, send]);
+  }, [activeSessionKey, queue, inputDisabled]);
 
   // A new chat got its server id: prompts queued meanwhile move to the server.
   useEffect(() => {

@@ -16,9 +16,11 @@ import {
   onComposerRestore,
   pendingSteers,
   requestComposerRestore,
+  resolveSessionKey,
+  settleSteer,
 } from "../src/hooks/use-chat-steering";
 import { Queue, PendingSteers } from "../src/components/ai-elements/queue";
-import { useChatQueue, type QueueClient, type UseChatQueueApi } from "../src/hooks/use-chat-queue";
+import { legacyQueuedPrompts, migrateLegacyQueue, useChatQueue, type QueueClient, type UseChatQueueApi } from "../src/hooks/use-chat-queue";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -171,4 +173,63 @@ test("useChatQueue mirrors the server queue with optimistic changes", async () =
   await act(async () => { result = await api.sendNow("q1"); });
   expect(result).toEqual({ mode: "steer", turnId: "t", steerId: "st" });
   expect(client.sendChatQueueItem).toHaveBeenCalledWith("session-1", "q1");
+});
+
+test("Stop during an in-flight steer gives the text back exactly once", () => {
+  const restored: string[] = [];
+  const off = onComposerRestore((_key, text) => restored.push(text));
+  pendingSteers.add("sid-stop", { id: "s1", content: "wait", status: "sending" });
+  // Stop takes every pending steer and restores it…
+  const taken = pendingSteers.take("sid-stop");
+  requestComposerRestore("sid-stop", taken.map((s) => s.content));
+  // …then the steer request fails (turn_aborted): it must not restore again.
+  expect(settleSteer("sid-stop", "s1", true)).toBe(false);
+  // Without Stop, a failed steer restores its own text once.
+  pendingSteers.add("sid-stop", { id: "s2", content: "other", status: "sending" });
+  expect(settleSteer("sid-stop", "s2", true)).toBe(true);
+  off();
+  expect(restored).toEqual(["wait", "other"]);
+});
+
+test("a steer follows its own conversation through a new chat getting its id, never another chat", () => {
+  const migrations = new Map([["__polpo_new_session__:1", "sid-a"]]);
+  expect(resolveSessionKey(migrations, "__polpo_new_session__:1")).toBe("sid-a");
+  expect(resolveSessionKey(migrations, "sid-b")).toBe("sid-b");
+  expect(resolveSessionKey(new Map([["a", "b"], ["b", "a"]]), "a")).toMatch(/^[ab]$/);
+});
+
+function legacyClient(failOn?: string) {
+  const added: string[] = [];
+  const calls: string[] = [];
+  const client = {
+    setChatQueueAutoSend: vi.fn(async (_sid: string, value: boolean) => { calls.push(`autoSend:${value}`); }),
+    addToChatQueue: vi.fn(async (_sid: string, text: string) => {
+      if (text === failOn) throw new Error("offline");
+      calls.push(`add:${text}`);
+      added.push(text);
+    }),
+  } as unknown as QueueClient;
+  return { client, added, calls };
+}
+
+test("legacy localStorage queues move to the server with auto-send paused, and nothing is lost on failure", async () => {
+  localStorage.setItem("polpo:chat:queue:v1", JSON.stringify({
+    s1: { items: [{ id: "a", text: "one", createdAt: 1 }, { id: "b", text: "two", createdAt: 2 }, { id: "c", text: "three", createdAt: 3 }], autoSend: true },
+    other: { items: [{ id: "z", text: "keep me", createdAt: 1 }], autoSend: true },
+  }));
+  const failing = legacyClient("two");
+  const notes: Array<[string, boolean | undefined]> = [];
+  expect(await migrateLegacyQueue(failing.client, "s1", (m, e) => notes.push([m, e]))).toBe(1);
+  // Auto-send paused before anything is added; the failed and later prompts stay on this device.
+  expect(failing.calls).toEqual(["autoSend:false", "add:one"]);
+  expect(legacyQueuedPrompts("s1")).toEqual(["two", "three"]);
+  expect(notes[0][1]).toBe(true);
+
+  const ok = legacyClient();
+  expect(await migrateLegacyQueue(ok.client, "s1")).toBe(2);
+  expect(ok.added).toEqual(["two", "three"]);
+  expect(legacyQueuedPrompts("s1")).toEqual([]);
+  expect(legacyQueuedPrompts("other")).toEqual(["keep me"]);
+  expect(await migrateLegacyQueue(ok.client, "s1")).toBe(0);
+  localStorage.clear();
 });
