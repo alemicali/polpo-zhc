@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { CheckpointStore, CheckpointState } from "@polpo-ai/core/checkpoint-store";
-import { type Dialect, deserializeJson } from "../utils.js";
+import { type Dialect, deserializeJson, serializeJson } from "../utils.js";
 
 type AnyTable = any;
 
@@ -23,7 +23,7 @@ export class DrizzleCheckpointStore implements CheckpointStore {
   }
 
   async save(state: CheckpointState): Promise<void> {
-    const value = JSON.stringify(state);
+    const value = serializeJson(state, this.dialect);
     await this.db.insert(this.metadata).values({ key: CHECKPOINT_KEY, value })
       .onConflictDoUpdate({ target: this.metadata.key, set: { value } });
   }

@@ -17,8 +17,9 @@
 
 export * from "./stores/index.js";
 export * from "./schema/index.js";
-export { ensurePgSchema } from "./migrate.js";
+export { migratePg, migrateSqlite, configureSqlite, ensurePgSchema, type MigrationResult } from "./migrate.js";
 export type { Dialect } from "./utils.js";
+export { pgSafe } from "./utils.js";
 
 // ── Schema sets ───────────────────────────────────────────────────────
 
@@ -53,6 +54,15 @@ import {
   pushSubscriptionsPg, pushSubscriptionsSqlite,
   pushVapidPg, pushVapidSqlite,
 } from "./schema/push-subscriptions.js";
+import { tokenUsagePg, tokenUsageSqlite, contextCheckpointsPg, contextCheckpointsSqlite } from "./schema/usage.js";
+import {
+  appsPg, appsSqlite,
+  dataSourcesPg, dataSourcesSqlite, dataViewsPg, dataViewsSqlite, dataActivityPg, dataActivitySqlite,
+} from "./schema/registries.js";
+import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
+import {
+  whatsappMessagesPg, whatsappMessagesSqlite, whatsappContactsPg, whatsappContactsSqlite,
+} from "./schema/whatsapp.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -79,6 +89,12 @@ import {
 } from "./stores/coding-session-store.js";
 import { DrizzleExpoTokenStore } from "./stores/expo-token-store.js";
 import { DrizzlePushSubscriptionStore } from "./stores/push-subscription-store.js";
+import { DrizzleTokenUsageStore } from "./stores/token-usage-store.js";
+import { DrizzleContextCheckpointStore } from "./stores/context-checkpoint-store.js";
+import { DrizzleAppRegistryStore } from "./stores/app-registry-store.js";
+import { DrizzleDataRegistryStore } from "./stores/data-registry-store.js";
+import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
+import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -99,6 +115,12 @@ import type { AgentStore } from "@polpo-ai/core/agent-store";
 import type { VaultStore } from "@polpo-ai/core/vault-store";
 import type { PlaybookStore } from "@polpo-ai/core/playbook-store";
 import type { AttachmentStore } from "@polpo-ai/core/attachment-store";
+import type { TokenUsageStore } from "@polpo-ai/core/token-usage";
+import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
+import type { AppRegistryStore } from "@polpo-ai/core/app-registry";
+import type { DataRegistryStore } from "@polpo-ai/core/data-registry";
+import type { CompanyBrainStore } from "@polpo-ai/core/company-brain";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 
 export interface DrizzleStores {
   taskStore: TaskStore;
@@ -121,6 +143,12 @@ export interface DrizzleStores {
   codingSessionStore: CodingSessionStoreLike;
   expoTokenStore: DrizzleExpoTokenStore;
   pushSubscriptionStore: DrizzlePushSubscriptionStore;
+  tokenUsageStore: DrizzleTokenUsageStore & TokenUsageStore;
+  contextCheckpointStore: ContextCheckpointStore;
+  appRegistryStore: DrizzleAppRegistryStore & AppRegistryStore;
+  dataRegistryStore: DrizzleDataRegistryStore & DataRegistryStore;
+  companyBrainStore: CompanyBrainStore;
+  whatsappStore: WhatsAppMessageStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -157,6 +185,12 @@ export function createPgStores(db: any): DrizzleStores {
     codingSessionStore: new DrizzleCodingSessionStore(db, codingSessionsPg, "pg"),
     expoTokenStore: new DrizzleExpoTokenStore(db, expoTokensPg, "pg"),
     pushSubscriptionStore: new DrizzlePushSubscriptionStore(db, pushSubscriptionsPg, pushVapidPg, "pg"),
+    tokenUsageStore: new DrizzleTokenUsageStore(db, tokenUsagePg, "pg"),
+    contextCheckpointStore: new DrizzleContextCheckpointStore(db, contextCheckpointsPg, "pg"),
+    appRegistryStore: new DrizzleAppRegistryStore(db, appsPg, "pg"),
+    dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesPg, views: dataViewsPg, activity: dataActivityPg }, "pg"),
+    companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsPg, "pg"),
+    whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesPg, contacts: whatsappContactsPg }, "pg"),
   };
 }
 
@@ -194,6 +228,12 @@ export function createSqliteStores(db: any): DrizzleStores {
     codingSessionStore: new DrizzleCodingSessionStore(db, codingSessionsSqlite, "sqlite"),
     expoTokenStore: new DrizzleExpoTokenStore(db, expoTokensSqlite, "sqlite"),
     pushSubscriptionStore: new DrizzlePushSubscriptionStore(db, pushSubscriptionsSqlite, pushVapidSqlite, "sqlite"),
+    tokenUsageStore: new DrizzleTokenUsageStore(db, tokenUsageSqlite, "sqlite"),
+    contextCheckpointStore: new DrizzleContextCheckpointStore(db, contextCheckpointsSqlite, "sqlite"),
+    appRegistryStore: new DrizzleAppRegistryStore(db, appsSqlite, "sqlite"),
+    dataRegistryStore: new DrizzleDataRegistryStore(db, { sources: dataSourcesSqlite, views: dataViewsSqlite, activity: dataActivitySqlite }, "sqlite"),
+    companyBrainStore: new DrizzleCompanyBrainStore(db, brainItemsSqlite, "sqlite"),
+    whatsappStore: new DrizzleWhatsAppStore(db, { messages: whatsappMessagesSqlite, contacts: whatsappContactsSqlite }, "sqlite"),
   };
 }
 
@@ -226,6 +266,15 @@ export const pgSchema = {
   expoTokens: expoTokensPg,
   pushSubscriptions: pushSubscriptionsPg,
   pushVapid: pushVapidPg,
+  tokenUsage: tokenUsagePg,
+  contextCheckpoints: contextCheckpointsPg,
+  apps: appsPg,
+  dataSources: dataSourcesPg,
+  dataViews: dataViewsPg,
+  dataActivity: dataActivityPg,
+  brainItems: brainItemsPg,
+  whatsappMessages: whatsappMessagesPg,
+  whatsappContacts: whatsappContactsPg,
 };
 
 export const sqliteSchema = {
@@ -255,4 +304,13 @@ export const sqliteSchema = {
   expoTokens: expoTokensSqlite,
   pushSubscriptions: pushSubscriptionsSqlite,
   pushVapid: pushVapidSqlite,
+  tokenUsage: tokenUsageSqlite,
+  contextCheckpoints: contextCheckpointsSqlite,
+  apps: appsSqlite,
+  dataSources: dataSourcesSqlite,
+  dataViews: dataViewsSqlite,
+  dataActivity: dataActivitySqlite,
+  brainItems: brainItemsSqlite,
+  whatsappMessages: whatsappMessagesSqlite,
+  whatsappContacts: whatsappContactsSqlite,
 };

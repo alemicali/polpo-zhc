@@ -38,7 +38,9 @@ export const pairingRequestsSqlite = sqliteTable("pairing_requests", {
 export const peerSessionsSqlite = sqliteTable("peer_sessions", {
   peerId: text("peer_id").primaryKey(),
   sessionId: text("session_id").notNull(),
-});
+}, (table) => [
+  index("idx_peer_sessions_session_id").on(table.sessionId),
+]);
 
 // ── PostgreSQL schema ──────────────────────────────────────────────────
 
@@ -77,4 +79,6 @@ export const pairingRequestsPg = pgTable("pairing_requests", {
 export const peerSessionsPg = pgTable("peer_sessions", {
   peerId: pgText("peer_id").primaryKey(),
   sessionId: pgText("session_id").notNull(),
-});
+}, (table) => [
+  pgIndex("idx_pg_peer_sessions_session_id").on(table.sessionId),
+]);

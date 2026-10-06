@@ -5,7 +5,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
 import { chromium } from "playwright-core";
 import { z } from "zod";
-import { normalizeAppTags, type AppDomain, type AppDomainRecord, type AppRegistryStore, type RegisteredApp } from "../../core/app-registry.js";
+import { normalizeAppTags, type AppDomain, type AppDomainRecord, type AppRegistryStore, type RegisteredApp } from "@polpo-ai/core/app-registry";
 import type { AppRuntimeManager } from "../app-runtime-manager.js";
 
 const EnvironmentSchema = z.enum(["development", "preview", "staging", "production"]);

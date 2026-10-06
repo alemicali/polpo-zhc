@@ -63,6 +63,7 @@ import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
+import { databaseStoresFor } from "../core/storage.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
 import { getAppRegistryRuntime } from "./app-runtime-manager.js";
 import { getDataRegistryRuntime } from "./data-runtime.js";
@@ -193,7 +194,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
   const completionApp = completionRoutes(() => ({
-    contextCheckpoints: new FileContextCheckpointStore(o.getPolpoDir()),
+    contextCheckpoints: databaseStoresFor(o.getPolpoDir())?.contextCheckpointStore ?? new FileContextCheckpointStore(o.getPolpoDir()),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
     saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
       o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
@@ -204,7 +205,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
     recordTokenUsage: async (usage) => {
-      await new FileTokenUsageStore(activePolpoDir()).record(usage);
+      await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
     },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {

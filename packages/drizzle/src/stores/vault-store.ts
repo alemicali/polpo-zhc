@@ -2,6 +2,7 @@ import { eq, and, like, ne } from "drizzle-orm";
 import type { VaultStore } from "@polpo-ai/core/vault-store";
 import type { VaultEntry } from "@polpo-ai/core/types";
 import { resolveKey, encryptJson, decryptJson } from "@polpo-ai/vault-crypto";
+import { affectedRows } from "../utils.js";
 
 type AnyTable = any;
 
@@ -140,7 +141,7 @@ export class DrizzleVaultStore implements VaultStore {
     const result = await this.db.delete(this.vault)
       .where(and(eq(this.vault.agent, agent), eq(this.vault.service, service)));
     // Drizzle returns { rowsAffected } for SQLite, { rowCount } for PG
-    const affected = result?.rowsAffected ?? result?.rowCount ?? result?.changes ?? 0;
+    const affected = affectedRows(result);
     return affected > 0;
   }
 

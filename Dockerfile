@@ -99,6 +99,7 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist/ dist/
 COPY --from=builder /app/packages/core/dist/ packages/core/dist/
 COPY --from=builder /app/packages/drizzle/dist/ packages/drizzle/dist/
+COPY --from=builder /app/packages/drizzle/migrations/ packages/drizzle/migrations/
 COPY --from=builder /app/packages/server/dist/ packages/server/dist/
 COPY --from=builder /app/packages/vault-crypto/dist/ packages/vault-crypto/dist/
 COPY docker/server-entrypoint.sh /usr/local/bin/polpo-server-entrypoint

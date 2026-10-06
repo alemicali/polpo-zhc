@@ -56,6 +56,11 @@ export interface SessionStore {
   updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<boolean>;
   getMessages(sessionId: string): Promise<Message[]>;
   getRecentMessages(sessionId: string, limit: number): Promise<Message[]>;
+  /**
+   * Messages after `messageId` in getMessages() order, or undefined when that message is not in
+   * the session. Optional: callers fall back to getMessages().
+   */
+  getMessagesAfter?(sessionId: string, messageId: string): Promise<Message[] | undefined>;
   listSessions(): Promise<Session[]>;
   getSession(sessionId: string): Promise<Session | undefined>;
   /** Get the most recent session, optionally filtered by agent name. Pass `null` to match only orchestrator sessions. */

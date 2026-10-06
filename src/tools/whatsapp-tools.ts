@@ -8,7 +8,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { basename, extname, resolve } from "node:path";
 import { statSync } from "node:fs";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
@@ -60,12 +60,12 @@ const WhatsAppContactsSchema = Type.Object({
 // ─── Helpers ──────────────────────────────────
 
 /** Resolve a user input (phone, name, JID) to a JID. */
-function resolveJid(input: string, store: WhatsAppStore): string {
+async function resolveJid(input: string, store: WhatsAppMessageStore): Promise<string> {
   // Already a JID?
   if (input.includes("@")) return input;
 
   // Try contact lookup by name or phone
-  const contact = store.resolveContact(input);
+  const contact = await store.resolveContact(input);
   if (contact) return contact.jid;
 
   // Assume it's a phone number — clean and make JID
@@ -80,7 +80,7 @@ function formatTimestamp(ts: number): string {
 // ─── Tool Factories ───────────────────────────
 
 interface WhatsAppToolDeps {
-  store: WhatsAppStore;
+  store: WhatsAppMessageStore;
   sendMessage: (jid: string, text: string) => Promise<string | undefined>;
   sendMedia?: (jid: string, opts: {
     path: string;
@@ -100,7 +100,7 @@ function createWhatsAppListTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
     description: "List recent WhatsApp chats with last message preview, contact name, and unread count.",
     parameters: WhatsAppListSchema,
     async execute(_id, params) {
-      const chats = deps.store.listChats(params.limit ?? 20);
+      const chats = await deps.store.listChats(params.limit ?? 20);
 
       if (chats.length === 0) {
         return { content: [{ type: "text", text: "No WhatsApp chats found." }], details: {} };
@@ -129,8 +129,8 @@ function createWhatsAppReadTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
     description: "Read messages from a WhatsApp chat. Specify contact name, phone number, or JID.",
     parameters: WhatsAppReadSchema,
     async execute(_id, params) {
-      const jid = resolveJid(params.chat, deps.store);
-      const messages = deps.store.listMessages(jid, params.limit ?? 30);
+      const jid = await resolveJid(params.chat, deps.store);
+      const messages = await deps.store.listMessages(jid, params.limit ?? 30);
 
       if (messages.length === 0) {
         return { content: [{ type: "text", text: `No messages found for ${params.chat}` }], details: {} };
@@ -155,12 +155,12 @@ function createWhatsAppReadTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
           .map(m => ({ remoteJid: m.chatJid, id: m.id, fromMe: false, participant: m.chatJid.endsWith("@g.us") ? m.senderJid : undefined }));
         if (keys.length > 0) {
           await deps.markRead(keys);
-          deps.store.markRead(keys.map(k => k.id));
+          await deps.store.markRead(keys.map(k => k.id));
           markedRead = keys.length;
         }
       }
 
-      const contact = deps.store.resolveContact(params.chat);
+      const contact = await deps.store.resolveContact(params.chat);
       const header = contact ? `${contact.name} (${contact.phone})` : params.chat;
 
       return {
@@ -178,14 +178,14 @@ function createWhatsAppSendTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
     description: "Send a WhatsApp message to a phone number or contact name.",
     parameters: WhatsAppSendSchema,
     async execute(_id, params) {
-      const jid = resolveJid(params.to, deps.store);
+      const jid = await resolveJid(params.to, deps.store);
 
       try {
         const msgId = await deps.sendMessage(jid, params.message);
 
         // Store outbound message
         if (msgId) {
-          deps.store.appendMessage({
+          await deps.store.appendMessage({
             id: msgId,
             chatJid: jid,
             senderJid: "me",
@@ -195,7 +195,7 @@ function createWhatsAppSendTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
           });
         }
 
-        const contact = deps.store.resolveContact(params.to);
+        const contact = await deps.store.resolveContact(params.to);
         const recipient = contact ? `${contact.name} (${contact.phone})` : params.to;
 
         return {
@@ -220,7 +220,7 @@ function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox
       if (!deps.sendMedia) {
         return { content: [{ type: "text", text: "WhatsApp media sending is not available in this runtime." }], details: { error: "sendMedia unavailable" } };
       }
-      const jid = resolveJid(params.to, deps.store);
+      const jid = await resolveJid(params.to, deps.store);
       const filePath = resolve(cwd, params.path);
       try {
         assertPathAllowed(filePath, sandbox, "whatsapp_send_file");
@@ -255,8 +255,8 @@ function createWhatsAppSearchTool(deps: WhatsAppToolDeps): AgentTool<typeof What
     description: "Search WhatsApp messages by text content. Optionally limit to a specific chat.",
     parameters: WhatsAppSearchSchema,
     async execute(_id, params) {
-      const chatJid = params.chat ? resolveJid(params.chat, deps.store) : undefined;
-      const results = deps.store.searchMessages(params.query, params.limit ?? 20, chatJid);
+      const chatJid = params.chat ? await resolveJid(params.chat, deps.store) : undefined;
+      const results = await deps.store.searchMessages(params.query, params.limit ?? 20, chatJid);
 
       if (results.length === 0) {
         return { content: [{ type: "text", text: `No messages found matching "${params.query}"` }], details: {} };
@@ -286,8 +286,8 @@ function createWhatsAppContactsTool(deps: WhatsAppToolDeps): AgentTool<typeof Wh
     parameters: WhatsAppContactsSchema,
     async execute(_id, params) {
       const contacts = params.query
-        ? deps.store.searchContacts(params.query, params.limit ?? 50)
-        : deps.store.listContacts(params.limit ?? 50);
+        ? await deps.store.searchContacts(params.query, params.limit ?? 50)
+        : await deps.store.listContacts(params.limit ?? 50);
 
       if (contacts.length === 0) {
         const qualifier = params.query ? ` matching "${params.query}"` : "";

@@ -1,6 +1,6 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
 import type { VaultStore } from "./vault-store.js";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 
 /**
  * Handle returned by the engine after spawning an agent.
@@ -63,7 +63,7 @@ export interface SpawnContext {
   /** Vault store — for resolving agent credentials at runtime. */
   vaultStore?: VaultStore;
   /** WhatsApp message store — for whatsapp_* agent tools. */
-  whatsappStore?: WhatsAppStore;
+  whatsappStore?: WhatsAppMessageStore;
   /** WhatsApp send function — for whatsapp_send agent tool. */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
   /** WhatsApp media send function — for whatsapp_send_file agent tool. */

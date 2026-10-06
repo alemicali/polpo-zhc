@@ -3,15 +3,13 @@
  * test deliveries. Each (deviceId + token) pair represents one anonymous
  * device; no auth/user binding (MVP).
  *
- * The token store is always file-based (`.polpo/expo-tokens.json`) regardless
- * of the `storage` setting — same policy as the vault. The Drizzle equivalent
- * in @polpo-ai/drizzle is unused at runtime. Single source of truth = the
- * file; no migration runs for these rows.
+ * Tokens live in the project's database, or in .polpo/expo-tokens.json when the
+ * project runs on files.
  *
  * Mounted at /api/v1/expo-push/* (see src/server/app.ts).
  */
 import { Hono } from "hono";
-import { FileExpoTokenStore } from "../../stores/file-expo-token-store.js";
+import { expoTokenStoreFor } from "../../stores/notification-device-stores.js";
 import { ExpoPushChannel, isExpoPushTokenSafe, isExpoSdkAvailable } from "../../notifications/channels/expo-push.js";
 
 interface RegisterBody {
@@ -33,7 +31,7 @@ interface TestBody {
 
 export function expoPushRoutes(getDeps: () => { polpoDir: string }): Hono {
   const app = new Hono();
-  const store = () => new FileExpoTokenStore(getDeps().polpoDir);
+  const store = () => expoTokenStoreFor(getDeps().polpoDir);
 
   app.post("/register-token", async (c) => {
     let body: RegisterBody;
@@ -55,7 +53,7 @@ export function expoPushRoutes(getDeps: () => { polpoDir: string }): Hono {
       return c.json({ ok: false, error: "token is not a valid Expo push token" }, 400);
     }
 
-    const record = store().saveToken({ token, platform, deviceId });
+    const record = await store().saveToken({ token, platform, deviceId });
     return c.json({
       ok: true,
       data: {
@@ -76,7 +74,7 @@ export function expoPushRoutes(getDeps: () => { polpoDir: string }): Hono {
     }
     const token = typeof body.token === "string" ? body.token : "";
     if (!token) return c.json({ ok: false, error: "token is required" }, 400);
-    const removed = store().removeToken(token);
+    const removed = await store().removeToken(token);
     return c.json({ ok: true, data: { removed } });
   });
 
@@ -86,8 +84,8 @@ export function expoPushRoutes(getDeps: () => { polpoDir: string }): Hono {
     return c.json({
       ok: true,
       data: {
-        tokens: s.count(),
-        active: s.countActive(),
+        tokens: await s.count(),
+        active: await s.countActive(),
         expoSdkAvailable,
       },
     });
@@ -113,7 +111,7 @@ export function expoPushRoutes(getDeps: () => { polpoDir: string }): Hono {
     // single token by spinning up an in-memory channel that only sees it.
     // (We don't mutate the persistent store.)
     if (targetToken) {
-      const all = s.listAll();
+      const all = await s.listAll();
       const match = all.find((t) => t.token === targetToken);
       if (!match) {
         return c.json({ ok: false, error: "token not found in store" }, 404);

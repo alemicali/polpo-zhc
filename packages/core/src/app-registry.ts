@@ -91,12 +91,22 @@ export interface RegisteredApp {
 
 export type CreateRegisteredApp = Omit<RegisteredApp, "id" | "createdAt" | "updatedAt"> & { id?: string };
 
+export type AppChangeEvent = {
+  appId: string;
+  action: "created" | "updated" | "deleted" | "runtime" | "log";
+  resourceId?: string;
+  timestamp: string;
+};
+
+export type AppChangeEmitter = (event: AppChangeEvent) => void;
+
 export interface AppRegistryStore {
   list(): Promise<RegisteredApp[]>;
   get(id: string): Promise<RegisteredApp | null>;
   create(input: CreateRegisteredApp): Promise<RegisteredApp>;
   update(id: string, input: Partial<Omit<RegisteredApp, "id" | "createdAt">>): Promise<RegisteredApp | null>;
   delete(id: string): Promise<boolean>;
+  setEmitter?(emitChange?: AppChangeEmitter): void;
 }
 
 export interface AppRuntimeStatus {

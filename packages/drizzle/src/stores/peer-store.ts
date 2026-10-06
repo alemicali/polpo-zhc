@@ -1,6 +1,7 @@
 import { eq, and, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { PeerStore } from "@polpo-ai/core/peer-store";
+import { affectedRows } from "../utils.js";
 import type {
   PeerIdentity, PairingRequest, ChannelType,
   ChannelGatewayConfig, PresenceEntry,
@@ -166,7 +167,7 @@ export class DrizzlePeerStore implements PeerStore {
     const now = new Date().toISOString();
     const result = await this.db.delete(this.schema.pairingRequests)
       .where(and(eq(this.schema.pairingRequests.resolved, 0), lt(this.schema.pairingRequests.expiresAt, now)));
-    return result?.rowCount ?? result?.changes ?? 0;
+    return affectedRows(result);
   }
 
   // ── Session mapping ─────────────────────────────────────────────────

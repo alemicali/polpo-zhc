@@ -18,7 +18,7 @@ import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
 
 const MAX_READ_LINES = 500;
@@ -497,7 +497,7 @@ export interface CreateAllToolsOptions {
   /** Per-task output directory for deliverables. Passed to outcome tools. */
   outputDir?: string;
   /** WhatsApp message store (for whatsapp_* tools). */
-  whatsappStore?: WhatsAppStore;
+  whatsappStore?: WhatsAppMessageStore;
   /** WhatsApp send function (for whatsapp_send tool). */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
   /** WhatsApp media send function (for whatsapp_send_file tool). */

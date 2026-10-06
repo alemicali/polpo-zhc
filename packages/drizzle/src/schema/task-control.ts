@@ -41,6 +41,7 @@ export const backgroundWaitsSqlite = sqliteTable("background_waits", {
 }, (table) => [
   index("idx_background_waits_session_state").on(table.sessionId, table.state),
   index("idx_background_waits_task_state").on(table.taskId, table.state),
+  index("idx_background_waits_state").on(table.state),
 ]);
 
 export const taskDirectionsPg = pgTable("task_directions", {
@@ -83,4 +84,5 @@ export const backgroundWaitsPg = pgTable("background_waits", {
 }, (table) => [
   pgIndex("idx_pg_background_waits_session_state").on(table.sessionId, table.state),
   pgIndex("idx_pg_background_waits_task_state").on(table.taskId, table.state),
+  pgIndex("idx_pg_background_waits_state").on(table.state),
 ]);

@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { type Dialect } from "../utils.js";
+import { type Dialect, affectedRows } from "../utils.js";
 
 export interface PushSubscriptionKeys { p256dh: string; auth: string }
 
@@ -126,7 +126,7 @@ export class DrizzlePushSubscriptionStore {
 
   async remove(endpoint: string): Promise<boolean> {
     const result: any = await this.db.delete(this.subscriptions).where(eq(this.subscriptions.endpoint, endpoint));
-    const changes = result?.changes ?? result?.rowCount ?? 0;
+    const changes = affectedRows(result);
     return changes > 0;
   }
 
@@ -153,5 +153,23 @@ export class DrizzlePushSubscriptionStore {
     await this.db.update(this.subscriptions)
       .set({ lastFailureAt: new Date().toISOString(), failureCount: next })
       .where(eq(this.subscriptions.endpoint, endpoint));
+  }
+
+  /** Copy existing records as they are (used when moving push.json into the database). */
+  async importRecords(records: PushSubscriptionRecord[]): Promise<void> {
+    for (const r of records) {
+      await this.db.insert(this.subscriptions).values({
+        endpoint: r.endpoint,
+        expirationTime: r.expirationTime ?? null,
+        p256dh: r.keys.p256dh,
+        auth: r.keys.auth,
+        userAgent: r.userAgent ?? null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        lastSuccessAt: r.lastSuccessAt ?? null,
+        lastFailureAt: r.lastFailureAt ?? null,
+        failureCount: r.failureCount ?? 0,
+      }).onConflictDoNothing({ target: this.subscriptions.endpoint });
+    }
   }
 }

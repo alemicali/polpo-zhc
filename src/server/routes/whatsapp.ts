@@ -78,9 +78,9 @@ function listProfiles(polpoDir: string) {
 
 /** Resolve a free-form recipient (phone, contact name, or already-JID)
  *  to a JID, mirroring the same logic used by the agent tools. */
-function resolveJid(input: string, store: { resolveContact: (s: string) => { jid: string } | undefined }): string {
+async function resolveJid(input: string, store: { resolveContact: (s: string) => Promise<{ jid: string } | undefined> }): Promise<string> {
   if (input.includes("@")) return input;
-  const contact = store.resolveContact(input);
+  const contact = await store.resolveContact(input);
   if (contact) return contact.jid;
   const clean = input.replace(/[+\s-]/g, "");
   return `${clean}@s.whatsapp.net`;
@@ -200,12 +200,12 @@ export function whatsappRoutes(getDeps: () => {
       return c.json({ ok: false, error: "WhatsApp is not connected on this instance." }, 503);
     }
     try {
-      const jid = resolveJid(parsed.data.to, store);
+      const jid = await resolveJid(parsed.data.to, store);
       const id = await bridge.sendMessage(jid, parsed.data.message);
       // Mirror the agent tool: persist the outbound message so the user
       // sees it in subsequent whatsapp_read calls.
       if (id) {
-        store.appendMessage({
+        await store.appendMessage({
           id, chatJid: jid, senderJid: "me",
           text: parsed.data.message, fromMe: true,
           timestamp: Math.floor(Date.now() / 1000),
@@ -237,7 +237,7 @@ export function whatsappRoutes(getDeps: () => {
       if (!stat.isFile()) {
         return c.json({ ok: false, error: "Path is not a file" }, 400);
       }
-      const jid = resolveJid(parsed.data.to, store);
+      const jid = await resolveJid(parsed.data.to, store);
       const id = await bridge.sendMediaMessage(jid, {
         path: filePath,
         caption: parsed.data.caption,

@@ -1,18 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
-import type { AppRegistryStore, CreateRegisteredApp, RegisteredApp } from "../core/app-registry.js";
+import type { AppChangeEmitter, AppChangeEvent, AppRegistryStore, CreateRegisteredApp, RegisteredApp } from "@polpo-ai/core/app-registry";
+
+export type { AppChangeEmitter, AppChangeEvent } from "@polpo-ai/core/app-registry";
 
 type RegistryFile = { version: 1; apps: RegisteredApp[] };
-
-export type AppChangeEvent = {
-  appId: string;
-  action: "created" | "updated" | "deleted" | "runtime" | "log";
-  resourceId?: string;
-  timestamp: string;
-};
-
-export type AppChangeEmitter = (event: AppChangeEvent) => void;
 
 export class FileAppRegistryStore implements AppRegistryStore {
   private readonly path: string;

@@ -12,8 +12,10 @@ import type {
   DataQuery,
   DataSource,
   DataCapability,
-} from "../core/data-registry.js";
-import { FileDataRegistryStore, type DataRegistryChangeEmitter } from "../stores/file-data-registry-store.js";
+} from "@polpo-ai/core/data-registry";
+import { FileDataRegistryStore } from "../stores/file-data-registry-store.js";
+import type { DataRegistryChangeEmitter, DataRegistryStore } from "@polpo-ai/core/data-registry";
+import { databaseStoresFor } from "../core/storage.js";
 
 const require = createRequire(import.meta.url);
 const MAX_ROWS = 1_000;
@@ -34,14 +36,16 @@ export interface DataMutation {
 }
 
 export class DataRuntime {
-  readonly store: FileDataRegistryStore;
+  readonly store: DataRegistryStore;
 
   constructor(
     readonly polpoDir: string,
     private vaultStore?: VaultStore,
     emitChange?: DataRegistryChangeEmitter,
   ) {
-    this.store = new FileDataRegistryStore(polpoDir, emitChange);
+    // The database when the project has one, the data.json file otherwise.
+    this.store = databaseStoresFor(polpoDir)?.dataRegistryStore ?? new FileDataRegistryStore(polpoDir, emitChange);
+    this.store.setEmitter?.(emitChange);
   }
 
   setVaultStore(store?: VaultStore): void {
@@ -49,7 +53,7 @@ export class DataRuntime {
   }
 
   setEmitter(emitChange?: DataRegistryChangeEmitter): void {
-    this.store.setEmitter(emitChange);
+    this.store.setEmitter?.(emitChange);
   }
 
   async listSources(principal: DataPrincipal = { admin: true }): Promise<DataSource[]> {
@@ -297,6 +301,8 @@ const runtimes = new Map<string, DataRuntime>();
 
 export function getDataRegistryRuntime(polpoDir: string, vaultStore?: VaultStore, emitChange?: DataRegistryChangeEmitter): DataRuntime {
   let runtime = runtimes.get(polpoDir);
+  // Rebuilt if the project's database was opened (or closed) after the runtime was created.
+  if (runtime && (runtime.store === databaseStoresFor(polpoDir)?.dataRegistryStore) !== !!databaseStoresFor(polpoDir)) runtime = undefined;
   if (!runtime) {
     runtime = new DataRuntime(polpoDir, vaultStore, emitChange);
     runtimes.set(polpoDir, runtime);

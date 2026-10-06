@@ -135,6 +135,22 @@ export interface BrainChangeEvent {
 
 export type BrainChangeEmitter = (event: BrainChangeEvent) => void;
 
+/** Most recent ingestion runs and activity entries kept in the brain. */
+export const BRAIN_MAX_RUNS = 250;
+export const BRAIN_MAX_ACTIVITY = 2_000;
+
+/**
+ * Storage of the company brain. Changes are whole-snapshot transactions: `change` mutates a copy,
+ * the store persists what changed. Arrays keep their order (entities, relations, claims and grants
+ * in insertion order; runs and activity newest first).
+ */
+export interface CompanyBrainStore {
+  snapshot(): Promise<CompanyBrainSnapshot>;
+  transaction<T>(change: (snapshot: CompanyBrainSnapshot) => T | Promise<T>): Promise<T>;
+  setEmitter(emitChange?: BrainChangeEmitter): void;
+  emit(event: Omit<BrainChangeEvent, "timestamp">): void;
+}
+
 export function normalizeBrainType(value: string, fallback = "concept"): string {
   const normalized = value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   return normalized || fallback;

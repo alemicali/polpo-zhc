@@ -205,6 +205,30 @@
     "./retry": {
       "types": "./dist/retry.d.ts",
       "import": "./dist/retry.js"
+    },
+    "./app-registry": {
+      "types": "./dist/app-registry.d.ts",
+      "import": "./dist/app-registry.js"
+    },
+    "./data-registry": {
+      "types": "./dist/data-registry.d.ts",
+      "import": "./dist/data-registry.js"
+    },
+    "./company-brain": {
+      "types": "./dist/company-brain.d.ts",
+      "import": "./dist/company-brain.js"
+    },
+    "./token-usage": {
+      "types": "./dist/token-usage.d.ts",
+      "import": "./dist/token-usage.js"
+    },
+    "./context-checkpoint": {
+      "types": "./dist/context-checkpoint.d.ts",
+      "import": "./dist/context-checkpoint.js"
+    },
+    "./whatsapp-store": {
+      "types": "./dist/whatsapp-store.d.ts",
+      "import": "./dist/whatsapp-store.js"
     }
   },
   "sideEffects": false,

@@ -5,10 +5,11 @@ import type {
   CreateDataSource,
   CreateDataView,
   DataActivity,
+  DataRegistryChangeEmitter,
   DataRegistryStore,
   DataSource,
   DataView,
-} from "../core/data-registry.js";
+} from "@polpo-ai/core/data-registry";
 
 type RegistryFile = {
   version: 1;
@@ -19,11 +20,7 @@ type RegistryFile = {
 
 const EMPTY: RegistryFile = { version: 1, sources: [], views: [], activity: [] };
 
-export type DataRegistryChangeEvent =
-  | { type: "source"; sourceId: string; action: "created" | "updated" | "deleted" | "activity" | "data"; timestamp: string }
-  | { type: "view"; viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
-
-export type DataRegistryChangeEmitter = (event: DataRegistryChangeEvent) => void;
+export type { DataRegistryChangeEmitter, DataRegistryChangeEvent } from "@polpo-ai/core/data-registry";
 
 export class FileDataRegistryStore implements DataRegistryStore {
   private readonly path: string;

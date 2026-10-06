@@ -2,7 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { VaultStore } from "../../core/vault-store.js";
-import { normalizeDataTags, type DataRegistryStore } from "../../core/data-registry.js";
+import { normalizeDataTags, type DataRegistryStore } from "@polpo-ai/core/data-registry";
 import type { DataRuntime } from "../data-runtime.js";
 
 const GrantSchema = z.object({

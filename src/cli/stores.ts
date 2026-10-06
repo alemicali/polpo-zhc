@@ -9,7 +9,7 @@
  * falling back to file-based stores.
  */
 
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
 import type { TeamStore } from "../core/team-store.js";
 import type { AgentStore } from "../core/agent-store.js";
 import type { VaultStore } from "../core/vault-store.js";
@@ -40,45 +40,19 @@ export async function createCliStores(polpoDir: string): Promise<CliStores> {
   const databaseUrl = (config?.settings as Record<string, unknown> | undefined)?.databaseUrl as string | undefined
     ?? process.env.DATABASE_URL;
 
-  if (storage === "postgres" && databaseUrl) {
-    const { createPgStores, ensurePgSchema } = await import("@polpo-ai/drizzle");
-    const postgres = (await import("postgres")).default;
-    const { drizzle } = await import("drizzle-orm/postgres-js");
-    const sql = postgres(databaseUrl);
-    const db = drizzle(sql);
-    await ensurePgSchema(db);
-    const stores = createPgStores(db);
-    return {
-      teamStore: stores.teamStore,
-      agentStore: stores.agentStore,
-      vaultStore: stores.vaultStore,
-      playbookStore: stores.playbookStore,
-      sessionStore: stores.sessionStore,
-    };
-  }
-
-  if (storage === "sqlite") {
-    const { createSqliteStores } = await import("@polpo-ai/drizzle");
-    const { createRequire } = await import("node:module");
-    const req = createRequire(import.meta.url);
-    const Database = req("better-sqlite3");
-    const dbPath = join(polpoDir, "state.db");
-    const sqlite = new Database(dbPath);
-    sqlite.exec("PRAGMA journal_mode = WAL");
-    sqlite.exec("PRAGMA synchronous = NORMAL");
-    sqlite.exec("PRAGMA foreign_keys = ON");
-    const { ensureSqliteSchema } = await import("../core/drizzle-sqlite-schema.js");
-    ensureSqliteSchema(sqlite);
-    const { drizzle } = await import("drizzle-orm/better-sqlite3");
-    const db = drizzle(sqlite);
-    const stores = createSqliteStores(db);
-    return {
-      teamStore: stores.teamStore,
-      agentStore: stores.agentStore,
-      vaultStore: stores.vaultStore,
-      playbookStore: stores.playbookStore,
-      sessionStore: stores.sessionStore,
-    };
+  if (storage === "postgres" || storage === "sqlite") {
+    const { openStorage } = await import("../core/storage.js");
+    const opened = await openStorage({ storage, polpoDir, databaseUrl, role: "cli" });
+    if (opened.kind !== "file") {
+      const stores = opened.stores;
+      return {
+        teamStore: stores.teamStore,
+        agentStore: stores.agentStore,
+        vaultStore: stores.vaultStore,
+        playbookStore: stores.playbookStore,
+        sessionStore: stores.sessionStore,
+      };
+    }
   }
 
   // Default: file-based stores
