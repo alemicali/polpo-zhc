@@ -26,67 +26,20 @@ function createDatabase(dbPath: string): PolpoDatabase {
 
 // ─── Types ──────────────────────────────────────
 
-export interface WhatsAppMessage {
-  id: string;
-  /** JID of the chat (individual or group). */
-  chatJid: string;
-  /** JID of the sender (same as chatJid for 1:1). */
-  senderJid: string;
-  /** Display name of the sender (pushName). */
-  senderName?: string;
-  /** Message text content. */
-  text: string;
-  /** Whether we sent this message (outbound). */
-  fromMe: boolean;
-  /** Unix timestamp (seconds). */
-  timestamp: number;
-  /** Optional media type (image, video, document, audio). */
-  mediaType?: string;
-  /** Local downloaded media path, when available. */
-  mediaPath?: string;
-  /** Original media MIME type. */
-  mimeType?: string;
-  /** Original media filename, when available. */
-  fileName?: string;
-  /** Media size in bytes, when known. */
-  mediaSize?: number;
-  /** Local read receipt timestamp. */
-  readAt?: number;
-}
+import {
+  whatsappJidToPhone,
+  type WhatsAppChat,
+  type WhatsAppContact,
+  type WhatsAppMessage,
+  type WhatsAppMessageStore,
+} from "@polpo-ai/core/whatsapp-store";
 
-export interface WhatsAppContact {
-  /** JID (e.g. "393387172954@s.whatsapp.net"). */
-  jid: string;
-  /** Display name (pushName from WhatsApp). */
-  name: string;
-  /** Phone number extracted from JID. */
-  phone: string;
-  /** Last time we saw a message from/to this contact. */
-  lastSeen: number;
-}
-
-export interface WhatsAppChat {
-  /** Chat JID. */
-  jid: string;
-  /** Contact name (if known). */
-  name?: string;
-  /** Phone number. */
-  phone: string;
-  /** Is this a group chat? */
-  isGroup: boolean;
-  /** Last message text (preview). */
-  lastMessage?: string;
-  /** Last message timestamp. */
-  lastMessageAt?: number;
-  /** Number of messages stored. */
-  messageCount: number;
-  /** Number of unread (inbound since last outbound). */
-  unread: number;
-}
+export type { WhatsAppChat, WhatsAppContact, WhatsAppMessage, WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 
 // ─── Store ──────────────────────────────────────
 
-export class WhatsAppStore {
+/** WhatsApp history in .polpo/whatsapp.db, for projects that run on files. */
+export class WhatsAppStore implements WhatsAppMessageStore {
   private db: PolpoDatabase;
 
   constructor(dbPath: string) {
@@ -139,7 +92,7 @@ export class WhatsAppStore {
   // ── Messages ──
 
   /** Insert a message (idempotent — ignores duplicates by ID). */
-  appendMessage(msg: WhatsAppMessage): void {
+  async appendMessage(msg: WhatsAppMessage): Promise<void> {
     this.db.prepare(`
       INSERT OR IGNORE INTO messages (
         id, chat_jid, sender_jid, sender_name, text, from_me, timestamp,
@@ -176,7 +129,7 @@ export class WhatsAppStore {
   }
 
   /** List messages in a chat, newest first. */
-  listMessages(chatJid: string, limit = 50, before?: number): WhatsAppMessage[] {
+  async listMessages(chatJid: string, limit = 50, before?: number): Promise<WhatsAppMessage[]> {
     const sql = before
       ? `SELECT * FROM messages WHERE chat_jid = ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`
       : `SELECT * FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT ?`;
@@ -186,7 +139,7 @@ export class WhatsAppStore {
   }
 
   /** Search messages across all chats by text content. */
-  searchMessages(query: string, limit = 30, chatJid?: string): WhatsAppMessage[] {
+  async searchMessages(query: string, limit = 30, chatJid?: string): Promise<WhatsAppMessage[]> {
     const pattern = `%${query}%`;
     const sql = chatJid
       ? `SELECT * FROM messages WHERE chat_jid = ? AND text LIKE ? ORDER BY timestamp DESC LIMIT ?`
@@ -197,7 +150,7 @@ export class WhatsAppStore {
   }
 
   /** List recent chats with last message preview. */
-  listChats(limit = 30): WhatsAppChat[] {
+  async listChats(limit = 30): Promise<WhatsAppChat[]> {
     const rows = this.db.prepare(`
       SELECT 
         m.chat_jid,
@@ -230,7 +183,7 @@ export class WhatsAppStore {
   // ── Contacts ──
 
   /** Upsert a contact (updates name and lastSeen if newer). */
-  upsertContact(jid: string, name: string, timestamp?: number): void {
+  async upsertContact(jid: string, name: string, timestamp?: number): Promise<void> {
     const ts = timestamp ?? Math.floor(Date.now() / 1000);
     this.db.prepare(`
       INSERT INTO contacts (jid, name, phone, last_seen)
@@ -242,7 +195,7 @@ export class WhatsAppStore {
   }
 
   /** List all contacts, most recently seen first. */
-  listContacts(limit = 100): WhatsAppContact[] {
+  async listContacts(limit = 100): Promise<WhatsAppContact[]> {
     const rows = this.db.prepare(
       `SELECT * FROM contacts ORDER BY last_seen DESC LIMIT ?`
     ).all(limit) as any[];
@@ -250,7 +203,7 @@ export class WhatsAppStore {
   }
 
   /** Search contacts by name or phone. */
-  searchContacts(query: string, limit = 20): WhatsAppContact[] {
+  async searchContacts(query: string, limit = 20): Promise<WhatsAppContact[]> {
     const pattern = `%${query}%`;
     const rows = this.db.prepare(
       `SELECT * FROM contacts WHERE name LIKE ? OR phone LIKE ? ORDER BY last_seen DESC LIMIT ?`
@@ -259,7 +212,7 @@ export class WhatsAppStore {
   }
 
   /** Resolve a name or phone to a JID. Returns first match or undefined. */
-  resolveContact(nameOrPhone: string): WhatsAppContact | undefined {
+  async resolveContact(nameOrPhone: string): Promise<WhatsAppContact | undefined> {
     // Try exact phone match first
     const clean = nameOrPhone.replace(/[+\s-]/g, "");
     let row = this.db.prepare(
@@ -277,7 +230,7 @@ export class WhatsAppStore {
   }
 
   /** Mark specific messages locally read after sending WhatsApp read receipts. */
-  markRead(ids: string[], readAt = Math.floor(Date.now() / 1000)): number {
+  async markRead(ids: string[], readAt = Math.floor(Date.now() / 1000)): Promise<number> {
     let changed = 0;
     const stmt = this.db.prepare(`UPDATE messages SET read_at = ? WHERE id = ?`);
     for (const id of ids) {
@@ -287,7 +240,7 @@ export class WhatsAppStore {
   }
 
   /** Get total message count. */
-  messageCount(): number {
+  async messageCount(): Promise<number> {
     const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM messages`).get() as any;
     return row?.cnt ?? 0;
   }
@@ -299,9 +252,7 @@ export class WhatsAppStore {
 
 // ─── Helpers ──────────────────────────────────
 
-function jidToPhone(jid: string): string {
-  return jid.replace(/@.*$/, "").replace(/:.*$/, "");
-}
+const jidToPhone = whatsappJidToPhone;
 
 function rowToMessage(r: any): WhatsAppMessage {
   return {

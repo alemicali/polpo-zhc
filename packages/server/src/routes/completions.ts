@@ -28,6 +28,7 @@ import {
 } from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
 import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
+import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
 const DEFAULT_MAX_TURNS = 200;
 
@@ -459,19 +460,7 @@ export interface CompletionRouteDeps {
   }>;
 }
 
-export interface TokenUsageRecord {
-  timestamp: string;
-  source: "orchestrator_chat" | "agent_chat" | "background_wait";
-  provider?: string;
-  model?: string;
-  sessionId?: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  cost: number;
-}
+export type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
 export interface ToolExecutionProgress {
   message: string;

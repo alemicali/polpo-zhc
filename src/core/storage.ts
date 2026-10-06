@@ -9,7 +9,7 @@
  * Runners never migrate: they are spawned by a server that already did.
  */
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { DrizzleStores } from "@polpo-ai/drizzle";
 
 export type StorageKind = "file" | "sqlite" | "postgres";
@@ -18,6 +18,8 @@ export type StorageKind = "file" | "sqlite" | "postgres";
 export type StorageRole = "server" | "cli" | "runner";
 
 export interface OpenStorageOptions {
+  /** Import data still in .polpo files into the database once (server only). Default: true. */
+  importFiles?: boolean;
   storage: StorageKind | undefined;
   polpoDir: string;
   databaseUrl?: string | undefined;
@@ -42,6 +44,17 @@ export interface FileStorage {
 
 export type OpenStorage = DatabaseStorage | FileStorage;
 
+/**
+ * Database stores of the projects open in this process, by .polpo directory. Code that only knows
+ * the project directory (route factories, runtimes, channels) finds the database stores here and
+ * falls back to the file stores when the project runs on files.
+ */
+const openDatabases = new Map<string, DrizzleStores>();
+
+export function databaseStoresFor(polpoDir: string): DrizzleStores | undefined {
+  return openDatabases.get(resolve(polpoDir));
+}
+
 /** Connections per process: the server serves HTTP and the orchestrator; runners do a few writes. */
 const POOL_SIZE: Record<StorageRole, number> = { server: 10, cli: 2, runner: 2 };
 
@@ -65,7 +78,21 @@ export async function openStorage(opts: OpenStorageOptions): Promise<OpenStorage
       const result = await migratePg(db);
       if (result.adoptedLegacy) log("PostgreSQL database predates versioned migrations: adopted at the baseline (no data changed).");
     }
-    return { kind: "postgres", stores: createPgStores(db), db, close: () => sql.end({ timeout: 5 }) };
+    const stores = createPgStores(db);
+    const key = resolve(opts.polpoDir);
+    openDatabases.set(key, stores);
+    if (opts.role === "server" && opts.importFiles !== false) {
+      const { pgSchema } = await import("@polpo-ai/drizzle");
+      const { importFileStores } = await import("../stores/import-file-stores.js");
+      await importFileStores({ polpoDir: opts.polpoDir, stores, db, schema: pgSchema, dialect: "pg", log });
+    }
+    return {
+      kind: "postgres", stores, db,
+      close: async () => {
+        if (openDatabases.get(key) === stores) openDatabases.delete(key);
+        await sql.end({ timeout: 5 });
+      },
+    };
   }
 
   if (opts.storage === "sqlite") {
@@ -80,7 +107,21 @@ export async function openStorage(opts: OpenStorageOptions): Promise<OpenStorage
       const result = migrateSqlite(db);
       if (result.adoptedLegacy) log("SQLite database predates versioned migrations: adopted at the baseline (no data changed).");
     }
-    return { kind: "sqlite", stores: createSqliteStores(db), db, close: async () => { client.close(); } };
+    const stores = createSqliteStores(db);
+    const key = resolve(opts.polpoDir);
+    openDatabases.set(key, stores);
+    if (opts.role === "server" && opts.importFiles !== false) {
+      const { sqliteSchema } = await import("@polpo-ai/drizzle");
+      const { importFileStores } = await import("../stores/import-file-stores.js");
+      await importFileStores({ polpoDir: opts.polpoDir, stores, db, schema: sqliteSchema, dialect: "sqlite", log });
+    }
+    return {
+      kind: "sqlite", stores, db,
+      close: async () => {
+        if (openDatabases.get(key) === stores) openDatabases.delete(key);
+        client.close();
+      },
+    };
   }
 
   return { kind: "file", close: async () => {} };

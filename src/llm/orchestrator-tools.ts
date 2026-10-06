@@ -5399,7 +5399,7 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const text = args.text as string;
-  const jidOrError = resolveWhatsAppJid(to, store);
+  const jidOrError = await resolveWhatsAppJid(to, store);
   if (jidOrError.startsWith("Error:")) return jidOrError;
 
   const jid = jidOrError;
@@ -5421,7 +5421,7 @@ async function execWhatsAppSendFile(polpo: Orchestrator, args: Record<string, un
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const path = args.path as string;
-  const jidOrError = resolveWhatsAppJid(to, store);
+  const jidOrError = await resolveWhatsAppJid(to, store);
   if (jidOrError.startsWith("Error:")) return jidOrError;
 
   const baseDir = polpo.getAgentWorkDir();
@@ -5457,7 +5457,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
 
   switch (action) {
     case "list_chats": {
-      const chats = store.listChats(limit);
+      const chats = await store.listChats(limit);
       if (chats.length === 0) return "No WhatsApp chats found.";
       const lines = chats.map(c => {
         const name = c.name ? `${c.name} (${c.phone})` : c.phone;
@@ -5480,12 +5480,12 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
         const clean = chatId.replace(/[+\s-]/g, "");
         jid = `${clean}@s.whatsapp.net`;
       } else {
-        const contact = store.resolveContact(chatId);
+        const contact = await store.resolveContact(chatId);
         if (!contact) return `Error: Contact "${chatId}" not found. Use a phone number or JID.`;
         jid = contact.jid;
       }
 
-      const messages = store.listMessages(jid, limit);
+      const messages = await store.listMessages(jid, limit);
       if (messages.length === 0) return `No messages found for ${chatId}.`;
 
       const markRead = args.markRead === true;
@@ -5514,7 +5514,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
       const query = args.query as string;
       if (!query) return "Error: 'query' is required for search.";
 
-      const results = store.searchMessages(query, limit);
+      const results = await store.searchMessages(query, limit);
       if (results.length === 0) return `No messages matching "${query}".`;
 
       const lines = results.map(m => {
@@ -5527,7 +5527,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
     }
 
     case "contacts": {
-      const contacts = store.listContacts(limit);
+      const contacts = await store.listContacts(limit);
       if (contacts.length === 0) return "No WhatsApp contacts found.";
       const lines = contacts.map(c => {
         const lastSeen = new Date(c.lastSeen * 1000).toLocaleString();
@@ -5541,11 +5541,11 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
   }
 }
 
-function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): string {
+async function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): Promise<string> {
   if (to.includes("@")) return to;
   if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) return `${to.replace(/[+\s-]/g, "")}@s.whatsapp.net`;
   if (store) {
-    const contact = store.resolveContact(to);
+    const contact = await store.resolveContact(to);
     if (contact) return contact.jid;
     return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
   }

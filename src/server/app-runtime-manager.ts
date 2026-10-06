@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, relative, sep } from "node:path";
 import type {
+  AppChangeEmitter,
   AppDeployment,
   AppRegistryStore,
   AppRuntimeLog,
@@ -9,7 +10,8 @@ import type {
   AppService,
   RegisteredApp,
 } from "@polpo-ai/core/app-registry";
-import { FileAppRegistryStore, type AppChangeEmitter } from "../stores/file-app-registry-store.js";
+import { FileAppRegistryStore } from "../stores/file-app-registry-store.js";
+import { databaseStoresFor } from "../core/storage.js";
 
 type Runtime = AppRuntimeStatus & { process: ChildProcessWithoutNullStreams };
 const MAX_LOGS = 600;
@@ -250,12 +252,18 @@ export function appRuntimePath(home = process.env.HOME || homedir(), current = p
   return [...new Set(paths)].join(delimiter);
 }
 
-const registries = new Map<string, { store: FileAppRegistryStore; runtime: AppRuntimeManager }>();
+type RegistryStore = AppRegistryStore & { setEmitter(emitChange?: AppChangeEmitter): void };
 
-export function getAppRegistryRuntime(polpoDir: string, emitChange?: AppChangeEmitter): { store: FileAppRegistryStore; runtime: AppRuntimeManager } {
+const registries = new Map<string, { store: RegistryStore; runtime: AppRuntimeManager }>();
+
+export function getAppRegistryRuntime(polpoDir: string, emitChange?: AppChangeEmitter): { store: RegistryStore; runtime: AppRuntimeManager } {
   let registry = registries.get(polpoDir);
+  const database = databaseStoresFor(polpoDir);
+  if (registry && (registry.store === database?.appRegistryStore) !== !!database) registry = undefined;
   if (!registry) {
-    const store = new FileAppRegistryStore(polpoDir, emitChange);
+    // The database when the project has one, apps.json otherwise.
+    const store: RegistryStore = database?.appRegistryStore ?? new FileAppRegistryStore(polpoDir, emitChange);
+    store.setEmitter(emitChange);
     registry = { store, runtime: new AppRuntimeManager(store, emitChange) };
     registries.set(polpoDir, registry);
   } else if (emitChange) {

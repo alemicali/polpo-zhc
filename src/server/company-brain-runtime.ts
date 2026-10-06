@@ -21,6 +21,8 @@ import {
 } from "@polpo-ai/core/company-brain";
 import { queryOrchestratorText } from "../llm/query.js";
 import { FileCompanyBrainStore } from "../stores/file-company-brain-store.js";
+import type { CompanyBrainStore } from "@polpo-ai/core/company-brain";
+import { databaseStoresFor } from "../core/storage.js";
 import type { DataRuntime } from "./data-runtime.js";
 
 const MAX_GRAPH_ENTITIES = 1_000;
@@ -100,14 +102,16 @@ type ExtractedGraph = {
 };
 
 export class CompanyBrainRuntime {
-  readonly store: FileCompanyBrainStore;
+  readonly store: CompanyBrainStore;
 
   constructor(
     readonly polpoDir: string,
     private dataRuntime?: DataRuntime,
     emitChange?: BrainChangeEmitter,
   ) {
-    this.store = new FileCompanyBrainStore(polpoDir, emitChange);
+    // The database when the project has one, company-brain.json otherwise.
+    this.store = databaseStoresFor(polpoDir)?.companyBrainStore ?? new FileCompanyBrainStore(polpoDir, emitChange);
+    this.store.setEmitter(emitChange);
   }
 
   setDependencies(dataRuntime?: DataRuntime, emitChange?: BrainChangeEmitter): void {
@@ -501,6 +505,7 @@ export class CompanyBrainRuntime {
 const runtimes = new Map<string, CompanyBrainRuntime>();
 export function getCompanyBrainRuntime(polpoDir: string, dataRuntime?: DataRuntime, emitChange?: BrainChangeEmitter): CompanyBrainRuntime {
   let runtime = runtimes.get(polpoDir);
+  if (runtime && (runtime.store === databaseStoresFor(polpoDir)?.companyBrainStore) !== !!databaseStoresFor(polpoDir)) runtime = undefined;
   if (!runtime) {
     runtime = new CompanyBrainRuntime(polpoDir, dataRuntime, emitChange);
     runtimes.set(polpoDir, runtime);

@@ -24,7 +24,7 @@ import { notifyRunComplete } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
@@ -164,6 +164,7 @@ interface RunnerStores {
   taskControlStore: TaskControlStore;
   logStore?: LogStore;
   vaultStore?: VaultStore;
+  whatsappStore?: WhatsAppMessageStore;
 }
 
 async function createStores(config: RunnerConfig): Promise<RunnerStores> {
@@ -177,7 +178,10 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
     });
     if (opened.kind !== "file") {
       const stores = opened.stores;
-      return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+      return {
+        runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore,
+        vaultStore: stores.vaultStore, whatsappStore: stores.whatsappStore,
+      };
     }
   }
   return {
@@ -189,7 +193,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
+  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore, whatsappStore: dbWhatsAppStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   // When LogStore is available (postgres/sqlite), persist transcript to DB.
@@ -219,17 +223,12 @@ async function main(): Promise<void> {
   let initialDirections: TaskDirection[] = [];
   let checkpointWrites: Promise<void> = Promise.resolve();
   try {
-    // Vault is intentionally FILE-BASED for every storage mode — matches the
-    // orchestrator (src/core/orchestrator.ts:initVaultStore). Crypto round-trip
-    // to DB is sensitive and not wired automatically; the explicit
-    // `polpo vault migrate` command would do it on user request. The
-    // `drizzleVaultStore` returned by createStores is ignored on purpose.
-    void drizzleVaultStore;
-    let vaultStore: VaultStore | undefined;
-    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+    // Same vault as the server: the database's vault table, or .polpo/vault.enc in file mode.
+    let vaultStore: VaultStore | undefined = drizzleVaultStore;
+    if (!vaultStore) try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
     // WhatsApp store + send function (if configured)
-    let waStore: WhatsAppStore | undefined;
+    let waStore: WhatsAppMessageStore | undefined;
     let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;
     let waSendMedia: ((jid: string, opts: {
       path: string;
@@ -242,8 +241,12 @@ async function main(): Promise<void> {
     let waMarkRead: ((keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>) | undefined;
     if (config.whatsappDbPath && config.whatsappProfilePath) {
       try {
-        const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
-        waStore = new WAStore(config.whatsappDbPath);
+        if (dbWhatsAppStore) {
+          waStore = dbWhatsAppStore;
+        } else {
+          const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
+          waStore = new WAStore(config.whatsappDbPath);
+        }
 
         // Lazy Baileys connection for sending — only connects when first send is called
         let waSock: any;
@@ -291,7 +294,7 @@ async function main(): Promise<void> {
         waMarkRead = async (keys) => {
           const sock = await ensureWaSock();
           await sock.readMessages(keys);
-          waStore?.markRead(keys.map(k => k.id));
+          await waStore?.markRead(keys.map(k => k.id));
         };
       } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
     }

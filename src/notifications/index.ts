@@ -13,7 +13,7 @@ import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
 import { PushChannel } from "./channels/push.js";
 import { ExpoPushChannel } from "./channels/expo-push.js";
-import { FileExpoTokenStore } from "../stores/file-expo-token-store.js";
+import { expoTokenStoreFor } from "../stores/notification-device-stores.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
@@ -741,7 +741,7 @@ export class NotificationRouter {
         return new PushChannel(config, this.polpoDir);
       case "expo-push":
         if (!this.polpoDir) throw new Error("Expo push channel requires polpoDir (pass it via init())");
-        return new ExpoPushChannel(new FileExpoTokenStore(this.polpoDir));
+        return new ExpoPushChannel(expoTokenStoreFor(this.polpoDir));
       default:
         throw new Error(`Unknown channel type: ${config.type}`);
     }

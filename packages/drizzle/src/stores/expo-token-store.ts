@@ -116,4 +116,19 @@ export class DrizzleExpoTokenStore {
       .set({ failureCount: 0, disabled: false, lastSeenAt: new Date().toISOString() })
       .where(eq(this.tokens.token, token));
   }
+
+  /** Copy existing records as they are (used when moving expo-tokens.json into the database). */
+  async importRecords(records: ExpoTokenRecord[]): Promise<void> {
+    for (const r of records) {
+      await this.db.insert(this.tokens).values({
+        token: r.token,
+        platform: r.platform,
+        deviceId: r.deviceId,
+        createdAt: r.createdAt,
+        lastSeenAt: r.lastSeenAt,
+        failureCount: r.failureCount ?? 0,
+        disabled: !!r.disabled,
+      }).onConflictDoNothing({ target: this.tokens.token });
+    }
+  }
 }

@@ -178,4 +178,18 @@ export class DrizzleDataRegistryStore implements DataRegistryStore {
   private emitView(viewId: string, action: "created" | "updated" | "deleted"): void {
     this.emitChange?.({ type: "view", viewId, action, timestamp: new Date().toISOString() });
   }
+
+  /** Copy an existing registry as it is (used when moving data.json into the database). */
+  async importAll(data: { sources: DataSource[]; views: DataView[]; activity: DataActivity[] }): Promise<void> {
+    for (const source of data.sources) await this.db.insert(this.tables.sources).values(this.sourceRow(source)).onConflictDoNothing();
+    for (const view of data.views) await this.db.insert(this.tables.views).values(this.viewRow(view)).onConflictDoNothing();
+    for (const activity of data.activity.slice(0, MAX_ACTIVITY)) {
+      await this.db.insert(this.tables.activity).values({
+        id: activity.id,
+        sourceId: activity.sourceId,
+        doc: serializeJson(activity, this.dialect),
+        createdAt: activity.createdAt,
+      }).onConflictDoNothing();
+    }
+  }
 }

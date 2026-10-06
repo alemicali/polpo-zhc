@@ -1,41 +1,49 @@
 import webpush from "web-push";
 import type { NotificationChannel, Notification } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
-import { FilePushSubscriptionStore, type PushVapidConfig } from "../../stores/file-push-subscription-store.js";
+import type { PushVapidConfig } from "../../stores/file-push-subscription-store.js";
+import { pushSubscriptionStoreFor, type PushSubscriptionStoreLike } from "../../stores/notification-device-stores.js";
 
 /**
  * Web Push notification channel.
  *
- * Uses the browser Push API subscription records stored in `.polpo/push.json`.
+ * Uses the browser Push API subscription records of the project (database, or `.polpo/push.json`).
  * Delivery goes through standard Web Push/VAPID, so it works with Chrome,
  * Firefox, Edge, Safari macOS and iOS/iPadOS Home Screen web apps.
  */
 export class PushChannel implements NotificationChannel {
   readonly type = "push";
-  private store: FilePushSubscriptionStore;
-  private vapid: PushVapidConfig;
+  private store: PushSubscriptionStoreLike;
+  private vapid!: PushVapidConfig;
+  /** VAPID keys come from the config or the store, which may be a database: resolved once. */
+  private ready: Promise<void>;
   private ttl: number;
   private urgency: "very-low" | "low" | "normal" | "high";
 
   constructor(config: NotificationChannelConfig, polpoDir: string) {
-    this.store = new FilePushSubscriptionStore(polpoDir);
-    const generated = this.store.ensureVapid(config.vapidSubject);
-    this.vapid = {
-      publicKey: resolveEnvVar(config.vapidPublicKey ?? generated.publicKey),
-      privateKey: resolveEnvVar(config.vapidPrivateKey ?? generated.privateKey),
-      subject: resolveEnvVar(config.vapidSubject ?? generated.subject),
-    };
-    if (!this.vapid.publicKey) throw new Error("Push channel requires vapidPublicKey");
-    if (!this.vapid.privateKey) throw new Error("Push channel requires vapidPrivateKey");
-    if (!this.vapid.subject) throw new Error("Push channel requires vapidSubject");
+    const store = pushSubscriptionStoreFor(polpoDir);
+    this.store = store;
     this.ttl = config.ttl ?? 60 * 60;
     this.urgency = config.urgency ?? "normal";
-    this.configureVapid();
+    this.ready = (async () => {
+      const generated = await store.ensureVapid(config.vapidSubject);
+      this.vapid = {
+        publicKey: resolveEnvVar(config.vapidPublicKey ?? generated.publicKey),
+        privateKey: resolveEnvVar(config.vapidPrivateKey ?? generated.privateKey),
+        subject: resolveEnvVar(config.vapidSubject ?? generated.subject),
+      };
+      if (!this.vapid.publicKey) throw new Error("Push channel requires vapidPublicKey");
+      if (!this.vapid.privateKey) throw new Error("Push channel requires vapidPrivateKey");
+      if (!this.vapid.subject) throw new Error("Push channel requires vapidSubject");
+      this.configureVapid();
+    })();
+    this.ready.catch(() => { /* reported by send() and test() */ });
   }
 
   async send(notification: Notification): Promise<void> {
+    await this.ready;
     this.configureVapid();
-    const subscriptions = this.store.list();
+    const subscriptions = await this.store.list();
     if (subscriptions.length === 0) {
       throw new Error("No push subscriptions registered for this project");
     }
@@ -71,20 +79,20 @@ export class PushChannel implements NotificationChannel {
               topic: topicFrom(notification.sourceEvent),
             },
           );
-          this.store.markSuccess(subscription.endpoint);
+          await this.store.markSuccess(subscription.endpoint);
         } catch (err) {
           if (isExpiredSubscriptionError(err)) {
-            this.store.remove(subscription.endpoint);
+            await this.store.remove(subscription.endpoint);
             return;
           }
-          this.store.markFailure(subscription.endpoint);
+          await this.store.markFailure(subscription.endpoint);
           throw err;
         }
       }),
     );
 
     const failures = results.filter((result) => result.status === "rejected");
-    const remainingSubscriptions = this.store.count();
+    const remainingSubscriptions = await this.store.count();
     if (remainingSubscriptions === 0) {
       throw new Error("All push subscriptions are expired or invalid. Enable notifications from this browser again.");
     }
@@ -96,10 +104,11 @@ export class PushChannel implements NotificationChannel {
   }
 
   async test(): Promise<boolean> {
+    await this.ready;
     if (!this.vapid.publicKey || !this.vapid.privateKey) {
       throw new Error("Push VAPID keys are missing");
     }
-    if (this.store.count() === 0) {
+    if ((await this.store.count()) === 0) {
       throw new Error("No push subscriptions registered for this project. Enable notifications from this browser first.");
     }
     return true;

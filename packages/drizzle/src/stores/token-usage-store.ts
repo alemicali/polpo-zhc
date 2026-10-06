@@ -49,4 +49,24 @@ export class DrizzleTokenUsageStore implements TokenUsageStore {
       cost: Number(r.cost),
     }));
   }
+
+  /** Bulk insert (used when moving usage/*.jsonl into the database). */
+  async recordMany(records: TokenUsageRecord[]): Promise<void> {
+    for (let i = 0; i < records.length; i += 500) {
+      await this.db.insert(this.usage).values(records.slice(i, i + 500).map((record) => ({
+        id: nanoid(),
+        timestamp: record.timestamp,
+        source: record.source,
+        provider: record.provider ?? null,
+        model: record.model ?? null,
+        sessionId: record.sessionId ?? null,
+        inputTokens: record.inputTokens ?? 0,
+        outputTokens: record.outputTokens ?? 0,
+        cacheReadTokens: record.cacheReadTokens ?? 0,
+        cacheWriteTokens: record.cacheWriteTokens ?? 0,
+        totalTokens: record.totalTokens ?? 0,
+        cost: record.cost ?? 0,
+      })));
+    }
+  }
 }

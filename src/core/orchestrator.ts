@@ -67,6 +67,7 @@ import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
@@ -159,7 +160,7 @@ export class Orchestrator extends TypedEmitter {
   /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
-  private whatsappStore?: WhatsAppStore;
+  private whatsappStore?: WhatsAppMessageStore;
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
   private agentStore!: AgentStore;
@@ -214,7 +215,7 @@ export class Orchestrator extends TypedEmitter {
     this.backgroundWaitContinuation = handler;
     this.backgroundWaitMgr?.setContinuation(handler);
   }
-  getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
+  getWhatsAppStore(): WhatsAppMessageStore | undefined { return this.whatsappStore; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   /** Re-point the orchestrator at a different project directory (before init). */
@@ -1001,21 +1002,14 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /**
-   * Initialize the vault store.
-   * ALWAYS uses EncryptedVaultStore (file-based, .polpo/vault.enc) regardless
-   * of storage mode. Rationale: vault crypto operations are sensitive — keeping
-   * the file-based store as the single source of truth avoids any risk of
-   * key-resolution drift or migration-time data loss when storage flips to
-   * SQLite. The DrizzleVaultStore implementation exists (and the `vault` table
-   * is still created in the schema) but is intentionally NOT wired here.
-   * If/when we want full DB consolidation, do it via an explicit
-   * `polpo vault migrate` command that round-trips through resolveKey()
-   * — not by silently flipping the wiring.
+   * Initialize the vault store: the `vault` table when the project runs on a database (each entry
+   * encrypted with AES-256-GCM, same key as before; .polpo/vault.enc is imported once at startup
+   * and kept as a backup), .polpo/vault.enc otherwise.
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
@@ -1788,11 +1782,15 @@ export class Orchestrator extends TypedEmitter {
     if (!ch || ch.type !== "whatsapp") return;
     const waChannel = ch as WhatsAppChannel;
 
-    // Create or reuse WhatsApp message store (SQLite)
+    // WhatsApp history: the project's database, or .polpo/whatsapp.db on files.
     if (!this.whatsappStore) {
-      const dbPath = join(this.polpoDir, "whatsapp.db");
-      this.whatsappStore = new WhatsAppStore(dbPath);
-      this.emit("log", { level: "info", message: `WhatsApp store opened: ${dbPath}` });
+      if (this.drizzleStores) {
+        this.whatsappStore = this.drizzleStores.whatsappStore;
+      } else {
+        const dbPath = join(this.polpoDir, "whatsapp.db");
+        this.whatsappStore = new WhatsAppStore(dbPath);
+        this.emit("log", { level: "info", message: `WhatsApp store opened: ${dbPath}` });
+      }
     }
 
     // Create the bridge

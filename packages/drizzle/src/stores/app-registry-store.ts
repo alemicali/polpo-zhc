@@ -90,4 +90,11 @@ export class DrizzleAppRegistryStore implements AppRegistryStore {
   private emit(action: AppChangeEvent["action"], appId: string): void {
     this.emitChange?.({ appId, action, timestamp: new Date().toISOString() });
   }
+
+  /** Copy existing apps as they are, ids and dates included (used when moving apps.json). */
+  async importApps(apps: RegisteredApp[]): Promise<void> {
+    for (const app of apps) {
+      await this.db.insert(this.apps).values(this.toRow(app)).onConflictDoNothing();
+    }
+  }
 }

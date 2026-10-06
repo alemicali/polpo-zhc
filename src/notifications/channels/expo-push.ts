@@ -1,5 +1,5 @@
 import type { NotificationChannel, Notification } from "../types.js";
-import type { FileExpoTokenStore } from "../../stores/file-expo-token-store.js";
+import type { ExpoTokenStoreLike } from "../../stores/notification-device-stores.js";
 
 /**
  * Minimal subset of expo-server-sdk we depend on. Re-declared here so the
@@ -127,10 +127,10 @@ function stripMarkdown(s: string | undefined): string | undefined {
  */
 export class ExpoPushChannel implements NotificationChannel {
   readonly type = "expo-push";
-  private store: FileExpoTokenStore;
+  private store: ExpoTokenStoreLike;
   private accessToken?: string;
 
-  constructor(store: FileExpoTokenStore, opts?: { accessToken?: string }) {
+  constructor(store: ExpoTokenStoreLike, opts?: { accessToken?: string }) {
     this.store = store;
     this.accessToken = opts?.accessToken ?? process.env.EXPO_ACCESS_TOKEN;
   }
@@ -143,7 +143,7 @@ export class ExpoPushChannel implements NotificationChannel {
       );
     }
 
-    const tokens = this.store.listActive();
+    const tokens = await this.store.listActive();
     if (tokens.length === 0) {
       throw new Error(
         "No Expo push tokens registered. Register a device via POST /api/v1/expo-push/register-token first.",
@@ -205,15 +205,15 @@ export class ExpoPushChannel implements NotificationChannel {
         if (ticket.status === "ok") {
           anyDelivered = true;
           allFailed = false;
-          this.store.markSuccess(message.to);
+          await this.store.markSuccess(message.to);
         } else {
           firstErrorMessage ??= ticket.message;
           // DeviceNotRegistered means the token is permanently dead —
           // remove it instead of just incrementing the failure counter.
           if (ticket.details?.error === "DeviceNotRegistered") {
-            this.store.removeToken(message.to);
+            await this.store.removeToken(message.to);
           } else {
-            this.store.markFailed(message.to);
+            await this.store.markFailed(message.to);
           }
         }
       }
@@ -229,7 +229,7 @@ export class ExpoPushChannel implements NotificationChannel {
     if (!Expo) {
       throw new Error("expo-server-sdk is not installed. Run `pnpm install`.");
     }
-    if (this.store.countActive() === 0) {
+    if ((await this.store.countActive()) === 0) {
       throw new Error("No active Expo push tokens registered.");
     }
     return true;

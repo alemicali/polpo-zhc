@@ -1,16 +1,7 @@
 import { summarizeContextMessages } from "@polpo-ai/core";
+import type { ContextCheckpoint, ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 
-export interface ContextCheckpoint {
-  version: 1;
-  revision: string;
-  scope: string;
-  prefixHashes: string[];
-  summary: string;
-}
-export interface ContextCheckpointStore {
-  load(sessionId: string): Promise<ContextCheckpoint | null>;
-  save(sessionId: string, checkpoint: ContextCheckpoint, expectedRevision: string | null): Promise<boolean>;
-}
+export type { ContextCheckpoint, ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 
 const checkpointMessage = (summary: string) => ({
   role: "user",

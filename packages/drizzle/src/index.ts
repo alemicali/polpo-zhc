@@ -142,10 +142,10 @@ export interface DrizzleStores {
   codingSessionStore: CodingSessionStoreLike;
   expoTokenStore: DrizzleExpoTokenStore;
   pushSubscriptionStore: DrizzlePushSubscriptionStore;
-  tokenUsageStore: TokenUsageStore;
+  tokenUsageStore: DrizzleTokenUsageStore & TokenUsageStore;
   contextCheckpointStore: ContextCheckpointStore;
-  appRegistryStore: AppRegistryStore & { setEmitter(emit?: unknown): void };
-  dataRegistryStore: DataRegistryStore & { setEmitter(emit?: unknown): void };
+  appRegistryStore: DrizzleAppRegistryStore & AppRegistryStore;
+  dataRegistryStore: DrizzleDataRegistryStore & DataRegistryStore;
   companyBrainStore: CompanyBrainStore;
   whatsappStore: WhatsAppMessageStore;
 }

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ContextCheckpoint, ContextCheckpointStore } from "@polpo-ai/server";
+import { isValidContextCheckpoint, type ContextCheckpoint, type ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 
 /** Atomic sidecar, private permissions, compare-and-swap against stale turns. */
 export class FileContextCheckpointStore implements ContextCheckpointStore {
@@ -13,12 +13,8 @@ export class FileContextCheckpointStore implements ContextCheckpointStore {
   }
   private read(sessionId: string): ContextCheckpoint | null {
     try {
-      const value = JSON.parse(readFileSync(this.file(sessionId), "utf8"));
-      if (value.version !== 1 || typeof value.revision !== "string" || typeof value.scope !== "string" ||
-          typeof value.summary !== "string" || value.summary.length > 25_000 ||
-          !Array.isArray(value.prefixHashes) || !value.prefixHashes.length ||
-          !value.prefixHashes.every((hash: unknown) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))) return null;
-      return value;
+      const value: unknown = JSON.parse(readFileSync(this.file(sessionId), "utf8"));
+      return isValidContextCheckpoint(value) ? value : null;
     } catch { return null; }
   }
   async load(sessionId: string) { return this.read(sessionId); }
