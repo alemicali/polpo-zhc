@@ -311,7 +311,9 @@ export class ChannelGateway {
   /** Like handleMessage, keeping inline buttons for channels that can render them. */
   async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
     const reply = await this.routeMessage(msg);
-    return typeof reply === "string" ? { text: reply } : reply;
+    const out = typeof reply === "string" ? { text: reply } : reply;
+    if (msg.group) await this.hearGroup(msg, out?.text);
+    return out;
   }
 
   private async routeMessage(msg: InboundMessage): Promise<string | GatewayReply | undefined> {
@@ -446,6 +448,22 @@ export class ChannelGateway {
   }
 
   /**
+   * Feed the group's transcript (shared by the instance's bots): the person's message, heard
+   * once whichever bot got it, and this bot's reply. The classifier reads it to tell who is
+   * involved in the conversation.
+   */
+  private async hearGroup(msg: InboundMessage, reply: string | undefined): Promise<void> {
+    if (!this.intent || !msg.text.trim() || msg.text.startsWith("/")) return;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    const person = msg.displayName ?? msg.externalId;
+    this.intent.hear(conversation, { name: person, text: msg.text }, msg.messageId);
+    if (reply?.trim()) {
+      const me = await this.intentCandidate(conversation).catch(() => undefined);
+      this.intent.hear(conversation, { name: me?.name ?? this.interlocutorName(), text: reply, agent: true, to: person });
+    }
+  }
+
+  /**
    * An unaddressed group message: should this bot answer it anyway? Asked before the message is
    * kept as context. True only in intent mode, in an enabled group, above the threshold.
    */
@@ -453,16 +471,15 @@ export class ChannelGateway {
     if (!msg.group || msg.group.addressed || !this.intentMode() || !msg.messageId) return false;
     if (!msg.text.trim() || msg.text.startsWith("/")) return false;
     const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
-    const now = Date.now();
-    const earlier = (this.groupContext.get(conversation) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
+    const me = await this.intentCandidate(conversation);
+    if (!me) return false;
     const decision = await this.intent!.decide({
       conversation,
       messageId: msg.messageId,
       title: msg.group.title,
       speaker: msg.displayName ?? msg.externalId,
       text: msg.text,
-      earlier: earlier.map(l => ({ name: l.name, text: l.text })),
-    });
+    }, me);
     const p = decision[this.key] ?? 0;
     return p >= (this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD);
   }
@@ -507,7 +524,6 @@ export class ChannelGateway {
       return `I'm not enabled in this group yet. Someone already authorized to talk to ${this.interlocutorName()} can enable me by sending /enable here.`;
     }
     if (command === "/disable") return this.disableGroup(msg, peerId);
-    this.intent?.noteReply(this.conversationId(msg, peerId), this.interlocutorName());
     await this.peerStore.upsertPeer({
       channel: msg.channel,
       externalId: msg.externalId,
