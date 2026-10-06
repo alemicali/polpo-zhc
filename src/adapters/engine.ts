@@ -11,12 +11,15 @@ import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
 import {
   buildAgentSystemPrompt,
-  compactContextMessages,
+  buildSummaryPrompt,
+  ContextCompactor,
   contextBudgetForModel,
   estimateContextTokens,
-  selectCompactionCut,
-  summarizeContextMessages,
+  isContextOverflowError,
+  parseSummary,
+  type CompactionInfo,
 } from "@polpo-ai/core";
+import { effectiveCompactionSettings } from "../core/config.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -31,7 +34,7 @@ export function createActivity(): AgentActivity {
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
-import { resolveModel, streamSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
@@ -500,39 +503,37 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
   const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
-  const contextBudget = contextBudgetForModel(model);
+  // ── Context compaction (packages/core/src/context-compactor.ts) ──
+  // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
+  // between calls (the prompt cache survives), and recompacts only when the window fills again.
+  const compactionSettings = effectiveCompactionSettings(ctx?.compaction, agentConfig.compaction);
+  const contextBudget = contextBudgetForModel(model, compactionSettings);
+  let compactor: ContextCompactor;
+  /** Messages sent in the last model call (to pair the provider's usage with them). */
+  let lastProjectedCount = 0;
+  /** Set after a "context too long" error: the next call compacts harder. */
+  let forceNextCompaction: "overflow" | undefined;
+  const recordCompaction = (info: CompactionInfo, durableFacts?: string[]) => {
+    activity.compactions = (activity.compactions ?? 0) + 1;
+    activity.lastCompaction = { ...info, at: new Date().toISOString(), ...(durableFacts?.length ? { durableFacts } : {}) };
+    handle.onTranscript?.({ type: "compaction", ...info, ...(durableFacts?.length ? { durableFacts: durableFacts.length } : {}) });
+  };
+  let pendingFacts: string[] | undefined;
   const agent = new Agent({
-    streamFn: streamSimpleWithAuth,
-    transformContext: async (messages) => {
-      const estimate = estimateContextTokens({
-        systemPrompt: initialSystemPrompt,
-        messages: messages as any[],
-        tools: codingTools,
-      });
-      if (estimate <= contextBudget.softLimit) return messages;
-      if (messages.length < 2) {
-        return [{
-          role: "user",
-          content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
-          timestamp: Date.now(),
-        }];
+    // The task id keys provider-side caching/affinity; the long retention keeps the cached prefix
+    // across tool calls that take minutes (builds, browsing), which the 5-minute default loses.
+    streamFn: (streamModel, context, options) =>
+      streamSimpleWithAuth(streamModel, context, { ...options, sessionId: task.id, cacheRetention: "long" }),
+    transformContext: async (messages, signal) => {
+      const force = forceNextCompaction;
+      forceNextCompaction = undefined;
+      const { messages: projected, info } = await compactor.prepare(messages as any[], { force, signal });
+      if (info) {
+        recordCompaction(info, pendingFacts);
+        pendingFacts = undefined;
       }
-      const cut = selectCompactionCut(messages as any[], contextBudget.keepRecentTokens);
-      const summary = summarizeContextMessages((messages as any[]).slice(0, cut));
-      const compacted = compactContextMessages(messages as any[], cut, summary);
-      const compactedEstimate = estimateContextTokens({
-        systemPrompt: initialSystemPrompt,
-        messages: compacted,
-        tools: codingTools,
-      });
-      if (compactedEstimate <= contextBudget.softLimit) {
-        return compacted as unknown as AgentMessage[];
-      }
-      return [{
-        role: "user",
-        content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
-        timestamp: Date.now(),
-      }];
+      lastProjectedCount = projected.length;
+      return projected as unknown as AgentMessage[];
     },
     initialState: {
       // Mailboxes section is added later (handle.done) after vault is async-resolved.
@@ -546,6 +547,34 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       streamMessage: null,
       pendingToolCalls: new Set(),
     } as any,
+  });
+  const summaryModel = (() => {
+    if (!compactionSettings.model) return model;
+    try { return resolveModel(compactionSettings.model); } catch { return model; }
+  })();
+  compactor = new ContextCompactor({
+    budget: contextBudget,
+    settings: compactionSettings,
+    // what goes with every call besides the messages: the tools the agent has now
+    baseTokens: () => {
+      const state = agent.state as unknown as { tools: unknown[]; systemPrompt?: string; messages: Array<{ role: string }> };
+      // the system prompt counts once: from the transcript when it is there, from the state otherwise
+      const inTranscript = state.messages[0]?.role === "system";
+      return estimateContextTokens({ systemPrompt: inTranscript ? undefined : state.systemPrompt, messages: [], tools: state.tools });
+    },
+    summarize: async ({ messages, previousSummary, focus, signal }) => {
+      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus });
+      const response = await completeSimpleWithAuth(summaryModel, {
+        systemPrompt,
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
+      }, { signal, maxTokens: 8_000 } as any);
+      if ((response as any).stopReason === "error") throw new Error((response as any).errorMessage ?? "summary failed");
+      const text = (response.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
+      const parsed = parseSummary(text);
+      return { summary: parsed.summary, durableFacts: parsed.durableFacts, model: `${summaryModel.provider}:${summaryModel.id}` };
+    },
+    // the facts travel with the compaction record; the orchestrator saves them to the agent's memory
+    onDurableFacts: (facts) => { pendingFacts = facts; },
   });
   const directionAcks = new WeakMap<object, string[]>();
 
@@ -604,8 +633,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         if (msg && "content" in msg && msg.role === "assistant") {
           // Accumulate token usage
           if ("usage" in msg && msg.usage && typeof msg.usage === "object") {
-            const u = msg.usage as { totalTokens?: number };
+            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number };
             if (u.totalTokens) activity.totalTokens += u.totalTokens;
+            // the real size of what was sent: next compaction decisions start from it
+            compactor.noteUsage((u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0), lastProjectedCount);
           }
           for (const block of msg.content) {
             if (block.type === "text") {
@@ -737,6 +768,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         await agent.prompt(continuationMessage);
       } else {
         await agent.prompt(buildPrompt(task));
+      }
+
+      // "Context too long" from the provider: compact harder and continue once.
+      const last = agent.state.messages[agent.state.messages.length - 1] as any;
+      if (last?.role === "assistant" && last.stopReason === "error" && isContextOverflowError(String(last.errorMessage ?? ""))) {
+        agent.state.messages = agent.state.messages.slice(0, -1);
+        forceNextCompaction = "overflow";
+        handle.onTranscript?.({ type: "error", message: `Context overflow: compacting and retrying (${String(last.errorMessage).slice(0, 200)})` });
+        await agent.continue();
       }
 
       // Extract final text from the last assistant message

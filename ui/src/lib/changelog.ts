@@ -27,6 +27,26 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-06-context-compaction",
+    date: "2026-10-06",
+    kind: "improved",
+    title: "Conversazioni lunghe: il contesto si compatta meglio",
+    summary: "Chat e task lunghi restano nella finestra del modello senza perdere il filo. Scrivi /compact per farlo quando vuoi.",
+    body: [
+      "Quando una conversazione o un task si avvicina al limite del modello, Polpo ora **compatta il contesto** in modo più intelligente:",
+      "",
+      "- prima **svuota i vecchi risultati degli strumenti** (se erano stati salvati su file, resta il percorso);",
+      "- poi fa **riassumere da un modello** la parte più vecchia, aggiornando il riassunto precedente invece di rifarlo da capo;",
+      "- la **richiesta del task** non viene mai riassunta, e i **fatti importanti** finiscono nella memoria dell'agente.",
+      "",
+      "Il riassunto resta lo stesso tra una chiamata e l'altra, quindi la cache del modello funziona e si spende meno.",
+      "",
+      "Scrivi **/compact** in chat (anche su Telegram, con un agente) per compattare subito; puoi aggiungere su cosa concentrarsi, per esempio `/compact le decisioni sul prezzo`. Ogni compattazione compare in **Events**.",
+      "",
+      "Gli output molto grandi degli strumenti ora vengono **salvati su file** invece di essere tagliati: l'agente vede un'anteprima e il percorso per rileggerli.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-06-events",
     date: "2026-10-06",
     kind: "improved",

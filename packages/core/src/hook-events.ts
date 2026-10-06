@@ -210,6 +210,7 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "orchestrator:stopped": { label: "Orchestrator stopped", description: "The supervisor loop stopped (work done, stop requested, or error).", category: "orchestrator", placeholders: ["reason", "message"] },
   "playbook:changed": { label: "Playbook changed", description: "A playbook was created, updated, deleted or installed.", category: "mission", placeholders: ["name", "action", "source", "by"] },
   "playbook:run": { label: "Playbook run", description: "A playbook was run and became a mission.", category: "mission", placeholders: ["name", "missionId", "params", "source", "by"] },
+  "context:compacted": { label: "Context compacted", description: "A chat or a task run was compacted to fit the model's context window (old tool results cleared and/or earlier messages summarized).", category: "session", placeholders: ["scope", "sessionId", "taskId", "agentName", "reason", "mode", "beforeTokens", "afterTokens", "compactionCount", "model"] },
   "log": { label: "System log", description: "A text message from the server (info, warning, error).", category: "orchestrator", placeholders: ["level", "message"] },
 };
 

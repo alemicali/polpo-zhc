@@ -349,6 +349,8 @@ export interface AgentConfig {
    *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
    *  Falls back to the global `settings.reasoning` when not set. */
   reasoning?: ReasoningLevel;
+  /** Context compaction for this agent's runs and chats (overrides `settings.compaction`). */
+  compaction?: import("./context-compactor.js").CompactionSettings;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -416,6 +418,10 @@ export interface AgentActivity {
   lastUpdate: string;       // ISO timestamp of last activity
   summary?: string;         // agent's last text output / message
   sessionId?: string;       // SDK session ID for transcript access
+  /** Context compactions in this run so far. */
+  compactions?: number;
+  /** The latest compaction, with the durable facts it found (saved to the agent's memory). */
+  lastCompaction?: import("./context-compactor.js").CompactionInfo & { at: string; durableFacts?: string[] };
 }
 
 export interface AgentProcess {
@@ -664,6 +670,8 @@ export interface RunnerConfig {
   emailAllowedDomains?: string[];
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
+  /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
+  compaction?: import("./context-compactor.js").CompactionSettings;
   /** WhatsApp message DB path (for whatsapp_* agent tools). */
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
@@ -860,6 +868,8 @@ export interface PolpoSettings {
   /** Days of orchestrator event logs to keep; older ones are removed at startup and daily.
    *  0 keeps them forever. Default: 30 */
   logRetentionDays?: number;
+  /** How long conversations and task runs are compacted when they fill the model's window. */
+  compaction?: import("./context-compactor.js").CompactionSettings;
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */

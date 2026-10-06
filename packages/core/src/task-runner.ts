@@ -32,6 +32,8 @@ export class TaskRunner {
   private knownFiles = new Map<string, Set<string>>();
   /** Outcome ids already announced per running task (task:outcome). */
   private knownOutcomes = new Map<string, Set<string>>();
+  /** Compactions already announced per running task (context:compacted). */
+  private knownCompactions = new Map<string, number>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -326,7 +328,31 @@ export class TaskRunner {
       });
     }
 
+    // Announce context compactions of running agents; their durable facts go to the agent's memory
+    for (const r of active) {
+      const count = r.activity.compactions ?? 0;
+      if (count <= (this.knownCompactions.get(r.taskId) ?? 0) || !r.activity.lastCompaction) continue;
+      this.knownCompactions.set(r.taskId, count);
+      const { at: _at, durableFacts, ...info } = r.activity.lastCompaction;
+      let savedFacts = 0;
+      if (durableFacts?.length) {
+        const scope = agentMemoryScope(r.agentName);
+        // incremental summaries repeat earlier facts: only new ones, a few per compaction
+        const known = ((await this.ctx.memoryStore.get(scope).catch(() => "")) ?? "").toLowerCase();
+        for (const fact of durableFacts.slice(0, 10)) {
+          const line = fact.length > 300 ? `${fact.slice(0, 297)}...` : fact;
+          if (known.includes(line.toLowerCase())) continue;
+          try { await this.ctx.memoryStore.append(line, scope); savedFacts += 1; } catch { /* memory is best effort */ }
+        }
+      }
+      this.ctx.emitter.emit("context:compacted", {
+        scope: "task", taskId: r.taskId, runId: r.id, agentName: r.agentName, ...info,
+        ...(savedFacts ? { savedFacts } : {}),
+      });
+    }
+
     // Cleanup stale entries for tasks no longer active
+    for (const taskId of this.knownCompactions.keys()) if (!seenTaskIds.has(taskId)) this.knownCompactions.delete(taskId);
     for (const taskId of this.lastActivity.keys()) {
       if (!seenTaskIds.has(taskId)) {
         this.lastActivity.delete(taskId);
@@ -545,6 +571,7 @@ export class TaskRunner {
       notifySocket: this.ctx.notifySocketPath,
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
       reasoning: this.ctx.config.settings.reasoning,
+      compaction: this.ctx.config.settings.compaction,
       whatsappDbPath,
       whatsappProfilePath,
     };

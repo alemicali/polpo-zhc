@@ -217,6 +217,20 @@ export interface PolpoEventMap {
   // Filesystem
   "file:changed": { path: string; dir: string; action: "created" | "modified" | "deleted" | "renamed"; source: "agent" | "server" | "chat" };
 
+  // Context compaction (chat sessions and task runs)
+  /** A conversation or a task run was compacted to fit the model's window. */
+  "context:compacted": {
+    scope: "chat" | "task";
+    sessionId?: string; taskId?: string; runId?: string; agentName?: string;
+    reason: "budget" | "overflow" | "manual";
+    mode: "prune" | "summary" | "fallback" | "truncate";
+    beforeTokens: number; afterTokens: number; hardLimit: number;
+    removedMessages: number; prunedToolResults: number; compactionCount: number; durationMs: number;
+    model?: string; focus?: string; fallbackReason?: string;
+    /** Durable facts saved to memory by this compaction. */
+    savedFacts?: number;
+  } & EventOrigin;
+
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;
 

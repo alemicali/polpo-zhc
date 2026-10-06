@@ -386,6 +386,8 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.maxAssessmentRetries != null) settings.maxAssessmentRetries = raw.maxAssessmentRetries;
   if (raw?.maxConcurrency != null) settings.maxConcurrency = raw.maxConcurrency;
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
+  const compaction = normalizeCompactionSettings(raw?.compaction);
+  if (compaction) settings.compaction = compaction;
 
   // Extended settings: notifications, approval gates, escalation, SLA, scheduling, quality
   if (raw?.approvalGates) settings.approvalGates = raw.approvalGates;
@@ -512,4 +514,28 @@ export function generatePolpoConfigDefault(
     config.providers = options.providers;
   }
   return config;
+}
+
+/** Keep only well-formed compaction settings (unknown keys and wrong types are dropped). */
+export function normalizeCompactionSettings(raw: unknown): import("@polpo-ai/core").CompactionSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: import("@polpo-ai/core").CompactionSettings = {};
+  if (typeof r.auto === "boolean") out.auto = r.auto;
+  if (typeof r.prune === "boolean") out.prune = r.prune;
+  if (typeof r.memoryFlush === "boolean") out.memoryFlush = r.memoryFlush;
+  if (typeof r.thresholdPct === "number" && r.thresholdPct > 0.2 && r.thresholdPct < 1) out.thresholdPct = r.thresholdPct;
+  if (typeof r.reserveTokens === "number" && r.reserveTokens > 0) out.reserveTokens = Math.floor(r.reserveTokens);
+  if (typeof r.keepRecentTokens === "number" && r.keepRecentTokens > 0) out.keepRecentTokens = Math.floor(r.keepRecentTokens);
+  if (typeof r.summaryTimeoutMs === "number" && r.summaryTimeoutMs >= 1_000) out.summaryTimeoutMs = Math.floor(r.summaryTimeoutMs);
+  if (typeof r.model === "string" && r.model.trim()) out.model = r.model.trim();
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Instance settings with the agent's own compaction settings on top. */
+export function effectiveCompactionSettings(
+  global: import("@polpo-ai/core").CompactionSettings | undefined,
+  agent: import("@polpo-ai/core").CompactionSettings | undefined,
+): import("@polpo-ai/core").CompactionSettings {
+  return { ...(global ?? {}), ...(normalizeCompactionSettings(agent) ?? {}) };
 }

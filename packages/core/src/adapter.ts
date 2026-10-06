@@ -62,6 +62,8 @@ export interface SpawnContext {
   emailAllowedDomains?: string[];
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
+  /** Instance compaction settings; the agent's own settings apply on top. */
+  compaction?: import("./context-compactor.js").CompactionSettings;
   /** Consistent conversation messages restored for a manual continuation. */
   resumeMessages?: unknown[];
   /** Human direction that triggered this continuation run. */

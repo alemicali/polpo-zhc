@@ -29,7 +29,8 @@ export const POLPO_EVENT_NAMES = [
   "task:complete-blocked", "mission:created", "mission:updated", "mission:aborted",
   "schedule:updated", "schedule:removed", "schedule:skipped", "watcher:action-completed",
   "watcher:action-failed", "background-wait:requeued", "approval:auto-blocked",
-  "orchestrator:stopping", "orchestrator:stopped", "playbook:changed", "playbook:run", "log",
+  "orchestrator:stopping", "orchestrator:stopped", "playbook:changed", "playbook:run",
+  "context:compacted", "log",
 ] as const;
 
 export type PolpoEventName = typeof POLPO_EVENT_NAMES[number];

@@ -20,17 +20,20 @@ import { streamSSE } from "hono/streaming";
 import { nanoid } from "nanoid";
 import {
   agentMemoryScope,
-  compactContextMessages,
+  buildSummaryPrompt,
+  ContextCompactor,
   contextBudgetForModel,
   estimateContextTokens,
-  selectCompactionCut,
-  summarizeContextMessages,
+  isContextOverflowError,
+  parseSummary,
+  type CompactionSettings,
 } from "@polpo-ai/core";
+import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
 import { sessionLeases } from "../session-lease.js";
 import { INTERNAL_CALL_HEADER, isInternalCall } from "../internal-call.js";
-import { contextCheckpointProjection, type ContextCheckpointStore } from "../context-checkpoint.js";
+import { loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpointStore } from "../context-checkpoint.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 
 const DEFAULT_MAX_TURNS = 200;
@@ -200,6 +203,11 @@ const completionRequestSchema = z.object({
   }),
   project: z.string().optional().openapi({
     description: "Deprecated. Ignored.",
+  }),
+  compact: z.object({
+    focus: z.string().max(500).optional().openapi({ description: "What the summary should pay particular attention to." }),
+  }).optional().openapi({
+    description: "Compact the session's context now instead of answering: the earlier conversation is summarized (as when the window fills) and the checkpoint is saved for the next turns. Requires x-session-id of an existing session. Returns { compaction } without calling the model for an answer.",
   }),
 });
 
@@ -460,6 +468,10 @@ export interface CompletionRouteDeps {
   }>;
   /** LLM streaming function (streamSimple from pi-ai). */
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
+  /** One-shot completion (completeSimple from pi-ai): writes compaction summaries. Without it the deterministic extract is used. */
+  completeLLM?: (model: any, opts: { systemPrompt: string; messages: any[] }, options?: any) => Promise<any>;
+  /** Resolve a "provider:model" spec (the compaction summary model). */
+  resolveModel?: (spec: string) => any;
   /** Persist provider-reported token usage for dashboard aggregation. */
   recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
   /**
@@ -583,6 +595,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     let effectiveTools: any[];
     let effectiveToolExecutor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     let isInteractiveFn: ((name: string) => boolean) | undefined;
+    /** The agent's own compaction settings (agent-direct chats), applied over the instance ones. */
+    let agentCompactionSettings: Record<string, unknown> | undefined;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
 
@@ -594,6 +608,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }
 
+      agentCompactionSettings = agentConfig.compaction;
       // Per-agent maxTurns override
       if (typeof agentConfig.maxTurns === "number" && agentConfig.maxTurns > 0) {
         maxTurns = Math.floor(agentConfig.maxTurns);
@@ -718,7 +733,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       // Background-wait continuations and server-started answers (a branch replying to its last
       // user message) run on a conversation whose user message is already stored.
       const skipUserPersistence = c.req.header("x-polpo-internal-continuation") === "background-wait"
-        || (internal && c.req.header("x-polpo-skip-user-message") === "1");
+        || (internal && c.req.header("x-polpo-skip-user-message") === "1")
+        || !!body.compact;
       const lastUserMsg = skipUserPersistence
         ? undefined
         : [...body.messages].reverse().find(m => m.role === "user");
@@ -769,81 +785,86 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       c.header("x-session-id", sessionId);
     }
 
-    const contextBudget = contextBudgetForModel(m ?? {});
+    // ── Context compaction (packages/core/src/context-compactor.ts) ──
+    // The full conversation (caller history + this turn's loop) stays intact in `messages`;
+    // the model gets a projection: checkpoint summary + recent messages, stable between calls.
+    // The checkpoint persists per session (verified by message hashes), so later requests
+    // start from it instead of compacting again.
+    const compactionSettings: CompactionSettings = {
+      ...(deps.getConfig()?.settings?.compaction ?? {}),
+      ...((agentCompactionSettings as CompactionSettings | undefined) ?? {}),
+    };
+    const contextBudget = contextBudgetForModel(m ?? {}, compactionSettings);
     const usageSource: TokenUsageRecord["source"] = c.req.header("x-polpo-internal-continuation") === "background-wait"
       ? "background_wait"
       : agentMode ? "agent_chat" : "orchestrator_chat";
 
     const session = sessionId && sessionStore ? await sessionStore.getSession(sessionId) : undefined;
-    const projection = await contextCheckpointProjection(
-      session ? deps.contextCheckpoints : undefined, sessionId,
-      JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]), piMessages,
-    );
+    const checkpointScope = JSON.stringify([session?.createdAt, body.agent ?? null, m?.provider, m?.id]);
+    const checkpointStore = session ? deps.contextCheckpoints : undefined;
+    const checkpoint = await loadContextCheckpoint(checkpointStore, sessionId, checkpointScope, piMessages)
+      .catch(() => null);
+    let checkpointRevision = checkpoint?.revision ?? null;
+    const summaryModel = compactionSettings.model && deps.resolveModel
+      ? (() => { try { return deps.resolveModel!(compactionSettings.model!); } catch { return m; } })()
+      : m;
+    const memoryScope = agentMode && body.agent ? agentMemoryScope(body.agent) : undefined;
+    let savedFacts = 0;
+    const compactor = new ContextCompactor({
+      budget: contextBudget,
+      settings: compactionSettings,
+      pinned: () => 0,
+      baseTokens: () => estimateContextTokens({ systemPrompt: fullSystemPrompt, messages: [], tools: effectiveTools }),
+      summarize: deps.completeLLM ? async ({ messages: folded, previousSummary, focus, signal }) => {
+        const { systemPrompt, prompt } = buildSummaryPrompt({ messages: folded, previousSummary, focus });
+        const response = await deps.completeLLM!(summaryModel, {
+          systemPrompt,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
+        }, { signal, maxTokens: 8_000 });
+        if (response?.stopReason === "error") throw new Error(response.errorMessage ?? "summary failed");
+        const text = (response?.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
+        const parsed = parseSummary(text);
+        return { summary: parsed.summary, durableFacts: parsed.durableFacts, model: `${summaryModel?.provider}:${summaryModel?.id}` };
+      } : undefined,
+      onDurableFacts: async (facts) => {
+        const memory = deps.getMemoryStore?.();
+        if (!memory) return;
+        const known = String((await memory.get(memoryScope).catch(() => "")) ?? "").toLowerCase();
+        for (const fact of facts.slice(0, 10)) {
+          const line = redactSecrets(fact.length > 300 ? `${fact.slice(0, 297)}...` : fact);
+          if (known.includes(line.toLowerCase())) continue;
+          try { await memory.append(line, memoryScope); savedFacts += 1; } catch { /* best effort */ }
+        }
+      },
+    });
+    if (checkpoint) compactor.restoreState({ covered: checkpoint.covered, summary: checkpoint.summary, pruned: [], count: checkpoint.count });
+    /** Messages sent in the last model call, to pair the provider's usage with them. */
+    let lastProjectedCount = 0;
 
-    const prepareContext = async (current: any[], force = false) => {
-      const beforeTokens = estimateContextTokens({
-        systemPrompt: fullSystemPrompt,
-        messages: current,
-        tools: effectiveTools,
-      });
-      if (!force && beforeTokens <= contextBudget.softLimit) {
-        return { messages: current, info: null };
+    const prepareContext = async (current: any[], force?: "overflow" | "manual", focus?: string) => {
+      savedFacts = 0;
+      const { messages: projected, info } = await compactor.prepare(current, { force, focus });
+      lastProjectedCount = projected.length;
+      if (!info) return { messages: projected, info: null };
+      // Persist the summary for the caller-visible history it covers (never secrets, never the
+      // loop's raw tool output). A storage failure must not fail the completion.
+      const state = compactor.getState();
+      if (state.summary && state.covered > 0) {
+        await saveContextCheckpoint(checkpointStore, sessionId, checkpointScope, piMessages,
+          Math.min(state.covered, piMessages.length), redactSecrets(state.summary), state.count, checkpointRevision)
+          .then((revision) => { if (revision) checkpointRevision = revision; })
+          .catch(error => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
       }
-
-      const cut = selectCompactionCut(
-        current,
-        force ? Math.floor(contextBudget.keepRecentTokens / 2) : contextBudget.keepRecentTokens,
-      );
-      const prefix = cut > 0 ? current.slice(0, cut) : current;
-      let checkpointPrefix = prefix;
-      const summary = summarizeContextMessages(prefix);
-      let compacted = cut > 0
-        ? compactContextMessages(current, cut, summary)
-        : [{
-            role: "user",
-            content: `[Context checkpoint: earlier conversation compacted]\n\n${summary}\n\n[End context checkpoint]`,
-            timestamp: Date.now(),
-          }];
-      let afterTokens = estimateContextTokens({
-        systemPrompt: fullSystemPrompt,
-        messages: compacted,
-        tools: effectiveTools,
+      deps.emit("context:compacted", {
+        scope: "chat", ...(sessionId ? { sessionId } : {}), ...(body.agent ? { agentName: body.agent } : {}),
+        ...info, ...(savedFacts ? { savedFacts } : {}),
       });
-
-      // A single oversized recent tool result can still exceed the budget.
-      // Collapse the projection further while leaving the persisted transcript untouched.
-      if (afterTokens > contextBudget.softLimit) {
-        checkpointPrefix = current;
-        compacted = [{
-          role: "user",
-          content: `[Context checkpoint: earlier conversation compacted]\n\n${summarizeContextMessages(current)}\n\n[End context checkpoint]`,
-          timestamp: Date.now(),
-        }];
-        afterTokens = estimateContextTokens({
-          systemPrompt: fullSystemPrompt,
-          messages: compacted,
-          tools: effectiveTools,
-        });
-      }
-
-      // Keep only the stable caller-history prefix in durable storage. A
-      // storage failure must not prevent an otherwise valid completion.
-      await projection.remember(checkpointPrefix, compacted[0])
-        .catch(error => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
-      return {
-        messages: compacted,
-        info: {
-          beforeTokens,
-          afterTokens,
-          hardLimit: contextBudget.hardLimit,
-          removedMessages: Math.max(0, current.length - compacted.length),
-          reason: force ? "overflow_recovery" : "budget",
-        },
-      };
+      return { messages: projected, info };
     };
 
     const recordResponseUsage = async (response: any): Promise<void> => {
       const usage = response?.usage;
+      if (usage) compactor.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0), lastProjectedCount);
       if (!usage || !deps.recordTokenUsage) return;
       try {
         await deps.recordTokenUsage({
@@ -864,8 +885,15 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       }
     };
 
-    const isContextOverflowError = (message: string): boolean =>
-      /context.{0,20}(overflow|length|window)|prompt is too long|too many tokens|maximum context/i.test(message);
+
+    // ── Manual compaction: summarize now, save the checkpoint, no answer ──
+    if (body.compact) {
+      if (!sessionId || isFirstTurn) {
+        return c.json({ error: { message: "Manual compaction needs an existing session (x-session-id)", type: "invalid_request_error", code: "session_required" } }, 400);
+      }
+      const done = await prepareContext([...piMessages], "manual", body.compact.focus?.trim() || undefined);
+      return c.json({ ok: true, data: { compaction: done.info } });
+    }
 
     if (body.stream) {
       // ── Streaming mode ──
@@ -935,7 +963,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         let carried: Array<{ id: string; content: string }> = [];
         let carriedStored = 0;
         let assistantMsgId: string | null = null;
-        let messages: any[] = [...projection.messages];
+        let messages: any[] = [...piMessages];
         let finalText = "";
         const toolCallsAccum: any[] = [];
         const segmentsAccum: MessageSegment[] = [];
@@ -1011,16 +1039,15 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             if (abortController.signal.aborted) break;
 
             const prepared = await prepareContext(messages);
-            messages = prepared.messages;
             if (prepared.info) {
               await emit(sseChunk(completionId, {}, null, { context_compaction: prepared.info }));
             }
 
             const streamResult = deps.streamLLM(m, {
               systemPrompt: fullSystemPrompt,
-              messages,
+              messages: prepared.messages,
               tools: effectiveTools,
-            }, { ...streamOpts, signal: abortController.signal });
+            }, { ...streamOpts, ...(sessionId ? { sessionId } : {}), signal: abortController.signal });
             const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
               ? streamResult
               : await streamResult;
@@ -1085,8 +1112,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             if (streamError) {
               if (overflowRetries === 0 && isContextOverflowError(streamError)) {
                 overflowRetries += 1;
-                const recovered = await prepareContext(messages, true);
-                messages = recovered.messages;
+                const recovered = await prepareContext(messages, "overflow");
                 if (recovered.info) {
                   await emit(sseChunk(completionId, {}, null, { context_compaction: recovered.info }));
                 }
@@ -1484,7 +1510,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         assistantMsgId = placeholder.id;
       }
 
-      let messages: any[] = [...projection.messages];
+      let messages: any[] = [...piMessages];
       let finalText = "";
       const toolCallsAccum: any[] = [];
       const segmentsAccum: MessageSegment[] = [];
@@ -1494,12 +1520,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       try {
         for (let turn = 0; turn < maxTurns; turn++) {
           const prepared = await prepareContext(messages);
-          messages = prepared.messages;
           const streamResult = deps.streamLLM(m, {
             systemPrompt: fullSystemPrompt,
-            messages,
+            messages: prepared.messages,
             tools: effectiveTools,
-          }, streamOpts);
+          }, { ...streamOpts, ...(sessionId ? { sessionId } : {}) });
           const piStream = typeof streamResult?.[Symbol.asyncIterator] === "function"
             ? streamResult
             : await streamResult;
@@ -1520,7 +1545,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           if (streamError) {
             if (overflowRetries === 0 && isContextOverflowError(streamError)) {
               overflowRetries += 1;
-              messages = (await prepareContext(messages, true)).messages;
+              await prepareContext(messages, "overflow");
               continue;
             }
             return c.json({ error: { message: streamError, type: "upstream_error" } }, 502 as any);
