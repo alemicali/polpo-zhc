@@ -330,6 +330,24 @@ export class TelegramCallbackPoller {
     }
   }
 
+  /** Member counts of groups (getChatMemberCount), kept for a while: who is in the room matters for intent. */
+  private memberCounts = new Map<string, { n: number; at: number }>();
+
+  /** How many members a group has, bots included; undefined when Telegram does not say. */
+  async memberCount(chatId: string): Promise<number | undefined> {
+    const hit = this.memberCounts.get(chatId);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.n;
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getChatMemberCount?chat_id=${encodeURIComponent(chatId)}`);
+      const body = await res.json() as { ok?: boolean; result?: number };
+      if (body.ok && typeof body.result === "number") {
+        this.memberCounts.set(chatId, { n: body.result, at: Date.now() });
+        return body.result;
+      }
+    } catch { /* unknown: the classifier does without */ }
+    return hit?.n;
+  }
+
   /** The bot's own id and username (getMe): needed to tell which group messages are for it. */
   async getIdentity(): Promise<TelegramIdentity | undefined> {
     if (this.identity || Date.now() - this.identityCheckedAt < 30_000) return this.identity;
@@ -530,7 +548,8 @@ export class TelegramCallbackPoller {
       const line = [mediaLabel(message), text].filter(Boolean).join(" ").trim();
       if (!line) return;
       // groupReplies "intent": the agent may join in, then it answers as if it had been called
-      if (text.trim() && await gateway.joinsByIntent?.(senderId, chatId, text, senderName, String(message.message_id), group)) {
+      if (text.trim() && gateway.joinsByIntent
+        && await gateway.joinsByIntent(senderId, chatId, text, senderName, String(message.message_id), { ...group, members: await this.memberCount(chatId) })) {
         await this.respond(chatId, { threadId, replyTo: message.message_id }, text, inboundMediaOf(message), senderId, senderName, String(message.message_id), { ...group, addressed: true });
         return;
       }

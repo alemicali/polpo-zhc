@@ -26,6 +26,8 @@ export interface InboundGroup {
   threadId?: number;
   /** Meant for the bot (mention, reply, command); otherwise kept as context only. */
   addressed: boolean;
+  /** How many members the group has, bots included (getChatMemberCount), when known. */
+  members?: number;
 }
 
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";

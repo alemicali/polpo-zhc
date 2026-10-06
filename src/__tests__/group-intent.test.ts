@@ -96,6 +96,23 @@ describe("GroupIntentArbiter", () => {
     expect(log).toHaveBeenCalledWith("warn", expect.stringContaining("429"));
   });
 
+  it("one person alone with one agent: the agent answers, nothing is asked", async () => {
+    const classify = fakeClassifier({ "growth-bot": 0 });
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 0 });
+    expect(await arbiter.decide(message({ text: "I'm talking to you", members: 2 }), GROWTH)).toEqual({ "growth-bot": 1 });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("tells the classifier who is in the room: the people besides the speaker", async () => {
+    const classify = fakeClassifier({});
+    const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 5 });
+    await Promise.all([arbiter.decide(message({ members: 3 }), GROWTH), arbiter.decide(message({ members: 3 }), OPS)]);
+    const group = (classify.mock.calls[0]![0].state as { group: Record<string, unknown> }).group;
+    expect(group).toMatchObject({ members: 3, agentsHere: 2, otherPeopleBesidesSpeaker: 0, speakerIsTheOnlyPerson: true, peopleInTheConversation: ["Ada"] });
+    await arbiter.decide(message({ messageId: "11", members: 6 }), GROWTH);
+    expect((classify.mock.calls[1]![0].state as { group: Record<string, unknown> }).group).toMatchObject({ otherPeopleBesidesSpeaker: 4, speakerIsTheOnlyPerson: false });
+  });
+
   it("the classifier reads the group's transcript", async () => {
     const classify = fakeClassifier({});
     const arbiter = new GroupIntentArbiter({ apiKey: () => "k", classify, windowMs: 0 });
@@ -187,6 +204,7 @@ describe("TelegramCallbackPoller — joining in by intent", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: { body?: unknown }) => {
       const method = String(url).split("/").pop()!;
       if (method === "getMe") return new Response(JSON.stringify({ ok: true, result: { id: 999, username: "polpo_test_bot", can_read_all_group_messages: true } }));
+      if (method.startsWith("getChatMemberCount")) return new Response(JSON.stringify({ ok: true, result: 2 }));
       sent.push({ method, body: typeof init?.body === "string" ? JSON.parse(init.body) : init?.body });
       return new Response(JSON.stringify({ ok: true, result: {} }));
     }));
@@ -208,7 +226,7 @@ describe("TelegramCallbackPoller — joining in by intent", () => {
   it("answers an unaddressed message the agent joins, quoting it", async () => {
     const { handle, handler, sent } = poller(true);
     await handle();
-    expect(handler.joinsByIntent).toHaveBeenCalledWith("7", "-100123", "how did the campaign go?", "Ada", "42", { title: "Team", threadId: undefined, addressed: false });
+    expect(handler.joinsByIntent).toHaveBeenCalledWith("7", "-100123", "how did the campaign go?", "Ada", "42", { title: "Team", threadId: undefined, addressed: false, members: 2 });
     expect(handler.handleInboundMessage).toHaveBeenCalledWith("7", "-100123", "how did the campaign go?", "Ada", "42", [], { title: "Team", threadId: undefined, addressed: true });
     expect(sent.find((s) => s.method === "sendMessage")!.body).toMatchObject({ reply_parameters: { message_id: 42 } });
   });

@@ -43,6 +43,8 @@ export interface IntentMessage {
   title?: string;
   speaker: string;
   text: string;
+  /** Members of the group, bots included, when the channel knows. */
+  members?: number;
 }
 
 /** A line of a group conversation: a person, or an agent's reply. */
@@ -147,6 +149,11 @@ export class GroupIntentArbiter {
   private async run(msg: IntentMessage, candidates: IntentCandidate[]): Promise<IntentDecision> {
     const apiKey = this.opts.apiKey();
     if (!apiKey || candidates.length === 0) return {};
+    // One person alone with one agent: whatever they write is for it, no need to ask
+    if (candidates.length === 1 && otherPeople(msg, candidates) === 0) {
+      this.opts.log?.("info", `[group intent] ${msg.title ?? msg.conversation} #${msg.messageId} "${clip(msg.text, 60)}": only ${msg.speaker} and ${candidates[0]!.name} here, ${candidates[0]!.name} answers`);
+      return { [candidates[0]!.key]: 1 };
+    }
 
     const context = intentContext(msg, candidates, this.transcript(msg.conversation));
     const started = Date.now();
@@ -168,6 +175,11 @@ export class GroupIntentArbiter {
   }
 }
 
+/** The people in the group besides the speaker (the agents asked about are bots); null when unknown. */
+export function otherPeople(msg: Pick<IntentMessage, "members">, candidates: IntentCandidate[]): number | null {
+  return msg.members !== undefined ? Math.max(0, msg.members - 1 - candidates.length) : null;
+}
+
 const minutesAgo = (at: number, now: number) => Math.max(0, Math.round((now - at) / 60_000));
 
 /**
@@ -185,8 +197,19 @@ export function intentContext(msg: IntentMessage, candidates: IntentCandidate[],
       talkingWith: [...new Set(mine.map((l) => l.to).filter((x): x is string => !!x))],
     };
   };
+  // who is in the room, counted here (the classifier does not do arithmetic): the people
+  // besides the speaker. The agents asked about are bots, so they are not people.
+  const others = otherPeople(msg, candidates);
+  const people = [...new Set([...transcript.filter((l) => !l.agent).map((l) => l.name), msg.speaker])];
   const state = {
-    group: msg.title ?? "a group chat",
+    group: {
+      title: msg.title ?? "a group chat",
+      members: msg.members ?? null,
+      agentsHere: candidates.length,
+      otherPeopleBesidesSpeaker: others,
+      speakerIsTheOnlyPerson: others === 0,
+      peopleInTheConversation: people,
+    },
     conversation: transcript.map((l) => ({
       from: l.agent ? `${l.name} (agent)` : l.name,
       ...(l.agent && l.to ? { replyingTo: l.to } : {}),
@@ -211,11 +234,14 @@ export function intentContext(msg: IntentMessage, candidates: IntentCandidate[],
         `and ${c.name}'s involvement in state.agentsInGroup.`,
       criteria: {
         true:
-          `The message continues a conversation ${c.name} is involved in: it answers something ${c.name} asked or said, ` +
+          `The speaker is the only person in the group besides the agents (state.group.speakerIsTheOnlyPerson), so the message is meant for the agents, ` +
+          `and ${c.name} is the only agent here or the one whose role fits it best. ` +
+          `Or the message speaks to an agent without naming it ("you", "tu", "can you…") and ${c.name} is the only agent here or the one in the conversation. ` +
+          `Or the message continues a conversation ${c.name} is involved in: it answers something ${c.name} asked or said, ` +
           `follows up on ${c.name}'s last reply, or is a next request from the person ${c.name} was helping. ` +
           `Or it asks a question or makes a request that falls within ${c.name}'s role and responsibilities and that no other agent is already handling.`,
         false:
-          `Small talk or a conversation between people, a message addressed to a specific person, something already answered, ` +
+          `Other people are in the group and the message is small talk or a conversation between them, a message addressed to a specific person, something already answered, ` +
           `a follow-up to another agent's conversation, or a topic outside ${c.name}'s role that another agent in state.agentsInGroup fits better.`,
       },
     };
