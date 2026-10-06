@@ -41,6 +41,22 @@ function sanitizeFtsQuery(raw: string): string {
     .join(" ");
 }
 
+/**
+ * The same tokens as sanitizeFtsQuery(), as a PostgreSQL tsquery for the `search` column
+ * (`to_tsvector('simple', title/description)`): every token must match, the last one as a prefix.
+ * Tokens are letters, digits and `_` only, so they cannot carry tsquery operators.
+ */
+function toPgTsQuery(raw: string): string {
+  const cleaned = raw
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}_\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  const tokens = cleaned.split(" ").filter(Boolean);
+  return tokens.map((tok, i) => i === tokens.length - 1 ? `'${tok}':*` : `'${tok}'`).join(" & ");
+}
+
 export interface TaskStoreSchema {
   tasks: AnyTable;
   missions: AnyTable;
@@ -303,16 +319,16 @@ export class DrizzleTaskStore implements TaskStore {
   /**
    * Cursor-paginated task list, optionally filtered + full-text searched.
    *
-   * - When `q` is set, results come from the FTS5 virtual table
-   *   `tasks_fts` (ranked by relevance). Cursor is ignored because rank
-   *   ordering and updated_at ordering are incompatible.
+   * - When `q` is set, results come from full-text search ranked by
+   *   relevance: the FTS5 virtual table `tasks_fts` on SQLite, the generated
+   *   `search` tsvector column (GIN index) on PostgreSQL. Cursor is ignored
+   *   because rank ordering and updated_at ordering are incompatible.
    * - When `q` is empty, results are ordered by `updated_at DESC` and the
    *   cursor is the `updated_at` of the last item from the previous page.
    * - status / group / assignTo filters are AND-combined with both modes.
    * - `hasMore` is determined by fetching `limit + 1` rows.
-   *
-   * Only implemented for SQLite — Postgres falls back to `getAllTasks()`
-   * + in-memory filtering at the route level.
+   * - If full-text search is unavailable (or `q` has no searchable token),
+   *   a case-insensitive substring match on title/description is used.
    */
   async getTasksPage(opts: {
     limit?: number;
@@ -380,6 +396,8 @@ export class DrizzleTaskStore implements TaskStore {
         void like;
         void err;
       }
+    } else if (opts.q && opts.q.trim().length > 0 && this.dialect === "pg") {
+      rows = await this.searchTasksPg(opts.q, filters, fetchLimit);
     } else {
       // Cursor path.
       const where = [...filters];
@@ -399,6 +417,35 @@ export class DrizzleTaskStore implements TaskStore {
     const tasks = data.map((r) => this.rowToTask(r));
     const nextCursor = hasMore && tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : null;
     return { tasks, nextCursor, hasMore };
+  }
+
+  /**
+   * PostgreSQL full-text search for getTasksPage(): `search @@ tsquery` (GIN index), ranked by
+   * ts_rank with the newest first on ties. Falls back to ILIKE on title/description when the
+   * query has no searchable token or the `search` column is missing (database not migrated).
+   */
+  private async searchTasksPg(q: string, filters: SQL[], fetchLimit: number): Promise<any[]> {
+    const t = this.schema.tasks;
+    const tsQuery = toPgTsQuery(q);
+    if (tsQuery) {
+      const query = sql`to_tsquery('simple', ${tsQuery})`;
+      const search = sql`${t}.${sql.identifier("search")}`;
+      try {
+        return await this.db.select().from(t)
+          .where(and(sql`${search} @@ ${query}`, ...filters))
+          .orderBy(sql`ts_rank(${search}, ${query}) DESC`, desc(t.updatedAt))
+          .limit(fetchLimit);
+      } catch (err) {
+        // 42703 undefined_column: no `search` column (not migrated), use the substring match.
+        const e = err as { code?: string; cause?: { code?: string } };
+        if ((e.code ?? e.cause?.code) !== "42703") throw err;
+      }
+    }
+    const like = `%${q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    return this.db.select().from(t)
+      .where(and(sql`(${t.title} ILIKE ${like} OR ${t.description} ILIKE ${like})`, ...filters))
+      .orderBy(desc(t.updatedAt))
+      .limit(fetchLimit);
   }
 
   /**

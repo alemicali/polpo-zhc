@@ -260,6 +260,71 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(state.processes[0].alive).toBe(true);
       expect(state.processes[0].activity.toolCalls).toBe(5);
     });
+
+    describe("getTasksPage", () => {
+      type PagedStore = { getTasksPage(opts: Record<string, unknown>): Promise<{ tasks: Array<{ id: string; updatedAt: string }>; nextCursor: string | null; hasMore: boolean }> };
+      const page = (opts: Record<string, unknown>) => (stores.taskStore as unknown as PagedStore).getTasksPage(opts);
+      const ids = async (opts: Record<string, unknown>) => (await page(opts)).tasks.map((t) => t.id).sort();
+      let a: string, b: string, c: string;
+
+      beforeEach(async () => {
+        const add = async (title: string, description: string, group: string, assignTo: string, done = false) => {
+          const task = await stores.taskStore.addTask({ title, description, assignTo, group, dependsOn: [], expectations: [], metrics: [], maxRetries: 1 });
+          if (done) await stores.taskStore.unsafeSetStatus(task.id, "done", "test");
+          await new Promise((resolve) => setTimeout(resolve, 3)); // distinct updated_at
+          return task.id;
+        };
+        a = await add("Deploy landing page", "Ship the marketing site", "g1", "dev", true);
+        b = await add("Write blog post", "About the landing redesign", "g2", "writer");
+        c = await add("Fix login bug", "Users cannot sign in", "g1", "dev");
+      });
+
+      it("pages by updated_at, newest first, with a cursor", async () => {
+        const first = await page({ limit: 2 });
+        expect(first.tasks.map((t) => t.id)).toEqual([c, b]);
+        expect(first.hasMore).toBe(true);
+        expect(first.nextCursor).toBe(first.tasks[1].updatedAt);
+        const second = await page({ limit: 2, cursor: first.nextCursor });
+        expect(second.tasks.map((t) => t.id)).toEqual([a]);
+        expect(second).toMatchObject({ hasMore: false, nextCursor: null });
+      });
+
+      it("filters by status, group and assignee", async () => {
+        expect((await page({ status: "pending" })).tasks.map((t) => t.id)).toEqual([c, b]);
+        expect((await page({ group: "g1" })).tasks.map((t) => t.id)).toEqual([c, a]);
+        expect((await page({ assignTo: "dev", status: "pending" })).tasks.map((t) => t.id)).toEqual([c]);
+      });
+
+      it("searches title and description, the last word as a prefix", async () => {
+        expect(await ids({ q: "land" })).toEqual([a, b].sort());
+        expect(await ids({ q: "landing pa" })).toEqual([a]);
+        expect(await ids({ q: "LOGIN!!" })).toEqual([c]);
+        expect(await ids({ q: "sign" })).toEqual([c]);
+        expect(await ids({ q: "landing", status: "pending" })).toEqual([b]);
+        expect(await ids({ q: "landing", group: "g1", assignTo: "dev" })).toEqual([a]);
+        expect(await ids({ q: "nothing-matches" })).toEqual([]);
+        expect(await ids({ q: "%%" })).toEqual([]);
+      });
+
+      it("falls back to a substring match when PostgreSQL has no search column", async () => {
+        if (dialect !== "postgres") return;
+        await pg!.unsafe(`ALTER TABLE "tasks" DROP COLUMN "search"`);
+        try {
+          expect(await ids({ q: "landing pa" })).toEqual([a]);
+          expect(await ids({ q: "LOGIN" })).toEqual([c]);
+          expect(await ids({ q: "100%" })).toEqual([]);
+        } finally {
+          await pg!.unsafe(`ALTER TABLE "tasks" ADD COLUMN "search" tsvector GENERATED ALWAYS AS (setweight(to_tsvector('simple', coalesce("title", '')), 'A') || setweight(to_tsvector('simple', coalesce("description", '')), 'B')) STORED`);
+          await pg!.unsafe(`CREATE INDEX IF NOT EXISTS "idx_pg_tasks_search" ON "tasks" USING gin ("search")`);
+        }
+      });
+
+      it("reports hasMore for search results", async () => {
+        const result = await page({ q: "landing", limit: 1 });
+        expect(result.tasks).toHaveLength(1);
+        expect(result.hasMore).toBe(true);
+      });
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════

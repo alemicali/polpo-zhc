@@ -355,8 +355,9 @@ export function taskRoutes(getDeps: () => {
     const { status, group, assignTo, summary, slim, limit, cursor, q } = c.req.valid("query");
 
     // ── Paginated path ────────────────────────────────────────────────
-    // Triggered by *any* of `limit`, `cursor`, or `q`. Uses the SQLite
-    // FTS5 + cursor query when the store exposes `getTasksPage()`;
+    // Triggered by *any* of `limit`, `cursor`, or `q`. Uses the store's
+    // `getTasksPage()` when it has one (Drizzle: cursor query, full-text
+    // search via SQLite FTS5 or the PostgreSQL `search` tsvector);
     // otherwise falls back to fetch-all + in-memory filtering so the file
     // store and tests keep working.
     const usePagination = limit !== undefined || cursor !== undefined || q !== undefined;
