@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
+import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -43,6 +44,59 @@ function migrateConfig(raw: PolpoFileConfigRaw): PolpoFileConfig {
 export function savePolpoConfig(polpoDir: string, config: PolpoFileConfig): void {
   if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
   writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify(config, null, 2), "utf-8");
+}
+
+/**
+ * Persist only `settings` into polpo.json, preserving everything else in the file as-is
+ * (providers with all their fields, project, legacy keys). Used by the settings API, which
+ * edits an in-memory config whose `providers` / `teams` are parsed views, not file content.
+ */
+export function savePolpoSettings(polpoDir: string, settings: Record<string, unknown>): void {
+  const filePath = join(polpoDir, "polpo.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(filePath)) {
+    try {
+      raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    } catch {
+      throw new Error("polpo.json is not valid JSON — refusing to overwrite it");
+    }
+  }
+  const rawSettings = (raw.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...settings };
+  // Never write values that only came from the environment (e.g. DATABASE_URL) into the file.
+  if (rawSettings.databaseUrl === undefined && next.databaseUrl !== undefined && next.databaseUrl === process.env.DATABASE_URL) {
+    delete next.databaseUrl;
+  }
+  for (const [k, v] of Object.entries(next)) if (v === undefined) delete next[k];
+  if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
+  writeFileSync(filePath, JSON.stringify({ ...raw, settings: next }, null, 2), "utf-8");
+}
+
+/**
+ * Read-modify-write the raw `providers` map of polpo.json (nothing else in the file changes).
+ * Returns the new raw providers map.
+ */
+export function mutatePolpoProviders(
+  polpoDir: string,
+  mutate: (providers: Record<string, unknown>) => void,
+): Record<string, unknown> {
+  const filePath = join(polpoDir, "polpo.json");
+  if (!existsSync(filePath)) throw new Error("polpo.json not found");
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    throw new Error("polpo.json is not valid JSON — refusing to overwrite it");
+  }
+  const providers = (raw.providers && typeof raw.providers === "object" && !Array.isArray(raw.providers)
+    ? { ...(raw.providers as Record<string, unknown>) }
+    : {}) as Record<string, unknown>;
+  mutate(providers);
+  const next = { ...raw };
+  if (Object.keys(providers).length > 0) next.providers = providers;
+  else delete next.providers;
+  writeFileSync(filePath, JSON.stringify(next, null, 2), "utf-8");
+  return providers;
 }
 
 // --- Validation helpers ---
@@ -268,19 +322,19 @@ function validatePipelineStep(step: unknown, path: string, loopNames: Set<string
   }
 }
 
+/**
+ * Parse the polpo.json `providers` map. Keeps every known field (custom providers /
+ * gateways: label, preset, auth, headers, compat, allowPrivateNetwork, timeouts, models…),
+ * drops unknown keys and invalid values, and skips ids that are not valid slugs.
+ */
 export function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
   const providers: Record<string, ProviderConfig> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return providers;
   for (const [name, cfg] of Object.entries(raw)) {
-    if (!cfg || typeof cfg !== "object") continue;
-    const c = cfg as Record<string, unknown>;
-    const pc: ProviderConfig = {};
-    if (typeof c.baseUrl === "string") pc.baseUrl = c.baseUrl;
-    if (typeof c.api === "string") pc.api = c.api as ProviderConfig["api"];
-    if (Array.isArray(c.models)) pc.models = c.models;
-    // Only include if there's actual custom config (not just an empty object)
-    if (pc.baseUrl || pc.api || pc.models) {
-      providers[name] = pc;
-    }
+    if (!name || name === "__proto__" || name === "constructor" || name === "prototype") continue;
+    const pc = parseStoredProvider(cfg);
+    // Only include if there's actual config (not just an empty object)
+    if (pc) providers[name] = pc;
   }
   return providers;
 }

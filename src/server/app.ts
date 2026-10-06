@@ -43,6 +43,7 @@ import {
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
+import { customProviderRoutes } from "./routes/custom-providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
@@ -188,6 +189,38 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Filesystem browsing — always available during setup (used by path picker)
   app.route("/api/v1/filesystem", filesystemRoutes());
+
+  // Custom providers / AI gateways (CRUD, test, discovery). Mounted before the generic
+  // provider routes so "/custom/*" never matches "/:name/*". Requires an initialized
+  // instance, so it is always behind the instance auth gate above.
+  if (opts?.workDir) {
+    app.route("/api/v1/providers/custom", customProviderRoutes(() => ({
+      isInitialized: () => !!orchestrator?.isInitialized,
+      getPolpoDir: () => orchestrator.getPolpoDir(),
+      getVaultStore: () => orchestrator.getVaultStore(),
+      applyProviders: async () => {
+        const { loadPolpoConfig, parseProviders } = await import("../core/config.js");
+        const { setProviderOverrides } = await import("../llm/pi-client.js");
+        const { refreshCustomProviderSecretStatus } = await import("../llm/custom-providers.js");
+        const raw = loadPolpoConfig(orchestrator.getPolpoDir());
+        const parsed = raw?.providers ? parseProviders(raw.providers as Record<string, unknown>) : {};
+        const config = orchestrator.getConfig();
+        if (config) config.providers = Object.keys(parsed).length > 0 ? parsed : undefined;
+        setProviderOverrides(parsed);
+        await refreshCustomProviderSecretStatus();
+      },
+      getModelUsage: async () => {
+        const specs: string[] = [];
+        const settings = orchestrator.getConfig()?.settings;
+        const om = settings?.orchestratorModel;
+        if (typeof om === "string") specs.push(om);
+        else if (om) specs.push(...[om.primary, ...(om.fallbacks ?? [])].filter((x): x is string => !!x));
+        if (settings?.imageModel) specs.push(settings.imageModel);
+        for (const agent of await orchestrator.getAgents()) if (agent.model) specs.push(agent.model);
+        return specs;
+      },
+    })));
+  }
 
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
@@ -648,8 +681,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     reloadConfig: () => o.reloadConfig(),
     getPolpoDir: () => o.getPolpoDir(),
     saveConfig: async (config: any) => {
-      const { savePolpoConfig } = await import("../core/config.js");
-      savePolpoConfig(o.getPolpoDir(), config);
+      // Config routes only mutate `settings`; merge them into the file so provider
+      // definitions (and anything else the parsed in-memory config drops) survive.
+      const { savePolpoSettings } = await import("../core/config.js");
+      savePolpoSettings(o.getPolpoDir(), config?.settings ?? {});
     },
     getNotificationRouter: () => o.getNotificationRouter(),
   })));

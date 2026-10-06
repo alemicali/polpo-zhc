@@ -106,7 +106,8 @@ export function registerModelsCommands(parent: Command): void {
 
       // Set provider overrides if config loaded
       if (config?.providers) {
-        setProviderOverrides(config.providers);
+        const { parseProviders } = await import("../../core/config.js");
+        setProviderOverrides(parseProviders(config.providers as Record<string, unknown>));
       }
 
       // Resolve the primary model
