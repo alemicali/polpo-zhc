@@ -173,8 +173,18 @@ export class PolpoServer {
     });
   }
 
-  /** Graceful shutdown: stop orchestrator, close HTTP server. */
-  async stop(): Promise<void> {
+  private stopping?: Promise<void>;
+
+  /**
+   * Graceful shutdown: stop orchestrator, close HTTP server. Safe to call more than once: a
+   * SIGTERM reaches both this server's handler and the CLI's, and they share one shutdown.
+   */
+  stop(): Promise<void> {
+    this.stopping ??= this.shutdown();
+    return this.stopping;
+  }
+
+  private async shutdown(): Promise<void> {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
     this.terminalWs?.close();
