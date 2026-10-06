@@ -49,8 +49,8 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
   expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([["2026-10-06", 5], ["2026-10-05", 1]]);
   expect(CHANGELOG.find((e) => e.id === "2026-10-06-group-chats")?.cta?.to).toBe("/chat?newGroup=1");
-  // the Telegram news leads the banner
-  expect(unseenHighlights(CHANGELOG, new Set())[0]?.id).toBe("2026-10-06-telegram-groups");
+  // group chats lead the bar, then the Telegram news
+  expect(unseenHighlights(CHANGELOG, new Set()).slice(0, 2).map((e) => e.id)).toEqual(["2026-10-06-group-chats", "2026-10-06-telegram-groups"]);
   expect(unseenHighlights(CHANGELOG, new Set()).map((e) => e.id)).toEqual(CHANGELOG.filter((e) => e.highlight).map((e) => e.id));
 });
 
