@@ -178,3 +178,28 @@ describe("local workspace", () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe("file tools never reach .polpo through a broader grant", () => {
+  test("protected paths", async () => {
+    const { isPathAllowed, setProtectedPaths } = await import("../tools/path-sandbox.js");
+    const project = mkdtempSync(join(tmpdir(), "polpo-guard-"));
+    const polpoDir = join(project, ".polpo");
+    for (const d of ["output/t1", "mounts/docs", "mounts/other", "skills", "tmp/tool-output/a"]) mkdirSync(join(polpoDir, d), { recursive: true });
+    setProtectedPaths([polpoDir], [join(polpoDir, "tmp", "tool-output"), join(polpoDir, "skills")]);
+    try {
+      const allowed = [project, join(polpoDir, "output/t1"), join(polpoDir, "mounts/docs")];
+      expect(isPathAllowed(join(project, "notes.md"), allowed)).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "polpo.json"), allowed)).toBe(false);
+      expect(isPathAllowed(join(polpoDir, ".env"), allowed)).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "mounts/other/x"), allowed)).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "mounts/docs/x"), allowed)).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "output/t1/report.md"), allowed)).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "tmp/tool-output/a/out.txt"), allowed)).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "skills/s/SKILL.md"), allowed)).toBe(true);
+      expect(isPathAllowed(join(project, "..", "elsewhere"), allowed)).toBe(false);
+    } finally {
+      setProtectedPaths([]);
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});

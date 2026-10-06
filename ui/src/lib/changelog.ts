@@ -27,24 +27,6 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "2026-10-06-storage",
-    date: "2026-10-06",
-    kind: "new",
-    title: "Storage: bucket S3 e R2 come cartelle per gli agenti",
-    summary: "Collega un bucket (Cloudflare R2, AWS S3, MinIO…): viene montato sul server e gli agenti lo vedono come una cartella.",
-    body: [
-      "Nella nuova pagina **Storage** puoi collegare un bucket **S3 compatibile**: Cloudflare R2, AWS S3, MinIO, Backblaze B2, Wasabi e altri.",
-      "",
-      "- Il bucket viene **montato sul server** e compare come cartella anche nella pagina **Files**.",
-      "- Scegli **quali agenti** lo vedono, in **sola lettura** o anche in **scrittura**, ed eventualmente solo una sottocartella (prefisso).",
-      "- Gli agenti con gli strumenti `storage_*` possono elencare, leggere, scrivere e cancellare file, e creare **link di download temporanei**.",
-      "- Le **chiavi** stanno cifrate nel Vault: non vengono mai mostrate di nuovo né date agli agenti.",
-      "",
-      "Per le sandbox remote puoi aggiungere una **chiave dedicata e limitata**, separata da quella principale.",
-    ].join("\n"),
-    cta: { label: "Apri Storage", to: "/storage" },
-  },
-  {
     id: "2026-10-06-context-compaction",
     date: "2026-10-06",
     kind: "improved",
@@ -140,6 +122,24 @@ export const CHANGELOG: ChangelogEntry[] = [
       "",
       "Le sandbox remote (Daytona, poi E2B) per i task arrivano nei prossimi passi.",
     ].join("\n"),
+  },
+  {
+    id: "2026-10-06-storage",
+    date: "2026-10-06",
+    kind: "new",
+    title: "Storage: bucket S3 e R2 come cartelle per gli agenti",
+    summary: "Collega un bucket (Cloudflare R2, AWS S3, MinIO…): viene montato sul server e gli agenti lo vedono come una cartella.",
+    body: [
+      "Nella nuova pagina **Storage** puoi collegare un bucket **S3 compatibile**: Cloudflare R2, AWS S3, MinIO, Backblaze B2, Wasabi e altri.",
+      "",
+      "- Il bucket viene **montato sul server** e compare come cartella anche nella pagina **Files**.",
+      "- Scegli **quali agenti** lo vedono, in **sola lettura** o anche in **scrittura**, ed eventualmente solo una sottocartella (prefisso).",
+      "- Gli agenti con gli strumenti `storage_*` possono elencare, leggere, scrivere e cancellare file, e creare **link di download temporanei**.",
+      "- Le **chiavi** stanno cifrate nel Vault: non vengono mai mostrate di nuovo né date agli agenti.",
+      "",
+      "Per le sandbox remote puoi aggiungere una **chiave dedicata e limitata**, separata da quella principale.",
+    ].join("\n"),
+    cta: { label: "Apri Storage", to: "/storage" },
   },
   {
     id: "2026-10-06-agent-to-agent",

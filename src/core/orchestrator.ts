@@ -100,6 +100,7 @@ import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-st
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
 import { resolveToolOutputDir } from "../tools/tool-output.js";
+import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { normalizeSandboxSettings, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
@@ -204,10 +205,6 @@ export class Orchestrator extends TypedEmitter {
 
   // Pure orchestration engine (delegates tick, run, and all pure-logic methods)
   private engine!: OrchestratorEngine;
-
-  // Storage mounts (buckets) workspaces may show to agents. Stub: feat/sandbox-core owns the real wiring.
-  private storageMountProvider?: import("@polpo-ai/core/sandbox").StorageMountProvider;
-  setStorageMountProvider(provider: import("@polpo-ai/core/sandbox").StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
 
   getWorkDir(): string { return this.workDir; }
   getAgentWorkDir(): string {
@@ -588,6 +585,14 @@ export class Orchestrator extends TypedEmitter {
 
   async init(): Promise<void> {
     this.config = await parseConfig(this.workDir);
+
+    // Agents' file tools never reach .polpo through a broader grant (config, .env, sessions,
+    // vault, storage mounts); granted paths inside it (task output, mounts) stay reachable.
+    setProtectedPaths([this.polpoDir], [
+      join(this.polpoDir, "tmp", "tool-output"),
+      join(this.polpoDir, "skills"),
+      join(this.polpoDir, "playbooks"),
+    ]);
 
     // Apply provider overrides from config
     if (this.config.providers) {

@@ -51,9 +51,35 @@ export function resolveAllowedPaths(cwd: string, allowedPaths?: string[]): strin
  * Uses path prefix matching with separator awareness to prevent partial matches
  * (e.g. `/home/user/project-evil` should NOT match `/home/user/project`).
  */
+/**
+ * Directories agents never reach through a broader grant (the project's .polpo: config, .env,
+ * sessions, vault, storage mounts). A path inside one is allowed only when an allowed path
+ * itself lies inside it (task output dir, a granted storage mount) or it is one of the
+ * exceptions (offloaded tool outputs, skills, playbooks).
+ */
+let protectedRoots: string[] = [];
+let protectedExceptions: string[] = [];
+
+export function setProtectedPaths(roots: string[], exceptions: string[] = []): void {
+  protectedRoots = roots.map((r) => canonicalPath(r));
+  protectedExceptions = exceptions.map((e) => canonicalPath(e));
+}
+
+function within(path: string, root: string): boolean {
+  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 export function isPathAllowed(filePath: string, allowedPaths: string[]): boolean {
   // Symlinks resolved on both sides: no symlink-based escape, no false denials.
   const resolved = canonicalPath(filePath);
+  const protectedRoot = protectedRoots.find((root) => within(resolved, root));
+  if (protectedRoot) {
+    if (protectedExceptions.some((e) => within(resolved, e))) return true;
+    return allowedPaths.some((allowed) => {
+      const a = canonicalPath(allowed);
+      return within(a, protectedRoot) && within(resolved, a);
+    });
+  }
   for (const allowed of allowedPaths) {
     const normalizedAllowed = canonicalPath(allowed);
     // Exact match
