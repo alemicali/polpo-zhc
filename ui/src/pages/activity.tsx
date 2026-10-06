@@ -312,6 +312,10 @@ function buildNarrative(
         const show = (v: unknown) => typeof v === "object" && v !== null ? ((v as { mode?: string }).mode ?? JSON.stringify(v)) : String(v);
         return `${data?.level === "mission" ? "Mission" : "Task"} asked for ${data?.field} ${show(data?.requested)} for ${where}; kept ${show(data?.applied)}`;
       }
+      case "sandbox:network-denied": {
+        const target = `${data?.host}${data?.port ? `:${data.port}` : ""}`;
+        return `Network refused ${target} for ${where}: ${data?.reason === "private-address" ? "local or private address" : "not in the allowlist"}`;
+      }
       case "storage:changed": return `Storage "${data?.name}" ${data?.action}${data?.error ? `: ${data.error}` : ""}`;
     }
   }

@@ -796,8 +796,8 @@ const removeAgentTool: Tool = {
 const agentSandboxParam = Type.Optional(Type.Object({
   provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker/daytona/e2b fall back to bwrap until available." })),
   network: Type.Optional(Type.Object({
-    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny")]),
-    allow: Type.Optional(Type.Array(Type.String(), { description: "Domains for allowlist mode; *.example.com also covers example.com" })),
+    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny"), Type.Literal("unrestricted")], { description: "open = every public destination through a proxy (never this machine's own services or private networks; the default); allowlist = only the listed hosts; deny = none; unrestricted = the whole network of this machine incl. local services (risky: ask the person first)" }),
+    allow: Type.Optional(Type.Array(Type.String(), { description: "Hosts for allowlist mode: example.com, *.example.com (also covers example.com), optionally with a port (github.com:22)" })),
   })),
   resources: Type.Optional(Type.Object({
     memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
@@ -3788,7 +3788,10 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
   const instance = normalizeSandboxSettings(polpo.getConfig()?.settings?.sandbox);
   const describe = (s: EffectiveSandbox) => {
     const limits = Object.entries(s.resources).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ");
-    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${limits ? `, ${limits}` : ""}`;
+    const hint = s.provider === "local" ? " (not enforced: no isolation)"
+      : s.network.mode === "open" ? " (public destinations only, via proxy)"
+      : s.network.mode === "unrestricted" ? " (whole machine network, local services included)" : "";
+    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
   };
   const lines = [
     `Available on this server: ${[...availableProviders()].join(", ")}`,
@@ -3801,6 +3804,9 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
     const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
     lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
   }
+  const refused = polpo.getNetworkDenied?.() ?? [];
+  if (refused.length) lines.push(`Refused recently: ${refused.slice(0, 8).map((r) => `${r.host}${r.port ? `:${r.port}` : ""} (${r.agentName ?? "?"}, ${r.reason}, x${r.count})`).join("; ")}. A person can approve them in Settings → Sandbox.`);
+  lines.push("Network: the proxy speaks HTTP and SOCKS5 (ssh/git over ssh via GIT_SSH_COMMAND); open and allowlist never reach this machine's own services or private addresses.");
   lines.push("In bwrap commands see only the working directory, granted paths and granted storage mounts: no home (~/.ssh, ~/.gitconfig, gh login), no .polpo, no other projects.");
   return lines.join("\n");
 }

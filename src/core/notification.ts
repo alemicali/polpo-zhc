@@ -24,10 +24,23 @@ export interface RunCompleteMessage {
   status: string;
 }
 
+/** A destination the network rule refused inside a task run's sandbox. */
+export interface NetworkDeniedMessage {
+  type: "network_denied";
+  runId: string;
+  taskId: string;
+  agentName?: string;
+  provider: string;
+  host: string;
+  port?: number;
+  reason: "not-allowed" | "private-address";
+}
+
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
   polpoDir: string,
   onRunComplete: (runId: string, taskId: string, status: string) => void,
+  onNetworkDenied?: (msg: NetworkDeniedMessage) => void,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -42,9 +55,11 @@ export function startNotificationServer(
     conn.on("data", (chunk) => { buffer += chunk; });
     conn.on("end", () => {
       try {
-        const msg = JSON.parse(buffer.trim()) as RunCompleteMessage;
+        const msg = JSON.parse(buffer.trim()) as RunCompleteMessage | NetworkDeniedMessage;
         if (msg.type === "run_complete") {
           onRunComplete(msg.runId, msg.taskId, msg.status);
+        } else if (msg.type === "network_denied") {
+          onNetworkDenied?.(msg);
         }
       } catch { /* malformed message — ignore */ }
     });
@@ -71,6 +86,15 @@ export function notifyRunComplete(
     conn.on("error", () => { /* orchestrator not listening — it will poll */ });
     conn.end(JSON.stringify({ type: "run_complete", runId, taskId, status } satisfies RunCompleteMessage) + "\n");
   } catch { /* orchestrator not listening — it will poll */ }
+}
+
+/** Client-side: runner reports a refused destination (fire-and-forget). */
+export function notifyNetworkDenied(socketPath: string, msg: Omit<NetworkDeniedMessage, "type">): void {
+  try {
+    const conn = createConnection(socketPath);
+    conn.on("error", () => { /* orchestrator not listening — the refusal is still logged by the run */ });
+    conn.end(JSON.stringify({ type: "network_denied", ...msg } satisfies NetworkDeniedMessage) + "\n");
+  } catch { /* ignore */ }
 }
 
 /**

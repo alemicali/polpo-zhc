@@ -365,7 +365,7 @@ export class E2BWorkspace extends RemoteWorkspace {
         }
       },
       readFile: async (path) => new Uint8Array(await sbx.files.read(path, { format: "bytes" })),
-      writeFile: async (path, data) => { await sbx.files.write(path, new Blob([data])); },
+      writeFile: async (path, data) => { await sbx.files.write(path, new Blob([new Uint8Array(data)])); },
       destroy: async () => { await sbx.kill(); },
     };
   }

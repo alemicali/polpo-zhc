@@ -43,7 +43,11 @@ export class DockerWorkspace extends HostFsWorkspace {
   }
 
   private async networkProxy(): Promise<NetworkProxy> {
-    this.proxyStarting ??= startNetworkProxy(this.opts.sandbox.network.allow ?? [], this.opts.onNetworkDenied).then((p) => (this.proxy = p));
+    const { network } = this.opts.sandbox;
+    this.proxyStarting ??= startNetworkProxy({
+      rule: network.mode === "allowlist" ? { mode: "allowlist", allow: network.allow ?? [] } : { mode: "open" },
+      onDenied: this.opts.onNetworkDenied,
+    }).then((p) => (this.proxy = p));
     return this.proxyStarting;
   }
 
@@ -56,7 +60,8 @@ export class DockerWorkspace extends HostFsWorkspace {
     const args: string[] = [this.binary, "run", "--rm", "--init", "--name", name, "--user", this.user];
     if (podman) args.push("--userns=keep-id");
     args.push("--read-only", "--tmpfs", "/tmp:rw,exec,mode=1777", "--cap-drop", "ALL", "--security-opt", "no-new-privileges");
-    if (network.mode !== "open") args.push("--network", "none");
+    // only "unrestricted" gets the host's network; open and allowlist go through the proxy
+    if (network.mode !== "unrestricted") args.push("--network", "none");
     if (resources.memoryMb) args.push("--memory", `${resources.memoryMb}m`, "--memory-swap", `${resources.memoryMb}m`);
     if (resources.cpus) args.push("--cpus", String(resources.cpus));
 
@@ -81,7 +86,7 @@ export class DockerWorkspace extends HostFsWorkspace {
       HOME: this.root, USER: process.env.USER ?? "agent", LANG: process.env.LANG ?? "C.UTF-8", TERM: "dumb", TMPDIR: "/tmp",
     };
     let script = command;
-    if (network.mode === "allowlist") {
+    if (network.mode === "allowlist" || network.mode === "open") {
       const proxy = await this.networkProxy();
       args.push("-v", `${proxy.dir}:/run/polpo-net:ro`);
       const bridge = networkBridge(command, this.bridgePort, "node");

@@ -7,7 +7,7 @@
 import { apiUrl, config } from "@/lib/config";
 
 export type SandboxProvider = "local" | "bwrap" | "docker" | "daytona" | "e2b";
-export type SandboxNetworkMode = "deny" | "allowlist" | "open";
+export type SandboxNetworkMode = "deny" | "allowlist" | "open" | "unrestricted";
 
 export interface SandboxSettings {
   provider?: SandboxProvider;
@@ -41,10 +41,22 @@ export const SANDBOX_PROVIDERS: Array<{ id: SandboxProvider; label: string; desc
 ];
 
 export const NETWORK_MODES: Array<{ id: SandboxNetworkMode; label: string; description: string }> = [
-  { id: "open", label: "Open", description: "Any destination." },
-  { id: "allowlist", label: "Allowlist", description: "Only the listed domains (through a proxy)." },
+  { id: "open", label: "Open", description: "Any public destination, through a proxy. Never this machine's own services, private networks or Tailscale." },
+  { id: "allowlist", label: "Allowlist", description: "Only the listed hosts (through a proxy)." },
   { id: "deny", label: "None", description: "No network at all." },
+  { id: "unrestricted", label: "Unrestricted", description: "The whole network of this machine, local services included. Risky." },
 ];
+
+/** A destination the sandbox network rule refused recently (GET /sandbox/network-denied). */
+export interface NetworkDeniedEntry {
+  agentName?: string;
+  scope: "chat" | "task";
+  host: string;
+  port?: number;
+  reason: "not-allowed" | "private-address";
+  count: number;
+  lastAt: string;
+}
 
 export function providerLabel(id: SandboxProvider): string {
   return SANDBOX_PROVIDERS.find((p) => p.id === id)?.label ?? id;
@@ -84,6 +96,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const sandboxApi = {
   overview: () => request<SandboxOverview>("/sandbox"),
+  /** Destinations refused recently, newest first. */
+  networkDenied: () => request<NetworkDeniedEntry[]>("/sandbox/network-denied"),
   /** Instance defaults; null removes them. */
   saveInstance: (sandbox: SandboxSettings | null) =>
     request<unknown>("/config/settings", { method: "PATCH", body: JSON.stringify({ sandbox }) }),
@@ -104,4 +118,70 @@ export function compactSandbox(s: SandboxSettings): SandboxSettings {
   if (s.confineExternalContent) out.confineExternalContent = true;
   if (s.chatIdleMinutes && s.chatIdleMinutes > 0) out.chatIdleMinutes = s.chatIdleMinutes;
   return out;
+}
+
+// ── Approving a refused destination ──────────────────────────────────────
+
+/** The allowlist entry for a refused destination: the host, with the port only when it is not plain web traffic. */
+export function allowEntryFor(entry: Pick<NetworkDeniedEntry, "host" | "port">): string {
+  return entry.port && entry.port !== 80 && entry.port !== 443 ? `${entry.host}:${entry.port}` : entry.host;
+}
+
+/** True when an allowlist ("host", "*.host", "host:port") covers host:port (same rule as the server's proxy). */
+export function allowlistCovers(allow: string[] | undefined, host: string, port?: number): boolean {
+  const h = host.toLowerCase().replace(/\.$/, "");
+  return (allow ?? []).some((raw) => {
+    const m = /^(.*):(\d{1,5})$/.exec(raw.trim().toLowerCase());
+    const withPort = m && !m[1]!.includes(":");
+    const pattern = withPort ? m![1]! : raw.trim().toLowerCase();
+    if (withPort && Number(m![2]) !== port) return false;
+    return pattern.startsWith("*.") ? h === pattern.slice(2) || h.endsWith(pattern.slice(1)) : h === pattern;
+  });
+}
+
+/** Add a host to the allowlist of one level, starting from `base` when that level has no allowlist of its own. */
+export function withAllowedHost(settings: SandboxSettings, host: string, base: string[] = []): SandboxSettings {
+  const current = settings.network?.mode === "allowlist" ? settings.network.allow ?? [] : base;
+  return { ...settings, network: { mode: "allowlist", allow: current.includes(host) ? current : [...current, host] } };
+}
+
+/** Why an entry cannot be approved with one click, or null when it can. */
+export function approvalBlocker(entry: NetworkDeniedEntry): string | null {
+  return entry.reason === "private-address"
+    ? "A local or private address: the proxy never reaches those. To allow one deliberately, write its IP in an agent's allowlist (Sandbox tab), or choose Unrestricted."
+    : null;
+}
+
+/** The agent's settings after "Allow for <agent>": its own allowlist, or a new one that starts from the instance list. */
+export function planAllowForAgent(overview: SandboxOverview, entry: NetworkDeniedEntry): { name: string; settings: SandboxSettings } | null {
+  const agent = overview.agents.find((a) => a.name === entry.agentName);
+  if (!agent) return null;
+  const instance = overview.settings?.network;
+  const base = instance?.mode === "allowlist" ? instance.allow ?? [] : [];
+  return { name: agent.name, settings: compactSandbox(withAllowedHost(agent.settings ?? {}, allowEntryFor(entry), base)) };
+}
+
+/**
+ * "Allow for everyone": the instance allowlist, and every agent that has an allowlist of its own
+ * (those do not inherit the instance's). Null when the instance has no allowlist to extend (open).
+ */
+export function planAllowForEveryone(overview: SandboxOverview, entry: NetworkDeniedEntry):
+  { instance: SandboxSettings; agents: Array<{ name: string; settings: SandboxSettings }> } | null {
+  const mode = overview.settings?.network?.mode;
+  if (mode !== "allowlist" && mode !== "deny") return null;
+  const host = allowEntryFor(entry);
+  return {
+    instance: compactSandbox(withAllowedHost(overview.settings ?? {}, host)),
+    agents: overview.agents
+      .filter((a) => a.settings?.network?.mode === "allowlist")
+      .map((a) => ({ name: a.name, settings: compactSandbox(withAllowedHost(a.settings!, host)) })),
+  };
+}
+
+/** True once the agent's effective allowlist covers the destination (the approval took effect). */
+export function alreadyAllowed(overview: SandboxOverview, entry: NetworkDeniedEntry): boolean {
+  const effective = entry.agentName === "polpo" || !entry.agentName
+    ? overview.polpo
+    : overview.agents.find((a) => a.name === entry.agentName)?.[entry.scope];
+  return !!effective && effective.network.mode === "allowlist" && allowlistCovers(effective.network.allow, entry.host, entry.port);
 }

@@ -21,6 +21,7 @@ import { assertPathAllowed, resolveAllowedPaths } from "./path-sandbox.js";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
+import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./browser-network-guard.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -81,6 +82,8 @@ export function execBrowserAsync(
   args: string[],
   options: {
     session?: string; profileDir?: string; cdp?: number; timeout?: number; cwd?: string; signal?: AbortSignal;
+    /** Proxy the browser must use (the sandbox network rule); ignored when attached to an external Chrome. */
+    proxy?: string;
     /** Keep only the last N chars of the raw output (default 50,000). Infinity keeps everything. */
     maxOutputBytes?: number;
   } = {},
@@ -91,7 +94,7 @@ export function execBrowserAsync(
     // (that Chrome already owns its user-data-dir) so it's dropped.
     const cdpArgs = options.cdp ? ["--cdp", String(options.cdp)] : [];
     const profileArgs = options.cdp || !options.profileDir ? [] : ["--profile", options.profileDir];
-    const fullArgs = [...sessionArgs, ...cdpArgs, ...profileArgs, ...args, "--json"];
+    const fullArgs = [...sessionArgs, ...cdpArgs, ...profileArgs, ...(options.cdp ? [] : proxyArgs(options.proxy)), ...args, "--json"];
 
     const child = spawnChild("agent-browser", fullArgs, {
       cwd: options.cwd,
@@ -157,7 +160,7 @@ function execAgentBrowser(
   args: string[],
   options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
 ): ReturnType<typeof execBrowserAsync> {
-  return execBrowserAsync(args, { ...options, maxOutputBytes: Infinity });
+  return execBrowserAsync(args, { ...options, proxy: browserProxyContext.getStore()?.proxy, maxOutputBytes: Infinity });
 }
 
 // ─── Tool: browser_navigate ───
@@ -594,6 +597,22 @@ export const ALL_BROWSER_TOOL_NAMES: BrowserToolName[] = [
   "browser_reload", "browser_tabs", "browser_set_user_agent",
 ];
 
+/** Enforce the sandbox network rule: refuse navigations it forbids, run everything else behind the proxy. */
+function guardedByNetwork(tool: AgentTool<any>, network: BrowserNetworkGuard | undefined): AgentTool<any> {
+  if (!network) return tool;
+  return {
+    ...tool,
+    async execute(id, params: any, signal, ...rest) {
+      if (tool.name === "browser_navigate") {
+        const refusal = await network.checkUrl(String(params.url ?? ""));
+        if (refusal) return { content: [{ type: "text", text: `Browser error: ${refusal}` }], details: { error: refusal } };
+      }
+      const proxy = await network.proxyUrl();
+      return browserProxyContext.run({ proxy }, () => tool.execute(id, params, signal, ...rest));
+    },
+  };
+}
+
 /**
  * Create browser automation tools powered by agent-browser CLI.
  *
@@ -605,6 +624,7 @@ export const ALL_BROWSER_TOOL_NAMES: BrowserToolName[] = [
  *                     Typically `.polpo/browser-profiles/<agent>/`.
  * @param toolOutputDir - Where results above 50 KB are saved in full (default: resolveToolOutputDir()).
  * @param allowedPaths - Directories the agent may write to (screenshots), like the file tools; default [cwd].
+ * @param network - The agent's sandbox network rule: navigations are checked against it and the browser runs behind the sandbox proxy.
  */
 export function createBrowserTools(
   cwd: string,
@@ -613,6 +633,7 @@ export function createBrowserTools(
   profileDir?: string,
   toolOutputDir: string = resolveToolOutputDir({ agentName: session }),
   allowedPaths?: string[],
+  network?: BrowserNetworkGuard,
 ): AgentTool<any>[] {
   const factories: Record<BrowserToolName, () => AgentTool<any>> = {
     browser_navigate: () => createBrowserNavigateTool(session, profileDir),
@@ -640,5 +661,5 @@ export function createBrowserTools(
     ? ALL_BROWSER_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_BROWSER_TOOL_NAMES;
 
-  return names.map(n => withToolOutputOffload(factories[n](), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES }));
+  return names.map(n => withToolOutputOffload(guardedByNetwork(factories[n](), network), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES }));
 }

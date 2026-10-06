@@ -66,18 +66,23 @@ export interface Workspace {
 // ── Settings and the cascade ─────────────────────────────────────────────
 
 export type SandboxProvider = "local" | "bwrap" | "docker" | "daytona" | "e2b";
-export type SandboxNetworkMode = "deny" | "allowlist" | "open";
+/**
+ * "unrestricted": the full network of this machine, local services included. "open": every
+ * public destination, through the proxy (no loopback, private, Tailscale or metadata addresses).
+ * "allowlist": only the listed hosts. "deny": nothing.
+ */
+export type SandboxNetworkMode = "deny" | "allowlist" | "open" | "unrestricted";
 
 /** Providers that run on this machine (usable by chats). */
 export const LOCAL_PROVIDERS: ReadonlySet<SandboxProvider> = new Set(["local", "bwrap", "docker"]);
 
 /** Isolation strength, weakest first: "tightening" means moving right. */
 export const PROVIDER_ISOLATION: Record<SandboxProvider, number> = { local: 0, bwrap: 1, docker: 2, daytona: 3, e2b: 3 };
-const NETWORK_STRICTNESS: Record<SandboxNetworkMode, number> = { open: 0, allowlist: 1, deny: 2 };
+const NETWORK_STRICTNESS: Record<SandboxNetworkMode, number> = { unrestricted: 0, open: 1, allowlist: 2, deny: 3 };
 
 export interface SandboxNetwork {
   mode: SandboxNetworkMode;
-  /** Domains for "allowlist" ("example.com", "*.example.com"). */
+  /** Hosts for "allowlist": "example.com", "*.example.com", optionally with a port ("example.com:22"). */
   allow?: string[];
 }
 
@@ -146,8 +151,25 @@ export function readsExternalContent(allowedTools: string[] | undefined): boolea
     matches(pattern, tool) || (tool.endsWith("*") && pattern.startsWith(tool.slice(0, -1)))));
 }
 
-function domainAllowed(domain: string, allow: string[]): boolean {
-  return allow.some((pattern) => pattern === domain || (pattern.startsWith("*.") && (domain === pattern.slice(2) || domain.endsWith(pattern.slice(1)))));
+/** "host" or "host:port" (the port is the digits after the last colon, so IPv6 literals stay whole). */
+export function splitHostPort(entry: string): { host: string; port?: number } {
+  const e = entry.trim();
+  const m = /^(.*):(\d{1,5})$/.exec(e);
+  // a bare IPv6 literal has colons of its own: with a port it must be written [::1]:22
+  const withPort = m && (!m[1]!.includes(":") || (m[1]!.startsWith("[") && m[1]!.endsWith("]")));
+  const host = (withPort ? m![1]! : e).replace(/^\[(.*)\]$/, "$1");
+  return withPort ? { host, port: Number(m![2]) } : { host };
+}
+
+/** True when an upper-level allowlist entry covers the requested one (same or broader host, same or any port). */
+function domainAllowed(requested: string, allow: string[]): boolean {
+  const want = splitHostPort(requested);
+  return allow.some((entry) => {
+    const have = splitHostPort(entry);
+    if (have.port !== undefined && have.port !== want.port) return false;
+    const pattern = have.host;
+    return pattern === want.host || (pattern.startsWith("*.") && (want.host === pattern.slice(2) || want.host.endsWith(pattern.slice(1))));
+  });
 }
 
 /**
@@ -180,10 +202,10 @@ export function resolveSandbox(
       else denied.push({ level, field: "provider", requested: s.provider, applied: provider });
     }
     if (s.network) {
-      if (s.network.mode === "allowlist" && (network.mode === "allowlist" || network.mode === "open")) {
+      if (s.network.mode === "allowlist" && (network.mode === "allowlist" || network.mode === "open" || network.mode === "unrestricted")) {
         // An allowlist below an allowlist keeps only the domains the upper level allows.
         const requested = s.network.allow ?? [];
-        const kept = network.mode === "open" ? requested : requested.filter((d) => domainAllowed(d, network.allow ?? []));
+        const kept = network.mode === "open" || network.mode === "unrestricted" ? requested : requested.filter((d) => domainAllowed(d, network.allow ?? []));
         if (kept.length < requested.length) denied.push({ level, field: "network", requested: s.network, applied: { mode: "allowlist", allow: kept } });
         network = { mode: "allowlist", allow: kept };
       } else if (NETWORK_STRICTNESS[s.network.mode] >= NETWORK_STRICTNESS[network.mode]) {
@@ -274,7 +296,7 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
     const list = r.allowedProviders.filter(isProvider);
     if (list.length) out.allowedProviders = list;
   }
-  if (r.network && typeof r.network === "object" && ["deny", "allowlist", "open"].includes(r.network.mode)) {
+  if (r.network && typeof r.network === "object" && ["deny", "allowlist", "open", "unrestricted"].includes(r.network.mode)) {
     out.network = { mode: r.network.mode };
     if (Array.isArray(r.network.allow)) out.network.allow = r.network.allow.filter((d: unknown) => typeof d === "string" && d.trim()).map((d: string) => d.trim());
   }
