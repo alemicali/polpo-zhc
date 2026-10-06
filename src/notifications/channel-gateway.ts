@@ -54,6 +54,7 @@ import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
 } from "../llm/orchestrator-tools.js";
+import { withEventOrigin } from "../core/events.js";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -326,7 +327,8 @@ export class ChannelGateway {
 
   /** Like handleMessage, keeping inline buttons for channels that can render them. */
   async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
-    const reply = await this.routeMessage(msg);
+    // Whatever this message causes is attributed to the channel and the person who wrote it
+    const reply = await withEventOrigin({ source: "channel", by: `${msg.channel}:${msg.externalId}` }, () => this.routeMessage(msg));
     const out = typeof reply === "string" ? { text: reply } : reply;
     if (msg.group) {
       const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);

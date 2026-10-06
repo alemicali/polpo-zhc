@@ -13,6 +13,7 @@ import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
 import type { Team } from "../core/types.js";
 import type { ServerConfig } from "./types.js";
+import { withEventOrigin } from "../core/events.js";
 
 /**
  * Polpo HTTP Server.
@@ -59,8 +60,9 @@ export class PolpoServer {
       agents: [{ name: "dev-1", role: "developer" }],
     };
 
-    await this.orchestrator.initInteractive(
-      persistedConfig?.project ?? basename(workDir), [defaultTeam]);
+    // Init may run inside the setup request: timers and pollers it starts belong to the system
+    await withEventOrigin({ source: "system" }, () => this.orchestrator.initInteractive(
+      persistedConfig?.project ?? basename(workDir), [defaultTeam]));
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -82,9 +84,11 @@ export class PolpoServer {
     if (!this.orchestrator?.isInitialized) return;
     if (this.supervisorRun) return;
 
-    this.supervisorRun = this.orchestrator.run()
+    // The loop outlives the request that may have woken it: its events are the system's own
+    this.supervisorRun = withEventOrigin({ source: "system" }, () => this.orchestrator.run())
       .catch((err) => {
         console.error(`[PolpoServer] Supervisor loop crashed (${reason}):`, err instanceof Error ? err.message : err);
+        this.orchestrator?.emit("orchestrator:stopped", { reason: "error", message: err instanceof Error ? err.message : String(err) });
       })
       .finally(() => {
         this.supervisorRun = null;
