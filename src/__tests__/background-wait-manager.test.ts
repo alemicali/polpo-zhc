@@ -76,6 +76,34 @@ describe("BackgroundWaitManager", () => {
     await expect(controls.getBackgroundWait(wait.id)).resolves.toMatchObject({ state: "cancelled" });
   });
 
+  it("polls only the active waits, not the finished history", async () => {
+    manager.setContinuation(vi.fn().mockResolvedValue("completed"));
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let setContinuation's own tick finish
+    const list = vi.spyOn(controls, "listBackgroundWaits");
+
+    await manager.tick();
+
+    expect(list.mock.calls.map((call) => call[1])).toEqual([["waiting"], ["ready"]]);
+  });
+
+  it("works with a store that ignores the state filter", async () => {
+    const task = (await tasks.getAllTasks())[0];
+    const continuation = vi.fn().mockResolvedValue("completed");
+    const finished = await controls.createBackgroundWait({ taskId: task.id, sessionId: "old" });
+    await controls.cancelBackgroundWait(finished.id);
+    const listAll = controls.listBackgroundWaits.bind(controls);
+    vi.spyOn(controls, "listBackgroundWaits").mockImplementation((sessionId?: string) => listAll(sessionId));
+    manager.setContinuation(continuation);
+    const wait = await manager.create({ taskId: task.id, sessionId: "session-1", targetStatus: "done" });
+
+    await tasks.unsafeSetStatus(task.id, "done", "test completion");
+    await manager.tick();
+
+    expect(continuation).toHaveBeenCalledTimes(1);
+    await expect(controls.getBackgroundWait(wait.id)).resolves.toMatchObject({ state: "completed" });
+    await expect(controls.getBackgroundWait(finished.id)).resolves.toMatchObject({ state: "cancelled" });
+  });
+
   it("deduplicates equivalent active waits", async () => {
     const task = (await tasks.getAllTasks())[0];
     const first = await manager.create({ taskId: task.id, sessionId: "session-1", targetStatus: "done" });

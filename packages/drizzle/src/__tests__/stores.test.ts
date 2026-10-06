@@ -420,6 +420,27 @@ describe.each(DIALECTS)("%s", (dialect) => {
       });
       await expect(stores.taskControlStore.claimBackgroundWait(wait.id)).resolves.toBeUndefined();
     });
+
+    it("lists background waits filtered by state and session, newest first", async () => {
+      const controls = stores.taskControlStore;
+      const waiting = await controls.createBackgroundWait({ taskId: "t1", sessionId: "s1" });
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const ready = await controls.createBackgroundWait({ taskId: "t2", sessionId: "s1" });
+      await controls.markBackgroundWaitReady(ready.id, "done");
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const done = await controls.createBackgroundWait({ taskId: "t3", sessionId: "s2" });
+      await controls.cancelBackgroundWait(done.id);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const otherSession = await controls.createBackgroundWait({ taskId: "t4", sessionId: "s2" });
+
+      const ids = (waits: Array<{ id: string }>) => waits.map((w) => w.id);
+      expect(ids(await controls.listBackgroundWaits())).toEqual([otherSession.id, done.id, ready.id, waiting.id]);
+      expect(ids(await controls.listBackgroundWaits(undefined, ["waiting"]))).toEqual([otherSession.id, waiting.id]);
+      expect(ids(await controls.listBackgroundWaits(undefined, ["ready", "waiting"]))).toEqual([otherSession.id, ready.id, waiting.id]);
+      expect(ids(await controls.listBackgroundWaits("s1", ["waiting"]))).toEqual([waiting.id]);
+      expect(ids(await controls.listBackgroundWaits("s2"))).toEqual([otherSession.id, done.id]);
+      expect(await controls.listBackgroundWaits(undefined, ["running"])).toEqual([]);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════

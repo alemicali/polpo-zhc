@@ -63,7 +63,7 @@ export class BackgroundWaitManager {
     if (!task) throw new Error(`Task "${input.taskId}" not found`);
     if (!input.sessionId.trim()) throw new Error("A chat session is required for a background wait");
 
-    const existing = (await this.store.listBackgroundWaits(input.sessionId)).find((wait) =>
+    const existing = (await this.store.listBackgroundWaits(input.sessionId, ["waiting", "ready", "running"])).find((wait) =>
       wait.taskId === input.taskId
       && wait.targetStatus === input.targetStatus
       && ["waiting", "ready", "running"].includes(wait.state),
@@ -97,7 +97,8 @@ export class BackgroundWaitManager {
 
   async tick(): Promise<void> {
     if (this.stopped) return;
-    const waits = await this.store.listBackgroundWaits();
+    // Only the active waits: the table keeps every finished one as history.
+    const waits = await this.store.listBackgroundWaits(undefined, ["waiting"]);
     for (const wait of waits) {
       if (wait.state !== "waiting") continue;
       const task = await this.tasks.getTask(wait.taskId);
@@ -134,7 +135,7 @@ export class BackgroundWaitManager {
     if (this.draining || !this.continuation || this.stopped) return;
     this.draining = true;
     try {
-      const waits = await this.store.listBackgroundWaits();
+      const waits = await this.store.listBackgroundWaits(undefined, ["ready"]);
       for (const candidate of waits.reverse()) {
         if (candidate.state !== "ready") continue;
         const wait = await this.store.claimBackgroundWait(candidate.id);
