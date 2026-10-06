@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListChecks,
   MessageCircle,
+  UsersRound,
   Monitor,
   Moon,
   ShieldCheck,
@@ -41,6 +42,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Home" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
+      { to: "/groups", icon: UsersRound, label: "Groups" },
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/agents", icon: Bot, label: "Agents" },

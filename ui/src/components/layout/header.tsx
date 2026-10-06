@@ -35,6 +35,7 @@ const titles: Record<string, string> = {
   "/skills": "Skills",
   "/activity": "Activity",
   "/chat": "Chat",
+  "/groups": "Groups",
   "/memory": "Memory",
   "/logs": "Logs",
   "/notifications": "Notifications",
@@ -54,6 +55,7 @@ function resolveTitle(pathname: string): string {
   if (pathname.startsWith("/tasks/")) return "Task Detail";
   if (pathname.startsWith("/agents/")) return "Agent Detail";
   if (pathname.startsWith("/skills/")) return "Skill Detail";
+  if (pathname.startsWith("/groups/")) return "Groups";
   return "";
 }
 

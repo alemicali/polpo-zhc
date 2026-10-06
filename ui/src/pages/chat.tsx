@@ -68,7 +68,9 @@ import {
   AppWindow,
   Database,
   Table2,
+  UsersRound,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -2366,6 +2368,16 @@ function SessionSidebar({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
           History
         </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground" asChild>
+              <Link to="/groups" aria-label="Groups">
+                <UsersRound className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Groups — chat with several agents</TooltipContent>
+        </Tooltip>
         {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
           <button

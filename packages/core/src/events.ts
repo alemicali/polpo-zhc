@@ -82,6 +82,14 @@ export interface PolpoEventMap {
   /** A session's prompt queue changed (items or auto-send). */
   "chat:queue-updated": { sessionId: string };
 
+  // Rooms (group conversations of people and agents)
+  "room:created": { room: import("./room-store.js").Room };
+  "room:updated": { room: import("./room-store.js").Room };
+  "room:deleted": { roomId: string };
+  "room:message": { roomId: string; message: import("./room-store.js").RoomMessage };
+  /** An agent started (typing: true) or finished (false) its turn in a room. */
+  "room:typing": { roomId: string; agent: string; name: string; typing: boolean };
+
   // Durable background task waits
   "background-wait:created": { wait: BackgroundWait };
   "background-wait:ready": { wait: BackgroundWait };
