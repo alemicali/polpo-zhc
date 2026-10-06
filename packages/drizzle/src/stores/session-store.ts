@@ -1,4 +1,4 @@
-import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
+import { eq, desc, asc, count as drizzleCount, isNull, and, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
@@ -101,6 +101,19 @@ export class DrizzleSessionStore implements SessionStore {
       .where(eq(this.messages.sessionId, sessionId))
       .orderBy(asc(this.messages.ts));
     return rows.map((r) => this.rowToMessage(r));
+  }
+
+  async getMessagesAfter(sessionId: string, messageId: string): Promise<Message[] | undefined> {
+    const m = this.messages;
+    const anchor: any[] = await this.db.select({ ts: m.ts }).from(m)
+      .where(and(eq(m.sessionId, sessionId), eq(m.id, messageId)));
+    if (anchor.length === 0) return undefined;
+    // From the anchor's timestamp on (ties included), then cut after the anchor itself.
+    const rows: any[] = await this.db.select().from(m)
+      .where(and(eq(m.sessionId, sessionId), gte(m.ts, anchor[0].ts)))
+      .orderBy(asc(m.ts));
+    const index = rows.findIndex((r) => r.id === messageId);
+    return rows.slice(index + 1).map((r) => this.rowToMessage(r));
   }
 
   async getRecentMessages(sessionId: string, limit: number): Promise<Message[]> {

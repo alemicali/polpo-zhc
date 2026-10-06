@@ -1,4 +1,4 @@
-import { eq, desc, asc, lt, and, sql, type SQL } from "drizzle-orm";
+import { inArray, eq, desc, asc, lt, and, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { TaskStore } from "@polpo-ai/core/task-store";
 import type {
@@ -49,6 +49,17 @@ export interface TaskStoreSchema {
 }
 
 export class DrizzleTaskStore implements TaskStore {
+  /**
+   * Decoded tasks by id, with the updated_at they were read at. getAllTasks() runs every
+   * supervisor tick and every chat turn; decoding all rows (results, outcomes) dominated its cost.
+   * Now only (id, updated_at) is read each time and only changed rows are fetched. Writes through
+   * this store drop their entry, so two writes within the same millisecond are never missed;
+   * writes by other processes are caught by updated_at. Callers get copies.
+   */
+  private cache = new Map<string, { updatedAt: string; task: Task }>();
+  /** Last process list written: the supervisor saves it every tick, usually unchanged. */
+  private lastProcesses?: string;
+
   constructor(
     private db: any,
     private schema: TaskStoreSchema,
@@ -175,13 +186,13 @@ export class DrizzleTaskStore implements TaskStore {
       teams = [deserializeJson(meta.team, { name: "default", agents: [] }, this.dialect)];
     }
 
-    const taskRows: any[] = await this.db.select().from(tasks).orderBy(asc(tasks.createdAt));
+    const allTasks = await this.getAllTasks();
     const procRows: any[] = await this.db.select().from(processes);
 
     return {
       project: meta.project ?? "",
       teams,
-      tasks: taskRows.map((r) => this.rowToTask(r)),
+      tasks: allTasks,
       processes: procRows.map((r) => this.rowToProcess(r)),
       startedAt: meta.startedAt,
       completedAt: meta.completedAt,
@@ -211,7 +222,9 @@ export class DrizzleTaskStore implements TaskStore {
       if (partial.completedAt !== undefined) {
         await upsertMeta(db, "completedAt", partial.completedAt);
       }
-      if (partial.processes !== undefined) {
+      const processesJson = partial.processes !== undefined ? JSON.stringify(partial.processes) : undefined;
+      if (partial.processes !== undefined && processesJson !== this.lastProcesses) {
+        this.lastProcesses = processesJson;
         await db.delete(processes);
         for (const p of partial.processes) {
           await db.insert(processes).values({
@@ -225,6 +238,7 @@ export class DrizzleTaskStore implements TaskStore {
         }
       }
       if (partial.tasks !== undefined) {
+        this.cache.clear();
         await db.delete(tasks);
         for (const t of partial.tasks) {
           await db.insert(tasks).values(this.taskToValues(t));
@@ -262,9 +276,22 @@ export class DrizzleTaskStore implements TaskStore {
   }
 
   async getAllTasks(): Promise<Task[]> {
-    const rows: any[] = await this.db.select().from(this.schema.tasks)
-      .orderBy(asc(this.schema.tasks.createdAt));
-    return rows.map((r) => this.rowToTask(r));
+    const t = this.schema.tasks;
+    const heads: Array<{ id: string; updatedAt: string }> = await this.db
+      .select({ id: t.id, updatedAt: t.updatedAt }).from(t).orderBy(asc(t.createdAt));
+    const stale = heads.filter((h) => this.cache.get(h.id)?.updatedAt !== h.updatedAt).map((h) => h.id);
+    for (let i = 0; i < stale.length; i += 500) {
+      const rows: any[] = await this.db.select().from(t).where(inArray(t.id, stale.slice(i, i + 500)));
+      for (const row of rows) this.cache.set(row.id, { updatedAt: row.updatedAt, task: this.rowToTask(row) });
+    }
+    if (this.cache.size > heads.length) {
+      const present = new Set(heads.map((h) => h.id));
+      for (const id of this.cache.keys()) if (!present.has(id)) this.cache.delete(id);
+    }
+    return heads.flatMap((h) => {
+      const entry = this.cache.get(h.id);
+      return entry ? [copyJson(entry.task)] : [];
+    });
   }
 
   /**
@@ -415,12 +442,14 @@ export class DrizzleTaskStore implements TaskStore {
     const merged = { ...existing, ...updates, updatedAt: now };
     const values = this.taskToValues(merged);
     delete values.id;
+    this.cache.delete(taskId);
     await this.db.update(this.schema.tasks).set(values)
       .where(eq(this.schema.tasks.id, taskId));
     return merged;
   }
 
   async removeTask(taskId: string): Promise<boolean> {
+    this.cache.delete(taskId);
     const result = await this.db.delete(this.schema.tasks)
       .where(eq(this.schema.tasks.id, taskId));
     return affectedRows(result) > 0;
@@ -431,6 +460,7 @@ export class DrizzleTaskStore implements TaskStore {
     const toRemove = all.filter(filter);
     if (toRemove.length === 0) return 0;
     for (const t of toRemove) {
+      this.cache.delete(t.id);
       await this.db.delete(this.schema.tasks)
         .where(eq(this.schema.tasks.id, t.id));
     }
@@ -453,6 +483,7 @@ export class DrizzleTaskStore implements TaskStore {
       updates.retries = task.retries + 1;
     }
 
+    this.cache.delete(taskId);
     await this.db.update(this.schema.tasks).set(updates)
       .where(eq(this.schema.tasks.id, taskId));
 
@@ -464,6 +495,7 @@ export class DrizzleTaskStore implements TaskStore {
     if (!task) throw new Error(`Task "${taskId}" not found`);
 
     const now = new Date().toISOString();
+    this.cache.delete(taskId);
     await this.db.update(this.schema.tasks)
       .set({ status: newStatus, updatedAt: now })
       .where(eq(this.schema.tasks.id, taskId));
@@ -563,4 +595,15 @@ export class DrizzleTaskStore implements TaskStore {
   async close(): Promise<void> {
     // Connection lifecycle managed externally
   }
+}
+
+/** Copy of plain data: objects and arrays are new, strings (immutable) are shared, not duplicated. */
+function copyJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copyJson) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) out[key] = copyJson((value as Record<string, unknown>)[key]);
+    return out as T;
+  }
+  return value;
 }

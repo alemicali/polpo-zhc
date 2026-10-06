@@ -55,6 +55,43 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test run
 
+  storage:
+    name: Storage (SQLite + PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: polpo
+          POSTGRES_PASSWORD: polpo
+          POSTGRES_DB: polpo_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U polpo"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build
+      # Migrations must match the schema: regenerating them must change nothing.
+      - name: Migrations up to date
+        run: |
+          pnpm --filter @polpo-ai/drizzle exec drizzle-kit generate --config drizzle.pg.config.ts
+          pnpm --filter @polpo-ai/drizzle exec drizzle-kit generate --config drizzle.sqlite.config.ts
+          if [ -n "$(git status --porcelain packages/drizzle/migrations)" ]; then
+            git status --porcelain packages/drizzle/migrations
+            echo "::error::Schema changed without a migration: run pnpm --filter @polpo-ai/drizzle db:generate"
+            exit 1
+          fi
+      - run: pnpm --filter @polpo-ai/drizzle test
+        env:
+          POLPO_TEST_DATABASE_URL: postgres://polpo:polpo@localhost:5432/polpo_test
+
   install-check:
     name: Install Check
     runs-on: ubuntu-latest

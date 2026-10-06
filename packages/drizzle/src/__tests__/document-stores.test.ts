@@ -209,4 +209,51 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect((await wa.listContacts())[0]!.lastSeen).toBe(10);
     });
   });
+
+  // ── Hot paths ────────────────────────────────────────────────────────
+
+  describe("hot paths", () => {
+    const newTask = (title: string) => ({ title, description: "d", assignTo: "a", dependsOn: [], expectations: [], metrics: [] } as any);
+
+    it("getAllTasks reuses decoded rows but sees every change, including other processes'", async () => {
+      const tasks = stores.taskStore;
+      const a = await tasks.addTask(newTask("a"));
+      await tasks.addTask(newTask("b"));
+      expect((await tasks.getAllTasks()).map((t) => t.title)).toEqual(["a", "b"]);
+      // Two writes in the same millisecond through this store
+      await tasks.updateTask(a.id, { title: "a1" });
+      await tasks.updateTask(a.id, { title: "a2" });
+      expect((await tasks.getAllTasks())[0]!.title).toBe("a2");
+      // Another store instance (another process) on the same database
+      const other = dialect === "sqlite" ? createSqliteStores(drizzle(sqlite!)) : createPgStores(pgDb!);
+      await other.taskStore.updateTask(a.id, { title: "from-elsewhere" });
+      expect((await tasks.getAllTasks())[0]!.title).toBe("from-elsewhere");
+      await other.taskStore.removeTask(a.id);
+      expect((await tasks.getAllTasks()).map((t) => t.title)).toEqual(["b"]);
+      // Callers get copies
+      const list = await tasks.getAllTasks();
+      list[0]!.dependsOn.push("x");
+      expect((await tasks.getAllTasks())[0]!.dependsOn).toEqual([]);
+    });
+
+    it("getMessagesAfter returns the delta, or undefined for an unknown message", async () => {
+      const sessions = stores.sessionStore;
+      const id = await sessions.create("t");
+      const m1 = await sessions.addMessage(id, "user", "one");
+      const m2 = await sessions.addMessage(id, "assistant", "two");
+      await sessions.addMessage(id, "user", "three");
+      expect((await sessions.getMessagesAfter!(id, m1.id))?.map((m) => m.content)).toEqual(["two", "three"]);
+      expect((await sessions.getMessagesAfter!(id, m2.id))?.map((m) => m.content)).toEqual(["three"]);
+      expect(await sessions.getMessagesAfter!(id, "nope")).toBeUndefined();
+    });
+
+    it("process list writes survive and still reflect changes", async () => {
+      const proc = { agentName: "a", pid: 1, taskId: "t", startedAt: "s", alive: true, activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: "x" } } as any;
+      await stores.taskStore.setState({ processes: [proc] });
+      await stores.taskStore.setState({ processes: [proc] });
+      expect((await stores.taskStore.getState()).processes.length).toBe(1);
+      await stores.taskStore.setState({ processes: [] });
+      expect((await stores.taskStore.getState()).processes.length).toBe(0);
+    });
+  });
 });

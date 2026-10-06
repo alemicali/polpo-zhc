@@ -145,8 +145,12 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    // Incremental sync: ?after=<msgId> returns only messages strictly newer than that id
+    // (read from the store when it can, instead of loading the whole transcript).
+    const afterId = c.req.valid("query").after;
+    const delta = afterId && sessionStore.getMessagesAfter ? await sessionStore.getMessagesAfter(id, afterId) : undefined;
     const [rawMessages, attachments] = await Promise.all([
-      sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
+      delta ?? sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
     ]);
     const byMessage = new Map<string, typeof attachments>();
     for (const attachment of attachments) {
@@ -168,10 +172,9 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     // than APPEND. That covers two cases: (1) the client cached a locally-
     // generated UUID that never existed on the server, (2) the server
     // pruned/lost the message after the client cached it.
-    const afterId = c.req.valid("query").after;
     let messages = allMessages;
-    let incremental = false;
-    if (afterId) {
+    let incremental = delta !== undefined;
+    if (afterId && delta === undefined) {
       const idx = allMessages.findIndex((m: any) => m.id === afterId);
       if (idx >= 0) {
         messages = allMessages.slice(idx + 1);
