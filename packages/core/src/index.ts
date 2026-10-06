@@ -97,6 +97,28 @@ export type {
   ContextMessageLike,
   ContextModelLimits,
 } from "./context-compaction.js";
+export {
+  ContextCompactor,
+  checkpointMessage,
+  defaultPinned,
+  serializeForSummary,
+  buildSummaryPrompt,
+  parseSummary,
+  isContextOverflowError,
+  CHECKPOINT_START,
+  CHECKPOINT_END,
+} from "./context-compactor.js";
+export type {
+  CompactionSettings,
+  CompactionInfo,
+  CompactionReason,
+  CompactionMode,
+  ContextSummarizer,
+  SummaryRequest,
+  SummaryResult,
+  CompactorState,
+  ContextCompactorOptions,
+} from "./context-compactor.js";
 
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
