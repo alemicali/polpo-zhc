@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { tmpdir } from "node:os";
 import {
   runCheck as coreRunCheck,
   runMetric as coreRunMetric,
@@ -72,6 +73,25 @@ describe("runCheck", () => {
     const result = await coreRunCheck(deps, exp, "/tmp");
     expect(result.passed).toBe(false);
     expect(result.details).toContain("exit code 1");
+  });
+
+  it("test: returns failed when command exits non-zero without throwing", async () => {
+    const shell = createMockShell({ resolve: { stdout: "1 failing", stderr: "AssertionError", exitCode: 1 } });
+    const deps = makeDeps({ shell });
+    const exp: TaskExpectation = { type: "test", command: "npm test" };
+    const result = await coreRunCheck(deps, exp, "/tmp");
+    expect(result.passed).toBe(false);
+    expect(result.message).toBe("Test failed: npm test");
+    expect(result.details).toContain("AssertionError");
+  });
+
+  it("test: fails with the real NodeShell when the command exits non-zero", async () => {
+    const { runCheck: shellRunCheck } = await import("../assessment/assessor.js");
+    const failing = await shellRunCheck({ type: "test", command: "echo boom >&2; exit 3" }, tmpdir());
+    expect(failing.passed).toBe(false);
+    expect(failing.details).toContain("boom");
+    const passing = await shellRunCheck({ type: "test", command: "true" }, tmpdir());
+    expect(passing.passed).toBe(true);
   });
 
   it("test: defaults to 'npm test' when no command", async () => {

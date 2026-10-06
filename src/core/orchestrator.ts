@@ -1545,6 +1545,9 @@ export class Orchestrator extends TypedEmitter {
         }
         return { taskNotifications, missionNotifications };
       });
+
+      // Reconnect rule actions (create_task, execute_mission, run_script, send_notification)
+      this.notificationRouter.setActionExecutor(this.buildActionExecutor(ctx));
     }
 
     // Wire notification router to approval manager
