@@ -33,6 +33,8 @@ export const tasksSqlite = sqliteTable("tasks", {
   revisionCount: integer("revision_count"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
+  version: integer("version").notNull().default(0),
 }, (table) => [
   index("idx_tasks_status").on(table.status),
   index("idx_tasks_group").on(table.group),
@@ -108,6 +110,8 @@ export const tasksPg = pgTable("tasks", {
   revisionCount: pgInteger("revision_count"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
+  /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
+  version: pgInteger("version").notNull().default(0),
 }, (table) => [
   pgIndex("idx_pg_tasks_status").on(table.status),
   pgIndex("idx_pg_tasks_group").on(table.group),

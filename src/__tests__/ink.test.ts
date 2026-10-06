@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   parseInkSource,
   hashContent,
@@ -56,7 +56,7 @@ describe("parseInkSource", () => {
   it("parses local absolute path", () => {
     const result = parseInkSource("/home/user/my-registry");
     expect(result.type).toBe("local");
-    expect(result.url).toBe("/home/user/my-registry");
+    expect(result.url).toBe(resolve("/home/user/my-registry"));
     expect(result.ownerRepo).toBeUndefined();
   });
 

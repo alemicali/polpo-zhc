@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   discoverSkills,
   parseSkillFrontmatter,
@@ -296,7 +296,13 @@ describe("parseSkillSource", () => {
   it("parses absolute path", () => {
     const parsed = parseSkillSource("/home/user/skills");
     expect(parsed.type).toBe("local");
-    expect(parsed.url).toBe("/home/user/skills");
+    expect(parsed.url).toBe(resolve("/home/user/skills"));
+  });
+
+  it("parses Windows local paths (drive letter, .\\ relative)", () => {
+    expect(parseSkillSource("C:\\Users\\me\\skills").type).toBe("local");
+    expect(parseSkillSource(".\\my-skills").type).toBe("local");
+    expect(parseSkillSource("owner/repo").type).toBe("github");
   });
 });
 

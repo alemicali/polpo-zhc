@@ -10,8 +10,30 @@
  * but its cwd is set to the agent's primary allowed path.
  */
 
-import { resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { realpathSync } from "node:fs";
+
+/**
+ * Absolute path with symlinks resolved, also for paths that do not exist yet: the nearest
+ * existing ancestor is resolved and the rest appended. Both sides of a sandbox check go
+ * through this, so /tmp vs /private/tmp (macOS) or a symlinked workspace compare equal, and
+ * a new file under a symlinked directory cannot escape.
+ */
+export function canonicalPath(p: string): string {
+  let current = resolve(p);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      const real = realpathSync(current);
+      return rest.length > 0 ? join(real, ...rest.reverse()) : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(p); // nothing on the way exists
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
 
 /**
  * Resolve allowedPaths to absolute paths, normalizing relative paths against cwd.
@@ -30,11 +52,10 @@ export function resolveAllowedPaths(cwd: string, allowedPaths?: string[]): strin
  * (e.g. `/home/user/project-evil` should NOT match `/home/user/project`).
  */
 export function isPathAllowed(filePath: string, allowedPaths: string[]): boolean {
-  let resolved = resolve(filePath);
-  // Resolve symlinks to prevent symlink-based sandbox escape
-  try { resolved = realpathSync(resolved); } catch { /* file may not exist yet — use logical path */ }
+  // Symlinks resolved on both sides: no symlink-based escape, no false denials.
+  const resolved = canonicalPath(filePath);
   for (const allowed of allowedPaths) {
-    const normalizedAllowed = resolve(allowed);
+    const normalizedAllowed = canonicalPath(allowed);
     // Exact match
     if (resolved === normalizedAllowed) return true;
     // Prefix match with separator (e.g. /foo/bar/ is prefix of /foo/bar/baz)

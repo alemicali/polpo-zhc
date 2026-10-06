@@ -19,7 +19,7 @@ test("checkpoint survives store recreation; new timestamps do not invalidate it"
   await first.remember(history.slice(0, 1), message("compacted"));
   const checkpoint = await store.load("chat");
   expect(checkpoint?.prefixHashes).toHaveLength(1);
-  expect((await stat(join(dir, "context-checkpoints/chat.json"))).mode & 0o777).toBe(0o600);
+  if (process.platform !== "win32") expect((await stat(join(dir, "context-checkpoints/chat.json"))).mode & 0o777).toBe(0o600);
   const second = await contextCheckpointProjection(new FileContextCheckpointStore(dir), "chat", "model",
     [...history.map(m => ({ ...m, timestamp: 42 })), message("new question")]);
   expect(second.messages[0].content).toContain("Context checkpoint");
