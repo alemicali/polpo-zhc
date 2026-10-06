@@ -80,13 +80,16 @@ function createPdfReadTool(cwd: string, sandbox: string[]): AgentTool<typeof Pdf
         // If pdftotext is available, try to use it
         let extractedText = "";
         try {
-          const { execSync } = await import("node:child_process");
-          const pagesArg = params.pages
-            ? `-f ${Math.min(...params.pages)} -l ${Math.max(...params.pages)}`
-            : "";
-          extractedText = execSync(
-            `pdftotext ${pagesArg} -layout ${JSON.stringify(filePath)} -`,
-            { encoding: "utf-8", timeout: 15_000 },
+          const { execFileSync } = await import("node:child_process");
+          const pageNums = (params.pages ?? []).map((p) => Math.trunc(Number(p))).filter((p) => Number.isFinite(p) && p > 0);
+          const pagesArgs = pageNums.length > 0
+            ? ["-f", String(Math.min(...pageNums)), "-l", String(Math.max(...pageNums))]
+            : [];
+          // Argument array, no shell (the path may contain shell metacharacters).
+          extractedText = execFileSync(
+            "pdftotext",
+            [...pagesArgs, "-layout", filePath, "-"],
+            { encoding: "utf-8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"] },
           ).trim();
         } catch {
           // pdftotext not available - that's fine

@@ -4,6 +4,7 @@ import {
   installSkills,
   removeSkill,
   createAgentSkill,
+  isSafeSkillName,
   assignSkillToAgent,
   unassignSkillFromAgent,
   listSkillsWithAssignments,
@@ -144,6 +145,10 @@ export function skillRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string(), path: z.string() }) }) } },
         description: "Skill created",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid skill name",
+      },
       409: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
         description: "Skill already exists",
@@ -156,6 +161,9 @@ export function skillRoutes(getDeps: () => {
     const polpoDir = deps.polpoDir;
     const workDir = deps.workDir;
     const body = c.req.valid("json");
+    if (!isSafeSkillName(body.name)) {
+      return c.json({ ok: false, error: "Invalid skill name — use letters, numbers, \".\", \"_\" or \"-\"", code: "INVALID_NAME" }, 400);
+    }
 
     const existing = discoverSkills(workDir, polpoDir);
     if (existing.some(s => s.name === body.name)) {

@@ -14,7 +14,7 @@
  * preventing cross-agent interference when multiple agents use browser tools.
  */
 
-import { execSync, spawn as spawnChild } from "node:child_process";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -29,7 +29,8 @@ const DEFAULT_TIMEOUT = 30_000;
  */
 export async function cleanupAgentBrowserSession(session: string): Promise<void> {
   try {
-    execSync(`agent-browser --session ${session} close`, {
+    // Argument array, no shell: the session is derived from the agent name.
+    execFileSync("agent-browser", ["--session", session, "close"], {
       encoding: "utf-8",
       timeout: 10_000,
       stdio: ["ignore", "pipe", "pipe"],
@@ -48,9 +49,8 @@ function execBrowser(
 ): { success: boolean; data?: any; error?: string; raw: string } {
   const sessionArgs = options.session ? ["--session", options.session] : [];
   const profileArgs = options.profileDir ? ["--profile", options.profileDir] : [];
-  const cmd = ["agent-browser", ...sessionArgs, ...profileArgs, ...args, "--json"].join(" ");
   try {
-    const raw = execSync(cmd, {
+    const raw = execFileSync("agent-browser", [...sessionArgs, ...profileArgs, ...args, "--json"], {
       encoding: "utf-8",
       timeout: options.timeout ?? DEFAULT_TIMEOUT,
       cwd: options.cwd,
