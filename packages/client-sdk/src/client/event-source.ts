@@ -1,3 +1,4 @@
+import { POLPO_EVENT_NAMES } from "./event-names.js";
 import type { SSEEvent } from "./types.js";
 
 export type ConnectionStatus =
@@ -57,55 +58,8 @@ export class EventSourceManager {
       this.handleMessage(e);
     };
 
-    // Listen for named events (Polpo sends typed event names)
-    // EventSource API: use addEventListener for named events
-    for (const name of ["session:created", "session:updated", "session:deleted", "message:added",
-      "chat:turn-started", "chat:queue-updated",
-      "background-wait:completed", "background-wait:failed", "background-wait:cancelled"]) {
-      es.addEventListener(name, (e) => this.handleMessage(e as MessageEvent));
-    }
-    es.addEventListener("task:created", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:transition", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:updated", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:removed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:direction", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:retry", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:fix", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:maxRetries", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:question", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:answered", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:timeout", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("task:recovered", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:spawned", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:created", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:updated", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:removed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:finished", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:activity", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("agent:stale", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("team:created", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("team:updated", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("team:removed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("assessment:started", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("assessment:progress", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("assessment:complete", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("assessment:corrected", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("orchestrator:started", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("orchestrator:tick", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("orchestrator:deadlock", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("orchestrator:shutdown", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("deadlock:detected", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("deadlock:resolving", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("deadlock:resolved", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("deadlock:unresolvable", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("mission:saved", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("mission:executed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("mission:completed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("mission:resumed", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("mission:deleted", (e) => this.handleMessage(e as MessageEvent));
-    es.addEventListener("log", (e) => this.handleMessage(e as MessageEvent));
-    // rooms (group chats of people and agents)
-    for (const name of ["room:created", "room:updated", "room:deleted", "room:message", "room:typing"]) {
+    // Listen for named events (Polpo sends typed event names): the whole bus
+    for (const name of POLPO_EVENT_NAMES) {
       es.addEventListener(name, (e) => this.handleMessage(e as MessageEvent));
     }
 

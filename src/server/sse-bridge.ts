@@ -1,42 +1,9 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PolpoEvent } from "../core/events.js";
+import { POLPO_EVENT_NAMES } from "@polpo-ai/core";
 
-/** All Polpo events to subscribe to. */
-const ALL_EVENTS: PolpoEvent[] = [
-  "task:created", "task:transition", "task:updated", "task:removed", "task:direction",
-  "agent:spawned", "agent:finished", "agent:activity",
-  "agent:created", "agent:updated", "agent:removed",
-  "team:created", "team:updated", "team:removed",
-  "assessment:started", "assessment:progress", "assessment:check:started", "assessment:check:complete", "assessment:complete", "assessment:corrected",
-  "orchestrator:started", "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown",
-  "task:retry", "task:retry:blocked", "task:fix", "task:maxRetries",
-  "task:question", "task:answered",
-  "deadlock:detected", "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable",
-  "task:timeout", "agent:stale",
-  "task:recovered",
-  "mission:saved", "mission:executed", "mission:completed", "mission:resumed", "mission:deleted",
-  "session:created", "session:updated", "session:deleted", "message:added",
-  "chat:turn-started", "chat:queue-updated",
-  "background-wait:created", "background-wait:ready", "background-wait:running",
-  "background-wait:completed", "background-wait:failed", "background-wait:cancelled",
-  "approval:requested", "approval:resolved", "approval:rejected", "approval:timeout",
-  "escalation:triggered", "escalation:resolved", "escalation:human",
-  "sla:warning", "sla:violated", "sla:met",
-  "checkpoint:reached", "checkpoint:resumed",
-  "delay:started", "delay:expired",
-  "quality:gate:passed", "quality:gate:failed", "quality:threshold:failed",
-  "schedule:triggered", "schedule:created", "schedule:completed", "schedule:expired",
-  "notification:sent", "notification:failed",
-  "config:reloaded",
-  "gateway:started", "gateway:stopped",
-  "peer:paired", "peer:message", "peer:blocked", "peer:presence",
-  "watcher:created", "watcher:fired", "watcher:removed",
-  "action:triggered",
-  "file:changed",
-  "app:changed", "data-source:changed", "data-view:changed", "skill:changed", "token-usage:recorded",
-  "room:created", "room:updated", "room:deleted", "room:message", "room:typing",
-  "log",
-];
+/** All Polpo events to subscribe to: the whole bus, from the event catalog. */
+const ALL_EVENTS: PolpoEvent[] = POLPO_EVENT_NAMES;
 
 export interface SSEClient {
   id: string;

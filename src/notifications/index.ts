@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { CANONICAL_HOOK_EVENT_NAMES } from "@polpo-ai/core";
+import { POLPO_EVENT_NAMES, HIGH_FREQUENCY_EVENTS } from "@polpo-ai/core";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -139,7 +139,7 @@ export class NotificationRouter {
 
     for (const pattern of patterns) {
       for (const event of allEvents) {
-        if (matchGlob(pattern, event) && !this.subscribedEvents.has(event)) {
+        if (ruleMatches(pattern, event) && !this.subscribedEvents.has(event)) {
           this.subscribedEvents.add(event);
           const fn = (data: unknown) => this.handleEvent(event, data);
           this.emitter.on(event as PolpoEvent, fn as (payload: PolpoEventMap[PolpoEvent]) => void);
@@ -550,13 +550,13 @@ export class NotificationRouter {
     planNotifications?: ScopedNotificationRules,
   ): NotificationRule[] {
     const globalMatching = this.rules.filter(r =>
-      r.events.some(p => matchGlob(p, event))
+      r.events.some(p => ruleMatches(p, event))
     );
 
     // Check task scope
     if (taskNotifications?.rules?.length) {
       const taskMatching = taskNotifications.rules.filter(r =>
-        r.events.some(p => matchGlob(p, event))
+        r.events.some(p => ruleMatches(p, event))
       );
       if (taskMatching.length > 0) {
         if (taskNotifications.inherit) {
@@ -586,7 +586,7 @@ export class NotificationRouter {
     globalMatching: NotificationRule[],
   ): NotificationRule[] {
     const planMatching = planNotifications.rules.filter(r =>
-      r.events.some(p => matchGlob(p, event))
+      r.events.some(p => ruleMatches(p, event))
     );
     if (planMatching.length > 0) {
       return planNotifications.inherit
@@ -778,15 +778,17 @@ function matchGlob(pattern: string, event: string): boolean {
 }
 
 /**
- * Get all known event names from the PolpoEventMap.
+ * Every event of the bus (PolpoEventMap, via the catalog in `@polpo-ai/core/hook-events`).
  * Used to subscribe to concrete events matching glob patterns.
- *
- * The canonical list lives in `@polpo-ai/core/hook-events`
- * (CANONICAL_HOOK_EVENT_NAMES). We just append the "log" channel,
- * which the router also wants to dispatch on.
  */
 function getAllEventNames(): string[] {
-  return [...CANONICAL_HOOK_EVENT_NAMES, "log"];
+  return POLPO_EVENT_NAMES;
+}
+
+/** A rule pattern matches an event: exactly, or by glob unless the event fires many times a minute. */
+function ruleMatches(pattern: string, event: string): boolean {
+  if (pattern === event) return true;
+  return !HIGH_FREQUENCY_EVENTS.has(event) && matchGlob(pattern, event);
 }
 
 /**
