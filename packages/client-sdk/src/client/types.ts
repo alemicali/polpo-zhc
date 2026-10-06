@@ -1299,11 +1299,15 @@ export interface ChatQueueItem {
   sessionId: string;
   content: string;
   createdAt: string;
+  /** Set on a message that goes out next whatever auto-send says (a steer that missed its turn…). */
+  steerId?: string;
 }
 
 export interface ChatQueueState {
   items: ChatQueueItem[];
   autoSend: boolean;
+  /** Auto-send is held: the last turn errored, was stopped or waits for the user. */
+  hold?: string;
 }
 
 /** Result of "send now" on a queued prompt. */

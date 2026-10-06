@@ -1769,9 +1769,10 @@ export function useChat() {
         const history = conversationBySessionRef.current.get(sessionKey) ?? [];
         setConversation(sessionKey, history.slice(0, -1));
         if (typeof conversationContent === "string") {
-          await client.addToChatQueue(sessionKey, conversationContent, { front: true });
+          // Marked "next": sent right after the running turn, whatever auto-send says.
+          await client.addToChatQueue(sessionKey, conversationContent, { next: true });
           opts?.onAccepted?.();
-          toast.info("A response is already running — your message was queued next");
+          toast.info("A response is already running — your message will be sent right after it");
         } else {
           toast.info("A response is already running — send it when it finishes");
         }

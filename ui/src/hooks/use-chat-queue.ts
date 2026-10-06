@@ -25,11 +25,15 @@ export interface QueueItem {
   id: string;
   text: string;
   createdAt: number;
+  /** Goes out next whatever auto-send says (a message that missed its turn). */
+  next?: boolean;
 }
 
 export interface QueueState {
   items: QueueItem[];
   autoSend: boolean;
+  /** Auto-send is held after a turn that did not complete (error, Stop, waiting for you…). */
+  hold?: string;
 }
 
 export type QueueSendResult =
@@ -39,8 +43,8 @@ export type QueueSendResult =
 
 /** The subset of the SDK client this hook needs (kept narrow for tests). */
 export interface QueueClient {
-  getChatQueue(sessionId: string): Promise<{ items: Array<{ id: string; content: string; createdAt: string }>; autoSend: boolean }>;
-  addToChatQueue(sessionId: string, content: string, opts?: { front?: boolean }): Promise<unknown>;
+  getChatQueue(sessionId: string): Promise<{ items: Array<{ id: string; content: string; createdAt: string; steerId?: string }>; autoSend: boolean; hold?: string }>;
+  addToChatQueue(sessionId: string, content: string, opts?: { front?: boolean; next?: boolean }): Promise<unknown>;
   updateChatQueueItem(sessionId: string, itemId: string, content: string): Promise<unknown>;
   removeChatQueueItem(sessionId: string, itemId: string): Promise<unknown>;
   reorderChatQueue(sessionId: string, ids: string[]): Promise<unknown>;
@@ -78,7 +82,8 @@ function localId(): string {
 
 const fromServer = (state: Awaited<ReturnType<QueueClient["getChatQueue"]>>): QueueState => ({
   autoSend: state.autoSend,
-  items: state.items.map((i) => ({ id: i.id, text: i.content, createdAt: Date.parse(i.createdAt) || Date.now() })),
+  ...(state.hold ? { hold: state.hold } : {}),
+  items: state.items.map((i) => ({ id: i.id, text: i.content, createdAt: Date.parse(i.createdAt) || Date.now(), ...(i.steerId ? { next: true } : {}) })),
 });
 
 const inflight = new Map<string, Promise<void>>();
@@ -135,20 +140,54 @@ function dropFirstLegacyPrompt(sessionId: string) {
   writeLegacy(store);
 }
 
+const LEGACY_LOCK_PREFIX = "polpo:chat:queue:v1:import-lock:";
+const LEGACY_LOCK_TTL_MS = 30_000;
+const tabId = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * Cross-tab lock for importing one session's legacy queue: every open tab shares this
+ * localStorage, so two tabs must not import the same prompts. A lock older than its TTL is
+ * considered abandoned (a tab closed mid-import).
+ */
+export function tryLegacyImportLock(sessionId: string, owner = tabId, now = Date.now()): boolean {
+  try {
+    const key = LEGACY_LOCK_PREFIX + sessionId;
+    const held = JSON.parse(localStorage.getItem(key) ?? "null") as { owner?: string; at?: number } | null;
+    if (held && held.owner !== owner && typeof held.at === "number" && now - held.at < LEGACY_LOCK_TTL_MS) return false;
+    localStorage.setItem(key, JSON.stringify({ owner, at: now }));
+    // Another tab may have written at the same moment: the last write wins, the other backs off.
+    return (JSON.parse(localStorage.getItem(key) ?? "null") as { owner?: string } | null)?.owner === owner;
+  } catch {
+    return false;
+  }
+}
+
+export function releaseLegacyImportLock(sessionId: string, owner = tabId) {
+  try {
+    const key = LEGACY_LOCK_PREFIX + sessionId;
+    const held = JSON.parse(localStorage.getItem(key) ?? "null") as { owner?: string } | null;
+    if (held?.owner === owner) localStorage.removeItem(key);
+  } catch { /* storage unavailable */ }
+}
+
 const migratingLegacy = new Set<string>();
 
 /**
  * Move the prompts an older version kept in localStorage to the server queue. They may be stale,
  * so auto-send is paused first: nothing fires on its own. Each prompt leaves localStorage only
  * once the server has it; on failure the rest stays for the next attempt and the error is shown.
+ * One tab at a time (cross-tab lock), re-reading the prompts once the lock is held.
  * Returns how many prompts were moved.
  */
-export async function migrateLegacyQueue(client: QueueClient, sessionId: string, notify: (message: string, error?: boolean) => void = () => {}): Promise<number> {
-  const prompts = legacyQueuedPrompts(sessionId);
-  if (prompts.length === 0 || migratingLegacy.has(sessionId)) return 0;
+export async function migrateLegacyQueue(client: QueueClient, sessionId: string, notify: (message: string, error?: boolean) => void = () => {}, owner = tabId): Promise<number> {
+  if (legacyQueuedPrompts(sessionId).length === 0 || migratingLegacy.has(sessionId)) return 0;
+  if (!tryLegacyImportLock(sessionId, owner)) return 0;
   migratingLegacy.add(sessionId);
+  // Read again under the lock: another tab may have imported them meanwhile.
+  const prompts = legacyQueuedPrompts(sessionId);
   let moved = 0;
   try {
+    if (prompts.length === 0) return 0;
     await client.setChatQueueAutoSend(sessionId, false);
     for (const text of prompts) {
       await client.addToChatQueue(sessionId, text);
@@ -160,6 +199,7 @@ export async function migrateLegacyQueue(client: QueueClient, sessionId: string,
     notify(`Could not restore ${prompts.length - moved} queued prompt(s): ${error instanceof Error ? error.message : "unknown error"}. They are kept on this device.`, true);
   } finally {
     migratingLegacy.delete(sessionId);
+    releaseLegacyImportLock(sessionId, owner);
   }
   return moved;
 }
@@ -268,7 +308,7 @@ export function useChatQueue(sessionId: string | null | undefined, injectedClien
   }, [client, key, mutate]);
 
   const setAutoSend = useCallback((value: boolean) => {
-    mutate((s) => ({ ...s, autoSend: value }), () => client.setChatQueueAutoSend(key, value));
+    mutate((s) => ({ ...s, autoSend: value, hold: undefined }), () => client.setChatQueueAutoSend(key, value));
   }, [client, key, mutate]);
 
   const sendNow = useCallback(async (id: string) => {
@@ -284,6 +324,7 @@ export function useChatQueue(sessionId: string | null | undefined, injectedClien
   return useMemo(() => ({
     items: state.items,
     autoSend: state.autoSend,
+    hold: state.hold,
     add,
     update,
     remove,
@@ -291,5 +332,5 @@ export function useChatQueue(sessionId: string | null | undefined, injectedClien
     clear,
     setAutoSend,
     sendNow,
-  }), [state.items, state.autoSend, add, update, remove, reorder, clear, setAutoSend, sendNow]);
+  }), [state.items, state.autoSend, state.hold, add, update, remove, reorder, clear, setAutoSend, sendNow]);
 }

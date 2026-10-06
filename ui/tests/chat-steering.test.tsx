@@ -20,7 +20,7 @@ import {
   settleSteer,
 } from "../src/hooks/use-chat-steering";
 import { Queue, PendingSteers } from "../src/components/ai-elements/queue";
-import { legacyQueuedPrompts, migrateLegacyQueue, useChatQueue, type QueueClient, type UseChatQueueApi } from "../src/hooks/use-chat-queue";
+import { legacyQueuedPrompts, migrateLegacyQueue, tryLegacyImportLock, useChatQueue, type QueueClient, type UseChatQueueApi } from "../src/hooks/use-chat-queue";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -232,4 +232,33 @@ test("legacy localStorage queues move to the server with auto-send paused, and n
   expect(legacyQueuedPrompts("other")).toEqual(["keep me"]);
   expect(await migrateLegacyQueue(ok.client, "s1")).toBe(0);
   localStorage.clear();
+});
+
+test("only one tab imports a legacy queue (cross-tab lock with expiry)", async () => {
+  localStorage.setItem("polpo:chat:queue:v1", JSON.stringify({ s9: { items: [{ id: "a", text: "only once", createdAt: 1 }] } }));
+  // Another tab is importing it right now.
+  expect(tryLegacyImportLock("s9", "other-tab")).toBe(true);
+  const first = legacyClient();
+  expect(await migrateLegacyQueue(first.client, "s9", undefined, "this-tab")).toBe(0);
+  expect(first.calls).toEqual([]);
+  expect(legacyQueuedPrompts("s9")).toEqual(["only once"]);
+  // That tab went away without releasing: after the TTL this tab takes over.
+  expect(tryLegacyImportLock("s9", "this-tab", Date.now() + 31_000)).toBe(true);
+  localStorage.removeItem("polpo:chat:queue:v1:import-lock:s9");
+  const second = legacyClient();
+  expect(await migrateLegacyQueue(second.client, "s9", undefined, "this-tab")).toBe(1);
+  expect(second.added).toEqual(["only once"]);
+  expect(localStorage.getItem("polpo:chat:queue:v1:import-lock:s9")).toBeNull();
+  localStorage.clear();
+});
+
+test("queue list shows a hold and messages marked to go next", async () => {
+  const props = { onUpdate: vi.fn(), onRemove: vi.fn(), onClear: vi.fn(), onAutoSendChange: vi.fn() };
+  await act(async () => root.render(<Queue items={[{ id: "1", text: "typed while busy", createdAt: 1, next: true }]} autoSend hold="error" {...props} />));
+  expect(container.textContent).toContain("paused (last answer failed)");
+  expect(container.textContent).toContain("next");
+  const toggle = container.querySelector('[role="switch"]') as HTMLButtonElement;
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  await act(async () => toggle.click());
+  expect(props.onAutoSendChange).toHaveBeenCalledWith(true);
 });

@@ -4003,6 +4003,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <Queue
               items={queue.items}
               autoSend={queue.autoSend}
+              hold={queue.hold}
               onUpdate={queue.update}
               onRemove={queue.remove}
               onSend={handleManualSend}

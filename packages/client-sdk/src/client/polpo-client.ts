@@ -891,8 +891,11 @@ export class PolpoClient {
     return this.request<ChatQueueState>("GET", this.apiUrl(`/chat/sessions/${sessionId}/queue`));
   }
 
-  addToChatQueue(sessionId: string, content: string, opts?: { front?: boolean }): Promise<ChatQueueItem> {
-    return this.post<ChatQueueItem>(`/chat/sessions/${sessionId}/queue`, { content, ...(opts?.front ? { front: true } : {}) });
+  /** Queue a prompt; `next` sends it right after the running turn, whatever auto-send says. */
+  addToChatQueue(sessionId: string, content: string, opts?: { front?: boolean; next?: boolean }): Promise<ChatQueueItem> {
+    return this.post<ChatQueueItem>(`/chat/sessions/${sessionId}/queue`, {
+      content, ...(opts?.front ? { front: true } : {}), ...(opts?.next ? { next: true } : {}),
+    });
   }
 
   updateChatQueueItem(sessionId: string, itemId: string, content: string): Promise<ChatQueueItem> {

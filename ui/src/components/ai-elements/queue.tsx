@@ -17,6 +17,8 @@ import type { PendingSteer } from "@/hooks/use-chat-steering";
 export interface QueueProps {
   items: QueueItem[];
   autoSend: boolean;
+  /** Auto-send is held after a turn that did not complete ("error", "aborted", "interactive", …). */
+  hold?: string;
   onUpdate: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
@@ -34,6 +36,7 @@ export interface QueueProps {
 export function Queue({
   items,
   autoSend,
+  hold,
   onUpdate,
   onRemove,
   onClear,
@@ -59,10 +62,10 @@ export function Queue({
           {collapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
           <span className="truncate">
             <span className="font-medium text-foreground">{items.length} queued</span>
-            {autoSend ? " · auto-send" : " · paused"}
+            {hold ? ` · paused (${HOLD_LABELS[hold] ?? "last answer did not finish"})` : autoSend ? " · auto-send" : " · paused"}
           </span>
         </button>
-        <AutoSendSwitch checked={autoSend} onChange={onAutoSendChange} />
+        <AutoSendSwitch checked={autoSend && !hold} onChange={onAutoSendChange} />
         <button
           type="button"
           onClick={onClear}
@@ -94,6 +97,13 @@ export function Queue({
     </div>
   );
 }
+
+const HOLD_LABELS: Record<string, string> = {
+  error: "last answer failed",
+  aborted: "stopped",
+  interactive: "waiting for your answer",
+  max_turns: "last answer hit its step limit",
+};
 
 function AutoSendSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -221,6 +231,9 @@ function QueueItemRow({
           className="min-w-0 flex-1 cursor-text rounded py-0.5 text-left leading-snug text-foreground/90 hover:text-foreground"
           title="Click to edit"
         >
+          {item.next && (
+            <span className="mr-1.5 rounded bg-primary/10 px-1 py-px text-[10px] font-medium uppercase tracking-wide text-primary">next</span>
+          )}
           <span className="line-clamp-2 whitespace-pre-wrap break-words">{item.text}</span>
         </button>
       )}
