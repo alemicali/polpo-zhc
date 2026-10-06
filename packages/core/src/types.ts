@@ -702,16 +702,61 @@ export interface PolpoFileConfigRaw {
 
 // === Provider Config ===
 
+/** Wire protocols a custom provider / gateway can speak. */
+export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages" | "azure-openai-responses";
+
+/**
+ * How the provider key is sent to a custom endpoint.
+ * - none: keyless (local Ollama / vLLM / LM Studio)
+ * - bearer: `Authorization: Bearer <key>`
+ * - x-api-key: `x-api-key: <key>`
+ * - header: `<headerName>: <prefix><key>`
+ */
+export interface ProviderAuthConfig {
+  type: "none" | "bearer" | "x-api-key" | "header";
+  /** Header name for type "header" (e.g. "api-key", "cf-aig-authorization"). */
+  headerName?: string;
+  /** Optional value prefix for type "header" (e.g. "Bearer "). */
+  prefix?: string;
+  /** Environment variable used as fallback when no key is stored in the vault. */
+  envVar?: string;
+}
+
+/**
+ * Provider entry in polpo.json `providers`.
+ *
+ * For built-in pi-ai providers (anthropic, openai, ...) only `baseUrl`/`api`/`models`
+ * act as overrides. Any other id is a custom provider / gateway. Secrets never live
+ * here: keys and secret headers are stored encrypted in the vault (owner "$providers").
+ */
 export interface ProviderConfig {
+  /** Display name. */
+  label?: string;
+  /** Wizard preset this provider was created from (openrouter, litellm, ollama, ...). */
+  preset?: string;
+  /** Built-in provider this endpoint proxies (catalog metadata is reused for its models). */
+  proxyFor?: string;
   /** Override base URL for the provider (e.g. custom proxy, Ollama, vLLM). */
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */
-  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  api?: ProviderApi;
+  /** How the key is sent. Default: bearer (x-api-key for anthropic-messages); legacy entries without auth are keyless. */
+  auth?: ProviderAuthConfig;
+  /** Static, NON-secret headers sent with every request. */
+  headers?: Record<string, string>;
+  /** Provider-wide compatibility flags (whitelisted per API). */
+  compat?: Record<string, unknown>;
+  /** Allow private/internal network targets (localhost, RFC1918, Tailscale CGNAT, ULA). */
+  allowPrivateNetwork?: boolean;
+  /** Request timeout in ms. */
+  timeoutMs?: number;
+  /** SDK-level retries. */
+  maxRetries?: number;
   /** Custom model definitions for this provider (used with custom endpoints). */
   models?: CustomModelDef[];
 }
 
-/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, etc.) */
+/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, gateways, etc.) */
 export interface CustomModelDef {
   /** Model ID used in API calls. */
   id: string;
@@ -723,10 +768,12 @@ export interface CustomModelDef {
   input?: ("text" | "image")[];
   /** Cost per million tokens. Default: all zeros (free/local). */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  /** Context window size in tokens. Default: 200000 */
+  /** Context window size in tokens. Default: 128000 */
   contextWindow?: number;
   /** Max output tokens. Default: 8192 */
   maxTokens?: number;
+  /** Per-model compatibility flags (override provider-level compat). */
+  compat?: Record<string, unknown>;
 }
 
 // === Model Config (primary + fallbacks) ===

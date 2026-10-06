@@ -18,6 +18,10 @@
       "types": "./dist/schemas.d.ts",
       "import": "./dist/schemas.js"
     },
+    "./provider-config": {
+      "types": "./dist/provider-config.d.ts",
+      "import": "./dist/provider-config.js"
+    },
     "./events": {
       "types": "./dist/events.d.ts",
       "import": "./dist/events.js"

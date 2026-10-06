@@ -13,6 +13,9 @@ export { VALID_TRANSITIONS, isValidTransition, assertValidTransition } from "./s
 // ── Schemas (Zod validation) ─────────────────────────────────────────────
 export * from "./schemas.js";
 
+// ── Custom providers / AI gateways (schema, presets, helpers) ────────────
+export * from "./provider-config.js";
+
 // ── Hooks ────────────────────────────────────────────────────────────────
 export { HookRegistry } from "./hooks.js";
 export type {
