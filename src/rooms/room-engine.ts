@@ -212,7 +212,10 @@ export class RoomEngine {
       const recent = await this.opts.rooms.getRecentMessages(room.id, ROOM_TURN_LINES + 20);
       const speaker = message.authorKind === "agent" ? `${message.authorName} (agent)` : message.authorName;
       const text = roomTurnText(recent, agent.id, { id: message.id, speaker, text: message.text });
-      const history = await this.opts.sessions.getRecentMessages(sessionId, 20);
+      // the agent's whole session in this group: compaction keeps it within the window
+      const history = typeof this.opts.sessions.getMessages === "function"
+        ? await this.opts.sessions.getMessages(sessionId)
+        : await this.opts.sessions.getRecentMessages(sessionId, 20);
       const members = await this.profiles(room);
       const messages = [
         ...history.filter((m) => m.content).map((m) => ({ role: m.role, content: m.content })),

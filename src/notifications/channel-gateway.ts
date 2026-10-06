@@ -47,7 +47,9 @@ import type {
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
-import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth } from "../llm/pi-client.js";
+import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
+import { createSessionCompaction } from "@polpo-ai/server";
+import { isContextOverflowError } from "@polpo-ai/core";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
 import type { Message } from "@earendil-works/pi-ai";
 import {
@@ -1333,7 +1335,10 @@ export class ChannelGateway {
       // Build conversation history from session
       // Note: pi-ai uses "user" role for both user and assistant messages.
       // Assistant messages are wrapped with a prefix, matching the completions endpoint behavior.
-      const recentMessages = await this.sessionStore.getRecentMessages(sessionId, 20);
+      // The whole conversation: compaction (below) keeps it within the model's window
+      const recentMessages = typeof this.sessionStore.getMessages === "function"
+        ? await this.sessionStore.getMessages(sessionId)
+        : await this.sessionStore.getRecentMessages(sessionId, 40);
       const piMessages: Message[] = recentMessages
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({
@@ -1365,9 +1370,28 @@ export class ChannelGateway {
       const m = resolveModel(modelSpec);
       const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
+      // Same compaction as the web chat: checkpoint kept per session, model summaries, events
+      const session = await this.sessionStore.getSession(sessionId).catch(() => undefined);
+      const compactionSettings = settings?.compaction ?? {};
+      const compaction = await createSessionCompaction({
+        model: m,
+        settings: compactionSettings,
+        systemPrompt: () => systemPrompt + peerContext,
+        tools: () => ALL_ORCHESTRATOR_TOOLS,
+        original: piMessages,
+        sessionId,
+        scope: JSON.stringify([session?.createdAt, "polpo:channel", m?.provider, m?.id]),
+        store: this.orchestrator.getContextCheckpointStore?.(),
+        completeLLM: completeSimpleWithAuth as any,
+        summaryModel: (promptTokens) => resolveSummaryModel(m, compactionSettings.model, promptTokens),
+        memory: { store: this.orchestrator.getMemoryStore() },
+        onCompacted: (info) => this.orchestrator.emit("context:compacted", { scope: "chat", sessionId, ...info }),
+      });
+
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;
       const messages: Message[] = [...piMessages];
+      let overflowRetried = false;
       let finalText = "";
       let sentPartials = false;
 
@@ -1375,11 +1399,12 @@ export class ChannelGateway {
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         this.log("verbose", `Turn ${turn + 1}: sending ${messages.length} messages`);
+        const prepared = await compaction.prepare(messages);
         const piStream = await streamSimpleWithAuth(m, {
           systemPrompt: systemPrompt + peerContext,
-          messages,
+          messages: prepared.messages as Message[],
           tools: ALL_ORCHESTRATOR_TOOLS,
-        }, streamOpts);
+        }, { ...streamOpts, sessionId });
 
         let turnText = "";
         let streamError: string | undefined;
@@ -1392,10 +1417,19 @@ export class ChannelGateway {
         }
 
         if (streamError) {
+          // "context too long": compact harder and try this turn again, once
+          if (!overflowRetried && isContextOverflowError(streamError)) {
+            overflowRetried = true;
+            await compaction.prepare(messages, "overflow");
+            turn -= 1;
+            continue;
+          }
           return `Error: ${streamError}`;
         }
 
         const response = await piStream.result();
+        const usage = (response as any).usage;
+        if (usage) compaction.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0));
         this.log("verbose", `Turn ${turn + 1} complete: ${turnText.length} chars, blocks: ${response.content.map((c: { type: string }) => c.type).join(",")}`);
         messages.push(response);
 

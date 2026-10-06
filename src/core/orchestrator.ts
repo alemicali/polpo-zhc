@@ -96,6 +96,9 @@ import type { PlaybookStore } from "./playbook-store.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 import { NodeSpawner } from "../adapters/node-spawner.js";
 import type { Spawner } from "./spawner.js";
+import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
+import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
+import { databaseStoresFor } from "./storage.js";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -180,6 +183,7 @@ export class Orchestrator extends TypedEmitter {
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
   private channelCompactRunner?: ChannelCompactRunner;
+  private contextCheckpointStore?: ContextCheckpointStore;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
   private logRetentionTimer?: ReturnType<typeof setTimeout>;
@@ -221,6 +225,11 @@ export class Orchestrator extends TypedEmitter {
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
+  /** Where chat sessions keep their compaction checkpoint (database when configured, files otherwise). */
+  getContextCheckpointStore(): ContextCheckpointStore {
+    this.contextCheckpointStore ??= databaseStoresFor(this.polpoDir)?.contextCheckpointStore ?? new FileContextCheckpointStore(this.polpoDir);
+    return this.contextCheckpointStore;
+  }
   getChannelCompactRunner(): ChannelCompactRunner | undefined { return this.channelCompactRunner; }
   setChannelCompactRunner(runner: ChannelCompactRunner): void { this.channelCompactRunner = runner; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
