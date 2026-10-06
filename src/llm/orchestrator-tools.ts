@@ -54,6 +54,7 @@ import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../s
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
+import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 
@@ -1889,6 +1890,8 @@ export const READ_TOOLS = new Set([
   "data_list_sources", "data_test_source", "data_describe", "data_query", "data_sql", "data_list_views", "data_get_view",
   // Company Brain
   "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
+  // Storage (buckets)
+  "storage_list_entries", "storage_list", "storage_read", "storage_presign",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -1937,6 +1940,8 @@ export const WRITE_TOOLS = new Set([
   // Company Brain
   "brain_upsert_entity", "brain_upsert_relation", "brain_upsert_claim", "brain_ingest_data_source",
   "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
+  // Storage (buckets)
+  "storage_mount", "storage_unmount", "storage_write", "storage_delete",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -2058,6 +2063,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   ...DATA_ORCHESTRATOR_TOOLS,
   // Evidence-grounded semantic company graph
   ...BRAIN_ORCHESTRATOR_TOOLS,
+  // Storage: S3/R2 buckets (host-side; admin + object tools)
+  ...STORAGE_ORCHESTRATOR_TOOLS,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2108,6 +2115,14 @@ const TOOL_LABELS: Record<string, string> = {
   data_create_view: "Create Data View",
   data_update_view: "Update Data View",
   data_delete_view: "Delete Data View",
+  storage_list_entries: "List Storage",
+  storage_mount: "Mount Storage",
+  storage_unmount: "Unmount Storage",
+  storage_list: "List Storage Files",
+  storage_read: "Read Storage File",
+  storage_write: "Write Storage File",
+  storage_delete: "Delete Storage File",
+  storage_presign: "Create Download Link",
   brain_stats: "Inspect Company Brain",
   brain_search: "Search Company Brain",
   brain_get_entity: "Get Brain Entity",
@@ -2327,6 +2342,17 @@ export async function executeOrchestratorTool(
       case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
         return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
           polpo.emit("brain:changed", event);
+        });
+
+      // ── Storage ──
+      case "storage_list_entries": case "storage_mount": case "storage_unmount":
+      case "storage_list": case "storage_read": case "storage_write": case "storage_delete": case "storage_presign":
+        return executeStorageTool(toolName, args, {
+          polpoDir: polpo.getPolpoDir(),
+          vaultStore: polpo.getVaultStore(),
+          cwd: polpo.getWorkDir(),
+          emit: (payload) => polpo.emit("storage:changed", payload),
+          emitFileChanged: (payload) => polpo.emit("file:changed", { ...payload, source: "chat" }),
         });
 
       // ── Task ──
