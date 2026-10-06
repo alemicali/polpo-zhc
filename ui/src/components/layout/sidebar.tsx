@@ -35,6 +35,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { config } from "@/lib/config";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
@@ -64,7 +65,7 @@ const nav: NavSection[] = [
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
       { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
-      { to: "https://polpo.sh/ink", icon: Store, label: "Polpo Ink Hub", external: true },
+      { to: config.inkHubUrl, icon: Store, label: "Polpo Ink Hub", external: true },
     ],
   },
   {

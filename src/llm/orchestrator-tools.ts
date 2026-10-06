@@ -56,6 +56,7 @@ import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -1561,9 +1562,9 @@ const inkBrowseTool: Tool = {
 
 const inkAddTool: Tool = {
   name: "ink_add",
-  description: "Install packages from an Ink registry source (GitHub repo). Clones the repo, discovers packages by convention (playbooks, agents, companies), validates them, and installs into the project config. The official registry is 'lumea-labs/ink-registry'.",
+  description: `Install packages from an Ink registry source (GitHub repo). Clones the repo, discovers packages by convention (playbooks, agents, companies), validates them, and installs into the project config. The official registry is '${inkRegistry()}'.`,
   parameters: Type.Object({
-    source: Type.String({ description: "Package source — GitHub owner/repo (e.g. 'lumea-labs/ink-registry') or a full GitHub URL" }),
+    source: Type.String({ description: `Package source — GitHub owner/repo (e.g. '${inkRegistry()}') or a full GitHub URL` }),
     name: Type.Optional(Type.String({ description: "Install a specific package by name (e.g. 'devops-engineer'). If omitted, all packages from the source are installed." })),
   }),
 };
@@ -1572,7 +1573,7 @@ const inkRemoveTool: Tool = {
   name: "ink_remove",
   description: "Remove an installed Ink registry source and its packages from the project. Playbooks are deleted, agents are removed from polpo.json. Use ink_browse to see what's installed.",
   parameters: Type.Object({
-    source: Type.String({ description: "Package source to remove — GitHub owner/repo (e.g. 'lumea-labs/ink-registry')" }),
+    source: Type.String({ description: `Package source to remove — GitHub owner/repo (e.g. '${inkRegistry()}')` }),
   }),
 };
 
@@ -1580,7 +1581,7 @@ const inkUpdateTool: Tool = {
   name: "ink_update",
   description: "Update installed Ink packages by pulling the latest from their git repos. Re-discovers and re-installs packages, updating the lock file with new commit hashes. If no source is specified, all installed sources are updated.",
   parameters: Type.Object({
-    source: Type.Optional(Type.String({ description: "Specific source to update (e.g. 'lumea-labs/ink-registry'). If omitted, all installed sources are updated." })),
+    source: Type.Optional(Type.String({ description: `Specific source to update (e.g. '${inkRegistry()}'). If omitted, all installed sources are updated.` })),
   }),
 };
 
@@ -5972,11 +5973,10 @@ async function execPhoneDisableInbound(polpo: Orchestrator): Promise<string> {
 //  INK HUB EXECUTORS
 // ═══════════════════════════════════════════════════════
 
-const INK_API_URL = "https://polpo.sh/api";
 
 async function execInkSearch(args: Record<string, unknown>): Promise<string> {
   try {
-    const res = await fetch(`${INK_API_URL}/packages`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${inkApiUrl()}/packages`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return `Error: Ink Hub API returned HTTP ${res.status}`;
 
     const data = await res.json() as { packages: Array<{
@@ -6043,7 +6043,7 @@ function execInkBrowse(polpo: Orchestrator, args: Record<string, unknown>): stri
 
 async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const source = args.source as string;
-  if (!source) return "Error: 'source' is required (e.g. 'lumea-labs/ink-registry').";
+  if (!source) return `Error: 'source' is required (e.g. '${inkRegistry()}').`;
 
   const polpoDir = polpo.getPolpoDir();
   let parsed: ReturnType<typeof parseInkSource>;
@@ -6202,7 +6202,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
 
   // Fire telemetry (fire-and-forget)
   try {
-    fetch(`${INK_API_URL}/installs`, {
+    fetch(`${inkApiUrl()}/installs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

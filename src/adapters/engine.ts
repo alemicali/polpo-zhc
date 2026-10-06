@@ -38,6 +38,7 @@ import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 import { createDataAgentTools } from "../tools/data-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { inkRegistry } from "../core/ink-config.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -239,11 +240,11 @@ function describeToolsForAgent(agent: AgentConfig): string {
     "**Ink Hub (package registry — always available):**",
     "- `ink_search` — search the Ink Hub for available packages (playbooks, agents, companies)",
     "- `ink_browse` — list packages currently installed in this project",
-    "- `ink_add` — install packages from a GitHub source (e.g. 'lumea-labs/ink-registry')",
+    `- \`ink_add\` — install packages from a GitHub source (e.g. '${inkRegistry()}')`,
     "- `ink_remove` — remove an installed registry source and uninstall its packages",
     "- `ink_update` — update installed registries by pulling the latest from git",
     "Use ink tools to find and install reusable playbooks, agent configs, and company setups.",
-    "The official registry is 'lumea-labs/ink-registry'.",
+    `The official registry is '${inkRegistry()}'.`,
   );
 
   // --- Guidance ---
