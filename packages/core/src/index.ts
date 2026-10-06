@@ -186,3 +186,13 @@ export { assessTask, runCheck, runMetric, type AssessmentDeps, type CheckProgres
 export { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./assessment-scoring.js";
 export { validateReviewPayload, ReviewPayloadSchema, ReviewScoreSchema, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./assessment-schemas.js";
 export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
+
+// ── Sandboxes and storage mounts ────────────────────────────────────────
+export {
+  resolveSandbox, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+} from "./sandbox.js";
+export type {
+  Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProvider, SandboxNetwork,
+  SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
+  StorageMountSpec, StorageMountProvider,
+} from "./sandbox.js";

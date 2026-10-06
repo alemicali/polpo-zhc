@@ -249,6 +249,10 @@
     "./secret-redaction": {
       "types": "./dist/secret-redaction.d.ts",
       "import": "./dist/secret-redaction.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "import": "./dist/sandbox.js"
     }
   },
   "sideEffects": false,
