@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { redactPolpoConfig } from "../security.js";
+import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
@@ -329,7 +329,7 @@ export function configRoutes(getDeps: () => {
     const deps = getDeps();
     const config = deps.getConfig();
     const channels = config?.settings?.notifications?.channels ?? {};
-    return c.json({ ok: true, data: channels }, 200);
+    return c.json({ ok: true, data: redactSecrets(channels) }, 200);
   });
 
   app.openapi(upsertChannelRoute, async (c) => {
@@ -341,7 +341,12 @@ export function configRoutes(getDeps: () => {
       const settings = config.settings ?? {};
       if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
       if (!settings.notifications.channels) settings.notifications.channels = {};
-      settings.notifications.channels[name] = channelConfig;
+      // Clients read channels redacted ("••••1234"): keep the stored secret
+      // wherever the incoming value is still the masked placeholder.
+      settings.notifications.channels[name] = restoreRedactedSecrets(
+        channelConfig,
+        settings.notifications.channels[name],
+      );
       config.settings = settings;
     });
 
