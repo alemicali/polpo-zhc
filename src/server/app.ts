@@ -57,6 +57,7 @@ import { expoPushRoutes } from "./routes/expo-push.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
+import { roomRoutes } from "./routes/rooms.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -631,6 +632,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
 
   authed.route("/events", eventRoutes(sseBridge));
+
+  authed.route("/rooms", roomRoutes(() => ({
+    rooms: o.getRoomStore(),
+    engine: o.getRoomEngine(),
+    agentNames: async () => (await o.getAgents()).map(a => a.name),
+    emit: (event, payload) => o.emit(event, payload),
+    emitDeleted: (roomId) => o.emit("room:deleted", { roomId }),
+  })));
 
   authed.route("/chat", chatRoutes(() => ({
     attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),

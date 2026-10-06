@@ -37,7 +37,8 @@ import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type { InboundGroup } from "./telegram-groups.js";
 import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
-import type { RoomKind, RoomMessage, RoomStore } from "@polpo-ai/core";
+import type { RoomKind, RoomStore } from "@polpo-ai/core";
+import { ROOM_TURN_LINES, roomTurnText } from "../rooms/transcript.js";
 import type {
   ChannelGatewayConfig,
   ChannelReplyTarget,
@@ -103,8 +104,6 @@ const GROUP_CONTEXT_MS = 12 * 60 * 60 * 1000;
 /** groupReplies "intent": the probability above which an agent joins in unprompted. */
 const DEFAULT_INTENT_THRESHOLD = 0.7;
 const GROUP_CONTEXT_CONVERSATIONS = 500;
-/** A group turn reads at most this many room lines since the agent last spoke. */
-const ROOM_TURN_LINES = 30;
 
 interface CommandResult {
   text: string;
@@ -664,18 +663,12 @@ export class ChannelGateway {
    * and the other agents), then the speaker's message.
    */
   private async roomTurnText(msg: InboundMessage, conversation: string): Promise<string> {
-    const speakerLine = `${msg.displayName ?? msg.externalId}: ${msg.text}`;
+    const current = { id: msg.roomMessageId, speaker: msg.displayName ?? msg.externalId, text: msg.text };
     try {
       const me = await this.speaker(conversation);
-      const recent = await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20);
-      const mine = recent.map(m => m.authorKind === "agent" && m.authorId === me.id).lastIndexOf(true);
-      const since = recent.slice(mine + 1).filter(m => m.id !== msg.roomMessageId).slice(-ROOM_TURN_LINES);
-      if (since.length === 0) return speakerLine;
-      const line = (m: RoomMessage) => `${m.authorKind === "agent" ? `${m.authorName} (agent)` : m.authorName}: ${m.text.slice(0, 1_500)}`;
-      const header = mine >= 0 ? "[In the group since your last reply]" : "[Earlier in the group]";
-      return `${header}\n${since.map(line).join("\n")}\n\n${speakerLine}`;
+      return roomTurnText(await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20), me.id, current);
     } catch {
-      return speakerLine;
+      return `${current.speaker}: ${current.text}`;
     }
   }
 

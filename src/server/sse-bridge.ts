@@ -34,6 +34,7 @@ const ALL_EVENTS: PolpoEvent[] = [
   "action:triggered",
   "file:changed",
   "app:changed", "data-source:changed", "data-view:changed", "skill:changed", "token-usage:recorded",
+  "room:created", "room:updated", "room:deleted", "room:message", "room:typing",
   "log",
 ];
 

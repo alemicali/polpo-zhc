@@ -58,6 +58,8 @@ export interface GroupLine {
   at: number;
   /** The channel's id of the message (the same for every bot of the group). */
   externalId?: string;
+  /** The room's id of the message. */
+  id?: string;
 }
 
 /** Probability, per candidate key, that the agent should answer. */
@@ -150,6 +152,14 @@ export class GroupIntentArbiter {
     return (this.transcripts.get(conversation)?.lines ?? []).filter((l) => now - l.at < TRANSCRIPT_MS).slice(-TRANSCRIPT_LINES);
   }
 
+  /**
+   * The decision for a message whose candidates are known at once (a web room): no gathering
+   * window, no sharing between bots.
+   */
+  evaluate(msg: IntentMessage, candidates: IntentCandidate[]): Promise<IntentDecision> {
+    return this.run(msg, candidates);
+  }
+
   private async run(msg: IntentMessage, candidates: IntentCandidate[]): Promise<IntentDecision> {
     const apiKey = this.opts.apiKey();
     if (!apiKey || candidates.length === 0) return {};
@@ -162,7 +172,7 @@ export class GroupIntentArbiter {
     const now = Date.now();
     const lines = this.opts.transcript
       ? (await this.opts.transcript(msg.conversation).catch(() => [] as GroupLine[]))
-        .filter((l) => l.externalId !== msg.messageId && now - l.at < TRANSCRIPT_MS)
+        .filter((l) => l.externalId !== msg.messageId && l.id !== msg.messageId && now - l.at < TRANSCRIPT_MS)
         .slice(-TRANSCRIPT_LINES)
       : this.transcript(msg.conversation);
     const context = intentContext(msg, candidates, lines);

@@ -67,6 +67,7 @@ import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
 import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { GroupIntentArbiter } from "../notifications/group-intent.js";
+import { POLPO, RoomEngine } from "../rooms/room-engine.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
@@ -1040,6 +1041,66 @@ export class Orchestrator extends TypedEmitter {
   private fileRoomStore?: FileRoomStore;
 
   /**
+   * The group intent classifier (TypeSafe Jev), one for the instance: Telegram groups and web
+   * rooms. It reads the room's persisted transcript.
+   */
+  getGroupIntent(): GroupIntentArbiter {
+    if (this.groupIntent) return this.groupIntent;
+    const roomStore = this.getRoomStore();
+    this.groupIntent = new GroupIntentArbiter({
+      apiKey: () => process.env.TYPESAFE_API_KEY || undefined,
+      transcript: async (conversation) => {
+        const messages = await roomStore.getRecentMessages(conversation, 30);
+        const names = new Map(messages.map(m => [m.id, m.authorName]));
+        return messages.map(m => ({
+          id: m.id,
+          name: m.authorName,
+          text: m.text,
+          at: Date.parse(m.ts),
+          ...(m.authorKind === "agent" ? { agent: true } : {}),
+          ...(m.replyToId && names.has(m.replyToId) ? { to: names.get(m.replyToId)! } : {}),
+          ...(m.externalId ? { externalId: m.externalId } : {}),
+        }));
+      },
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+    return this.groupIntent;
+  }
+  private groupIntent?: GroupIntentArbiter;
+
+  /** Group chats of people and agents on the web (rooms of kind "web"). */
+  getRoomEngine(): RoomEngine {
+    if (this.roomEngine) return this.roomEngine;
+    this.roomEngine = new RoomEngine({
+      rooms: this.getRoomStore(),
+      sessions: this.sessionStore,
+      runner: () => this.channelChatRunner,
+      intent: this.getGroupIntent(),
+      profile: async (name) => {
+        if (name === POLPO) {
+          return { id: POLPO, name: "Polpo", role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
+        }
+        const agent = (await this.getAgents()).find(a => a.name === name);
+        const id = agent?.identity;
+        const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+        return {
+          id: name,
+          name: id?.displayName ?? name,
+          role: short(id?.title ?? agent?.role ?? "an agent of the company", 160),
+          responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+        };
+      },
+      emit: (event) => {
+        if (event.type === "room:message") this.emit("room:message", { roomId: event.roomId, message: event.message });
+        else this.emit("room:typing", { roomId: event.roomId, agent: event.agent, name: event.name, typing: event.typing });
+      },
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+    return this.roomEngine;
+  }
+  private roomEngine?: RoomEngine;
+
+  /**
    * Initialize the vault store: the `vault` table when the project runs on a database (each entry
    * encrypted with AES-256-GCM, same key as before; .polpo/vault.enc is imported once at startup
    * and kept as a backup), .polpo/vault.enc otherwise.
@@ -1601,22 +1662,7 @@ export class Orchestrator extends TypedEmitter {
 
     // groupReplies "intent": one arbiter for all the bots, so a group message is classified once
     const roomStore = this.getRoomStore();
-    const intent = new GroupIntentArbiter({
-      apiKey: () => process.env.TYPESAFE_API_KEY || undefined,
-      transcript: async (conversation) => {
-        const messages = await roomStore.getRecentMessages(conversation, 30);
-        const names = new Map(messages.map(m => [m.id, m.authorName]));
-        return messages.map(m => ({
-          name: m.authorName,
-          text: m.text,
-          at: Date.parse(m.ts),
-          ...(m.authorKind === "agent" ? { agent: true } : {}),
-          ...(m.replyToId && names.has(m.replyToId) ? { to: names.get(m.replyToId)! } : {}),
-          ...(m.externalId ? { externalId: m.externalId } : {}),
-        }));
-      },
-      log: (level, message) => this.emit("log", { level, message }),
-    });
+    const intent = this.getGroupIntent();
 
     const usedTokens = new Set<string>();
     for (const key of ordered) {
