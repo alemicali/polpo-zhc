@@ -46,7 +46,7 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   const dates = CHANGELOG.map((e) => e.date);
   expect([...dates].sort().reverse()).toEqual(dates);
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
-  expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([["2026-10-06", 4], ["2026-10-05", 1]]);
+  expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([["2026-10-06", 5], ["2026-10-05", 1]]);
   expect(CHANGELOG[0].cta?.to).toBe("/chat?newGroup=1");
   expect(unseenHighlights(CHANGELOG, new Set()).map((e) => e.id)).toEqual(CHANGELOG.filter((e) => e.highlight).map((e) => e.id));
 });

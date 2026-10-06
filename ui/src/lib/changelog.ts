@@ -61,6 +61,20 @@ export const CHANGELOG: ChangelogEntry[] = [
     ].join("\n"),
   },
   {
+    id: "2026-10-06-ink-hub",
+    date: "2026-10-06",
+    kind: "new",
+    title: "Polpo Ink Hub è di nuovo attivo",
+    summary: "Il catalogo dei template (agenti, playbook, company) ora gira sul nostro server.",
+    body: [
+      "Il catalogo **Polpo Ink Hub** è tornato: lo trovi dal link nel menu laterale.",
+      "",
+      "- Elenca tutti i template del nostro registry privato: **agenti**, **playbook** e **company** (configurazioni complete con team e skill).",
+      "- Gli agenti e Polpo possono cercarli e installarli con gli strumenti Ink, e nuovi template compaiono da soli quando vengono aggiunti al registry.",
+      "- Per ora è raggiungibile solo dalla rete interna (Tailscale).",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-06-telegram-intent",
     date: "2026-10-06",
     kind: "new",
