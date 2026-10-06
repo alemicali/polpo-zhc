@@ -18,7 +18,9 @@ import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
 
+/** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
 const DEFAULT_TIMEOUT = 30_000;
 
@@ -75,7 +77,11 @@ function execBrowser(
  */
 export function execBrowserAsync(
   args: string[],
-  options: { session?: string; profileDir?: string; cdp?: number; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
+  options: {
+    session?: string; profileDir?: string; cdp?: number; timeout?: number; cwd?: string; signal?: AbortSignal;
+    /** Keep only the last N chars of the raw output (default 50,000). Infinity keeps everything. */
+    maxOutputBytes?: number;
+  } = {},
 ): Promise<{ success: boolean; data?: any; error?: string; raw: string }> {
   return new Promise((resolve) => {
     const sessionArgs = options.session ? ["--session", options.session] : [];
@@ -108,8 +114,9 @@ export function execBrowserAsync(
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", onAbort);
       let raw = Buffer.concat(chunks).toString("utf-8").trim();
-      if (raw.length > MAX_OUTPUT_BYTES) {
-        raw = raw.slice(-MAX_OUTPUT_BYTES) + "\n[truncated]";
+      const maxOutput = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
+      if (raw.length > maxOutput) {
+        raw = raw.slice(-maxOutput) + "\n[truncated]";
       }
       try {
         const parsed = JSON.parse(raw);
@@ -135,10 +142,20 @@ function browserResult(result: { success: boolean; data?: any; error?: string; r
     };
   }
   const text = typeof result.data === "string" ? result.data : JSON.stringify(result.data, null, 2);
+  // No slicing here: createBrowserTools wraps every tool with
+  // withToolOutputOffload, which saves results above MAX_OUTPUT_BYTES in full.
   return {
-    content: [{ type: "text", text: text.slice(0, MAX_OUTPUT_BYTES) }],
+    content: [{ type: "text", text }],
     details: result.data,
   };
+}
+
+/** Agent-side CLI call: the raw output is kept whole so large results can be offloaded, not lost. */
+function execAgentBrowser(
+  args: string[],
+  options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
+): ReturnType<typeof execBrowserAsync> {
+  return execBrowserAsync(args, { ...options, maxOutputBytes: Infinity });
 }
 
 // ─── Tool: browser_navigate ───
@@ -154,7 +171,7 @@ function createBrowserNavigateTool(session: string, profileDir?: string): AgentT
     description: "Open a URL in the browser. Launches the browser if not already running.",
     parameters: BrowserNavigateSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["open", params.url], { session, profileDir, signal });
+      const result = await execAgentBrowser(["open", params.url], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -182,7 +199,7 @@ function createBrowserSnapshotTool(session: string, profileDir?: string): AgentT
       if (params.compact) args.push("-c");
       if (params.max_depth) args.push("-d", String(params.max_depth));
       if (params.selector) args.push("-s", params.selector);
-      const result = await execBrowserAsync(args, { session, profileDir, signal, timeout: 15_000 });
+      const result = await execAgentBrowser(args, { session, profileDir, signal, timeout: 15_000 });
       return browserResult(result);
     },
   };
@@ -201,7 +218,7 @@ function createBrowserClickTool(session: string, profileDir?: string): AgentTool
     description: "Click an element. Use refs from snapshot (e.g. @e2) for reliable targeting.",
     parameters: BrowserClickSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["click", params.selector], { session, profileDir, signal });
+      const result = await execAgentBrowser(["click", params.selector], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -221,7 +238,7 @@ function createBrowserFillTool(session: string, profileDir?: string): AgentTool<
     description: "Clear an input field and type new text. Use refs from snapshot for targeting.",
     parameters: BrowserFillSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["fill", params.selector, params.text], { session, profileDir, signal });
+      const result = await execAgentBrowser(["fill", params.selector, params.text], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -241,7 +258,7 @@ function createBrowserTypeTool(session: string, profileDir?: string): AgentTool<
     description: "Type text into an element without clearing it first. Use for appending text.",
     parameters: BrowserTypeSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["type", params.selector, params.text], { session, profileDir, signal });
+      const result = await execAgentBrowser(["type", params.selector, params.text], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -260,7 +277,7 @@ function createBrowserPressTool(session: string, profileDir?: string): AgentTool
     description: "Press a keyboard key. Supports modifiers like 'Control+a', 'Shift+Enter'.",
     parameters: BrowserPressSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["press", params.key], { session, profileDir, signal });
+      const result = await execAgentBrowser(["press", params.key], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -283,7 +300,7 @@ function createBrowserScreenshotTool(session: string, cwd: string, profileDir?: 
       const args = ["screenshot"];
       if (params.path) args.push(resolve(cwd, params.path));
       if (params.full_page) args.push("--full");
-      const result = await execBrowserAsync(args, { session, profileDir, signal });
+      const result = await execAgentBrowser(args, { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -311,7 +328,7 @@ function createBrowserGetTool(session: string, profileDir?: string): AgentTool<t
     async execute(_id, params, signal) {
       const args = ["get", params.what];
       if (params.selector) args.push(params.selector);
-      const result = await execBrowserAsync(args, { session, profileDir, signal });
+      const result = await execAgentBrowser(args, { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -331,7 +348,7 @@ function createBrowserSelectTool(session: string, profileDir?: string): AgentToo
     description: "Select an option from a dropdown <select> element.",
     parameters: BrowserSelectSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["select", params.selector, params.value], { session, profileDir, signal });
+      const result = await execAgentBrowser(["select", params.selector, params.value], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -350,7 +367,7 @@ function createBrowserHoverTool(session: string, profileDir?: string): AgentTool
     description: "Hover over an element to trigger hover states, tooltips, or dropdown menus.",
     parameters: BrowserHoverSchema,
     async execute(_id, params, signal) {
-      const result = await execBrowserAsync(["hover", params.selector], { session, profileDir, signal });
+      const result = await execAgentBrowser(["hover", params.selector], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -377,7 +394,7 @@ function createBrowserScrollTool(session: string, profileDir?: string): AgentToo
     async execute(_id, params, signal) {
       const args = ["scroll", params.direction];
       if (params.pixels) args.push(String(params.pixels));
-      const result = await execBrowserAsync(args, { session, profileDir, signal });
+      const result = await execAgentBrowser(args, { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -410,7 +427,7 @@ function createBrowserWaitTool(session: string, profileDir?: string): AgentTool<
       if (params.url) args.push("--url", params.url);
       if (params.timeout_ms) args.push(String(params.timeout_ms));
       if (params.load_state) args.push("--load", params.load_state);
-      const result = await execBrowserAsync(args, { session, profileDir, signal, timeout: 60_000 });
+      const result = await execAgentBrowser(args, { session, profileDir, signal, timeout: 60_000 });
       return browserResult(result);
     },
   };
@@ -432,7 +449,7 @@ function createBrowserEvalTool(session: string, profileDir?: string): AgentTool<
     async execute(_id, params, signal) {
       // Use base64 encoding for safe transport of complex JS
       const b64 = Buffer.from(params.javascript).toString("base64");
-      const result = await execBrowserAsync(["eval", b64, "-b"], { session, profileDir, signal });
+      const result = await execAgentBrowser(["eval", b64, "-b"], { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -449,7 +466,7 @@ function createBrowserCloseTool(session: string): AgentTool<typeof BrowserCloseS
     description: "Close the browser session. Profile data (cookies, login) is saved automatically.",
     parameters: BrowserCloseSchema,
     async execute(_id, _params, signal) {
-      const result = await execBrowserAsync(["close"], { session, signal });
+      const result = await execAgentBrowser(["close"], { session, signal });
       return browserResult(result);
     },
   };
@@ -466,7 +483,7 @@ function createBrowserBackTool(session: string, profileDir?: string): AgentTool<
     description: "Navigate back in browser history.",
     parameters: BrowserNavActionSchema,
     async execute(_id, _params, signal) {
-      return browserResult(await execBrowserAsync(["back"], { session, profileDir, signal }));
+      return browserResult(await execAgentBrowser(["back"], { session, profileDir, signal }));
     },
   };
 }
@@ -478,7 +495,7 @@ function createBrowserForwardTool(session: string, profileDir?: string): AgentTo
     description: "Navigate forward in browser history.",
     parameters: BrowserNavActionSchema,
     async execute(_id, _params, signal) {
-      return browserResult(await execBrowserAsync(["forward"], { session, profileDir, signal }));
+      return browserResult(await execAgentBrowser(["forward"], { session, profileDir, signal }));
     },
   };
 }
@@ -490,7 +507,7 @@ function createBrowserReloadTool(session: string, profileDir?: string): AgentToo
     description: "Reload the current page.",
     parameters: BrowserNavActionSchema,
     async execute(_id, _params, signal) {
-      return browserResult(await execBrowserAsync(["reload"], { session, profileDir, signal }));
+      return browserResult(await execAgentBrowser(["reload"], { session, profileDir, signal }));
     },
   };
 }
@@ -506,7 +523,7 @@ function createBrowserSetUserAgentTool(session: string, profileDir?: string): Ag
     description: "Override the browser User-Agent for the current session and reload the active page. Use this to test mobile, desktop, crawler, or custom client behavior.",
     parameters: BrowserUserAgentSchema,
     async execute(_id, params, signal) {
-      return browserResult(await execBrowserAsync(["--user-agent", params.userAgent, "reload"], { session, profileDir, signal }));
+      return browserResult(await execAgentBrowser(["--user-agent", params.userAgent, "reload"], { session, profileDir, signal }));
     },
   };
 }
@@ -547,7 +564,7 @@ function createBrowserTabsTool(session: string, profileDir?: string): AgentTool<
           if (params.index !== undefined) args.push(String(params.index));
           break;
       }
-      const result = await execBrowserAsync(args, { session, profileDir, signal });
+      const result = await execAgentBrowser(args, { session, profileDir, signal });
       return browserResult(result);
     },
   };
@@ -579,12 +596,14 @@ export const ALL_BROWSER_TOOL_NAMES: BrowserToolName[] = [
  * @param profileDir - Persistent browser profile directory. Passed as --profile to agent-browser.
  *                     Stores cookies, localStorage, auth state across sessions.
  *                     Typically `.polpo/browser-profiles/<agent>/`.
+ * @param toolOutputDir - Where results above 50 KB are saved in full (default: resolveToolOutputDir()).
  */
 export function createBrowserTools(
   cwd: string,
   session: string = "default",
   allowedTools?: string[],
   profileDir?: string,
+  toolOutputDir: string = resolveToolOutputDir({ agentName: session }),
 ): AgentTool<any>[] {
   const factories: Record<BrowserToolName, () => AgentTool<any>> = {
     browser_navigate: () => createBrowserNavigateTool(session, profileDir),
@@ -612,5 +631,5 @@ export function createBrowserTools(
     ? ALL_BROWSER_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_BROWSER_TOOL_NAMES;
 
-  return names.map(n => factories[n]());
+  return names.map(n => withToolOutputOffload(factories[n](), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES }));
 }

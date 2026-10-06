@@ -351,6 +351,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
+        // Large tool outputs go to <polpoDir>/tmp/tool-output/<agent>/ (no task output dir in chat).
+        agentName: agentConfig.name,
         whatsappStore: o.getWhatsAppStore?.(),
         whatsappSendMessage,
         whatsappSendMedia,
