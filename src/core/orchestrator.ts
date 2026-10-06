@@ -248,6 +248,8 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** The open database (or the file backend), closed on shutdown. */
+  private storage?: import("./storage.js").OpenStorage;
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
   /** Raw Drizzle DB handle — used by file→sqlite migration after init. */
@@ -321,51 +323,29 @@ export class Orchestrator extends TypedEmitter {
     task: TaskStore; run: RunStore; taskControlStore: TaskControlStore;
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
-    if (storage === "postgres") {
-      const dbUrl = databaseUrl ?? this.config?.settings?.databaseUrl;
-      if (!dbUrl) throw new Error('storage: "postgres" requires a databaseUrl');
-      const { createPgStores, ensurePgSchema } = await import("@polpo-ai/drizzle");
-      const postgres = (await import("postgres")).default;
-      const { drizzle } = await import("drizzle-orm/postgres-js");
-      const sql = postgres(dbUrl);
-      const db = drizzle(sql);
-      await ensurePgSchema(db);
-      this.drizzleStores = createPgStores(db);
+    const { openStorage } = await import("./storage.js");
+    const opened = await openStorage({
+      storage,
+      polpoDir: this.polpoDir,
+      databaseUrl: databaseUrl ?? this.config?.settings?.databaseUrl,
+      role: "server",
+      log: (message) => this.emit("log", { level: "info", message: `[storage] ${message}` }),
+    });
+    this.storage = opened;
+    if (opened.kind !== "file") {
+      this.drizzleStores = opened.stores;
+      this.resolvedStorage = opened.kind;
+      if (opened.kind === "sqlite") {
+        this.drizzleDb = opened.db;
+        this.drizzleSchema = (await import("@polpo-ai/drizzle")).sqliteSchema;
+      }
       return {
-        task: this.drizzleStores.taskStore,
-        run: this.drizzleStores.runStore,
-        taskControlStore: this.drizzleStores.taskControlStore,
-        logStore: this.drizzleStores.logStore,
-        sessionStore: this.drizzleStores.sessionStore,
-        memoryStore: this.drizzleStores.memoryStore,
-      };
-    }
-    if (storage === "sqlite") {
-      const drizzleMod = await import("@polpo-ai/drizzle");
-      const { createSqliteStores, sqliteSchema } = drizzleMod;
-      const { createRequire } = await import("node:module");
-      const req = createRequire(import.meta.url);
-      const Database = req("better-sqlite3");
-      const dbPath = join(this.polpoDir, "state.db");
-      const sqlite = new Database(dbPath);
-      sqlite.exec("PRAGMA journal_mode = WAL");
-      sqlite.exec("PRAGMA synchronous = NORMAL");
-      sqlite.exec("PRAGMA foreign_keys = ON");
-      const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
-      ensureSqliteSchema(sqlite);
-      const { drizzle } = await import("drizzle-orm/better-sqlite3");
-      const db = drizzle(sqlite);
-      this.drizzleStores = createSqliteStores(db);
-      this.drizzleDb = db;
-      this.drizzleSchema = sqliteSchema;
-      this.resolvedStorage = "sqlite";
-      return {
-        task: this.drizzleStores.taskStore,
-        run: this.drizzleStores.runStore,
-        taskControlStore: this.drizzleStores.taskControlStore,
-        logStore: this.drizzleStores.logStore,
-        sessionStore: this.drizzleStores.sessionStore,
-        memoryStore: this.drizzleStores.memoryStore,
+        task: opened.stores.taskStore,
+        run: opened.stores.runStore,
+        taskControlStore: opened.stores.taskControlStore,
+        logStore: opened.stores.logStore,
+        sessionStore: opened.stores.sessionStore,
+        memoryStore: opened.stores.memoryStore,
       };
     }
     this.resolvedStorage = "file";
@@ -1324,6 +1304,7 @@ export class Orchestrator extends TypedEmitter {
     await this.hookRegistry.runAfter("orchestrator:shutdown", {});
     await this.logStore?.close();
     await this.sessionStore?.close();
+    await this.storage?.close().catch(() => {});
   }
 
   // ── Config Hot Reload ──

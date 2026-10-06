@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { type Dialect } from "../utils.js";
+import { type Dialect, affectedRows } from "../utils.js";
 
 export interface ExpoTokenRecord {
   token: string;
@@ -74,13 +74,13 @@ export class DrizzleExpoTokenStore {
   async removeToken(token: string): Promise<boolean> {
     const result: any = await this.db.delete(this.tokens).where(eq(this.tokens.token, token));
     // SQLite returns { changes: N }; PG returns { count: N }.
-    const changes = result?.changes ?? result?.rowCount ?? 0;
+    const changes = affectedRows(result);
     return changes > 0;
   }
 
   async removeByDevice(deviceId: string): Promise<number> {
     const result: any = await this.db.delete(this.tokens).where(eq(this.tokens.deviceId, deviceId));
-    return result?.changes ?? result?.rowCount ?? 0;
+    return affectedRows(result);
   }
 
   async listAll(): Promise<ExpoTokenRecord[]> {

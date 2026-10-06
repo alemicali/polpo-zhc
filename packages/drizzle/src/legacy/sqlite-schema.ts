@@ -1,8 +1,11 @@
 /**
- * Create all SQLite tables for @polpo-ai/drizzle stores.
- * Equivalent to ensurePgSchema() but for SQLite (uses raw SQL via better-sqlite3).
+ * FROZEN — the hand-written schema used before versioned migrations.
+ *
+ * Only run on databases created by that code (tables present, no migrations journal), to bring
+ * them up to the state of migrations/sqlite/0000_baseline before they are stamped at the baseline.
+ * Never edit to change the schema: add a migration instead (pnpm --filter @polpo-ai/drizzle db:generate).
  */
-export function ensureSqliteSchema(db: { exec(sql: string): void }): void {
+export function ensureLegacySqliteSchema(db: { exec(sql: string): void }): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,

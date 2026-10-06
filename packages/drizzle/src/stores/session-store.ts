@@ -1,7 +1,7 @@
 import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
-import { type Dialect, deserializeJson } from "../utils.js";
+import { type Dialect, deserializeJson, affectedRows } from "../utils.js";
 
 type AnyTable = any;
 
@@ -86,7 +86,7 @@ export class DrizzleSessionStore implements SessionStore {
       .set({ content, toolCalls: tcValue, segments: segmentsValue })
       .where(eq(this.messages.id, messageId));
 
-    const changed = (result?.rowCount ?? result?.changes ?? 0) > 0;
+    const changed = affectedRows(result) > 0;
     if (changed) {
       await this.db.update(this.sessions)
         .set({ updatedAt: now })
@@ -185,7 +185,7 @@ export class DrizzleSessionStore implements SessionStore {
     const result = await this.db.update(this.sessions)
       .set({ title, updatedAt: now })
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async setStarred(sessionId: string, starred: boolean): Promise<boolean> {
@@ -195,14 +195,14 @@ export class DrizzleSessionStore implements SessionStore {
     const result = await this.db.update(this.sessions)
       .set({ starred })
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
     // Messages are cascade-deleted via FK
     const result = await this.db.delete(this.sessions)
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async prune(keepSessions: number): Promise<number> {

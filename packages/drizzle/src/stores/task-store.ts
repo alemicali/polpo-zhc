@@ -5,7 +5,7 @@ import type {
   Task, TaskStatus, Mission, PolpoState, AgentProcess,
 } from "@polpo-ai/core/types";
 import { assertValidTransition } from "@polpo-ai/core/state-machine";
-import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
+import { type Dialect, serializeJson, deserializeJson, affectedRows } from "../utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTable = any;
@@ -423,7 +423,7 @@ export class DrizzleTaskStore implements TaskStore {
   async removeTask(taskId: string): Promise<boolean> {
     const result = await this.db.delete(this.schema.tasks)
       .where(eq(this.schema.tasks.id, taskId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async removeTasks(filter: (task: Task) => boolean): Promise<number> {
@@ -546,7 +546,7 @@ export class DrizzleTaskStore implements TaskStore {
   async deleteMission(missionId: string): Promise<boolean> {
     const result = await this.db.delete(this.schema.missions)
       .where(eq(this.schema.missions.id, missionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async nextMissionName(): Promise<string> {

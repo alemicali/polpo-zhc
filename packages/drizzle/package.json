@@ -16,7 +16,9 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "tsc",
+    "db:generate": "tsc && drizzle-kit generate --config drizzle.pg.config.ts && drizzle-kit generate --config drizzle.sqlite.config.ts",
+    "db:check": "tsc && drizzle-kit check --config drizzle.pg.config.ts && drizzle-kit check --config drizzle.sqlite.config.ts"
   },
   "dependencies": {
     "@polpo-ai/core": "workspace:*",
@@ -40,12 +42,13 @@
     "typescript": "^5.7.3",
     "@types/better-sqlite3": "^7.6.8",
     "postgres": "^3.4.0",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.6.2",
     "drizzle-kit": "^0.31.0"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "migrations"
   ],
   "license": "MIT",
   "keywords": [

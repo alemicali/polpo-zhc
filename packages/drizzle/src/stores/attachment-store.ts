@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { AttachmentStore, Attachment } from "@polpo-ai/core/attachment-store";
 import type { Dialect } from "../utils.js";
+import { affectedRows } from "../utils.js";
 
 type AnyTable = any;
 
@@ -52,13 +53,13 @@ export class DrizzleAttachmentStore implements AttachmentStore {
   async delete(id: string): Promise<boolean> {
     const result = await this.db.delete(this.attachments)
       .where(eq(this.attachments.id, id));
-    const affected = result?.rowsAffected ?? result?.rowCount ?? result?.changes ?? 0;
+    const affected = affectedRows(result);
     return affected > 0;
   }
 
   async deleteBySession(sessionId: string): Promise<number> {
     const result = await this.db.delete(this.attachments)
       .where(eq(this.attachments.sessionId, sessionId));
-    return result?.rowsAffected ?? result?.rowCount ?? result?.changes ?? 0;
+    return affectedRows(result);
   }
 }

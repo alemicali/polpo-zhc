@@ -10,7 +10,10 @@ export const sessionsSqlite = sqliteTable("sessions", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   starred: integer("starred", { mode: "boolean" }),
-});
+}, (table) => [
+  index("idx_sessions_agent").on(table.agent),
+  index("idx_sessions_updated_at").on(table.updatedAt),
+]);
 
 export const messagesSqlite = sqliteTable("messages", {
   id: text("id").primaryKey(),
@@ -33,7 +36,10 @@ export const sessionsPg = pgTable("sessions", {
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   starred: pgBoolean("starred"),
-});
+}, (table) => [
+  pgIndex("idx_pg_sessions_agent").on(table.agent),
+  pgIndex("idx_pg_sessions_updated_at").on(table.updatedAt.desc()),
+]);
 
 export const messagesPg = pgTable("messages", {
   id: pgText("id").primaryKey(),

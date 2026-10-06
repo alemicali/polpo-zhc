@@ -1,5 +1,5 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { pgTable, text as pgText, jsonb } from "drizzle-orm/pg-core";
+import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
+import { pgTable, text as pgText, jsonb, index as pgIndex } from "drizzle-orm/pg-core";
 
 // ── SQLite schema ──────────────────────────────────────────────────────
 
@@ -16,7 +16,9 @@ export const agentsSqlite = sqliteTable("agents", {
   config: text("config").notNull(), // JSON-serialized AgentConfig (minus name)
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (table) => [
+  index("idx_agents_team_name").on(table.teamName),
+]);
 
 // ── PostgreSQL schema ──────────────────────────────────────────────────
 
@@ -33,4 +35,6 @@ export const agentsPg = pgTable("agents", {
   config: jsonb("config").notNull(), // AgentConfig (minus name) as JSONB
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
-});
+}, (table) => [
+  pgIndex("idx_pg_agents_team_name").on(table.teamName),
+]);

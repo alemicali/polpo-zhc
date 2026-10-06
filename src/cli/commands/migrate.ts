@@ -32,16 +32,13 @@ export function registerMigrateCommand(parent: Command): void {
       const req = createRequire(import.meta.url);
       const Database = req("better-sqlite3");
       const { drizzle } = await import("drizzle-orm/better-sqlite3");
-      const { sqliteSchema } = await import("@polpo-ai/drizzle");
-      const { ensureSqliteSchema } = await import("../../core/drizzle-sqlite-schema.js");
+      const { sqliteSchema, configureSqlite, migrateSqlite } = await import("@polpo-ai/drizzle");
 
       const dbPath = join(polpoDir, "state.db");
       const sqlite = new Database(dbPath);
-      sqlite.exec("PRAGMA journal_mode = WAL");
-      sqlite.exec("PRAGMA synchronous = NORMAL");
-      sqlite.exec("PRAGMA foreign_keys = ON");
-      ensureSqliteSchema(sqlite);
+      configureSqlite(sqlite);
       const db = drizzle(sqlite);
+      await migrateSqlite(db);
 
       console.log(chalk.bold(opts.dryRun ? "Dry-run migrate:" : "Migrating .polpo → SQLite:"));
       console.log(chalk.dim(`  source: ${polpoDir}`));

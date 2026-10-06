@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import type { AgentStore } from "@polpo-ai/core/agent-store";
 import type { AgentConfig } from "@polpo-ai/core/types";
-import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
+import { type Dialect, serializeJson, deserializeJson, isUniqueViolation } from "../utils.js";
 
 type AnyTable = any;
 
@@ -47,7 +47,7 @@ export class DrizzleAgentStore implements AgentStore {
         updatedAt: now,
       });
     } catch (err: any) {
-      if (err?.message?.includes("unique") || err?.message?.includes("UNIQUE") || err?.code === "23505") {
+      if (isUniqueViolation(err)) {
         throw new Error(`Agent "${name}" already exists`);
       }
       throw err;

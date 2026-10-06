@@ -63,7 +63,7 @@ async function readConfigFromDb(): Promise<RunnerConfig> {
   const { createPgStores } = await import("@polpo-ai/drizzle");
   const postgres = (await import("postgres")).default;
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const sql = postgres(dbUrl);
+  const sql = postgres(dbUrl, { max: 1, onnotice: () => {} });
   const db = drizzle(sql);
   const store = createPgStores(db).runStore;
 
@@ -167,31 +167,18 @@ interface RunnerStores {
 }
 
 async function createStores(config: RunnerConfig): Promise<RunnerStores> {
-  if (config.storage === "postgres" && config.databaseUrl) {
-    const { createPgStores } = await import("@polpo-ai/drizzle");
-    const postgres = (await import("postgres")).default;
-    const { drizzle } = await import("drizzle-orm/postgres-js");
-    const sql = postgres(config.databaseUrl);
-    const db = drizzle(sql);
-    const stores = createPgStores(db);
-    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
-  }
-  if (config.storage === "sqlite") {
-    const { createSqliteStores } = await import("@polpo-ai/drizzle");
-    const { createRequire } = await import("node:module");
-    const req = createRequire(import.meta.url);
-    const Database = req("better-sqlite3");
-    const dbPath = join(config.polpoDir, "state.db");
-    const sqlite = new Database(dbPath);
-    sqlite.exec("PRAGMA journal_mode = WAL");
-    sqlite.exec("PRAGMA synchronous = NORMAL");
-    sqlite.exec("PRAGMA foreign_keys = ON");
-    const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
-    ensureSqliteSchema(sqlite);
-    const { drizzle } = await import("drizzle-orm/better-sqlite3");
-    const db = drizzle(sqlite);
-    const stores = createSqliteStores(db);
-    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+  if (config.storage === "postgres" || config.storage === "sqlite") {
+    const { openStorage } = await import("./storage.js");
+    const opened = await openStorage({
+      storage: config.storage,
+      polpoDir: config.polpoDir,
+      databaseUrl: config.databaseUrl,
+      role: "runner",
+    });
+    if (opened.kind !== "file") {
+      const stores = opened.stores;
+      return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+    }
   }
   return {
     runStore: new FileRunStore(config.polpoDir),

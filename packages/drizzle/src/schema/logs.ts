@@ -6,7 +6,9 @@ import { pgTable, text as pgText, jsonb, index as pgIndex } from "drizzle-orm/pg
 export const logSessionsSqlite = sqliteTable("log_sessions", {
   id: text("id").primaryKey(),
   startedAt: text("started_at").notNull(),
-});
+}, (table) => [
+  index("idx_log_sessions_started_at").on(table.startedAt),
+]);
 
 export const logEntriesSqlite = sqliteTable("log_entries", {
   id: text("id").primaryKey(),
@@ -24,7 +26,9 @@ export const logEntriesSqlite = sqliteTable("log_entries", {
 export const logSessionsPg = pgTable("log_sessions", {
   id: pgText("id").primaryKey(),
   startedAt: pgText("started_at").notNull(),
-});
+}, (table) => [
+  pgIndex("idx_pg_log_sessions_started_at").on(table.startedAt.desc()),
+]);
 
 export const logEntriesPg = pgTable("log_entries", {
   id: pgText("id").primaryKey(),

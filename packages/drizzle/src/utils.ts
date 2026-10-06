@@ -25,3 +25,21 @@ export function deserializeJson<T>(value: unknown, fallback: T, _dialect: Dialec
   }
   return fallback;
 }
+
+/**
+ * Rows touched by an UPDATE/DELETE, whatever the driver: better-sqlite3 reports `changes`,
+ * postgres.js `count`, node-postgres `rowCount`, libsql/D1 `rowsAffected`.
+ */
+export function affectedRows(result: unknown): number {
+  const r = result as { changes?: number; count?: number; rowCount?: number; rowsAffected?: number } | null | undefined;
+  return Number(r?.changes ?? r?.count ?? r?.rowCount ?? r?.rowsAffected ?? 0);
+}
+
+/** A primary-key or unique constraint was violated (SQLite or PostgreSQL, wrapped by Drizzle or not). */
+export function isUniqueViolation(err: unknown): boolean {
+  for (let e: any = err; e; e = e.cause) {
+    if (e.code === "23505" || e.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || e.code === "SQLITE_CONSTRAINT_UNIQUE") return true;
+    if (typeof e.message === "string" && /UNIQUE constraint failed|duplicate key value/.test(e.message)) return true;
+  }
+  return false;
+}

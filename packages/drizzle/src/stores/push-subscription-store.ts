@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { type Dialect } from "../utils.js";
+import { type Dialect, affectedRows } from "../utils.js";
 
 export interface PushSubscriptionKeys { p256dh: string; auth: string }
 
@@ -126,7 +126,7 @@ export class DrizzlePushSubscriptionStore {
 
   async remove(endpoint: string): Promise<boolean> {
     const result: any = await this.db.delete(this.subscriptions).where(eq(this.subscriptions.endpoint, endpoint));
-    const changes = result?.changes ?? result?.rowCount ?? 0;
+    const changes = affectedRows(result);
     return changes > 0;
   }
 
