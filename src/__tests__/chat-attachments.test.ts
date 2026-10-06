@@ -10,7 +10,7 @@ import { NodeFileSystem } from "../adapters/node-filesystem.js";
 describe("chat attachment contract", () => {
   test("model file references resolve from the project root, independently of tool cwd", () => {
     expect(resolveChatAttachmentReferences("Read [file: workspace/attachments/chat-id/file-id.txt]", "/data/lumea"))
-      .toBe("Read [file: /data/lumea/workspace/attachments/chat-id/file-id.txt]");
+      .toBe(`Read [file: ${join("/data/lumea", "workspace/attachments/chat-id/file-id.txt")}]`);
     expect(resolveChatAttachmentReferences("[file: workspace/attachments/../private.txt]", "/data/lumea"))
       .toBe("[file: workspace/attachments/../private.txt]");
   });

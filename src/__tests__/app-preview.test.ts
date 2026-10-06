@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { resolve } from "node:path";
 import { ALL_ORCHESTRATOR_TOOLS, READ_TOOLS } from "../llm/orchestrator-tools.js";
 import type { CodingSessionState, CodingSessionStore } from "../core/coding-session-store.js";
 import { ensurePreviewWorkspace, extractServeTargets, parseLocalListeners } from "../server/routes/app-preview.js";
@@ -66,7 +67,7 @@ describe("App Preview discovery", () => {
     const workspace = result.state.workspaces.find((item) => item.id === result.workspaceId);
     const terminal = result.state.terminals.find((item) => item.workspaceId === result.workspaceId);
 
-    expect(workspace).toMatchObject({ name: "storefront", cwd: "/workspace/apps/storefront" });
+    expect(workspace).toMatchObject({ name: "storefront", cwd: resolve("/workspace/apps/storefront") });
     expect(terminal).toMatchObject({ label: "App Preview", revision: 0 });
     expect(result.state.activeId).toBe(terminal?.id);
   });

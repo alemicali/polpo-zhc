@@ -31,7 +31,7 @@
  *   2. AgentConfig.skills[] names resolved against the pool (soft/config-based)
  */
 
-import { resolve, basename, join } from "node:path";
+import { resolve, basename, isAbsolute, join } from "node:path";
 import {
   readFileSync, writeFileSync, readdirSync, existsSync, lstatSync, realpathSync,
   mkdirSync, symlinkSync, rmSync, cpSync,
@@ -415,8 +415,8 @@ export interface ParsedSource {
 }
 
 export function parseSkillSource(input: string): ParsedSource {
-  // Local path
-  if (input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input === ".") {
+  // Local path (POSIX or Windows: /x, ./x, ../x, ., C:\x, .\x)
+  if (isAbsolute(input) || /^\.{1,2}(?:[\\/]|$)/.test(input) || /^[A-Za-z]:[\\/]/.test(input)) {
     return { type: "local", url: resolve(input) };
   }
 

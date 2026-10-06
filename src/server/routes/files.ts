@@ -1,5 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { resolve, relative, extname, basename, dirname } from "node:path";
+import { resolve, relative, extname, basename, dirname, isAbsolute, sep } from "node:path";
+
+/** Paths in API responses always use "/", whatever the server OS (the UI builds mentions and URLs from them). */
+const toApiPath = (p: string): string => (sep === "/" ? p : p.split(sep).join("/"));
 import { POLPO_DIR_NAME } from "../../core/constants.js";
 import type { FileSystem } from "@polpo-ai/core";
 import { uploadExclusionReason } from "../upload-exclusions.js";
@@ -270,7 +273,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     });
 
     const displayPath = roots.reduce((p: string, root: string) => {
-      const rel = relative(root, resolved);
+      const rel = toApiPath(relative(root, resolved));
       return !rel.startsWith("..") ? rel || "." : p;
     }, reqPath);
 
@@ -422,7 +425,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
 
       const filePath = resolve(resolvedDir, relativePath);
       const rel = relative(resolvedDir, filePath);
-      if (rel.startsWith("..") || rel.startsWith("/") || rel === "") {
+      if (rel.startsWith("..") || isAbsolute(rel) || rel === "") {
         return c.json({ ok: false, error: "Invalid relative upload path" }, 400);
       }
       seenPaths.add(relativePath);
@@ -594,7 +597,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
         for (const e of entries) {
           if (results.length >= limit) return;
           if (SKIP.has(e.name)) continue;
-          const relPath = relative(resolved!, resolve(dir, e.name));
+          const relPath = toApiPath(relative(resolved!, resolve(dir, e.name)));
           if (e.isFile) {
             if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
               results.push({ name: e.name, path: relPath, type: "file" });

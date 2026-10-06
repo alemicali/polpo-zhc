@@ -43,6 +43,13 @@
       "when": 1791278698659,
       "tag": "0005_session_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791283280642,
+      "tag": "0006_task_version",
+      "breakpoints": true
     }
   ]
 }

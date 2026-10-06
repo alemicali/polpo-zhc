@@ -49,23 +49,23 @@ function createMockVault(smtp?: SmtpCredentials): ResolvedVault {
     getKey: () => undefined,
     has: () => false,
     list: () => [],
+    listMailboxes: () => smtp ? [{ name: "default", from: smtp.from, canSend: true, canRead: false }] : [],
   };
 }
 
 // ─── Factory tests ───────────────────────────────────
 
 describe("createEmailTools — factory", () => {
-  it("returns all 8 tools by default", () => {
+  it("returns all 9 tools by default (list_email_accounts included)", () => {
     const tools = createEmailTools(CWD);
-    expect(tools).toHaveLength(8);
+    expect(tools).toHaveLength(9);
     const names = tools.map(t => t.name);
     expect(names).toEqual(ALL_EMAIL_TOOL_NAMES);
   });
 
-  it("filters tools by allowedTools", () => {
+  it("filters tools by allowedTools; list_email_accounts comes with any email tool", () => {
     const tools = createEmailTools(CWD, undefined, ["email_send"]);
-    expect(tools).toHaveLength(1);
-    expect(tools[0].name).toBe("email_send");
+    expect(tools.map(t => t.name)).toEqual(["email_send", "list_email_accounts"]);
   });
 
   it("returns correct tool names", () => {
@@ -374,7 +374,6 @@ describe("email_count", () => {
 
   it("is included in email_* wildcard filtering", () => {
     const tools = createEmailTools(CWD, undefined, ["email_count"]);
-    expect(tools).toHaveLength(1);
-    expect(tools[0].name).toBe("email_count");
+    expect(tools.map(t => t.name)).toEqual(["email_count", "list_email_accounts"]);
   });
 });

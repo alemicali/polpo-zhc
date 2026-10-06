@@ -56,7 +56,8 @@ export class DrizzleTaskStore implements TaskStore {
    * this store drop their entry, so two writes within the same millisecond are never missed;
    * writes by other processes are caught by updated_at. Callers get copies.
    */
-  private cache = new Map<string, { updatedAt: string; task: Task }>();
+  /** Decoded tasks by id, valid while the row's version and updated_at are unchanged. */
+  private cache = new Map<string, { stamp: string; task: Task }>();
   /** Last process list written: the supervisor saves it every tick, usually unchanged. */
   private lastProcesses?: string;
 
@@ -275,14 +276,19 @@ export class DrizzleTaskStore implements TaskStore {
     return rows.length > 0 ? this.rowToTask(rows[0]) : undefined;
   }
 
+  /** SQL for "version + 1": every writer (any process) bumps it, so cached copies notice. */
+  private nextVersion(): SQL {
+    return sql`${this.schema.tasks.version} + 1`;
+  }
+
   async getAllTasks(): Promise<Task[]> {
     const t = this.schema.tasks;
-    const heads: Array<{ id: string; updatedAt: string }> = await this.db
-      .select({ id: t.id, updatedAt: t.updatedAt }).from(t).orderBy(asc(t.createdAt));
-    const stale = heads.filter((h) => this.cache.get(h.id)?.updatedAt !== h.updatedAt).map((h) => h.id);
+    const heads: Array<{ id: string; updatedAt: string; version: number }> = await this.db
+      .select({ id: t.id, updatedAt: t.updatedAt, version: t.version }).from(t).orderBy(asc(t.createdAt));
+    const stale = heads.filter((h) => this.cache.get(h.id)?.stamp !== stampOf(h)).map((h) => h.id);
     for (let i = 0; i < stale.length; i += 500) {
       const rows: any[] = await this.db.select().from(t).where(inArray(t.id, stale.slice(i, i + 500)));
-      for (const row of rows) this.cache.set(row.id, { updatedAt: row.updatedAt, task: this.rowToTask(row) });
+      for (const row of rows) this.cache.set(row.id, { stamp: stampOf(row), task: this.rowToTask(row) });
     }
     if (this.cache.size > heads.length) {
       const present = new Set(heads.map((h) => h.id));
@@ -443,7 +449,7 @@ export class DrizzleTaskStore implements TaskStore {
     const values = this.taskToValues(merged);
     delete values.id;
     this.cache.delete(taskId);
-    await this.db.update(this.schema.tasks).set(values)
+    await this.db.update(this.schema.tasks).set({ ...values, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
     return merged;
   }
@@ -484,7 +490,7 @@ export class DrizzleTaskStore implements TaskStore {
     }
 
     this.cache.delete(taskId);
-    await this.db.update(this.schema.tasks).set(updates)
+    await this.db.update(this.schema.tasks).set({ ...updates, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
 
     return { ...task, status: newStatus, updatedAt: now, retries: (updates.retries as number) ?? task.retries };
@@ -497,7 +503,7 @@ export class DrizzleTaskStore implements TaskStore {
     const now = new Date().toISOString();
     this.cache.delete(taskId);
     await this.db.update(this.schema.tasks)
-      .set({ status: newStatus, updatedAt: now })
+      .set({ status: newStatus, updatedAt: now, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
 
     return { ...task, status: newStatus, updatedAt: now };
@@ -606,4 +612,9 @@ function copyJson<T>(value: T): T {
     return out as T;
   }
   return value;
+}
+
+/** Cache key of a task row. */
+function stampOf(row: { version?: number | null; updatedAt: string }): string {
+  return `${Number(row.version ?? 0)}:${row.updatedAt}`;
 }

@@ -35,7 +35,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build && ./node_modules/.bin/tsc",
+    "build": "pnpm run build:packages && ./node_modules/.bin/tsc",
+    "build:packages": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build",
     "build:all": "pnpm build && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
@@ -49,7 +50,7 @@
     "start:all": "pnpm build:all && node dist/cli/index.js serve -p 3890",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && ./node_modules/.bin/tsc --noEmit",
+    "typecheck": "pnpm run build:packages && ./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",

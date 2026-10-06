@@ -18,7 +18,7 @@
  */
 
 import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
-import { join, basename, resolve } from "node:path";
+import { join, basename, isAbsolute, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 import type { AgentConfig, PolpoFileConfig } from "./types.js";
@@ -280,8 +280,8 @@ export function validateInkCompany(def: unknown): InkValidationResult {
  * Reuses the same logic as parseSkillSource() from the skills system.
  */
 export function parseInkSource(input: string): InkSource {
-  // Local path
-  if (input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input === ".") {
+  // Local path (POSIX or Windows: /x, ./x, ../x, ., C:\x, .\x)
+  if (isAbsolute(input) || /^\.{1,2}(?:[\\/]|$)/.test(input) || /^[A-Za-z]:[\\/]/.test(input)) {
     return { type: "local", url: resolve(input) };
   }
 

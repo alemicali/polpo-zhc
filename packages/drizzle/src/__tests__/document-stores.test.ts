@@ -3,7 +3,7 @@
  * registry, company brain, WhatsApp), on SQLite always and on PostgreSQL when
  * POLPO_TEST_DATABASE_URL is set (see stores.test.ts).
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { drizzle as pgDrizzle } from "drizzle-orm/postgres-js";
@@ -220,16 +220,24 @@ describe.each(DIALECTS)("%s", (dialect) => {
       const a = await tasks.addTask(newTask("a"));
       await tasks.addTask(newTask("b"));
       expect((await tasks.getAllTasks()).map((t) => t.title)).toEqual(["a", "b"]);
-      // Two writes in the same millisecond through this store
-      await tasks.updateTask(a.id, { title: "a1" });
-      await tasks.updateTask(a.id, { title: "a2" });
-      expect((await tasks.getAllTasks())[0]!.title).toBe("a2");
-      // Another store instance (another process) on the same database
-      const other = dialect === "sqlite" ? createSqliteStores(drizzle(sqlite!)) : createPgStores(pgDb!);
-      await other.taskStore.updateTask(a.id, { title: "from-elsewhere" });
-      expect((await tasks.getAllTasks())[0]!.title).toBe("from-elsewhere");
-      await other.taskStore.removeTask(a.id);
-      expect((await tasks.getAllTasks()).map((t) => t.title)).toEqual(["b"]);
+      // From here on every write has the same updated_at (same millisecond): only the row
+      // version tells the cache that something changed.
+      vi.useFakeTimers({ toFake: ["Date"], now: new Date("2030-01-01T00:00:00.000Z") });
+      try {
+        await tasks.updateTask(a.id, { title: "a1" });
+        await tasks.updateTask(a.id, { title: "a2" });
+        expect((await tasks.getAllTasks())[0]!.title).toBe("a2");
+        // Another store instance (another process) on the same database
+        const other = dialect === "sqlite" ? createSqliteStores(drizzle(sqlite!)) : createPgStores(pgDb!);
+        await other.taskStore.updateTask(a.id, { title: "from-elsewhere" });
+        expect((await tasks.getAllTasks())[0]!.title).toBe("from-elsewhere");
+        await other.taskStore.transition(a.id, "assigned");
+        expect((await tasks.getAllTasks())[0]!.status).toBe("assigned");
+        await other.taskStore.removeTask(a.id);
+        expect((await tasks.getAllTasks()).map((t) => t.title)).toEqual(["b"]);
+      } finally {
+        vi.useRealTimers();
+      }
       // Callers get copies
       const list = await tasks.getAllTasks();
       list[0]!.dependsOn.push("x");

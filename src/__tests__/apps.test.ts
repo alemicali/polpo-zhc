@@ -64,16 +64,17 @@ describe("app registry", () => {
 
   test("adds user package-manager binaries to service PATH", () => {
     expect(appRuntimePath("/home/test", ["/usr/bin", "/bin"].join(delimiter)).split(delimiter)).toEqual([
-      "/home/test/.bun/bin",
-      "/home/test/.local/bin",
-      "/home/test/.npm-global/bin",
-      "/home/test/.local/share/pnpm",
+      join("/home/test", ".bun/bin"),
+      join("/home/test", ".local/bin"),
+      join("/home/test", ".npm-global/bin"),
+      join("/home/test", ".local/share/pnpm"),
       "/usr/bin",
       "/bin",
     ]);
   });
 
-  test("starts and stops a service process group while retaining logs", async () => {
+  // Services run as POSIX process groups through sh (Linux/macOS servers).
+  test.skipIf(process.platform === "win32")("starts and stops a service process group while retaining logs", async () => {
     const events: Array<{ action: string; resourceId?: string }> = [];
     runtime.setEmitter((event) => events.push(event));
     await store.create(appInput(project, {
