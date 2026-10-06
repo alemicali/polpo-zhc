@@ -2,7 +2,7 @@
  * "Novità" — what changed in the app, newest first.
  *
  * Shown on /changelog and, for `highlight` entries the person has not seen
- * yet, in the What's new banner (Dashboard, empty chat). Seen state is kept
+ * yet, in the What's new bar at the top. Seen state is kept
  * per entry id (see hooks/use-whats-new.ts), so ids must never change once
  * shipped. Add new entries at the top.
  */
@@ -31,18 +31,37 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: "2026-10-06",
     kind: "improved",
     title: "Activity e Logs diventano Events",
-    summary: "Una sola pagina per tutto quello che succede: Live e History.",
+    summary: "Una sola pagina per tutto quello che succede, Live e History, con filtri per tipo di evento e agente.",
     body: [
       "Polpo funziona a **eventi**: ogni cosa che succede (un task che cambia stato, un agente che parte o finisce, una missione, un'approvazione, una notifica…) è un evento.",
       "",
       "- **Events → Live**: gli eventi mentre succedono.",
-      "- **Events → History**: gli eventi salvati, una sessione per ogni avvio del server.",
+      "- **Events → History**: gli eventi salvati, per periodo (ultima ora, 24 ore, 7 o 30 giorni) o per singolo avvio del server.",
+      "- In entrambe puoi filtrare per **categoria**, **tipo di evento**, **agente**, **esito** (errori, avvisi…) e cercare nel testo.",
       "- I messaggi testuali del server ora si chiamano **System**.",
       "- Nel dettaglio di un task, quello che ha fatto l'agente passo per passo è la scheda **Execution**.",
       "",
       "La trovi nel menu, subito sotto Chat.",
     ].join("\n"),
     cta: { label: "Apri Events", to: "/events" },
+  },
+  {
+    id: "2026-10-06-telegram-groups",
+    date: "2026-10-06",
+    kind: "new",
+    highlight: true,
+    title: "Telegram: gli agenti capiscono quando parli con loro",
+    summary: "Nei gruppi Telegram gli agenti rispondono anche senza @ quando il messaggio è per loro, e ricordano la conversazione.",
+    body: [
+      "Nei gruppi Telegram non serve più menzionare sempre l'agente: risponde anche **senza @** quando il messaggio è chiaramente per lui. Un classificatore veloce legge la conversazione e decide chi deve rispondere.",
+      "",
+      "- Tiene conto del **contesto**: chi c'è nel gruppo, di cosa si stava parlando e chi era già coinvolto.",
+      "- Se nel gruppo ci sei **solo tu e un agente**, l'agente risponde sempre.",
+      "- Ogni gruppo ha **un unico trascritto**, condiviso da tutti gli agenti: ognuno sa cosa hanno già risposto gli altri e non ripete cose già dette.",
+      "- La **soglia** con cui l'agente decide di rispondere è configurabile.",
+      "",
+      "Serve la **privacy mode disattivata** nel bot (BotFather → /setprivacy → Disable), altrimenti il bot vede solo comandi e risposte.",
+    ].join("\n"),
   },
   {
     id: "2026-10-06-group-chats",
@@ -90,32 +109,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- Elenca tutti i template del nostro registry privato: **agenti**, **playbook** e **company** (configurazioni complete con team e skill).",
       "- Gli agenti e Polpo possono cercarli e installarli con gli strumenti Ink, e nuovi template compaiono da soli quando vengono aggiunti al registry.",
       "- Per ora è raggiungibile solo dalla rete interna (Tailscale).",
-    ].join("\n"),
-  },
-  {
-    id: "2026-10-06-telegram-intent",
-    date: "2026-10-06",
-    kind: "new",
-    title: "Telegram: risposte per intento",
-    summary: "Nei gruppi Telegram gli agenti rispondono anche senza menzione quando il messaggio è per loro.",
-    body: [
-      "Nei gruppi Telegram non serve più menzionare sempre l'agente: risponde anche **senza @** quando il messaggio è chiaramente per lui.",
-      "",
-      "- La **soglia** con cui l'agente decide di rispondere è configurabile.",
-      "- Serve la **privacy mode disattivata** nel bot (BotFather → /setprivacy → Disable), altrimenti il bot vede solo comandi e risposte.",
-      "- Se nel gruppo ci sei **solo tu e un agente**, l'agente risponde sempre.",
-    ].join("\n"),
-  },
-  {
-    id: "2026-10-06-telegram-memory",
-    date: "2026-10-06",
-    kind: "improved",
-    title: "Telegram: i gruppi ricordano la conversazione",
-    summary: "Un unico trascritto per gruppo: ogni agente sa cosa hanno risposto gli altri.",
-    body: [
-      "Ogni gruppo Telegram ha ora **un unico trascritto salvato**, condiviso da tutti gli agenti del gruppo.",
-      "",
-      "Così ogni agente sa **cosa hanno già risposto gli altri** e **chi c'è nel gruppo**, e non ripete cose già dette.",
     ].join("\n"),
   },
   {
