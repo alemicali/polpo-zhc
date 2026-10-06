@@ -105,7 +105,7 @@ export async function authorizeDestination(rule: NetworkRule, host: string, port
 /** Node bridge run inside the sandbox: 127.0.0.1:<port> → the proxy's Unix socket. */
 const BRIDGE_SOURCE = `const net = require("node:net");
 const [port, socketPath] = process.argv.slice(2);
-net.createServer((c) => { const u = net.createConnection(socketPath); c.pipe(u).pipe(c); u.on("error", () => c.destroy()); c.on("error", () => u.destroy()); })
+net.createServer({ allowHalfOpen: true }, (c) => { const u = net.createConnection({ path: socketPath, allowHalfOpen: true }); c.pipe(u).pipe(c); u.on("error", () => c.destroy()); c.on("error", () => u.destroy()); })
   .listen(Number(port), "127.0.0.1", () => process.stdout.write("ready\\n"));
 `;
 
@@ -189,7 +189,7 @@ function createProxyCore(opts: ProxyOptions): ProxyCore {
           } else client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
           return;
         }
-        const upstream = createConnection({ host: auth.address, port: target.port });
+        const upstream = createConnection({ host: auth.address, port: target.port, allowHalfOpen: true });
         track(upstream);
         upstream.on("error", () => { client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"); });
         upstream.on("connect", () => {
@@ -241,7 +241,7 @@ function createProxyCore(opts: ProxyOptions): ProxyCore {
       client.pause();
       void check(host, port).then((auth) => {
         if (!auth.ok) { reply("reason" in auth ? 2 : 4); return; }
-        const upstream = createConnection({ host: auth.address, port });
+        const upstream = createConnection({ host: auth.address, port, allowHalfOpen: true });
         track(upstream);
         upstream.on("error", (e: NodeJS.ErrnoException) => reply(e.code === "ECONNREFUSED" ? 5 : 4));
         upstream.on("connect", () => {
@@ -256,7 +256,8 @@ function createProxyCore(opts: ProxyOptions): ProxyCore {
     onData();
   };
 
-  const server: Server = createServer((client) => {
+  // half-open: a client that finished sending (FIN) still gets the reply
+  const server: Server = createServer({ allowHalfOpen: true }, (client) => {
     track(client);
     client.on("error", () => client.destroy());
     client.once("data", (first: Buffer) => { if (first[0] === 0x05) handleSocks(client, first); else handleHttp(client, first); });

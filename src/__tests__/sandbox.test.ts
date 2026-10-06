@@ -311,9 +311,10 @@ describe("docker workspace argv", () => {
     expect(pair(argv, "--workdir")).toEqual([out]);
   });
 
-  test("open network uses the default one; podman keeps the uid", async () => {
-    const open = await make({ mode: "open" }).argv("true");
-    expect(open).not.toContain("--network");
+  test("only unrestricted uses the default network (open goes through the proxy); podman keeps the uid", async () => {
+    expect(await make({ mode: "unrestricted" } as any).argv("true")).not.toContain("--network");
+    const openWs = make({ mode: "open" });
+    try { expect(pair(await openWs.argv("true"), "--network")).toEqual(["none"]); } finally { await openWs.dispose(); }
     const podman = await make({ mode: "deny" }, {}, "/usr/bin/podman").argv("true");
     expect(podman).toContain("--userns=keep-id");
     expect((await make({ mode: "deny" }).argv("true"))).not.toContain("--userns=keep-id");

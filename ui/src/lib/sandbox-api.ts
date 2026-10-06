@@ -94,8 +94,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body.data as T;
 }
 
+export type RemoteProviderId = "daytona" | "e2b";
+
+export interface RemoteProviderStatus {
+  id: RemoteProviderId;
+  configured: boolean;
+  apiKey: "set" | "not set";
+  apiUrl?: string;
+  target?: string;
+  domain?: string;
+  template?: string;
+  lastTest?: { ok: boolean; at: string; durationMs?: number; error?: string };
+}
+
+export interface RemoteProviderInput {
+  apiKey?: string;
+  apiUrl?: string;
+  target?: string;
+  domain?: string;
+  template?: string;
+}
+
 export const sandboxApi = {
   overview: () => request<SandboxOverview>("/sandbox"),
+  providers: () => request<RemoteProviderStatus[]>("/sandbox/providers"),
+  saveProvider: (id: RemoteProviderId, input: RemoteProviderInput) =>
+    request<RemoteProviderStatus>(`/sandbox/providers/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  removeProvider: (id: RemoteProviderId) =>
+    request<unknown>(`/sandbox/providers/${id}`, { method: "DELETE" }),
+  testProvider: (id: RemoteProviderId) =>
+    request<NonNullable<RemoteProviderStatus["lastTest"]>>(`/sandbox/providers/${id}/test`, { method: "POST" }),
   /** Destinations refused recently, newest first. */
   networkDenied: () => request<NetworkDeniedEntry[]>("/sandbox/network-denied"),
   /** Instance defaults; null removes them. */

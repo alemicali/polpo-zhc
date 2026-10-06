@@ -15,6 +15,7 @@ import type { Team } from "../core/types.js";
 import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
+import { loadRemoteProviders } from "../sandbox/remote-providers.js";
 
 /**
  * Polpo HTTP Server.
@@ -75,6 +76,12 @@ export class PolpoServer {
     o.setStorageMountProvider(storage);
     void withEventOrigin({ source: "system" }, () => storage.startMounts()).catch((err) => {
       console.error("[PolpoServer] Storage mounts failed to start:", err instanceof Error ? err.message : err);
+    });
+
+    // Remote sandbox providers (Daytona, E2B): their keys live in the vault; load them so tasks
+    // can pick those providers.
+    await loadRemoteProviders(o.getVaultStore()).catch((err) => {
+      console.error("[PolpoServer] Remote sandbox providers failed to load:", err instanceof Error ? err.message : err);
     });
 
     // (Re-)create SSE bridge

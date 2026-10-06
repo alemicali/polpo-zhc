@@ -24,6 +24,8 @@ import { remoteProviderCredentials, type RemoteProviderId } from "./remote-provi
 const MAX_CONTEXT_BYTES = 300 * 1024 * 1024;
 const CONTEXT_EXCLUDES = ["node_modules", ".polpo", ".venv", "__pycache__", ".next", ".turbo", "dist/.cache"];
 const DEFAULT_TIMEOUT_MIN = 60;
+/** DNS resolvers Daytona VMs use (/etc/resolv.conf): kept reachable in allowlist mode. */
+const DAYTONA_RESOLVERS = ["1.1.1.1/32", "1.0.0.1/32", "8.8.8.8/32", "100.65.160.1/32"];
 
 export interface RemoteDriver {
   /** Run a shell command line in the VM. */
@@ -307,6 +309,8 @@ export class DaytonaWorkspace extends RemoteWorkspace {
         const addrs = await lookup(name, { all: true, family: 4 }).catch(() => []);
         for (const a of addrs) cidrs.add(`${a.address}/32`);
       }
+      // the VM resolves names through public resolvers: without them nothing resolves
+      if (cidrs.size) for (const dns of DAYTONA_RESOLVERS) cidrs.add(dns);
       if (cidrs.size) params.networkAllowList = [...cidrs].slice(0, 50).join(",");
       else params.networkBlockAll = true;
     }
