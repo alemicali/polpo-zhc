@@ -326,6 +326,7 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.defaultRetryPolicy) settings.defaultRetryPolicy = raw.defaultRetryPolicy;
   if (raw?.maxAssessmentRetries != null) settings.maxAssessmentRetries = raw.maxAssessmentRetries;
   if (raw?.maxConcurrency != null) settings.maxConcurrency = raw.maxConcurrency;
+  if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
 
   // Extended settings: notifications, approval gates, escalation, SLA, scheduling, quality
   if (raw?.approvalGates) settings.approvalGates = raw.approvalGates;

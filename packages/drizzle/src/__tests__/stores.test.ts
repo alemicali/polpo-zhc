@@ -641,6 +641,25 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(pruned).toBe(1);
       expect(await stores.logStore.listSessions()).toHaveLength(1);
     });
+
+    it("pruneBefore removes older entries, then the old empty sessions but never the current one", async () => {
+      const first = await stores.logStore.startSession();
+      await stores.logStore.append({ ts: "2025-01-01T00:00:00Z", event: "old", data: null });
+      const current = await stores.logStore.startSession();
+      await stores.logStore.append({ ts: "2025-01-01T00:00:00Z", event: "old", data: null });
+      await stores.logStore.append({ ts: "2025-03-01T00:00:00Z", event: "recent", data: { keep: true } });
+
+      // Sessions started now are newer than this cutoff: only the entries go.
+      expect(await stores.logStore.pruneBefore!("2025-02-01T00:00:00Z")).toEqual({ sessions: 0, entries: 2 });
+      expect(await stores.logStore.getSessionEntries(first)).toEqual([]);
+      expect((await stores.logStore.getSessionEntries(current)).map((e) => e.event)).toEqual(["recent"]);
+
+      // A cutoff after everything: the first session is gone, the current one stays (empty).
+      expect(await stores.logStore.pruneBefore!("2999-01-01T00:00:00Z")).toEqual({ sessions: 1, entries: 1 });
+      expect((await stores.logStore.listSessions()).map((s) => s.sessionId)).toEqual([current]);
+      await stores.logStore.append({ ts: "2999-01-02T00:00:00Z", event: "after", data: null });
+      expect(await stores.logStore.getSessionEntries(current)).toHaveLength(1);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════
