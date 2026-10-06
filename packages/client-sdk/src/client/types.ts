@@ -794,6 +794,8 @@ export interface CustomModelDef {
   contextWindow?: number;
   /** Max output tokens. Default: 8192 */
   maxTokens?: number;
+  /** Per-model compatibility flags (custom providers). */
+  compat?: Record<string, unknown>;
 }
 
 export interface BrandingConfig {
@@ -837,12 +839,49 @@ export interface PolpoSettings {
   mcpToolAllowlist?: Record<string, string[]>;
 }
 
+export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages" | "azure-openai-responses";
+
+export interface ProviderAuthConfig {
+  type: "none" | "bearer" | "x-api-key" | "header";
+  headerName?: string;
+  prefix?: string;
+  envVar?: string;
+}
+
 export interface ProviderConfig {
+  /** Display name (custom providers). */
+  label?: string;
+  /** Wizard preset the provider was created from. */
+  preset?: string;
+  /** Built-in provider proxied by this endpoint. */
+  proxyFor?: string;
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */
-  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  api?: ProviderApi;
+  /** How the key is sent (key itself lives in the vault). */
+  auth?: ProviderAuthConfig;
+  /** Static, non-secret headers. */
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+  allowPrivateNetwork?: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
   /** Custom model definitions for this provider. */
   models?: CustomModelDef[];
+}
+
+/** Custom provider as returned by /providers/custom (no secrets). */
+export interface CustomProviderInfo extends ProviderConfig {
+  id: string;
+  hasKey: boolean;
+  /** Last 4 chars of the stored key (long keys only). */
+  keyHint?: string;
+  secretHeaderNames: string[];
+  envVar?: string;
+  envKeyPresent: boolean;
+  keySource?: "vault" | "env" | "none";
+  configured: boolean;
+  warnings?: string[];
 }
 
 export interface PolpoConfig {
@@ -1598,6 +1637,14 @@ export interface ProviderAuthInfo {
   oauthAvailable: boolean;
   oauthProviderName?: string;
   oauthFlow?: string;
+  /** Custom provider / gateway (polpo.json `providers`, non built-in id). */
+  custom?: boolean;
+  /** Custom providers: usable (key in vault / env, or keyless). */
+  configured?: boolean;
+  label?: string;
+  keySource?: "vault" | "env" | "none";
+  hasVaultKey?: boolean;
+  keyHint?: string;
 }
 
 /** Full auth status response — all providers. */
