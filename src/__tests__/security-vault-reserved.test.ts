@@ -214,3 +214,12 @@ describe("agent names — every creation/update path", () => {
     expect(() => validateAgents([{ name: "$data" }])).toThrow(/reserved/);
   });
 });
+
+describe("file-store import of system vault entries", () => {
+  it("drops allowedAgents on $-owned entries, keeps normal sharing", async () => {
+    const { sanitizeImportedVaultEntry } = await import("../stores/import-file-stores.js");
+    const shared = { type: "api_key", credentials: { k: "v" }, allowedAgents: ["alice"] };
+    expect(sanitizeImportedVaultEntry("$providers", shared)).toEqual({ type: "api_key", credentials: { k: "v" } });
+    expect(sanitizeImportedVaultEntry("bob", shared)).toEqual(shared);
+  });
+});

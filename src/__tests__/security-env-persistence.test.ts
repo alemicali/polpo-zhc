@@ -66,7 +66,7 @@ describe("persistToEnvFile", () => {
   it("moveEnvEntries moves only the requested keys and removes them from the source", () => {
     writeFileSync(join(polpoDir, ".env"), "OPENAI_API_KEY=sk-1\nOTHER=x\n");
     const dest = join(tmp, "other", ".polpo");
-    expect(moveEnvEntries(polpoDir, dest, ["OPENAI_API_KEY"])).toEqual(["OPENAI_API_KEY"]);
+    expect(moveEnvEntries(polpoDir, dest, [{ key: "OPENAI_API_KEY", previous: undefined }])).toEqual(["OPENAI_API_KEY"]);
     expect(readFileSync(join(dest, ".env"), "utf-8")).toBe("OPENAI_API_KEY=sk-1\n");
     expect(envFile()).toBe("OTHER=x\n");
   });
@@ -93,8 +93,8 @@ describe("provider API-key routes", () => {
     expect(res.status).toBe(200);
     expect(envFile()).toContain("OPENAI_API_KEY=sk-test-123");
     expect(existsSync(join(attackerDir, ".polpo", ".env"))).toBe(false);
-    // Recorded so setup can move exactly this key to the chosen project.
-    expect(takeApiWrittenEnvKeys(polpoDir)).toEqual(["OPENAI_API_KEY"]);
+    // Recorded (with "did not exist before") so setup can move exactly this key.
+    expect(takeApiWrittenEnvKeys(polpoDir)).toEqual([{ key: "OPENAI_API_KEY", previous: undefined }]);
   });
 
   it("setup flow: a key saved via the API is moved (not copied) to the initialized project", async () => {
@@ -109,6 +109,31 @@ describe("provider API-key routes", () => {
     moveEnvEntries(polpoDir, target, takeApiWrittenEnvKeys(polpoDir));
     expect(readFileSync(join(target, ".env"), "utf-8")).toBe("OPENAI_API_KEY=sk-setup-1\n");
     expect(envFile()).toBe("PRE_EXISTING=keep\n");
+  });
+
+  it("setup flow: a key that already existed in the starting .env is restored, not deleted", async () => {
+    writeFileSync(join(polpoDir, ".env"), "OPENAI_API_KEY=sk-original\nOTHER=1\n");
+    const app = providerRoutes(polpoDir);
+    for (const k of ["sk-setup-1", "sk-setup-2"]) {
+      await app.request("/openai/api-key", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey: k }),
+      });
+    }
+    expect(envFile()).toContain("OPENAI_API_KEY=sk-setup-2");
+    const target = join(tmp, "chosen", ".polpo");
+    moveEnvEntries(polpoDir, target, takeApiWrittenEnvKeys(polpoDir));
+    expect(readFileSync(join(target, ".env"), "utf-8")).toBe("OPENAI_API_KEY=sk-setup-2\n");
+    expect(envFile()).toBe("OPENAI_API_KEY=sk-original\nOTHER=1\n");
+  });
+
+  it("nothing recorded (e.g. after a restart) → nothing moved or deleted", () => {
+    writeFileSync(join(polpoDir, ".env"), "OPENAI_API_KEY=sk-original\n");
+    const target = join(tmp, "chosen", ".polpo");
+    expect(moveEnvEntries(polpoDir, target, takeApiWrittenEnvKeys(polpoDir))).toEqual([]);
+    expect(envFile()).toBe("OPENAI_API_KEY=sk-original\n");
+    expect(existsSync(join(target, ".env"))).toBe(false);
   });
 
   it("rejects API keys with newlines (env line injection)", async () => {

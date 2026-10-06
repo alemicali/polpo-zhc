@@ -524,8 +524,8 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
     if (!apiKey) return c.json({ ok: false, error: "apiKey is required" }, 400);
 
     const targetDir = resolvePolpoDir(polpoDir);
+    recordApiWrittenEnvKey(targetDir, envVar); // remembers the pre-existing value (if any)
     persistToEnvFile(targetDir, envVar, apiKey);
-    recordApiWrittenEnvKey(targetDir, envVar);
     process.env[envVar] = apiKey;
 
     return c.json({ ok: true, data: { message: `${envVar} saved to .polpo/.env` } });
