@@ -1,8 +1,9 @@
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type {
   AgentConversationCheckpoint,
   BackgroundWait,
+  BackgroundWaitState,
   TaskControlStore,
   TaskDirection,
 } from "@polpo-ai/core";
@@ -185,11 +186,13 @@ export class DrizzleTaskControlStore implements TaskControlStore {
     return rows[0] ? this.rowToBackgroundWait(rows[0]) : undefined;
   }
 
-  async listBackgroundWaits(sessionId?: string): Promise<BackgroundWait[]> {
+  async listBackgroundWaits(sessionId?: string, states?: readonly BackgroundWaitState[]): Promise<BackgroundWait[]> {
+    const where: SQL[] = [];
+    if (sessionId) where.push(eq(this.backgroundWaits.sessionId, sessionId));
+    if (states) where.push(inArray(this.backgroundWaits.state, [...states]));
     const query = this.db.select().from(this.backgroundWaits);
-    const rows: any[] = sessionId
-      ? await query.where(eq(this.backgroundWaits.sessionId, sessionId)).orderBy(desc(this.backgroundWaits.createdAt))
-      : await query.orderBy(desc(this.backgroundWaits.createdAt));
+    const rows: any[] = await (where.length > 0 ? query.where(and(...where)) : query)
+      .orderBy(desc(this.backgroundWaits.createdAt));
     return rows.map((row) => this.rowToBackgroundWait(row));
   }
 

@@ -727,12 +727,16 @@ export class MissionExecutor {
 
   /** Check if any mission groups have all tasks terminal, and clean up their volatile agents */
   async cleanupCompletedGroups(tasks: Task[]): Promise<void> {
-    const groups = new Set<string>();
+    // One pass instead of a filter per group (runs every tick over all tasks); groups keep
+    // first-appearance order and their tasks keep snapshot order.
+    const tasksByGroup = new Map<string, Task[]>();
     for (const t of tasks) {
-      if (t.group) groups.add(t.group);
+      if (!t.group) continue;
+      const groupTasks = tasksByGroup.get(t.group);
+      if (groupTasks) groupTasks.push(t);
+      else tasksByGroup.set(t.group, [t]);
     }
-    for (const group of groups) {
-      const groupTasks = tasks.filter(t => t.group === group);
+    for (const [group, groupTasks] of tasksByGroup) {
       const allTerminal = groupTasks.every(t => t.status === "done" || t.status === "failed");
 
       // If tasks went back to non-terminal (e.g. individual retry via retryTask),

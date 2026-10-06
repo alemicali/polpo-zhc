@@ -71,7 +71,10 @@ export async function runCheck(
     case "test": {
       const cmd = expectation.command ?? "npm test";
       try {
-        await deps.shell.execute(cmd, { cwd });
+        const result = await deps.shell.execute(cmd, { cwd });
+        if (result.exitCode !== 0) {
+          return { type: "test", passed: false, message: `Test failed: ${cmd}`, details: result.stderr || result.stdout };
+        }
         return { type: "test", passed: true, message: `Test passed: ${cmd}` };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
