@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/sheet";
 import { useTheme } from "@/hooks/use-theme";
 import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
+import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
 
 /** Single source of truth for mobile nav entries — grouped semantically. */
 const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashboard; label: string }[] }[] = [
@@ -114,7 +115,14 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
                     <NavLink
                       key={to}
                       to={to}
-                      onClick={() => setOpen(false)}
+                      onClick={(e) => {
+                        setOpen(false);
+                        // "Novità" opens the What's new drawer over the page
+                        if (to === "/changelog") {
+                          e.preventDefault();
+                          openWhatsNew();
+                        }
+                      }}
                       className={cn(
                         "flex flex-col items-center gap-1.5 rounded-xl p-2.5 text-[11px] font-medium transition-colors",
                         isActive

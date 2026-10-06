@@ -37,6 +37,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { config } from "@/lib/config";
+import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
@@ -86,6 +87,11 @@ const nav: NavSection[] = [
 
 /** Pinned at the bottom of the nav, above the connection footer. */
 const WHATS_NEW_ITEM: NavItem = { to: "/changelog", icon: Megaphone, label: "Novità" };
+/** "Novità" opens the What's new drawer over the page instead of leaving it. */
+const openWhatsNewFromNav = (e: React.MouseEvent) => {
+  e.preventDefault();
+  openWhatsNew();
+};
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
@@ -203,7 +209,7 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
     <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
         <div>
-          <NavLink to={to} className={linkClasses}>
+          <NavLink to={to} className={linkClasses} onClick={to === WHATS_NEW_ITEM.to ? openWhatsNewFromNav : undefined}>
             <Icon className="h-[18px] w-[18px]" />
             {to === "/approvals" && <PendingBadge collapsed />}
             {to === WHATS_NEW_ITEM.to && <WhatsNewDot className="absolute right-1.5 top-1.5" />}
@@ -243,7 +249,7 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
     );
 
   return (
-    <NavLink to={to} className={linkClasses}>
+    <NavLink to={to} className={linkClasses} onClick={to === WHATS_NEW_ITEM.to ? openWhatsNewFromNav : undefined}>
       <Icon className="h-[18px] w-[18px] shrink-0" />
       <span className="truncate">{label}</span>
       {to === "/approvals" && <PendingBadge collapsed={false} />}

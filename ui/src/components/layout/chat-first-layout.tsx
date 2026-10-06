@@ -92,6 +92,7 @@ import { ChatRoomRouteSync } from "./chat-room-route-sync";
 import { NewChatMenu } from "@/components/groups/new-chat-menu";
 import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import { applyChatLinkParams, requestNewGroup, setActiveChatRoom } from "@/hooks/use-chat-room";
+import { openWhatsNew, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((module) => ({ default: module.ChatPage })),
@@ -401,6 +402,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
 
 const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { pathname } = useLocation();
+  const whatsNewOpen = useWhatsNewOpen();
   const navigate = useNavigate();
   const { theme, resolved, setTheme } = useTheme();
   const { palette, setPalette } = usePalette();
@@ -451,11 +453,11 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               size="icon"
               className={cn(
                 "relative h-8 w-8 rounded-lg transition-all",
-                isTabActive(pathname, "/changelog")
+                whatsNewOpen
                   ? "text-primary bg-primary/10 hover:bg-primary/15"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
               )}
-              onClick={() => navigate("/changelog")}
+              onClick={openWhatsNew}
               aria-label="Novità"
             >
               <Megaphone className="h-4 w-4" />

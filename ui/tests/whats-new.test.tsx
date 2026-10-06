@@ -1,6 +1,6 @@
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, useLocation, type Location } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   CHANGELOG,
@@ -16,8 +16,9 @@ const STORAGE_KEY = "polpo-whats-new-seen";
 async function loadModules() {
   vi.resetModules();
   const store = await import("../src/hooks/use-whats-new");
-  const { WhatsNewBanner } = await import("../src/components/whats-new/whats-new-banner");
-  return { ...store, WhatsNewBanner };
+  const drawer = await import("../src/hooks/use-whats-new-drawer");
+  const { WhatsNewBar } = await import("../src/components/whats-new/whats-new-bar");
+  return { ...store, ...drawer, WhatsNewBar };
 }
 
 const entries: ChangelogEntry[] = [
@@ -51,8 +52,29 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   expect(unseenHighlights(CHANGELOG, new Set()).map((e) => e.id)).toEqual(CHANGELOG.filter((e) => e.highlight).map((e) => e.id));
 });
 
-test("banner shows the newest unseen highlight, steps through them and dismiss persists by id", async () => {
-  const { WhatsNewBanner, markAllChangelogSeen, useHasUnseenChangelog } = await loadModules();
+test("top bar: the newest unseen news (highlights first), how many more, a click opens the drawer", async () => {
+  const { WhatsNewBar, useWhatsNewOpen } = await loadModules();
+  let open: boolean | undefined;
+  function Drawer() {
+    const current = useWhatsNewOpen();
+    useEffect(() => { open = current; });
+    return null;
+  }
+  await act(async () => root.render(
+    <MemoryRouter>
+      <WhatsNewBar entries={entries} />
+      <Drawer />
+    </MemoryRouter>,
+  ));
+  expect(container.textContent).toContain("Second highlight… newest");
+  expect(container.textContent).toContain("+2");
+  expect(open).toBe(false);
+  await act(async () => { (container.querySelector('button[aria-label^="Novità:"]') as HTMLButtonElement).click(); });
+  expect(open).toBe(true);
+});
+
+test("top bar: the X sets everything as seen, and it stays hidden", async () => {
+  const { WhatsNewBar, useHasUnseenChangelog } = await loadModules();
   let hasUnseen: boolean | undefined;
   function Dot() {
     const current = useHasUnseenChangelog(entries);
@@ -61,61 +83,35 @@ test("banner shows the newest unseen highlight, steps through them and dismiss p
   }
   await act(async () => root.render(
     <MemoryRouter>
-      <WhatsNewBanner entries={entries} />
+      <WhatsNewBar entries={entries} />
       <Dot />
     </MemoryRouter>,
   ));
-  expect(container.textContent).toContain("Second highlight… newest");
-  expect(container.textContent).toContain("Novità");
-  expect(container.querySelector('a[href="/changelog"]')?.textContent).toBe("Tutte le novità");
-  expect(container.textContent).not.toContain("Not highlighted");
-
-  await act(async () => { (container.querySelector('[aria-label="Novità successiva"]') as HTMLButtonElement).click(); });
-  expect(container.textContent).toContain("Older highlight");
-
-  await act(async () => { (container.querySelector('[aria-label="Chiudi le novità"]') as HTMLButtonElement).click(); });
-  expect(container.textContent).toBe("");
-  expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(["b", "a"]);
-  // The non-highlighted entry is still unread (nav dot) until the changelog page is opened.
   expect(hasUnseen).toBe(true);
-  await act(async () => { markAllChangelogSeen(entries); });
+  await act(async () => { (container.querySelector('[aria-label="Nascondi le novità"]') as HTMLButtonElement).click(); });
+  expect(container.textContent).toBe("");
   expect(hasUnseen).toBe(false);
+  expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).sort()).toEqual(["a", "b", "c"]);
 });
 
-test("banner remembers what was seen and the CTA marks its entry seen", async () => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(["a"]));
-  const { WhatsNewBanner } = await loadModules();
-  let location: Location | undefined;
-  function Where() {
-    const current = useLocation();
-    useEffect(() => { location = current; });
-    return null;
-  }
-  await act(async () => root.render(
-    <MemoryRouter initialEntries={["/dashboard"]}>
-      <WhatsNewBanner entries={entries} />
-      <Where />
-    </MemoryRouter>,
-  ));
-  // Only one unseen highlight → no stepper.
-  expect(container.querySelector('[aria-label="Novità successiva"]')).toBeNull();
-  const cta = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Prova"))!;
-  await act(async () => { cta.click(); });
-  expect(`${location!.pathname}${location!.search}`).toBe("/chat?newGroup=1");
-  expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).sort()).toEqual(["a", "b"]);
+test("top bar: only what is still unseen; nothing when all is seen", async () => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(["b", "a"]));
+  const { WhatsNewBar } = await loadModules();
+  await act(async () => root.render(<MemoryRouter><WhatsNewBar entries={entries} /></MemoryRouter>));
+  expect(container.textContent).toContain("Not highlighted");
+  expect(container.textContent).not.toContain("+");
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(["a", "b", "c"]));
+  const fresh = await loadModules();
+  await act(async () => root.render(<MemoryRouter><fresh.WhatsNewBar entries={entries} /></MemoryRouter>));
   expect(container.textContent).toBe("");
 });
 
-test("blocked storage: the banner still works for this visit", async () => {
+test("blocked storage: the bar still works for this visit", async () => {
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
-  const { WhatsNewBanner } = await loadModules();
-  await act(async () => root.render(
-    <MemoryRouter>
-      <WhatsNewBanner entries={entries} />
-    </MemoryRouter>,
-  ));
+  const { WhatsNewBar } = await loadModules();
+  await act(async () => root.render(<MemoryRouter><WhatsNewBar entries={entries} /></MemoryRouter>));
   expect(container.textContent).toContain("Second highlight… newest");
-  await act(async () => { (container.querySelector('[aria-label="Chiudi le novità"]') as HTMLButtonElement).click(); });
+  await act(async () => { (container.querySelector('[aria-label="Nascondi le novità"]') as HTMLButtonElement).click(); });
   expect(container.textContent).toBe("");
 });
