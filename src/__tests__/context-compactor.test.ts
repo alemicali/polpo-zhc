@@ -82,6 +82,15 @@ describe("ContextCompactor", () => {
     }
   });
 
+  test("a cleared result that was saved to a file keeps the file's path", async () => {
+    const c = compactor(async () => ({ summary: "S" }));
+    const history: any[] = [user("task")];
+    for (let i = 0; i < 8; i += 1) history.push(call(`c${i}`), result(`c${i}`, `${big(10_000)}\nFull output saved to /out/tool-output/bash-${i}.txt. Read it with \`read\``));
+    for (let i = 8; i < 11; i += 1) history.push(call(`c${i}`), result(`c${i}`, "short"));
+    const out = await c.prepare(history);
+    expect(JSON.stringify(out.messages.find((m: any) => m.toolCallId === "c0"))).toContain("still in /out/tool-output/bash-0.txt");
+  });
+
   test("summaries are incremental: the previous summary is passed back", async () => {
     const calls: Array<string | undefined> = [];
     const c = compactor(async ({ previousSummary }) => { calls.push(previousSummary); return { summary: `S${calls.length}` }; });

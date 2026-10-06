@@ -144,7 +144,10 @@ function isProtectedTool(name: unknown, patterns: string[]): boolean {
 }
 
 function clearedResult(message: ContextMessageLike): ContextMessageLike {
-  return { ...message, content: [{ type: "text", text: CLEARED_RESULT }] };
+  // An output already saved to a file keeps its path: the agent can read it again instead of re-running
+  const saved = /Full output saved to (\S+?)\.?(?:\s|$)/.exec(textOf(message.content, 1_000_000));
+  const text = saved ? `${CLEARED_RESULT.slice(0, -1)} The full output is still in ${saved[1]}.]` : CLEARED_RESULT;
+  return { ...message, content: [{ type: "text", text }] };
 }
 
 function textOf(content: unknown, limit: number): string {
