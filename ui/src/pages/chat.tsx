@@ -7,6 +7,7 @@ import {
   useRef,
   useEffect,
   useMemo,
+  useId,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -125,7 +126,9 @@ import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
-import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath } from "@/components/shared/file-preview-utils";
 import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
@@ -219,7 +222,7 @@ function useSpeechRecognition(opts?: { lang?: string; onResult?: (text: string) 
   const [transcript, setTranscript] = useState("");
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onResultRef = useRef(opts?.onResult);
-  onResultRef.current = opts?.onResult;
+  useEffect(() => { onResultRef.current = opts?.onResult; });
 
   const Ctor = getSpeechRecognitionCtor();
   const isSupported = !!Ctor;
@@ -1293,11 +1296,13 @@ function CopyAction({ text }: { text: string }) {
 // Singleton: only one message can play at a time. Clicking another stops the previous.
 let currentTtsAudio: HTMLAudioElement | null = null;
 let currentTtsStop: (() => void) | null = null;
+let currentTtsOwner: string | null = null;
 
 function SpeakAction({ text }: { text: string }) {
   const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const ttsOwnerId = useId();
 
   const stop = useCallback(() => {
     if (audioRef.current) {
@@ -1310,16 +1315,19 @@ function SpeakAction({ text }: { text: string }) {
       objectUrlRef.current = null;
     }
     if (currentTtsAudio === audioRef.current) currentTtsAudio = null;
-    if (currentTtsStop === stop) currentTtsStop = null;
+    if (currentTtsOwner === ttsOwnerId) {
+      currentTtsOwner = null;
+      currentTtsStop = null;
+    }
     setState("idle");
-  }, []);
+  }, [ttsOwnerId]);
 
   const play = useCallback(async () => {
     if (state === "loading") return;
     if (state === "playing") { stop(); return; }
 
     // Stop any other speak action that's currently active
-    if (currentTtsStop && currentTtsStop !== stop) currentTtsStop();
+    if (currentTtsStop && currentTtsOwner !== ttsOwnerId) currentTtsStop();
 
     setState("loading");
     try {
@@ -1351,6 +1359,7 @@ function SpeakAction({ text }: { text: string }) {
       audioRef.current = audio;
       currentTtsAudio = audio;
       currentTtsStop = stop;
+      currentTtsOwner = ttsOwnerId;
       audio.onended = stop;
       audio.onerror = stop;
       await audio.play();
@@ -1359,7 +1368,7 @@ function SpeakAction({ text }: { text: string }) {
       console.warn("[TTS] play error:", err);
       setState("idle");
     }
-  }, [state, text, stop]);
+  }, [state, text, stop, ttsOwnerId]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1563,13 +1572,12 @@ function AskUserCards({
   const hasAnyAnswer = answeredCount > 0;
 
   // Auto-navigate to summary when all questions are answered
-  const prevAllAnswered = useRef(false);
-  useEffect(() => {
-    if (isWizard && allAnswered && !prevAllAnswered.current && !isSummaryStep) {
-      setStep(questions.length);
-    }
-    prevAllAnswered.current = allAnswered;
-  }, [allAnswered, isWizard, isSummaryStep, questions.length]);
+  // (adjusted during render when allAnswered flips, not in an effect)
+  const [prevAllAnswered, setPrevAllAnswered] = useState(false);
+  if (allAnswered !== prevAllAnswered) {
+    setPrevAllAnswered(allAnswered);
+    if (isWizard && allAnswered && !isSummaryStep) setStep(questions.length);
+  }
 
   const handleSubmit = () => {
     if (submitting) return;
@@ -1606,9 +1614,13 @@ function AskUserCards({
     onSubmit(answers);
   };
 
-  // Reset warnings when navigating
-  useEffect(() => { if (!isSummaryStep) setPartialWarning(false); }, [isSummaryStep]);
-  useEffect(() => { setSkipWarning(false); }, [step]);
+  // Reset warnings when navigating (adjusted during render on step change)
+  const [warningStep, setWarningStep] = useState(step);
+  if (warningStep !== step) {
+    setWarningStep(step);
+    setSkipWarning(false);
+    if (!isSummaryStep) setPartialWarning(false);
+  }
 
   // ── Single question — flat layout ──
   if (!isWizard) {
@@ -2221,18 +2233,17 @@ function SessionSidebar({
 
   // ── Drill-down state ──
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const lastAutoDrilledSessionRef = useRef<string | null>(null);
+  const [lastAutoDrilledSession, setLastAutoDrilledSession] = useState<string | null>(null);
 
   // Auto-drill into the group that contains the active session
-  useEffect(() => {
-    if (view !== "drill" || !activeSessionId) return;
-    if (lastAutoDrilledSessionRef.current === activeSessionId) return;
+  // (adjusted during render, not in an effect)
+  if (view === "drill" && activeSessionId && lastAutoDrilledSession !== activeSessionId) {
     const session = sessions.find((s) => s.id === activeSessionId);
     if (session) {
       setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
-      lastAutoDrilledSessionRef.current = activeSessionId;
+      setLastAutoDrilledSession(activeSessionId);
     }
-  }, [activeSessionId, sessions, view]);
+  }
 
   // ── Flat/accordion state: which groups are expanded ──
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
@@ -2266,14 +2277,16 @@ function SessionSidebar({
   }, []);
 
   // Auto-expand group of active session when it changes
-  useEffect(() => {
-    if (view !== "flat" || !activeSessionId) return;
-    const s = sessions.find((s) => s.id === activeSessionId);
+  // (adjusted during render when the inputs change, not in an effect)
+  const [expandInputs, setExpandInputs] = useState({ activeSessionId, sessions, view });
+  if (expandInputs.activeSessionId !== activeSessionId || expandInputs.sessions !== sessions || expandInputs.view !== view) {
+    setExpandInputs({ activeSessionId, sessions, view });
+    const s = view === "flat" && activeSessionId ? sessions.find((s) => s.id === activeSessionId) : undefined;
     if (s) {
       const key = s.agent ?? ORCHESTRATOR_KEY;
       setExpandedGroups((prev) => prev.has(key) ? prev : new Set(prev).add(key));
     }
-  }, [activeSessionId, sessions, view]);
+  }
 
   // ── Build groups: key → sessions[], sorted by most-recent-first ──
   const groups = useMemo((): [string, SessionItem[]][] => {

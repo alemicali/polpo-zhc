@@ -1,8 +1,10 @@
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { mimeFromPath, previewCategory, useFilePreview } from "../src/components/shared/file-preview";
-import { MermaidFilePreview, mermaidCodeBlock } from "../src/components/shared/mermaid-file-preview";
+import { mimeFromPath, previewCategory } from "../src/components/shared/file-preview-utils";
+import { useFilePreview } from "../src/components/shared/use-file-preview";
+import { MermaidFilePreview } from "../src/components/shared/mermaid-file-preview";
+import { mermaidCodeBlock } from "../src/components/shared/mermaid-code-block";
 
 const renderDiagram = vi.fn();
 vi.mock("../src/hooks/use-theme", () => ({ useTheme: () => ({ resolved: "dark" }) }));
@@ -15,12 +17,16 @@ vi.mock("../src/components/ai-elements/message", () => ({
 let root: Root;
 let container: HTMLDivElement;
 let preview: ReturnType<typeof useFilePreview>;
-function Harness() { preview = useFilePreview(); return null; }
+function Harness({ onPreview }: { onPreview: (value: ReturnType<typeof useFilePreview>) => void }) {
+  const value = useFilePreview();
+  useEffect(() => onPreview(value));
+  return null;
+}
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   container = document.createElement("div"); document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<Harness />));
+  await act(async () => root.render(<Harness onPreview={value => { preview = value; }} />));
 });
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove();

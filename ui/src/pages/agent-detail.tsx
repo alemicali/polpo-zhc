@@ -25,10 +25,8 @@ import {
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 // Provider + context hook
-import {
-  AgentDetailProvider,
-  useAgentDetail,
-} from "@/components/agents/agent-detail-provider";
+import { AgentDetailProvider } from "@/components/agents/agent-detail-provider";
+import { useAgentDetail } from "@/components/agents/agent-detail-context";
 import { cn } from "@/lib/utils";
 
 // Sidebar cards

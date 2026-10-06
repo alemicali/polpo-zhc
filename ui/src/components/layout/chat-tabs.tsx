@@ -88,7 +88,7 @@ function setTabs(next: string[]) {
 }
 
 /** Hook: read current open-tab ids. Re-renders only when the list changes. */
-export function useOpenTabs(): string[] {
+function useOpenTabs(): string[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 

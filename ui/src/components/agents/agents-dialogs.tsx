@@ -20,7 +20,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Loader2, Plus, FolderPlus, Trash2, ChevronDown, X } from "lucide-react";
 import { useAsyncAction } from "@/hooks/use-polpo";
-import { useAgentsPage } from "./agents-page-provider";
+import { useAgentsPage } from "./agents-page-context";
 import { ModelPicker } from "@/components/shared/model-picker";
 import { useAuthStatus } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";

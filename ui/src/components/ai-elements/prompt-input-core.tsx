@@ -52,14 +52,14 @@ import {
 import type {
   AttachmentsContext,
   ReferencedSourcesContext,
-} from "./prompt-input-provider";
+} from "./prompt-input-context";
 import {
   convertBlobUrlToDataUrl,
   LocalAttachmentsContext,
   LocalReferencedSourcesContext,
   useOptionalPromptInputController,
   usePromptInputAttachments,
-} from "./prompt-input-provider";
+} from "./prompt-input-context";
 
 // ============================================================================
 // PromptInputActionAddAttachments

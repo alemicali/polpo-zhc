@@ -8,7 +8,7 @@
  * the icons actually rendered, and Vite emits one chunk per provider.
  */
 
-import { Suspense, lazy, useMemo, type ComponentType } from "react";
+import { Suspense, lazy, type ComponentType } from "react";
 import { Server } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -61,17 +61,11 @@ const LOADERS: Record<string, () => Promise<{ default: LobeIconComponent }>> = {
   copilot: () => import("@lobehub/icons/es/Github") as unknown as Promise<{ default: LobeIconComponent }>,
 };
 
-const lazyCache = new Map<string, LobeIconComponent>();
-function lazyFor(key: string): LobeIconComponent | null {
-  const loader = LOADERS[key];
-  if (!loader) return null;
-  let component = lazyCache.get(key);
-  if (!component) {
-    component = lazy(loader) as unknown as LobeIconComponent;
-    lazyCache.set(key, component);
-  }
-  return component;
-}
+// lazy() only creates a thin wrapper; the import runs on first render, so the
+// wrappers can be created once at module level (stable component identities).
+const LAZY_ICONS: Partial<Record<string, LobeIconComponent>> = Object.fromEntries(
+  Object.entries(LOADERS).map(([key, loader]) => [key, lazy(loader) as unknown as LobeIconComponent]),
+);
 
 export function ProviderIcon({
   name,
@@ -86,10 +80,8 @@ export function ProviderIcon({
   variant?: "mono" | "avatar";
   className?: string;
 }) {
-  const Icon = useMemo(() => {
-    const normalized = name.toLowerCase();
-    return lazyFor(normalized) ?? lazyFor(normalized.split("-")[0]);
-  }, [name]);
+  const normalized = name.toLowerCase();
+  const Icon = LAZY_ICONS[normalized] ?? LAZY_ICONS[normalized.split("-")[0]];
 
   const fallback = (
     <Server

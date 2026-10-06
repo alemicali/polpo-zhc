@@ -227,9 +227,12 @@ export function SkillDetailPage() {
   const { skills, isLoading: skillsLoading } = useSkills();
   const { teams } = useAgents();
 
-  const [loadedSkill, setLoadedSkill] = useState<LoadedSkill | null>(null);
-  const [contentLoading, setContentLoading] = useState(true);
-  const [contentError, setContentError] = useState<string | null>(null);
+  // Content results are tagged with the skill they belong to, so switching
+  // skills shows the loader without resetting state inside the effect.
+  const [content, setContent] = useState<{ name: string; skill: LoadedSkill | null; error: string | null } | null>(null);
+  const contentLoading = !content || content.name !== skillName;
+  const loadedSkill = contentLoading ? null : content.skill;
+  const contentError = contentLoading ? null : content.error;
 
   const agentTeamMap = new Map<string, string>();
   for (const team of teams) {
@@ -246,22 +249,13 @@ export function SkillDetailPage() {
     if (!skillName || !client) return;
     let cancelled = false;
 
-    setContentLoading(true);
-    setContentError(null);
-
     client
       .getSkillContent(skillName)
       .then((data) => {
-        if (!cancelled) {
-          setLoadedSkill(data);
-          setContentLoading(false);
-        }
+        if (!cancelled) setContent({ name: skillName, skill: data, error: null });
       })
       .catch((err) => {
-        if (!cancelled) {
-          setContentError(err?.message ?? "Failed to load skill content");
-          setContentLoading(false);
-        }
+        if (!cancelled) setContent({ name: skillName, skill: null, error: err?.message ?? "Failed to load skill content" });
       });
 
     return () => {

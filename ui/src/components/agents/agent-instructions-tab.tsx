@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy, Eye, EyeOff, Terminal } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 
 export function AgentInstructionsTab() {
   const { state: { agent } } = useAgentDetail();

@@ -13,7 +13,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatState, useChatActions, sidebarActions } from "@/hooks/chat-context";
-import { useFilePreview, mimeFromPath, FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath } from "@/components/shared/file-preview-utils";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
 
 export function ChatNavigationEffects() {
   const {

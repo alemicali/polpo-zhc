@@ -4,7 +4,7 @@ import { PolpoProvider } from "@polpo-ai/react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Loader2 } from "lucide-react";
 import { config } from "@/lib/config";
-import { ChatProvider } from "@/hooks/chat-context";
+import { ChatProvider } from "@/hooks/chat-provider";
 
 // Lazy-load all pages for code splitting
 const DashboardPage = lazy(() => import("@/pages/dashboard").then(m => ({ default: m.DashboardPage })));

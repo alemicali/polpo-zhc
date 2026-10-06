@@ -7,7 +7,7 @@
  * the data.
  */
 
-import { createContext, use, useMemo } from "react";
+import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import {
   useAgent,
@@ -22,83 +22,12 @@ import type {
   AgentProcess,
   SkillInfo,
   Task,
-  VaultEntryMeta,
 } from "@polpo-ai/react";
 import { taskStatusOrder } from "@/lib/agent-meta";
 import { toolCategories } from "@/lib/agent-meta";
 import { useAsyncAction } from "@/hooks/use-polpo";
-
-// ── Context interface ──
-
-export interface TaskStats {
-  done: number;
-  failed: number;
-  active: number;
-  pending: number;
-  total: number;
-  successRate: number | null;
-  avgScore: number | null;
-}
-
-export interface AgentDetailState {
-  agent: AgentConfig;
-  isLoading: boolean;
-  isRefreshing: boolean;
-  error: Error | null;
-  /** Active process for this agent (if any) */
-  process: AgentProcess | undefined;
-  /** Agents that report to this one */
-  subordinates: AgentConfig[];
-  /** Manager agent (who this agent reports to) */
-  manager: AgentConfig | null;
-  /** Computed task statistics */
-  taskStats: TaskStats;
-  /** All tasks assigned to this agent, sorted (active first) */
-  sortedTasks: Task[];
-  /** Skill pool map (name -> info) */
-  skillPool: Map<string, SkillInfo>;
-  /** Vault entries for this agent */
-  vaultEntries: VaultEntryMeta[];
-  /** MCP server entries from agent config */
-  mcpEntries: [string, unknown][];
-  /** Flat list of allowed tool names */
-  agentAllowedTools: string[];
-  /** Tool categories that are enabled based on allowedTools */
-  enabledCategories: typeof toolCategories;
-  /** Team name this agent belongs to */
-  teamName: string | null;
-  /** Team color index (position in the teams array, for consistent colors) */
-  teamColorIndex: number;
-}
-
-export interface AgentDetailActions {
-  refetch: () => Promise<void>;
-  refetchVault: () => Promise<void>;
-}
-
-export interface AgentDetailMeta {
-  agentName: string;
-}
-
-export interface AgentDetailContextValue {
-  state: AgentDetailState;
-  actions: AgentDetailActions;
-  meta: AgentDetailMeta;
-}
-
-// ── Context ──
-
-export const AgentDetailContext = createContext<AgentDetailContextValue | null>(null);
-
-/**
- * Hook to consume the AgentDetail context.
- * Must be used within an AgentDetailProvider.
- */
-export function useAgentDetail(): AgentDetailContextValue {
-  const ctx = use(AgentDetailContext);
-  if (!ctx) throw new Error("useAgentDetail must be used within an AgentDetailProvider");
-  return ctx;
-}
+import { AgentDetailContext } from "./agent-detail-context";
+import type { AgentDetailContextValue, TaskStats } from "./agent-detail-context";
 
 // ── Provider ──
 
@@ -184,20 +113,26 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
 
   // Team membership
   const teamInfo = useMemo(() => {
-    for (let i = 0; i < teams.length; i++) {
-      if (teams[i].agents.some((a: AgentConfig) => a.name === agentName)) {
-        return { teamName: teams[i].name, teamColorIndex: i };
-      }
-    }
-    return { teamName: null as string | null, teamColorIndex: 0 };
+    const idx = teams.findIndex((t) => t.agents.some((a: AgentConfig) => a.name === agentName));
+    const teamName: string | null = idx >= 0 ? teams[idx].name : null;
+    return { teamName, teamColorIndex: idx >= 0 ? idx : 0 };
   }, [teams, agentName]);
 
   // MCP entries
-  const mcpEntries = agent?.mcpServers ? Object.entries(agent.mcpServers) : [];
+  const mcpEntries = useMemo<[string, unknown][]>(
+    () => (agent?.mcpServers ? Object.entries(agent.mcpServers) : []),
+    [agent],
+  );
 
   // Allowed tools
-  const agentAllowedTools: string[] = (agent as unknown as Record<string, unknown>)?.allowedTools as string[] ?? [];
-  const enabledCategories = toolCategories.filter(c => agentAllowedTools.some(t => t.toLowerCase().startsWith(c.prefix)));
+  const agentAllowedTools = useMemo<string[]>(
+    () => ((agent as unknown as Record<string, unknown> | undefined)?.allowedTools as string[] | undefined) ?? [],
+    [agent],
+  );
+  const enabledCategories = useMemo(
+    () => toolCategories.filter(c => agentAllowedTools.some(t => t.toLowerCase().startsWith(c.prefix))),
+    [agentAllowedTools],
+  );
 
   const contextValue = useMemo<AgentDetailContextValue>(() => ({
     state: {

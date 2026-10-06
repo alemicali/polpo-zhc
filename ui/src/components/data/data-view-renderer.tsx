@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart,
@@ -23,30 +23,32 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
   const { events } = useEvents(["data-source:changed", "agent:activity", "agent:finished"], 1);
   const [frames, setFrames] = useState<Record<string, DataFrame>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
+  // Loads run as async transitions: `loading` stays true until every pending
+  // refresh has settled, without a synchronous setState inside the effects.
+  const [loading, startLoading] = useTransition();
   const [search, setSearch] = useState("");
   const hasLiveData = view.bindings.some((binding) => Boolean(binding.query));
   const hasInlineData = view.bindings.some((binding) => Boolean(binding.inline));
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const results = await Promise.all(view.bindings.map(async (binding) => {
-      try {
-        if (binding.inline) return { id: binding.id, frame: inlineFrame(binding.id, binding.inline.label, binding.inline.rows) };
-        return { id: binding.id, frame: await dataRequest<DataFrame>("/query", { method: "POST", body: JSON.stringify(binding.query) }) };
-      } catch (error) {
-        return { id: binding.id, error: error instanceof Error ? error.message : String(error) };
-      }
-    }));
-    setFrames(Object.fromEntries(results.filter((item): item is { id: string; frame: DataFrame } => "frame" in item).map((item) => [item.id, item.frame])));
-    setErrors(Object.fromEntries(results.filter((item): item is { id: string; error: string } => "error" in item).map((item) => [item.id, item.error])));
-    setLoading(false);
+  const refresh = useCallback(() => {
+    startLoading(async () => {
+      const results = await Promise.all(view.bindings.map(async (binding) => {
+        try {
+          if (binding.inline) return { id: binding.id, frame: inlineFrame(binding.id, binding.inline.label, binding.inline.rows) };
+          return { id: binding.id, frame: await dataRequest<DataFrame>("/query", { method: "POST", body: JSON.stringify(binding.query) }) };
+        } catch (error) {
+          return { id: binding.id, error: error instanceof Error ? error.message : String(error) };
+        }
+      }));
+      setFrames(Object.fromEntries(results.filter((item): item is { id: string; frame: DataFrame } => "frame" in item).map((item) => [item.id, item.frame])));
+      setErrors(Object.fromEntries(results.filter((item): item is { id: string; error: string } => "error" in item).map((item) => [item.id, item.error])));
+    });
   }, [view.bindings]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
     if (!view.refreshSeconds) return;
-    const timer = window.setInterval(() => void refresh(), view.refreshSeconds * 1000);
+    const timer = window.setInterval(refresh, view.refreshSeconds * 1000);
     return () => window.clearInterval(timer);
   }, [refresh, view.refreshSeconds]);
   const latestEvent = events.at(-1);
@@ -55,7 +57,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
     const data = latestEvent.data as { sourceId?: string; action?: string; tool?: string } | undefined;
     const mayHaveMutatedData = latestEvent.event === "agent:activity"
       && (data?.tool === "data_mutate" || data?.tool === "data_sql");
-    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => binding.query?.sourceId === data.sourceId))) void refresh();
+    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => binding.query?.sourceId === data.sourceId))) refresh();
   }, [latestEvent, refresh, view.bindings]);
 
   const addView = () => {
@@ -86,7 +88,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
           <TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8" onClick={addView}><MessageSquarePlus className="h-3.5 w-3.5" /></Button></TooltipTrigger>
           <TooltipContent>Add this view to the next prompt</TooltipContent>
         </Tooltip>
-        {hasLiveData && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void refresh()} disabled={loading} aria-label="Refresh data view">
+        {hasLiveData && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={refresh} disabled={loading} aria-label="Refresh data view">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </Button>}
       </div>

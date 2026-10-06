@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { ShieldAlert } from "lucide-react";
 import { config, websocketUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import type { ConnectionState } from "./types";
@@ -36,8 +35,12 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  // xterm becomes "ready" one frame after mount, per (sessionId, revision).
+  // Tracking which instance is ready means a new instance starts not-ready
+  // without resetting state inside the mount effect.
+  const instanceKey = `${sessionId}:${revision}`;
+  const [readyKey, setReadyKey] = useState<string | null>(null);
+  const ready = readyKey === instanceKey;
   const onConnRef = useRef(onConnectionChange);
   useEffect(() => { onConnRef.current = onConnectionChange; }, [onConnectionChange]);
 
@@ -47,8 +50,6 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
   useEffect(() => {
     const host = containerRef.current;
     if (!host) return;
-    setError(null);
-    setReady(false);
     onConnRef.current("loading");
 
     const term = new Terminal({
@@ -74,7 +75,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     // First fit once the host has its size from layout.
     requestAnimationFrame(() => {
       try { fit.fit(); } catch { /* host detached */ }
-      setReady(true);
+      setReadyKey(instanceKey);
     });
 
     // Re-fit on container resize (panel drag, window resize, etc.)
@@ -89,7 +90,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [sessionId, revision]);
+  }, [instanceKey]);
 
   const wsUrl = useMemo(() => {
     const url = new URL(websocketUrl("/ws/terminal"));
@@ -174,16 +175,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
       )}
       aria-hidden={!active}
     >
-      {error ? (
-        <div className="flex h-full items-center justify-center p-6 text-center">
-          <div className="flex flex-col items-center gap-2 text-white/70">
-            <ShieldAlert className="h-5 w-5 text-rose-400" />
-            <p className="text-sm">{error}</p>
-          </div>
-        </div>
-      ) : (
-        <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
-      )}
+      <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden" />
     </div>
   );
 }

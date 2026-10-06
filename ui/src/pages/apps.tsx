@@ -739,7 +739,13 @@ function ResourcePanel({ title, description, action, children }: { title: string
 }
 function ResourceRow({ icon: Icon, title, subtitle, status, logs, detail, actions, onOpen }: { icon: typeof Server; title: string; subtitle: string; status?: string; logs?: AppRuntime["logs"]; detail?: string; actions: React.ReactNode; onOpen: () => void }) {
   const [expanded, setExpanded] = useState(status === "failed");
-  useEffect(() => { if (status === "failed" && logs?.length) setExpanded(true); }, [status, logs?.length]);
+  // Auto-expand logs when the resource fails (adjusted during render when status/log count change).
+  const logCount = logs?.length ?? 0;
+  const [prevLogState, setPrevLogState] = useState({ status, logCount });
+  if (prevLogState.status !== status || prevLogState.logCount !== logCount) {
+    setPrevLogState({ status, logCount });
+    if (status === "failed" && logCount > 0) setExpanded(true);
+  }
   return <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} className="group min-w-0 max-w-full cursor-pointer overflow-hidden px-4 py-3.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"><div className="flex min-w-0 flex-wrap items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground"><Icon className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><span className="truncate text-sm font-medium">{title}</span>{status && <StatusBadge status={status} />}</div><p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{subtitle}</p>{detail && <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{detail}</p>}</div><div className="ml-12 flex basis-[calc(100%-3rem)] shrink-0 items-center justify-end gap-1 sm:ml-0 sm:basis-auto" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>{logs?.length ? <IconAction label={expanded ? "Hide logs" : "View logs"} text="Logs" onClick={() => setExpanded(!expanded)} icon={Activity} /> : null}{actions}<ChevronRight className="ml-1 h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" /></div></div>{expanded && logs?.length ? <pre className="mt-3 max-h-64 w-full max-w-full overflow-auto border border-border/70 bg-code p-3 text-[11px] leading-5 text-[var(--ink-inverse)]" onClick={(event) => event.stopPropagation()}>{logs.map((line) => `[${new Date(line.at).toLocaleTimeString()}]${line.stream === "stderr" ? " [stderr]" : ""} ${line.text}`).join("\n")}</pre> : null}</div>;
 }
 

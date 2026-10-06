@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -447,15 +448,25 @@ export const MentionPopover = forwardRef<
     return result;
   }, [categoryCounts, filteredItems]);
 
-  // Reset selection when the query or filtered count changes
+  // Reset selection when the tab, query or filtered count changes
+  // (adjusted during render instead of in an effect).
   const filteredCount = filteredItems.length;
-  useEffect(() => {
+  const [selectionResetKey, setSelectionResetKey] = useState({ activeTab, query, filteredCount });
+  if (
+    selectionResetKey.activeTab !== activeTab ||
+    selectionResetKey.query !== query ||
+    selectionResetKey.filteredCount !== filteredCount
+  ) {
+    setSelectionResetKey({ activeTab, query, filteredCount });
     setSelectedIndex(0);
-  }, [activeTab, query, filteredCount]);
+  }
 
-  useEffect(() => {
+  // Switching trigger (`@` <-> `/`) goes back to the "all" tab.
+  const [prevTrigger, setPrevTrigger] = useState(trigger);
+  if (prevTrigger !== trigger) {
+    setPrevTrigger(trigger);
     setActiveTab("all");
-  }, [trigger]);
+  }
 
   useEffect(() => {
     if (isOpen) onTriggerOpen?.(trigger);
@@ -471,8 +482,12 @@ export const MentionPopover = forwardRef<
   }, [rows, selectedIndex]);
 
   // Ref to hold latest values for stable callbacks (avoids stale closures)
+  // Synced in a layout effect (not during render) so handlers always see the
+  // committed values before the browser processes the next input event.
   const stateRef = useRef({ isOpen, filteredItems, selectedIndex, triggerIndex, trigger, tabs, activeTab });
-  stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex, trigger, tabs, activeTab };
+  useLayoutEffect(() => {
+    stateRef.current = { isOpen, filteredItems, selectedIndex, triggerIndex, trigger, tabs, activeTab };
+  });
 
   const insertMention = useCallback(
     (item: MentionItem) => {

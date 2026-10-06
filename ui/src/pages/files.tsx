@@ -58,13 +58,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
-import {
-  useFilePreview,
-  FilePreviewDialog,
-  fileReadUrl,
-  mimeFromPath,
-  previewCategory,
-} from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { fileReadUrl, mimeFromPath, previewCategory } from "@/components/shared/file-preview-utils";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
@@ -1221,6 +1217,7 @@ export function FilesPage() {
       const info = await apiDeleteInfo(path);
       setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
     } catch (err) {
+      let error: unknown = err;
       if (err instanceof FileApiError && err.status === 404 && !err.jsonResponse) {
         try {
           const info = await apiLegacyDeleteInfo(path, entry.type);
@@ -1232,11 +1229,11 @@ export function FilesPage() {
           setDeleteTarget((current) => current?.path === path ? { ...current, info, inspecting: false } : current);
           return;
         } catch (fallbackError) {
-          err = fallbackError;
+          error = fallbackError;
         }
       }
       setDeleteTarget(null);
-      toast.error(err instanceof Error ? err.message : "Could not inspect this path");
+      toast.error(error instanceof Error ? error.message : "Could not inspect this path");
     }
   }, [currentPath]);
 

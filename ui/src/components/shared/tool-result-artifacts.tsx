@@ -1,12 +1,8 @@
 import { useState } from "react";
 import { ExternalLink, FileText, Image as ImageIcon } from "lucide-react";
-import {
-  FilePreviewDialog,
-  fileReadUrl,
-  mimeFromPath,
-  previewCategory,
-  useFilePreview,
-} from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { fileReadUrl, mimeFromPath, previewCategory } from "@/components/shared/file-preview-utils";
+import { useFilePreview } from "@/components/shared/use-file-preview";
 import { cn } from "@/lib/utils";
 
 const PATH_FIELD = /(?:^|_)(?:file|path|image|output)(?:$|_)/i;
@@ -24,7 +20,7 @@ function looksLikePath(value: string): boolean {
 }
 
 /** Extract local file references from common CLI text and structured tool output. */
-export function extractToolResultPaths(result: string): string[] {
+function extractToolResultPaths(result: string): string[] {
   const paths = new Set<string>();
   const add = (candidate: string) => {
     const path = cleanPath(candidate);

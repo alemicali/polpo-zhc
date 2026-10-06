@@ -19,6 +19,7 @@ import {
 import { useSchedules, useMissions } from "@polpo-ai/react";
 import type { ScheduleEntry, Mission } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
+import { useNow } from "@/hooks/use-now";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
@@ -34,7 +35,8 @@ function ScheduleRow({
   mission?: Mission;
   onClick: () => void;
 }) {
-  const isOverdue = entry.nextRunAt && new Date(entry.nextRunAt).getTime() < Date.now();
+  const now = useNow();
+  const isOverdue = entry.nextRunAt && new Date(entry.nextRunAt).getTime() < now;
 
   return (
     <div

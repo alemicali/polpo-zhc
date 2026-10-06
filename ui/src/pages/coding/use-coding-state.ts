@@ -48,7 +48,7 @@ function readStored(): PersistedCodingState {
     return {
       workspaces: parsed.workspaces as CodingWorkspace[],
       terminals,
-      codeServers: Array.isArray((parsed as any).codeServers) ? (parsed as any).codeServers as CodingCodeServerSession[] : [],
+      codeServers: Array.isArray((parsed as { codeServers?: unknown }).codeServers) ? (parsed as { codeServers: CodingCodeServerSession[] }).codeServers : [],
       activeId: parsed.activeId,
     };
   } catch {
