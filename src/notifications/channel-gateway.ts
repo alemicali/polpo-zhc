@@ -37,6 +37,7 @@ import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
 import type { InboundGroup } from "./telegram-groups.js";
 import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
+import type { RoomKind, RoomMessage, RoomStore } from "@polpo-ai/core";
 import type {
   ChannelGatewayConfig,
   ChannelReplyTarget,
@@ -63,6 +64,11 @@ export interface ChannelGatewayOptions {
   onTyping?: (chatId: string, target?: ChannelSendTarget) => Promise<void>;
   /** Channel key (notifications.channels): names this bot among the group's agents. */
   key?: string;
+  /**
+   * Group conversations as rooms: one persisted transcript (people and agents) that the agents
+   * read and the intent classifier judges on. Without it, group context stays in memory.
+   */
+  roomStore?: RoomStore;
 }
 
 /** Where a message goes inside a chat: a forum topic, as a reply to a message (groups). */
@@ -84,6 +90,8 @@ interface InboundMessage {
   replyTo?: ChannelReplyTarget | "origin";
   /** Set when the message was written in a group. */
   group?: InboundGroup;
+  /** The message as stored in its room (groups with a room store). */
+  roomMessageId?: string;
 }
 
 /** A group message that was not addressed to the bot, kept as context for the next turn. */
@@ -95,6 +103,8 @@ const GROUP_CONTEXT_MS = 12 * 60 * 60 * 1000;
 /** groupReplies "intent": the probability above which an agent joins in unprompted. */
 const DEFAULT_INTENT_THRESHOLD = 0.7;
 const GROUP_CONTEXT_CONVERSATIONS = 500;
+/** A group turn reads at most this many room lines since the agent last spoke. */
+const ROOM_TURN_LINES = 30;
 
 interface CommandResult {
   text: string;
@@ -265,6 +275,7 @@ export class ChannelGateway {
   private partialOverride = new Map<string, (text: string) => Promise<void>>(); // chatId → routed partials
   private key: string;
   private intent?: GroupIntentArbiter;
+  private roomStore?: RoomStore;
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -275,6 +286,7 @@ export class ChannelGateway {
     this.approvalResolver = opts.approvalResolver;
     this.onTyping = opts.onTyping;
     this.key = opts.key ?? "default";
+    this.roomStore = opts.roomStore;
   }
 
   /** Emit a structured log via the orchestrator's event bus. */
@@ -312,7 +324,10 @@ export class ChannelGateway {
   async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
     const reply = await this.routeMessage(msg);
     const out = typeof reply === "string" ? { text: reply } : reply;
-    if (msg.group) await this.hearGroup(msg, out?.text);
+    if (msg.group) {
+      if (this.roomStore) await this.recordAgentReply(msg, out?.text);
+      else await this.hearGroup(msg, out?.text);
+    }
     return out;
   }
 
@@ -516,7 +531,7 @@ export class ChannelGateway {
   private async admitGroupMessage(msg: InboundMessage, peerId: string): Promise<true | string | undefined> {
     const enabled = await this.peerStore.isAllowed(this.groupId(msg), this.gatewayConfig);
     if (!msg.group!.addressed) {
-      if (enabled) this.rememberGroupLine(msg, peerId);
+      if (enabled) await this.rememberGroupLine(msg, peerId);
       return undefined;
     }
     const command = msg.text.trim().split(/\s+/)[0].toLowerCase();
@@ -525,6 +540,7 @@ export class ChannelGateway {
       return `I'm not enabled in this group yet. Someone already authorized to talk to ${this.interlocutorName()} can enable me by sending /enable here.`;
     }
     if (command === "/disable") return this.disableGroup(msg, peerId);
+    if (this.roomStore && !command.startsWith("/")) await this.recordPerson(msg, peerId);
     await this.peerStore.upsertPeer({
       channel: msg.channel,
       externalId: msg.externalId,
@@ -593,8 +609,79 @@ export class ChannelGateway {
     await this.peerStore.removeFromAllowlist(from);
   }
 
+  // ── Groups as rooms ───────────────────────────────────────────────
+
+  /** The room of a group conversation (created on its first message). */
+  private async roomOf(msg: InboundMessage, conversation: string) {
+    const title = [msg.group?.title ?? "Group", msg.group?.threadId !== undefined ? `topic ${msg.group.threadId}` : ""].filter(Boolean).join(" · ");
+    return this.roomStore!.ensureRoom({ id: conversation, kind: msg.channel as RoomKind, title });
+  }
+
+  /** This bot in a room: the agent it speaks as (the orchestrator is "polpo"). */
+  private async speaker(conversation: string): Promise<{ id: string; name: string }> {
+    const agent = await this.getActiveAgent(conversation).catch(() => undefined);
+    if (!agent) return { id: "polpo", name: "Polpo" };
+    const def = (await this.orchestrator.getAgents()).find(a => a.name === agent);
+    return { id: agent, name: def?.identity?.displayName ?? agent };
+  }
+
+  /** A person's group message into its room, once whichever bot got it. */
+  private async recordPerson(msg: InboundMessage, peerId: string): Promise<void> {
+    if (!this.roomStore || !msg.text.trim()) return;
+    const conversation = this.conversationId(msg, peerId);
+    try {
+      await this.roomOf(msg, conversation);
+      const saved = await this.roomStore.addMessage(conversation, {
+        authorKind: "person",
+        authorId: peerId,
+        authorName: msg.displayName ?? msg.externalId,
+        text: msg.text,
+        ...(msg.messageId ? { externalId: msg.messageId } : {}),
+        ...(msg.group?.addressed ? { addressedTo: [(await this.speaker(conversation)).id] } : {}),
+      });
+      msg.roomMessageId = saved.id;
+    } catch (err) {
+      this.log("warn", `Room ${conversation}: could not store a message: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** This bot's reply into the room, answering the person's message. */
+  private async recordAgentReply(msg: InboundMessage, reply: string | undefined): Promise<void> {
+    if (!this.roomStore || !msg.roomMessageId || !reply?.trim()) return;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    try {
+      const me = await this.speaker(conversation);
+      await this.roomStore.addMessage(conversation, {
+        authorKind: "agent", authorId: me.id, authorName: me.name, text: reply, replyToId: msg.roomMessageId,
+      });
+    } catch (err) {
+      this.log("warn", `Room ${conversation}: could not store a reply: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * The text of a group turn from the room: what was said since this agent last spoke (people
+   * and the other agents), then the speaker's message.
+   */
+  private async roomTurnText(msg: InboundMessage, conversation: string): Promise<string> {
+    const speakerLine = `${msg.displayName ?? msg.externalId}: ${msg.text}`;
+    try {
+      const me = await this.speaker(conversation);
+      const recent = await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20);
+      const mine = recent.map(m => m.authorKind === "agent" && m.authorId === me.id).lastIndexOf(true);
+      const since = recent.slice(mine + 1).filter(m => m.id !== msg.roomMessageId).slice(-ROOM_TURN_LINES);
+      if (since.length === 0) return speakerLine;
+      const line = (m: RoomMessage) => `${m.authorKind === "agent" ? `${m.authorName} (agent)` : m.authorName}: ${m.text.slice(0, 1_500)}`;
+      const header = mine >= 0 ? "[In the group since your last reply]" : "[Earlier in the group]";
+      return `${header}\n${since.map(line).join("\n")}\n\n${speakerLine}`;
+    } catch {
+      return speakerLine;
+    }
+  }
+
   /** Keep an unaddressed group message for the next turn of that group conversation. */
-  private rememberGroupLine(msg: InboundMessage, peerId: string): void {
+  private async rememberGroupLine(msg: InboundMessage, peerId: string): Promise<void> {
+    if (this.roomStore) return this.recordPerson(msg, peerId);
     const key = this.conversationId(msg, peerId);
     const now = Date.now();
     const lines = (this.groupContext.get(key) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
@@ -1098,7 +1185,7 @@ export class ChannelGateway {
    * message is echoed there first (unless echoInbound is false), then partials and reply.
    */
   private async handleChat(msg: InboundMessage, conversation: string): Promise<string | GatewayReply | undefined> {
-    if (msg.group) msg = { ...msg, text: this.groupTurnText(msg, conversation) };
+    if (msg.group) msg = { ...msg, text: this.roomStore ? await this.roomTurnText(msg, conversation) : this.groupTurnText(msg, conversation) };
     const target = this.replyTargetFor(msg);
     if (!target || !this.replyRouter) return this.runChat(msg, conversation);
     const route = this.replyRouter;

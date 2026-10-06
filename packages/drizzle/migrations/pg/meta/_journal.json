@@ -57,6 +57,13 @@
       "when": 1791290574382,
       "tag": "0007_chat_fork_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791300269948,
+      "tag": "0008_rooms",
+      "breakpoints": true
     }
   ]
 }

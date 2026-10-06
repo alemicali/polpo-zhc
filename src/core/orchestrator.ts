@@ -12,6 +12,7 @@ import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
 import { FileChatQueueStore } from "../stores/file-chat-queue-store.js";
+import { FileRoomStore } from "../stores/file-room-store.js";
 import type { SessionStore } from "./session-store.js";
 import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
@@ -1032,6 +1033,12 @@ export class Orchestrator extends TypedEmitter {
   }
   private fileChatQueueStore?: FileChatQueueStore;
 
+  /** Rooms (group conversations of people and agents): database-backed with sqlite/postgres, `.polpo/rooms/` otherwise. */
+  getRoomStore(): import("@polpo-ai/core/room-store").RoomStore {
+    return this.drizzleStores?.roomStore ?? (this.fileRoomStore ??= new FileRoomStore(this.polpoDir));
+  }
+  private fileRoomStore?: FileRoomStore;
+
   /**
    * Initialize the vault store: the `vault` table when the project runs on a database (each entry
    * encrypted with AES-256-GCM, same key as before; .polpo/vault.enc is imported once at startup
@@ -1593,8 +1600,21 @@ export class Orchestrator extends TypedEmitter {
     const resolver = this.createApprovalResolver();
 
     // groupReplies "intent": one arbiter for all the bots, so a group message is classified once
+    const roomStore = this.getRoomStore();
     const intent = new GroupIntentArbiter({
       apiKey: () => process.env.TYPESAFE_API_KEY || undefined,
+      transcript: async (conversation) => {
+        const messages = await roomStore.getRecentMessages(conversation, 30);
+        const names = new Map(messages.map(m => [m.id, m.authorName]));
+        return messages.map(m => ({
+          name: m.authorName,
+          text: m.text,
+          at: Date.parse(m.ts),
+          ...(m.authorKind === "agent" ? { agent: true } : {}),
+          ...(m.replyToId && names.has(m.replyToId) ? { to: names.get(m.replyToId)! } : {}),
+          ...(m.externalId ? { externalId: m.externalId } : {}),
+        }));
+      },
       log: (level, message) => this.emit("log", { level, message }),
     });
 
@@ -1628,6 +1648,7 @@ export class Orchestrator extends TypedEmitter {
           approvalResolver: resolver,
           onTyping: (chatId, target) => poller.sendTyping(chatId, target),
           key,
+          roomStore,
         });
         gateway.setIntentArbiter(intent);
         gateway.setPartialResponseHandler((chatId, text, target) => poller.sendPartial(chatId, text, target));

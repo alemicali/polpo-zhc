@@ -635,6 +635,57 @@ describe.each(DIALECTS)("%s", (dialect) => {
     });
   });
 
+  describe("DrizzleRoomStore", () => {
+    const person = (text: string, externalId?: string) => ({
+      authorKind: "person" as const, authorId: "telegram:7", authorName: "Ada", text, ...(externalId ? { externalId } : {}),
+    });
+
+    it("creates a room once and keeps it as it is", async () => {
+      const a = await stores.roomStore.ensureRoom({ id: "telegram:group:-1", kind: "telegram", title: "Team" });
+      const b = await stores.roomStore.ensureRoom({ id: "telegram:group:-1", kind: "telegram", title: "Other" });
+      expect(b).toEqual(a);
+      expect(a).toMatchObject({ agents: [], settings: {} });
+      const updated = await stores.roomStore.updateRoom(a.id, { agents: ["growth"], settings: { replyMode: "intent", replyOrder: "parallel" } });
+      expect(updated).toMatchObject({ agents: ["growth"], settings: { replyMode: "intent", replyOrder: "parallel" } });
+      expect((await stores.roomStore.listRooms("telegram")).map((r) => r.id)).toEqual([a.id]);
+      expect(await stores.roomStore.listRooms("web")).toEqual([]);
+    });
+
+    it("stores a channel message once, whichever bot got it", async () => {
+      await stores.roomStore.ensureRoom({ id: "r", kind: "telegram", title: "Team" });
+      const first = await stores.roomStore.addMessage("r", person("hi all", "42"));
+      const again = await stores.roomStore.addMessage("r", person("hi all", "42"));
+      expect(again.id).toBe(first.id);
+      expect(await stores.roomStore.getRecentMessages("r", 10)).toHaveLength(1);
+      // the copy of the bot it was addressed to says so
+      const addressed = await stores.roomStore.addMessage("r", { ...person("hi all", "42"), addressedTo: ["growth"] });
+      expect(addressed).toMatchObject({ id: first.id, addressedTo: ["growth"] });
+      expect((await stores.roomStore.getRecentMessages("r", 10))[0]).toMatchObject({ addressedTo: ["growth"] });
+    });
+
+    it("keeps the order, and reads what came after a message", async () => {
+      await stores.roomStore.ensureRoom({ id: "r", kind: "web", title: "Team" });
+      const q = await stores.roomStore.addMessage("r", { ...person("budget?"), addressedTo: ["growth"] });
+      const a = await stores.roomStore.addMessage("r", { authorKind: "agent", authorId: "growth", authorName: "Giulia", text: "420 € left", replyToId: q.id });
+      const b = await stores.roomStore.addMessage("r", person("thanks"));
+      const recent = await stores.roomStore.getRecentMessages("r", 2);
+      expect(recent.map((m) => m.text)).toEqual(["420 € left", "thanks"]);
+      expect(recent[0]).toMatchObject({ authorKind: "agent", replyToId: q.id });
+      expect((await stores.roomStore.getRecentMessages("r", 10))[0]).toMatchObject({ addressedTo: ["growth"] });
+      expect((await stores.roomStore.getMessagesAfter("r", a.id, 10)).map((m) => m.id)).toEqual([b.id]);
+      expect(await stores.roomStore.getMessagesAfter("r", "missing", 10)).toHaveLength(3);
+    });
+
+    it("deletes a room with its messages", async () => {
+      await stores.roomStore.ensureRoom({ id: "r", kind: "web", title: "Team" });
+      await stores.roomStore.addMessage("r", person("hello"));
+      expect(await stores.roomStore.deleteRoom("r")).toBe(true);
+      expect(await stores.roomStore.getRoom("r")).toBeUndefined();
+      expect(await stores.roomStore.getRecentMessages("r", 10)).toEqual([]);
+      expect(await stores.roomStore.deleteRoom("r")).toBe(false);
+    });
+  });
+
   describe("DrizzleAttachmentStore", () => {
     it("finds every row sharing a file path", async () => {
       const base = { filename: "a.png", mimeType: "image/png", size: 1, path: "workspace/attachments/s1/x.png", createdAt: new Date().toISOString() };

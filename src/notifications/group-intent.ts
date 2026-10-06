@@ -56,6 +56,8 @@ export interface GroupLine {
   /** Who the agent was answering. */
   to?: string;
   at: number;
+  /** The channel's id of the message (the same for every bot of the group). */
+  externalId?: string;
 }
 
 /** Probability, per candidate key, that the agent should answer. */
@@ -66,6 +68,8 @@ export type IntentClassifier = (context: ClassifierContext, options: { apiKey: s
 export interface GroupIntentOptions {
   /** API key of the classifier; unset = intent mode stays off (mentions only). */
   apiKey: () => string | undefined;
+  /** The group's conversation from where it is kept (the room); unset = the arbiter's own memory. */
+  transcript?: (conversation: string) => Promise<GroupLine[]>;
   classify?: IntentClassifier;
   log?: (level: "info" | "warn", message: string) => void;
   /** Give up on the classifier after this long: the message stays context. Default 4 s. */
@@ -155,7 +159,13 @@ export class GroupIntentArbiter {
       return { [candidates[0]!.key]: 1 };
     }
 
-    const context = intentContext(msg, candidates, this.transcript(msg.conversation));
+    const now = Date.now();
+    const lines = this.opts.transcript
+      ? (await this.opts.transcript(msg.conversation).catch(() => [] as GroupLine[]))
+        .filter((l) => l.externalId !== msg.messageId && now - l.at < TRANSCRIPT_MS)
+        .slice(-TRANSCRIPT_LINES)
+      : this.transcript(msg.conversation);
+    const context = intentContext(msg, candidates, lines);
     const started = Date.now();
     try {
       const res = await this.classify(context, { apiKey, timeoutMs: this.opts.timeoutMs ?? 4_000 });
