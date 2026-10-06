@@ -1,5 +1,3 @@
-import { resolve } from "node:path";
-import { getPolpoDir } from "../../core/constants.js";
 import { randomUUID } from "node:crypto";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { PROVIDER_ENV_MAP, listModels } from "../../llm/pi-client.js";
@@ -7,6 +5,7 @@ import {
   detectProviders,
   persistToEnvFile,
   removeFromEnvFile,
+  assertValidEnvEntry,
   getOAuthProviderList,
   startOAuthLogin,
   type LoginDeviceCode,
@@ -231,6 +230,7 @@ const saveApiKeyRoute = createRoute({
         "application/json": {
           schema: z.object({
             apiKey: z.string(),
+            /** @deprecated Ignored — keys are always stored in the server's active project. */
             workDir: z.string().optional(),
           }),
         },
@@ -507,13 +507,23 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   // POST /providers/:name/api-key
   app.openapi(saveApiKeyRoute, (c: any) => {
     const { name } = c.req.valid("param");
-    const { apiKey, workDir: bodyWorkDir } = c.req.valid("json");
+    // Body `workDir` is ignored: a client must not choose which directory's
+    // .env gets written. Keys always go to the server's active project.
+    const { apiKey: rawApiKey } = c.req.valid("json");
     const envVar = PROVIDER_ENV_MAP[name];
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
-    process.env[envVar] = apiKey;
-    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
+    const apiKey = typeof rawApiKey === "string" ? rawApiKey.trim() : "";
+    try {
+      assertValidEnvEntry(envVar, apiKey);
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : "Invalid API key" }, 400);
+    }
+    if (!apiKey) return c.json({ ok: false, error: "apiKey is required" }, 400);
+
+    const targetDir = resolvePolpoDir(polpoDir);
     persistToEnvFile(targetDir, envVar, apiKey);
+    process.env[envVar] = apiKey;
 
     return c.json({ ok: true, data: { message: `${envVar} saved to .polpo/.env` } });
   });
@@ -521,17 +531,13 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   // DELETE /providers/:name/api-key
   app.openapi(deleteApiKeyRoute, (c: any) => {
     const { name } = c.req.valid("param");
-    let bodyWorkDir: string | undefined;
-    try {
-      const body = c.req.valid("json");
-      bodyWorkDir = body?.workDir;
-    } catch { /* no body is fine for DELETE */ }
+    // Body `workDir` (legacy) is ignored — always the server's active project.
 
     const envVar = PROVIDER_ENV_MAP[name];
     if (!envVar) return c.json({ ok: false, error: `Unknown provider: ${name}` }, 400);
 
     delete process.env[envVar];
-    const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
+    const targetDir = resolvePolpoDir(polpoDir);
     removeFromEnvFile(targetDir, envVar);
 
     return c.json({ ok: true, data: { message: `${envVar} removed` } });
@@ -540,11 +546,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   // DELETE /providers/:name/disconnect — remove env key + OAuth profiles
   app.openapi(disconnectRoute, async (c: any) => {
     const { name } = c.req.valid("param");
-    let bodyWorkDir: string | undefined;
-    try {
-      const body = c.req.valid("json");
-      bodyWorkDir = body?.workDir;
-    } catch { /* no body is fine for DELETE */ }
+    // Body `workDir` (legacy) is ignored — always the server's active project.
 
     const actions: string[] = [];
 
@@ -552,7 +554,7 @@ export function providerRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
     const envVar = PROVIDER_ENV_MAP[name];
     if (envVar && process.env[envVar]) {
       delete process.env[envVar];
-      const targetDir = bodyWorkDir ? getPolpoDir(resolve(bodyWorkDir)) : resolvePolpoDir(polpoDir);
+      const targetDir = resolvePolpoDir(polpoDir);
       removeFromEnvFile(targetDir, envVar);
       actions.push("API key removed");
     }

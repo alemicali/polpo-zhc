@@ -7,6 +7,9 @@ export {
 export {
   persistToEnvFile,
   removeFromEnvFile,
+  copyEnvEntries,
+  assertValidEnvEntry,
+  isValidEnvKey,
 } from "./env-persistence.js";
 
 export {
