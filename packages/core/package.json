@@ -253,6 +253,10 @@
     "./sandbox": {
       "types": "./dist/sandbox.d.ts",
       "import": "./dist/sandbox.js"
+    },
+    "./storage-registry": {
+      "types": "./dist/storage-registry.d.ts",
+      "import": "./dist/storage-registry.js"
     }
   },
   "sideEffects": false,

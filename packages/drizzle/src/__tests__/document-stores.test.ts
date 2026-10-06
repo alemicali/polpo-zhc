@@ -125,6 +125,36 @@ describe.each(DIALECTS)("%s", (dialect) => {
     });
   });
 
+  // ── Storage registry ─────────────────────────────────────────────────
+
+  describe("DrizzleStorageRegistryStore", () => {
+    const entry = (slug: string, name: string) => ({
+      slug, name, provider: "s3" as const, bucket: "b", driver: "rclone" as const, readOnly: false, enabled: true,
+      endpoint: "https://acct.r2.cloudflarestorage.com", region: "auto",
+      grants: [{ id: "g1", agent: "alice", access: "write" as const, prefix: "clients/" }],
+    });
+
+    it("creates, finds by id or slug, keeps slugs unique, updates and deletes, emitting changes", async () => {
+      const store = stores.storageRegistryStore;
+      const events: string[] = [];
+      store.setEmitter((event) => events.push(`${event.action}:${event.slug}`));
+      const docs = await store.create(entry("docs", "Docs"));
+      await store.create(entry("assets", "Assets"));
+      expect((await store.list()).map((e) => e.slug)).toEqual(["assets", "docs"]);
+      expect((await store.get("docs"))?.id).toBe(docs.id);
+      expect((await store.get(docs.id))?.grants[0]).toEqual({ id: "g1", agent: "alice", access: "write", prefix: "clients/" });
+      await expect(store.create(entry("docs", "Again"))).rejects.toThrow(/already exists/);
+      await expect(store.update("assets", { slug: "docs" })).rejects.toThrow(/already exists/);
+      const updated = await store.update("docs", { readOnly: true, cache: { mode: "full", maxSizeMb: 512 } });
+      expect(updated).toMatchObject({ id: docs.id, readOnly: true, cache: { mode: "full", maxSizeMb: 512 }, createdAt: docs.createdAt });
+      expect(await store.update("missing", { name: "x" })).toBeNull();
+      expect(await store.delete("docs")).toBe(true);
+      expect(await store.delete("docs")).toBe(false);
+      expect(await store.get("docs")).toBeNull();
+      expect(events).toEqual(["created:docs", "created:assets", "updated:docs", "deleted:docs"]);
+    });
+  });
+
   // ── Company brain ────────────────────────────────────────────────────
 
   describe("DrizzleCompanyBrainStore", () => {
