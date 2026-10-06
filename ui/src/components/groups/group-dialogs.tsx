@@ -48,20 +48,30 @@ function errorText(error: unknown): string {
 
 // ─── New group ───────────────────────────────────────────
 
-export function NewGroupDialog({ open, onOpenChange, members, membersLoading, resolve, onCreate }: {
+export function NewGroupDialog({ open, onOpenChange, members, membersLoading, resolve, onCreate, initialAgents }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   members: GroupMember[];
   membersLoading?: boolean;
   resolve: (id: string) => GroupMember;
   onCreate: (input: RoomInput) => Promise<unknown>;
+  /** Agents preselected when the dialog opens (e.g. the agent picked in the chat). */
+  initialAgents?: string[];
 }) {
-  const [value, setValue] = useState<GroupFormValue>({ title: "", agents: [], settings: DEFAULT_ROOM_SETTINGS });
+  const blank = (): GroupFormValue => ({ title: "", agents: [...(initialAgents ?? [])], settings: DEFAULT_ROOM_SETTINGS });
+  const [value, setValue] = useState<GroupFormValue>(blank);
   const [saving, setSaving] = useState(false);
+
+  // Start from a blank form (plus the preselection) every time the dialog opens
+  // (adjusted during render, not in an effect).
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setValue(blank());
+  }
 
   const handleOpenChange = (next: boolean) => {
     if (saving) return;
-    if (next) setValue({ title: "", agents: [], settings: DEFAULT_ROOM_SETTINGS });
     onOpenChange(next);
   };
 

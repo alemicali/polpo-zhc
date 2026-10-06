@@ -10,7 +10,7 @@ import {
   LayoutDashboard,
   ListChecks,
   MessageCircle,
-  UsersRound,
+  Megaphone,
   Monitor,
   Moon,
   ShieldCheck,
@@ -34,6 +34,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useTheme } from "@/hooks/use-theme";
+import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 
 /** Single source of truth for mobile nav entries — grouped semantically. */
 const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashboard; label: string }[] }[] = [
@@ -42,7 +43,6 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Home" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
-      { to: "/groups", icon: UsersRound, label: "Groups" },
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/agents", icon: Bot, label: "Agents" },
@@ -70,6 +70,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
       { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },
+      { to: "/changelog", icon: Megaphone, label: "Novità" },
     ],
   },
 ];
@@ -123,13 +124,14 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
                     >
                       <span
                         className={cn(
-                          "flex h-10 w-10 items-center justify-center rounded-xl border transition-colors",
+                          "relative flex h-10 w-10 items-center justify-center rounded-xl border transition-colors",
                           isActive
                             ? "border-primary/30 bg-primary/10 text-primary"
                             : "border-border/50 bg-muted/50 text-foreground/80",
                         )}
                       >
                         <Icon className="h-5 w-5" />
+                        {to === "/changelog" && <WhatsNewDot className="absolute -right-0.5 -top-0.5" />}
                       </span>
                       <span className="truncate tracking-wide">{label}</span>
                     </NavLink>

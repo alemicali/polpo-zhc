@@ -43,6 +43,7 @@ import { useTasks, useMissions, useProcesses, useAgents } from "@polpo-ai/react"
 import type { Task, AgentProcess, PolpoStats } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
+import { WhatsNewBanner } from "@/components/whats-new/whats-new-banner";
 
 const DASHBOARD_RANGES: { value: TokenUsageRange; label: string; shortLabel: string }[] = [
   { value: "today", label: "Today", shortLabel: "Today" },
@@ -778,6 +779,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 flex-1 min-h-0 overflow-auto pb-bottom-nav lg:pb-0">
+      <WhatsNewBanner />
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
         <LiveTicker stats={stats} />
         <DashboardRangeControl range={range} onChange={setRange} />

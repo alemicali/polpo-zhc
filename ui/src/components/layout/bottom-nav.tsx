@@ -8,6 +8,7 @@ import {
 import { usePolpo } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 
 /**
  * Compact 4-slot bottom nav (Home · Chat · Tasks · More) — phone-first.
@@ -21,7 +22,7 @@ const PRIMARY_NAV = [
   { to: "/tasks", icon: ListChecks, label: "Tasks" },
 ];
 
-const HIDDEN_ON: (string | RegExp)[] = [/^\/chat(\/|$)/, /^\/groups\/./];
+const HIDDEN_ON: (string | RegExp)[] = [/^\/chat(\/|$)/];
 
 export function BottomNav() {
   const { pathname } = useLocation();
@@ -77,6 +78,7 @@ export function BottomNav() {
           >
             <MoreHorizontal className="h-5 w-5" />
             <span className="tracking-wide">More</span>
+            <WhatsNewDot className="absolute top-2 right-1/2 translate-x-4" />
           </button>
         </MobileNavSheet>
       </div>

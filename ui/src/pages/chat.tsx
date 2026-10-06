@@ -9,6 +9,7 @@ import {
   useMemo,
   useId,
   type CSSProperties,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -70,7 +71,6 @@ import {
   Table2,
   UsersRound,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -156,6 +156,22 @@ import {
   useAppPreviewContext,
 } from "@/hooks/use-app-preview-context";
 import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
+import { GroupConversation } from "@/components/groups/group-conversation";
+import { GroupSettingsDialog, NewGroupDialog } from "@/components/groups/group-dialogs";
+import { GroupSidebarSection } from "@/components/groups/group-list";
+import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { useMemberDirectory } from "@/components/groups/use-member-directory";
+import { useGroups } from "@/hooks/use-rooms";
+import {
+  closeNewGroup,
+  requestNewGroup,
+  setActiveChatRoom,
+  setActiveChatRoomTitle,
+  useActiveChatRoom,
+  useNewGroupRequest,
+} from "@/hooks/use-chat-room";
+import { ORCHESTRATOR_MEMBER_ID, type RoomInput } from "@/lib/rooms-api";
+import { WhatsNewBanner } from "@/components/whats-new/whats-new-banner";
 
 const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
@@ -2170,6 +2186,8 @@ function SessionSidebar({
   fullWidth,
   mobileFullWidth,
   mobileOnlyBack,
+  onNewGroup,
+  groupsSection,
 }: {
   sessions: SessionItem[];
   activeSessionId: string | null;
@@ -2188,6 +2206,10 @@ function SessionSidebar({
   mobileFullWidth?: boolean;
   /** Show the close/back control only while the mobile overlay layout applies. */
   mobileOnlyBack?: boolean;
+  /** Opens the "New group" dialog, preselecting the agent when given. */
+  onNewGroup: (agent?: string) => void;
+  /** "Groups" section rendered above the threads. */
+  groupsSection?: ReactNode;
 }) {
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
@@ -2346,14 +2368,15 @@ function SessionSidebar({
             )}
             <span className="whitespace-normal break-words text-sm font-medium leading-snug">{name}</span>
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}>
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-          </Tooltip>
+          <NewChatMenu
+            className="h-7 w-7 shrink-0 text-foreground"
+            iconClassName="h-3.5 w-3.5"
+            align="end"
+            newChatLabel={`New chat with ${name}`}
+            newGroupLabel={`New group with ${name}`}
+            onNewChat={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}
+            onNewGroup={() => onNewGroup(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : ORCHESTRATOR_MEMBER_ID)}
+          />
         </div>
       );
     }
@@ -2368,16 +2391,13 @@ function SessionSidebar({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
           History
         </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground" asChild>
-              <Link to="/groups" aria-label="Groups">
-                <UsersRound className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">Groups — chat with several agents</TooltipContent>
-        </Tooltip>
+        <NewChatMenu
+          className="h-7 w-7 shrink-0"
+          iconClassName="h-3.5 w-3.5"
+          align="end"
+          onNewChat={() => onNew()}
+          onNewGroup={() => onNewGroup()}
+        />
         {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
           <button
@@ -2692,6 +2712,8 @@ function SessionSidebar({
       )}
       {renderHeader()}
       <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Groups sit above the threads (top level only, not inside an agent drill-down). */}
+        {(view === "flat" || !activeGroup) && groupsSection}
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
             <p className="text-xs font-medium">No sessions yet</p>
@@ -3004,7 +3026,8 @@ function ChatEmptyState() {
   }, [agentConfig, skills]);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center px-4 py-8">
+    <div className="flex h-full flex-col items-center justify-center-safe overflow-y-auto px-4 py-8">
+      <WhatsNewBanner className="mb-6 w-full max-w-xl" />
       {/* Avatar */}
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
         {agentConfig ? (
@@ -3056,6 +3079,17 @@ function ChatEmptyState() {
                 {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => requestNewGroup(selectedAgent ?? ORCHESTRATOR_MEMBER_ID)}
+              className="gap-2"
+            >
+              <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Group chat…</p>
+                <p className="text-[11px] text-muted-foreground truncate">Talk with several agents at once</p>
+              </div>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </h2>
@@ -4428,19 +4462,73 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   // All hooks MUST be above the early return to satisfy Rules of Hooks
   const handleSelectSession = useCallback((id: string) => {
+    setActiveChatRoom(null);
     loadSession(id);
     if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
   }, [loadSession, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   const handleNewSession = useCallback((agent?: string) => {
+    setActiveChatRoom(null);
     newSession();
     setSelectedAgent(agent ?? null);
     if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
   }, [newSession, setSelectedAgent, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
+  // ── Groups: a group opens in the chat area in place of the conversation.
+  // The open room lives in the use-chat-room store (mirrored to ?room=<id> on /chat).
+  const activeRoomId = useActiveChatRoom();
+  const groups = useGroups(activeRoomId);
+  const { room, createRoom, updateRoom, deleteRoom, refreshRooms } = groups;
+  const directory = useMemberDirectory();
+  const newGroupRequest = useNewGroupRequest();
+  const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
+  // Focus the group composer on open only with a real keyboard (no on-screen keyboard pop).
+  const [autoFocusGroupComposer] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.("(min-width: 1024px) and (pointer: fine)").matches,
+  );
+
+  // Headers outside this column (page header, chat-first panel) show the group title.
+  const roomTitle = activeRoomId ? room?.title ?? null : null;
+  useEffect(() => {
+    setActiveChatRoomTitle(roomTitle);
+  }, [roomTitle]);
+
+  const handleSelectRoom = useCallback((id: string) => {
+    setActiveChatRoom(id);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
+
+  const handleNewGroup = useCallback((agent?: string) => {
+    requestNewGroup(agent);
+  }, []);
+
+  const handleCreateGroup = useCallback(async (input: RoomInput) => {
+    const created = await createRoom(input);
+    setActiveChatRoom(created.id);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [createRoom, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
+
+  const leaveGroup = useCallback(() => setActiveChatRoom(null), []);
+
   if (sessionsLoading) {
     return <ChatLoadingSkeleton compact={compact} />;
   }
+
+  const groupsSection = (
+    <GroupSidebarSection
+      rooms={groups.rooms}
+      loading={groups.roomsLoading}
+      error={groups.roomsError}
+      activeRoomId={activeRoomId}
+      unread={groups.unread}
+      resolve={directory.resolve}
+      onSelect={handleSelectRoom}
+      onNew={() => handleNewGroup()}
+      onRetry={() => { void refreshRooms(); }}
+    />
+  );
+  // While a group is open no thread row is highlighted.
+  const activeThreadId = activeRoomId ? null : sessionId;
 
   return (
     <div className={cn(
@@ -4451,10 +4539,12 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
       {compact && sidebarOpen ? (
         <SessionSidebar
           sessions={visibleSessions}
-          activeSessionId={sessionId}
+          activeSessionId={activeThreadId}
           streamingSessionIds={streamingSessionIds}
           onSelect={handleSelectSession}
           onNew={handleNewSession}
+          onNewGroup={handleNewGroup}
+          groupsSection={groupsSection}
           onDelete={deleteSession}
           onRename={openRename}
           onToggleStar={handleToggleStar}
@@ -4472,10 +4562,12 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
             )}>
               <SessionSidebar
                 sessions={visibleSessions}
-                activeSessionId={sessionId}
+                activeSessionId={activeThreadId}
                 streamingSessionIds={streamingSessionIds}
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
+                onNewGroup={handleNewGroup}
+                groupsSection={groupsSection}
                 onDelete={deleteSession}
                 onRename={openRename}
                 onToggleStar={handleToggleStar}
@@ -4486,19 +4578,79 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
             </div>
           )}
 
-          {/* Main chat area */}
+          {/* Main chat area — a group conversation when a room is open */}
           <div className="flex-1 flex flex-col min-w-0 h-full">
-            {!embedded && compact && (
-              <ChatToolbar
-                sidebarOpen={sidebarOpen}
-                onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-                compact={compact}
+            {activeRoomId ? (
+              <GroupConversation
+                room={room}
+                roomMissing={groups.roomMissing}
+                messages={groups.messages}
+                loading={groups.messagesLoading}
+                error={groups.messagesError}
+                typingAgents={groups.typingAgents}
+                resolve={directory.resolve}
+                onSend={groups.send}
+                onBack={leaveGroup}
+                leading={compact && !embedded ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        onClick={() => setSidebarOpen(!sidebarOpen)}
+                        aria-label="Show threads"
+                      >
+                        <History className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">Threads</TooltipContent>
+                  </Tooltip>
+                ) : undefined}
+                onOpenSettings={() => setGroupSettingsOpen(true)}
+                onRetry={groups.reloadConversation}
+                autoFocusComposer={autoFocusGroupComposer}
               />
+            ) : (
+              <>
+                {!embedded && compact && (
+                  <ChatToolbar
+                    sidebarOpen={sidebarOpen}
+                    onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+                    compact={compact}
+                  />
+                )}
+                <ChatMessages />
+                {!isEmptyThread && <ChatInput />}
+              </>
             )}
-            <ChatMessages />
-            {!isEmptyThread && <ChatInput />}
           </div>
         </>
+      )}
+      <NewGroupDialog
+        open={newGroupRequest !== null}
+        onOpenChange={(open) => { if (!open) closeNewGroup(); }}
+        initialAgents={newGroupRequest?.agents}
+        members={directory.members}
+        membersLoading={directory.isLoading}
+        resolve={directory.resolve}
+        onCreate={handleCreateGroup}
+      />
+      {room && room.kind !== "telegram" && (
+        <GroupSettingsDialog
+          room={room}
+          open={groupSettingsOpen}
+          onOpenChange={setGroupSettingsOpen}
+          members={directory.members}
+          membersLoading={directory.isLoading}
+          onSave={(patch) => updateRoom(room.id, patch)}
+          onDelete={async () => {
+            await deleteRoom(room.id);
+            // Back to a normal, new chat.
+            setActiveChatRoom(null);
+            newSession();
+          }}
+        />
       )}
       {/* Rename dialog — controlled by `renameTarget`. Lives at the page
           root (outside the sidebar) so it survives sidebar close/open

@@ -1,7 +1,9 @@
 /**
- * Right side of the Groups page: header, transcript, typing line, composer.
+ * A group conversation inside the chat column: header (title, members, reply
+ * mode, settings), transcript, typing line and composer. Same widths and
+ * composer position as the normal chat.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -10,10 +12,8 @@ import {
   ChevronLeft,
   Copy,
   CornerDownRight,
-  Plus,
   RefreshCw,
   Settings2,
-  UsersRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,6 @@ import { ChannelLogo } from "@/components/shared/channel-logo";
 import { useNow } from "@/hooks/use-now";
 import type { TypingAgent } from "@/hooks/use-rooms";
 import { firstLine, resolveRoomSettings, typingLabel, type Room, type RoomMessage } from "@/lib/rooms-api";
-import { cn } from "@/lib/utils";
 import { GroupComposer } from "./group-composer";
 import { MemberAvatar, MemberAvatarStack } from "./group-members";
 import type { GroupMember } from "./use-member-directory";
@@ -96,28 +95,6 @@ function TypingDots() {
   );
 }
 
-/** Shown when no group is open (desktop) — the list sits to the left. */
-export function GroupsEmptyPanel({ onNew, hasGroups }: { onNew: () => void; hasGroups: boolean }) {
-  return (
-    <div className="flex h-full flex-1 flex-col items-center justify-center px-6 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <UsersRound className="h-6 w-6" />
-      </div>
-      <h3 className="text-base font-semibold tracking-tight">
-        {hasGroups ? "Pick a group" : "Talk with your whole team"}
-      </h3>
-      <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-        A group is one conversation with several agents. Mention someone with @ to ask them directly,
-        or just write — the agents your message is meant for will answer.
-      </p>
-      <Button className="mt-5 gap-1.5" onClick={onNew}>
-        <Plus className="h-4 w-4" />
-        New group
-      </Button>
-    </div>
-  );
-}
-
 export function GroupConversation({
   room,
   roomMissing,
@@ -128,6 +105,8 @@ export function GroupConversation({
   resolve,
   onSend,
   onBack,
+  backLabel = "Back to chat",
+  leading,
   onOpenSettings,
   onRetry,
   autoFocusComposer,
@@ -140,7 +119,11 @@ export function GroupConversation({
   typingAgents: TypingAgent[];
   resolve: (id: string, fallbackName?: string) => GroupMember;
   onSend: (text: string) => Promise<unknown>;
+  /** Leaves the group (back to the normal chat). Shown on small screens. */
   onBack: () => void;
+  backLabel?: string;
+  /** Extra controls at the start of the header (e.g. the threads toggle in compact mode). */
+  leading?: ReactNode;
   onOpenSettings: () => void;
   onRetry: () => void;
   autoFocusComposer?: boolean;
@@ -174,7 +157,7 @@ export function GroupConversation({
         <p className="mt-1 text-xs text-muted-foreground">It may have been deleted.</p>
         <Button variant="outline" size="sm" className="mt-4 gap-1.5" onClick={onBack}>
           <ChevronLeft className="h-3.5 w-3.5" />
-          All groups
+          {backLabel}
         </Button>
       </div>
     );
@@ -224,7 +207,7 @@ export function GroupConversation({
     const author = authorOf(message);
     if (!author) {
       return (
-        <div className="group w-full px-4 py-3">
+        <div className="group w-full px-4 py-4">
           <div className="mx-auto max-w-3xl">
             <div className="flex justify-end">
               <div className="flex max-w-[85%] flex-col items-end">
@@ -246,7 +229,7 @@ export function GroupConversation({
       );
     }
     return (
-      <div className="group w-full px-4 py-3">
+      <div className="group w-full px-4 py-4">
         <div className="mx-auto max-w-3xl">
           <Message from="assistant">
             <div className="flex gap-3">
@@ -278,10 +261,13 @@ export function GroupConversation({
   };
 
   const header = (
-    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/40 px-3 py-2 lg:px-4">
-      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 lg:hidden" onClick={onBack} aria-label="All groups">
-        <ChevronLeft className="h-4 w-4" />
-      </Button>
+    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/40 bg-background/80 px-3 py-2 backdrop-blur-md lg:px-4">
+      {leading}
+      {!leading && (
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 lg:hidden" onClick={onBack} aria-label={backLabel}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+      )}
       {room ? (
         <>
           {members.length > 0 && <MemberAvatarStack members={members} max={3} size="sm" className="shrink-0" />}
@@ -335,7 +321,29 @@ export function GroupConversation({
     </div>
   );
 
-  const isEmpty = !loading && !error && messages.length === 0;
+  const isEmpty = !loading && !error && messages.length === 0 && typingNames.length === 0;
+  // Like the chat: an empty group shows the composer in the middle, under the greeting.
+  const centerComposer = isEmpty && !!room && !readOnly;
+
+  const composer = room && !readOnly ? (
+    <>
+      <GroupComposer
+        key={room.id}
+        members={members}
+        onSend={onSend}
+        autoFocus={autoFocusComposer}
+        placeholder={`Message ${room.title || "the group"}…`}
+      />
+      <div className="mt-1 hidden flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground lg:flex">
+        <span className="inline-flex items-center gap-1 text-[11px]">
+          <span className="font-mono text-[10px] font-semibold text-foreground">@</span>
+          <span>to mention</span>
+        </span>
+        <span aria-hidden="true">·</span>
+        <span className="text-[11px]">Shift+Enter for a new line</span>
+      </div>
+    </>
+  ) : null;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -352,17 +360,20 @@ export function GroupConversation({
               Retry
             </Button>
           </div>
-        ) : isEmpty && typingNames.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            {members.length > 0 && <MemberAvatarStack members={members} max={6} size="md" className="mb-4" />}
-            <h3 className="text-base font-semibold tracking-tight">{room?.title || "New group"}</h3>
-            <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+        ) : isEmpty ? (
+          <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-4 py-8 text-center">
+            <div className="mb-4 flex min-h-14 items-center justify-center">
+              {members.length > 0 && <MemberAvatarStack members={members} max={6} size="md" />}
+            </div>
+            <h2 className="mb-2 max-w-full truncate text-2xl font-semibold">{room?.title || "New group"}</h2>
+            <p className="mb-5 max-w-md text-sm text-muted-foreground">
               {readOnly
                 ? "No messages yet. Messages written in the Telegram group will show up here."
                 : settings.replyMode === "intent"
                   ? "Say hello. Mention @someone to ask them directly, or just write — the agents your message is meant for will answer."
                   : "Say hello. Agents answer when you @mention them."}
             </p>
+            {centerComposer && <div className="w-full max-w-3xl text-left">{composer}</div>}
           </div>
         ) : (
           <Virtuoso
@@ -410,25 +421,10 @@ export function GroupConversation({
           <ChannelLogo type="telegram" size={12} />
           Written on Telegram — read-only here.
         </div>
-      ) : (
-        <div className={cn("shrink-0 bg-background/80 px-4 pt-2 backdrop-blur-md", "pb-[max(0.375rem,var(--safe-bottom))]")}>
-          <div className="mx-auto max-w-3xl">
-            <GroupComposer
-              key={room.id}
-              members={members}
-              onSend={onSend}
-              autoFocus={autoFocusComposer}
-              placeholder={`Message ${room.title || "the group"}…`}
-            />
-            <div className="mt-1 hidden flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground lg:flex">
-              <span className="inline-flex items-center gap-1 text-[11px]">
-                <span className="font-mono text-[10px] font-semibold text-foreground">@</span>
-                <span>to mention</span>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span className="text-[11px]">Shift+Enter for a new line</span>
-            </div>
-          </div>
+      ) : !centerComposer && (
+        // Same container as the chat composer (ChatInput).
+        <div className="shrink-0 bg-background/80 px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] backdrop-blur-md lg:pb-1.5">
+          <div className="mx-auto max-w-3xl">{composer}</div>
         </div>
       ))}
     </div>
