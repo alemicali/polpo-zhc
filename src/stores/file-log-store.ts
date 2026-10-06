@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { LogStore, LogEntry, SessionInfo } from "../core/log-store.js";
+import type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "../core/log-store.js";
 
 /**
  * File-backed LogStore.
@@ -17,6 +17,9 @@ import type { LogStore, LogEntry, SessionInfo } from "../core/log-store.js";
  *
  * File naming: `{sessionId}.jsonl`
  * First line of each file: `{"_session":true,"sessionId":"...","startedAt":"..."}`
+ *
+ * The same directory holds the agent run transcripts (`run-{runId}.jsonl`): they are not log
+ * sessions and this store never lists or removes them.
  */
 export class FileLogStore implements LogStore {
   private readonly logsDir: string;
@@ -76,7 +79,7 @@ export class FileLogStore implements LogStore {
   async listSessions(): Promise<SessionInfo[]> {
     if (!existsSync(this.logsDir)) return [];
     const files = readdirSync(this.logsDir)
-      .filter(f => f.endsWith(".jsonl"))
+      .filter(isSessionFile)
       .sort()
       .reverse(); // most recent first (nanoid is not time-sorted, so use file mtime)
 
@@ -121,6 +124,26 @@ export class FileLogStore implements LogStore {
     return removed;
   }
 
+  async pruneBefore(cutoff: string): Promise<LogPruneResult> {
+    if (!existsSync(this.logsDir)) return { sessions: 0, entries: 0 };
+    const cutoffMs = Date.parse(cutoff);
+    let sessions = 0;
+    let entries = 0;
+    // Files are append-only: one last written before the cutoff holds only older entries.
+    for (const file of readdirSync(this.logsDir).filter(isSessionFile)) {
+      if (this.sessionId && file === `${this.sessionId}.jsonl`) continue;
+      const path = join(this.logsDir, file);
+      try {
+        if (statSync(path).mtimeMs >= cutoffMs) continue;
+        const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean).length;
+        unlinkSync(path);
+        sessions++;
+        entries += Math.max(0, lines - 1); // exclude header
+      } catch { /* removed meanwhile */ }
+    }
+    return { sessions, entries };
+  }
+
   async close(): Promise<void> {
     // No resources to release for file-based store
     this.sessionId = undefined;
@@ -129,4 +152,9 @@ export class FileLogStore implements LogStore {
   private sessionFile(sessionId: string): string {
     return join(this.logsDir, `${sessionId}.jsonl`);
   }
+}
+
+/** Log session files, not the `run-*.jsonl` agent transcripts kept in the same directory. */
+function isSessionFile(file: string): boolean {
+  return file.endsWith(".jsonl") && !file.startsWith("run-");
 }

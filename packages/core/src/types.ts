@@ -810,6 +810,9 @@ export interface PolpoSettings {
   /** PostgreSQL connection URL (required when storage is "postgres").
    *  Example: "postgres://user:pass@localhost:5432/polpo" */
   databaseUrl?: string;
+  /** Days of orchestrator event logs to keep; older ones are removed at startup and daily.
+   *  0 keeps them forever. Default: 30 */
+  logRetentionDays?: number;
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */

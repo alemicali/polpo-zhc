@@ -1,9 +1,12 @@
-import { eq, desc, asc, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, notExists, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { LogStore, LogEntry, SessionInfo } from "@polpo-ai/core/log-store";
-import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
+import type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "@polpo-ai/core/log-store";
+import { type Dialect, affectedRows, serializeJson, deserializeJson } from "../utils.js";
 
 type AnyTable = any;
+
+/** Rows deleted per statement: short transactions, so writers are never held up for long. */
+const PRUNE_BATCH = 5_000;
 
 export class DrizzleLogStore implements LogStore {
   private currentSessionId: string | undefined;
@@ -89,6 +92,23 @@ export class DrizzleLogStore implements LogStore {
       deleted++;
     }
     return deleted;
+  }
+
+  async pruneBefore(cutoff: string): Promise<LogPruneResult> {
+    const e = this.logEntries;
+    const s = this.logSessions;
+    let entries = 0;
+    for (;;) {
+      // ts is an ISO timestamp: text order is time order (idx_log_entries_ts).
+      const batch = this.db.select({ id: e.id }).from(e).where(lt(e.ts, cutoff)).limit(PRUNE_BATCH);
+      const n = affectedRows(await this.db.delete(e).where(inArray(e.id, batch)));
+      entries += n;
+      if (n < PRUNE_BATCH) break;
+    }
+    const empty = notExists(this.db.select({ one: sql`1` }).from(e).where(eq(e.sessionId, s.id)));
+    const current = this.currentSessionId ? ne(s.id, this.currentSessionId) : undefined;
+    const sessions = affectedRows(await this.db.delete(s).where(and(lt(s.startedAt, cutoff), empty, current)));
+    return { sessions, entries };
   }
 
   async close(): Promise<void> {

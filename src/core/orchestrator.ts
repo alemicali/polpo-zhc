@@ -15,7 +15,7 @@ import type { SessionStore } from "./session-store.js";
 import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
-import type { LogStore } from "./log-store.js";
+import type { LogPruneResult, LogStore } from "./log-store.js";
 import { assessTask } from "../assessment/assessor.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
@@ -101,6 +101,10 @@ export interface OrchestratorOptions {
   spawner?: Spawner;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1_000;
+/** Days of orchestrator event logs kept when settings.logRetentionDays is not set. */
+const DEFAULT_LOG_RETENTION_DAYS = 30;
+
 function supportsBackgroundWaits(store: TaskControlStore): store is TaskControlStore & BackgroundWaitStore {
   return typeof store.createBackgroundWait === "function"
     && typeof store.getBackgroundWait === "function"
@@ -168,6 +172,7 @@ export class Orchestrator extends TypedEmitter {
   private channelChatRunner?: ChannelChatRunner;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
+  private logRetentionTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
   private playbookStore!: PlaybookStore;
   private eventingTaskStores = new WeakMap<TaskStore, TaskStore>();
@@ -425,6 +430,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initLogStore();
     }
+    this.scheduleLogRetention();
     if ("sessionStore" in stores && stores.sessionStore) {
       this.sessionStore = stores.sessionStore;
     } else {
@@ -842,6 +848,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initLogStore();
     }
+    this.scheduleLogRetention();
     if ("sessionStore" in stores && stores.sessionStore) {
       this.sessionStore = stores.sessionStore;
     } else {
@@ -914,6 +921,7 @@ export class Orchestrator extends TypedEmitter {
       this.configWatcher = watch(configPath, () => {
         // Debounce: wait 500ms after the last change event
         if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
         this.configReloadTimer = setTimeout(() => {
           this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
           this.reloadConfig().catch(() => {});
@@ -1175,6 +1183,38 @@ export class Orchestrator extends TypedEmitter {
     this.setLogSink(this.logStore);
     // Auto-prune: keep last 20 sessions
     try { await this.logStore.prune(20); } catch { /* best-effort: non-critical */ }
+  }
+
+  /**
+   * Removes orchestrator event logs older than settings.logRetentionDays (default 30, 0 keeps
+   * them): a minute after start, then daily. Agent run transcripts are kept: they back the task
+   * activity view and the task token totals.
+   */
+  private scheduleLogRetention(delayMs = 60_000): void {
+    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
+    this.logRetentionTimer = setTimeout(() => {
+      void this.pruneOldLogs().finally(() => {
+        if (!this.stopped) this.scheduleLogRetention(DAY_MS);
+      });
+    }, delayMs);
+    this.logRetentionTimer.unref?.();
+  }
+
+  /** Remove the event logs older than the retention period now. */
+  async pruneOldLogs(): Promise<LogPruneResult | undefined> {
+    const days = this.config?.settings?.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS;
+    if (!(days > 0) || !this.logStore?.pruneBefore) return undefined;
+    const cutoff = new Date(Date.now() - days * DAY_MS).toISOString();
+    try {
+      const result = await this.logStore.pruneBefore(cutoff);
+      if (result.entries > 0 || result.sessions > 0) {
+        this.emit("log", { level: "info", message: `[logs] Removed ${result.entries} log entries and ${result.sessions} log session(s) older than ${days} days.` });
+      }
+      return result;
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `[logs] Log cleanup failed: ${err instanceof Error ? err.message : String(err)}` });
+      return undefined;
+    }
   }
 
   /** Get the chat session store. */

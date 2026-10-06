@@ -15,6 +15,11 @@ export interface SessionInfo {
   entries: number;
 }
 
+export interface LogPruneResult {
+  sessions: number;
+  entries: number;
+}
+
 export interface LogStore {
   /** Start a new logging session. Returns session ID. */
   startSession(): Promise<string>;
@@ -28,6 +33,11 @@ export interface LogStore {
   listSessions(): Promise<SessionInfo[]>;
   /** Remove old sessions, keeping the most recent N. Returns number pruned. */
   prune(keepSessions: number): Promise<number>;
+  /**
+   * Remove what was logged before `cutoff` (ISO timestamp): older entries, then the sessions left
+   * empty. The current session is never removed.
+   */
+  pruneBefore?(cutoff: string): Promise<LogPruneResult>;
   /** Flush/close. */
   close(): Promise<void> | void;
 }
