@@ -56,6 +56,10 @@ jobs:
       # Tests import the workspace packages (@polpo-ai/core, drizzle, server, sdk…) from their dist.
       - run: pnpm run build:packages && pnpm --filter @polpo-ai/sdk build
       - run: pnpm run test run
+      # UI component/hook tests (jsdom) live outside the root vitest include (src/**).
+      - name: UI tests
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @polpo-ai/react build && npx vitest run --config ui/vitest.config.ts
 
   storage:
     name: Storage (SQLite + PostgreSQL)
