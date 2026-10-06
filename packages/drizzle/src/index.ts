@@ -19,6 +19,7 @@ export * from "./stores/index.js";
 export * from "./schema/index.js";
 export { migratePg, migrateSqlite, configureSqlite, ensurePgSchema, type MigrationResult } from "./migrate.js";
 export type { Dialect } from "./utils.js";
+export { pgSafe } from "./utils.js";
 
 // ── Schema sets ───────────────────────────────────────────────────────
 

@@ -9,12 +9,30 @@
 export type Dialect = "pg" | "sqlite";
 
 /**
+ * Text PostgreSQL can store: no NUL character (rejected in text and jsonb; tool output sometimes
+ * contains it) and no lone UTF-16 surrogate (an emoji cut in half by a truncation; rejected in
+ * jsonb). Both become U+FFFD, so the rest of the value is kept and the gap stays visible.
+ */
+const UNSAFE_FOR_PG = /\u0000|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+export function pgSafe<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.replace(UNSAFE_FOR_PG, "\uFFFD") as T;
+  }
+  if (Array.isArray(value)) return value.map(pgSafe) as T;
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [pgSafe(k), pgSafe(v)])) as T;
+  }
+  return value;
+}
+
+/**
  * Value for a JSON column: PostgreSQL columns are jsonb (the driver encodes the object once),
  * SQLite columns are TEXT (stringified here). Only use for jsonb columns on PostgreSQL.
  */
 export function serializeJson(value: unknown, dialect: Dialect): unknown {
   if (value === undefined || value === null) return null;
-  return dialect === "pg" ? value : JSON.stringify(value);
+  return dialect === "pg" ? pgSafe(value) : JSON.stringify(value);
 }
 
 /**

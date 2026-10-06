@@ -1,7 +1,7 @@
 import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
-import { type Dialect, deserializeJson, affectedRows } from "../utils.js";
+import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
 
 type AnyTable = any;
 
@@ -54,11 +54,12 @@ export class DrizzleSessionStore implements SessionStore {
     const ts = new Date().toISOString();
     const tcValue = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
     const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
+    const storedContent = this.dialect === "pg" ? pgSafe(content) : content;
     await this.db.insert(this.messages).values({
       id,
       sessionId,
       role,
-      content,
+      content: storedContent,
       ts,
       toolCalls: tcValue,
       segments: segmentsValue,
@@ -83,7 +84,7 @@ export class DrizzleSessionStore implements SessionStore {
     const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
 
     const result = await this.db.update(this.messages)
-      .set({ content, toolCalls: tcValue, segments: segmentsValue })
+      .set({ content: this.dialect === "pg" ? pgSafe(content) : content, toolCalls: tcValue, segments: segmentsValue })
       .where(eq(this.messages.id, messageId));
 
     const changed = affectedRows(result) > 0;
