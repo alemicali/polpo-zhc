@@ -321,14 +321,25 @@ export class OrchestratorEngine {
     this.slaMonitor?.check();
 
     // 3. Spawn agents for ready tasks (skip tasks from cancelled/completed/paused missions)
+    // Pending tasks of one mission share the lookup: resolved once per tick, like the task snapshot.
+    const missionLookups = new Map<string, Promise<Mission | undefined>>();
+    const lookupMission = (task: Task & { group: string }): Promise<Mission | undefined> => {
+      // Resolve mission via direct ID (preferred) or group name (legacy fallback)
+      const key = task.missionId ? `id:${task.missionId}` : `name:${task.group}`;
+      let lookup = missionLookups.get(key);
+      if (!lookup) {
+        lookup = Promise.resolve(task.missionId
+          ? this.ctx.registry.getMission?.(task.missionId)
+          : this.ctx.registry.getMissionByName?.(task.group));
+        missionLookups.set(key, lookup);
+      }
+      return lookup;
+    };
     const readyList: Task[] = [];
     for (const task of pending) {
       let isReady = true;
       if (task.group) {
-        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
-        const mission = task.missionId
-          ? await this.ctx.registry.getMission?.(task.missionId)
-          : await this.ctx.registry.getMissionByName?.(task.group);
+        const mission = await lookupMission(task as Task & { group: string });
         if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) { isReady = false; }
 
         // Check quality gates — task may be blocked by a gate even if deps are done

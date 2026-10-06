@@ -188,3 +188,44 @@ describe("OrchestratorEngine.tick task reads", () => {
     expect(s.cleaned[0].map((t) => t.status)).toEqual(["done", "failed"]);
   });
 });
+
+describe("OrchestratorEngine.tick mission lookups", () => {
+  it("resolves each mission once per tick for its pending tasks", async () => {
+    const s = setup();
+    const now = new Date().toISOString();
+    const mission: Mission = { id: "m1", name: "M1", data: "{}", status: "paused", createdAt: now, updatedAt: now };
+    const legacy: Mission = { id: "m2", name: "Legacy", data: "{}", status: "cancelled", createdAt: now, updatedAt: now };
+    s.store.missions.set(mission.id, mission);
+    s.store.missions.set(legacy.id, legacy);
+    await addTask(s.store, { status: "in_progress" }); // keeps the deadlock check away
+    for (let i = 0; i < 3; i++) await addTask(s.store, { group: "M1", missionId: "m1" });
+    for (let i = 0; i < 2; i++) await addTask(s.store, { group: "Legacy" });
+
+    await s.engine.tick();
+    expect(s.getMission).toHaveBeenCalledTimes(1);
+    expect(s.getMissionByName).toHaveBeenCalledTimes(1);
+
+    // Fresh lookups on the next tick: a resumed mission is seen.
+    mission.status = "active";
+    await s.engine.tick();
+    expect(s.getMission).toHaveBeenCalledTimes(2);
+    expect(s.getMissionByName).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not spawn tasks of paused or cancelled missions", async () => {
+    const s = setup();
+    const now = new Date().toISOString();
+    s.store.missions.set("m1", { id: "m1", name: "M1", data: "{}", status: "paused", createdAt: now, updatedAt: now });
+    s.store.missions.set("m3", { id: "m3", name: "M3", data: "{}", status: "active", createdAt: now, updatedAt: now });
+    await addTask(s.store, { status: "in_progress" });
+    await addTask(s.store, { group: "M1", missionId: "m1" });
+    await addTask(s.store, { group: "M1", missionId: "m1" });
+    const runnable = await addTask(s.store, { group: "M3", missionId: "m3" });
+
+    await s.engine.tick();
+
+    const spawn = (s.engine as unknown as { runner: { spawnForTask: ReturnType<typeof vi.fn> } }).runner.spawnForTask;
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0][0].id).toBe(runnable.id);
+  });
+});
