@@ -512,6 +512,21 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(latest!.id).toBe(id2);
     });
 
+    it("scoped sessions (group conversations) are listed but never the latest chat", async () => {
+      const web = await stores.sessionStore.create("web", "backend");
+      await new Promise((r) => setTimeout(r, 5));
+      const group = await stores.sessionStore.create("Team (telegram group)", "backend", { scope: "telegram:group:-1" });
+      await new Promise((r) => setTimeout(r, 5));
+      await stores.sessionStore.addMessage(group, "user", "Ada: hi");
+
+      expect((await stores.sessionStore.getSession(group))?.scope).toBe("telegram:group:-1");
+      expect((await stores.sessionStore.getSession(web))?.scope).toBeUndefined();
+      expect((await stores.sessionStore.listSessions()).map((x) => x.id)).toEqual([group, web]);
+      expect((await stores.sessionStore.getLatestSession("backend"))?.id).toBe(web);
+      expect((await stores.sessionStore.getLatestSession())?.id).toBe(web);
+      expect(await stores.sessionStore.getLatestSession(null)).toBeUndefined();
+    });
+
     it("updateMessage changes content", async () => {
       const sid = await stores.sessionStore.create();
       const msg = await stores.sessionStore.addMessage(sid, "assistant", "draft");
@@ -925,6 +940,59 @@ describe.each(DIALECTS)("%s", (dialect) => {
       const fetched = await stores.peerStore.getPeer(p1.id);
       expect(fetched!.displayName).toBe("New");
       expect(fetched!.lastSeenAt).toBe("2025-01-02");
+    });
+
+    it("upsertPeer without an id keeps one row per person, under <channel>:<externalId>", async () => {
+      await stores.peerStore.upsertPeer({ channel: "telegram", externalId: "42", displayName: "Ada", lastSeenAt: "2025-01-01" });
+      const again = await stores.peerStore.upsertPeer({ channel: "telegram", externalId: "42", lastSeenAt: "2025-01-02" });
+
+      expect(again.id).toBe("telegram:42");
+      expect(again.displayName).toBe("Ada"); // a message without a name does not erase it
+      expect(again.lastSeenAt).toBe("2025-01-02");
+      expect(await stores.peerStore.listPeers("telegram")).toHaveLength(1);
+    });
+
+    it("the peer_ids migration merges the random-id copies into one row per person", async () => {
+      const rows = [
+        ["telegram:42", "telegram", "42", "Ada", "2025-01-05", "2025-01-05", null],
+        ["rnd1", "telegram", "42", "Ada L.", "2025-01-01", "2025-03-01", null],
+        ["rnd2", "telegram", "42", "Ada", "2025-01-02", "2025-02-01", null],
+        ["rnd3", "telegram", "77", "Bob", "2025-01-03", "2025-01-03", null],
+        ["rnd4", "telegram", "77", "Bob", "2025-01-04", "2025-01-09", null],
+        ["linked", "telegram", "88", "Cy", "2025-01-04", "2025-01-04", null],
+        ["telegram:99", "telegram", "99", "Di", "2025-01-04", "2025-01-04", "linked"],
+      ];
+      const insert = `INSERT INTO peers (id, channel, external_id, display_name, first_seen_at, last_seen_at, linked_to) VALUES ${rows.map((r) => `(${r.map((v) => v === null ? "NULL" : `'${v}'`).join(", ")})`).join(", ")}`;
+      const { readFileSync } = await import("node:fs");
+      const file = new URL(`../../migrations/${dialect === "sqlite" ? "sqlite/0003_peer_ids.sql" : "pg/0004_peer_ids.sql"}`, import.meta.url);
+      const statements = readFileSync(file, "utf8").split("--> statement-breakpoint");
+      if (dialect === "sqlite") {
+        sqlite!.exec(insert);
+        for (const statement of statements) sqlite!.exec(statement);
+      } else {
+        await pg!.unsafe(insert);
+        for (const statement of statements) await pg!.unsafe(statement);
+      }
+
+      const peers = (await stores.peerStore.listPeers("telegram")).sort((a, b) => a.id.localeCompare(b.id));
+      expect(peers.map((p) => [p.id, p.displayName, p.firstSeenAt, p.lastSeenAt, p.linkedTo ?? null])).toEqual([
+        ["telegram:42", "Ada L.", "2025-01-01", "2025-03-01", null],
+        ["telegram:77", "Bob", "2025-01-03", "2025-01-09", null],
+        ["telegram:88", "Cy", "2025-01-04", "2025-01-04", null],
+        ["telegram:99", "Di", "2025-01-04", "2025-01-04", "telegram:88"], // link follows the merge
+      ]);
+    });
+
+    it("isAllowed follows the DM policy and the channel's allowFrom, like the file store", async () => {
+      const store = stores.peerStore;
+      await store.addToAllowlist("telegram:1");
+      expect(await store.isAllowed("telegram:1")).toBe(true);
+      expect(await store.isAllowed("telegram:2")).toBe(false);
+      expect(await store.isAllowed("telegram:2", { dmPolicy: "pairing", allowFrom: ["2"] })).toBe(true);
+      expect(await store.isAllowed("telegram:2", { dmPolicy: "allowlist", allowFrom: ["telegram:2"] })).toBe(true);
+      expect(await store.isAllowed("telegram:3", { allowFrom: ["*"] })).toBe(true);
+      expect(await store.isAllowed("telegram:3", { dmPolicy: "open" })).toBe(true);
+      expect(await store.isAllowed("telegram:1", { dmPolicy: "disabled" })).toBe(false);
     });
 
     it("listPeers filters by channel", async () => {

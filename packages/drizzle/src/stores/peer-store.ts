@@ -1,4 +1,4 @@
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { PeerStore } from "@polpo-ai/core/peer-store";
 import { affectedRows } from "../utils.js";
@@ -32,23 +32,26 @@ export class DrizzlePeerStore implements PeerStore {
 
   async upsertPeer(peer: Omit<PeerIdentity, "id" | "firstSeenAt"> & { id?: string }): Promise<PeerIdentity> {
     const now = new Date().toISOString();
-    const id = peer.id ?? nanoid();
+    // Same id as the file store and every caller (peer ids are "<channel>:<externalId>").
+    const id = peer.id ?? `${peer.channel}:${peer.externalId}`;
     const values = {
       id,
       channel: peer.channel,
       externalId: peer.externalId,
       displayName: peer.displayName ?? null,
       firstSeenAt: now,
-      lastSeenAt: peer.lastSeenAt,
+      lastSeenAt: peer.lastSeenAt ?? now,
       linkedTo: peer.linkedTo ?? null,
     };
+    // What the caller does not say is kept (a message without a name must not erase it).
+    const keep = (column: string) => sql`COALESCE(${sql.raw(`excluded."${column}"`)}, ${sql.raw(`"peers"."${column}"`)})`;
     await this.db.insert(this.schema.peers).values(values)
       .onConflictDoUpdate({
         target: this.schema.peers.id,
         set: {
-          displayName: values.displayName,
+          displayName: keep("display_name"),
           lastSeenAt: values.lastSeenAt,
-          linkedTo: values.linkedTo,
+          linkedTo: keep("linked_to"),
         },
       });
     const result = await this.getPeer(id);
@@ -64,8 +67,12 @@ export class DrizzlePeerStore implements PeerStore {
 
   // ── Authorization ───────────────────────────────────────────────────
 
+  /** Same rules as the file store: the DM policy, then the allowlist table or the channel's allowFrom. */
   async isAllowed(peerId: string, channelConfig?: ChannelGatewayConfig): Promise<boolean> {
-    if (channelConfig?.dmPolicy === "open") return true;
+    const policy = channelConfig?.dmPolicy ?? "allowlist";
+    if (policy === "disabled") return false;
+    if (policy === "open") return true;
+    if (inConfigAllowlist(peerId, channelConfig)) return true;
     const rows: any[] = await this.db.select().from(this.schema.peerAllowlist)
       .where(eq(this.schema.peerAllowlist.peerId, peerId));
     return rows.length > 0;
@@ -263,4 +270,13 @@ export class DrizzlePeerStore implements PeerStore {
       .where(and(eq(this.schema.peers.channel, channel), eq(this.schema.peers.externalId, externalId)));
     return rows.length > 0 ? this.rowToPeer(rows[0]) : undefined;
   }
+}
+
+/** allowFrom lists peer ids ("telegram:123") or bare external ids ("123"); "*" allows everyone. */
+function inConfigAllowlist(peerId: string, config?: ChannelGatewayConfig): boolean {
+  const allowFrom = config?.allowFrom;
+  if (!allowFrom?.length) return false;
+  if (allowFrom.includes("*")) return true;
+  const externalId = peerId.slice(peerId.indexOf(":") + 1);
+  return allowFrom.includes(peerId) || allowFrom.includes(externalId);
 }

@@ -1,6 +1,6 @@
 import { eq, desc, asc, count as drizzleCount, isNull, and, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
+import type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
 
 type AnyTable = any;
@@ -22,6 +22,7 @@ export class DrizzleSessionStore implements SessionStore {
       messageCount,
       ...(row.agent ? { agent: row.agent } : {}),
       ...(row.starred ? { starred: true } : {}),
+      ...(row.scope ? { scope: row.scope } : {}),
     };
   }
 
@@ -36,7 +37,7 @@ export class DrizzleSessionStore implements SessionStore {
     };
   }
 
-  async create(title?: string, agent?: string): Promise<string> {
+  async create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string> {
     const id = nanoid(10);
     const now = new Date().toISOString();
     await this.db.insert(this.sessions).values({
@@ -45,6 +46,7 @@ export class DrizzleSessionStore implements SessionStore {
       agent: agent ?? null,
       createdAt: now,
       updatedAt: now,
+      scope: opts?.scope ?? null,
     });
     return id;
   }
@@ -133,6 +135,7 @@ export class DrizzleSessionStore implements SessionStore {
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         starred: this.sessions.starred,
+        scope: this.sessions.scope,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -152,6 +155,7 @@ export class DrizzleSessionStore implements SessionStore {
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         starred: this.sessions.starred,
+        scope: this.sessions.scope,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
@@ -171,20 +175,22 @@ export class DrizzleSessionStore implements SessionStore {
         createdAt: this.sessions.createdAt,
         updatedAt: this.sessions.updatedAt,
         starred: this.sessions.starred,
+        scope: this.sessions.scope,
         messageCount: drizzleCount(this.messages.id),
       })
       .from(this.sessions)
       .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId));
 
-    // Filter by agent scope
+    // Group conversations are never "the latest" chat; then filter by agent:
+    // null → orchestrator sessions only, a name → that agent, undefined → any.
+    const unscoped = isNull(this.sessions.scope);
     if (agent === null) {
-      // Orchestrator sessions only (no agent)
-      query = query.where(isNull(this.sessions.agent));
+      query = query.where(and(unscoped, isNull(this.sessions.agent)));
     } else if (agent !== undefined) {
-      // Agent-specific sessions
-      query = query.where(eq(this.sessions.agent, agent));
+      query = query.where(and(unscoped, eq(this.sessions.agent, agent)));
+    } else {
+      query = query.where(unscoped);
     }
-    // agent === undefined → no filter, return most recent regardless
 
     const rows: any[] = await query
       .groupBy(this.sessions.id)

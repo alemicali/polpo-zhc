@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "../core/session-store.js";
+import type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "../core/session-store.js";
 
 /**
  * File-backed SessionStore.
@@ -36,7 +36,7 @@ export class FileSessionStore implements SessionStore {
     this.sessionsDir = join(polpoDir, "sessions");
   }
 
-  async create(title?: string, agent?: string): Promise<string> {
+  async create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string> {
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true });
     }
@@ -49,6 +49,7 @@ export class FileSessionStore implements SessionStore {
       createdAt,
     };
     if (agent) header.agent = agent;
+    if (opts?.scope) header.scope = opts.scope;
     try {
       appendFileSync(this.sessionFile(sessionId), JSON.stringify(header) + "\n", "utf-8");
     } catch { /* best-effort: non-critical */
@@ -64,6 +65,7 @@ export class FileSessionStore implements SessionStore {
         updatedAt: createdAt,
         messageCount: 0,
         ...(agent ? { agent } : {}),
+        ...(opts?.scope ? { scope: opts.scope } : {}),
       });
     }
     return sessionId;
@@ -178,6 +180,7 @@ export class FileSessionStore implements SessionStore {
           messageCount,
           ...(header.agent ? { agent: header.agent } : {}),
           ...(header.starred ? { starred: true } : {}),
+          ...(header.scope ? { scope: header.scope } : {}),
         });
       } catch { /* skip corrupt file */ }
     }
@@ -198,7 +201,8 @@ export class FileSessionStore implements SessionStore {
   }
 
   async getLatestSession(agent?: string | null): Promise<Session | undefined> {
-    const sessions = await this.listSessions();
+    // Group conversations are never "the latest" chat.
+    const sessions = (await this.listSessions()).filter(s => !s.scope);
     if (agent === undefined) {
       // No filter — return the most recent session regardless of agent
       return sessions[0];

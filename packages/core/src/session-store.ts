@@ -47,10 +47,19 @@ export interface Session {
   agent?: string;
   /** Whether the session is starred. When true, the UI surfaces it in a dedicated section above the normal list. */
   starred?: boolean;
+  /**
+   * Channel conversation the session belongs to (e.g. "telegram:group:-100…" for a Telegram group).
+   * Scoped sessions are never resumed as someone's "latest" chat: what is said there stays there.
+   */
+  scope?: string;
+}
+
+export interface CreateSessionOptions {
+  scope?: string;
 }
 
 export interface SessionStore {
-  create(title?: string, agent?: string): Promise<string>;
+  create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string>;
   addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message>;
   /** Update the content of an existing message (e.g. finalize a streaming response). */
   updateMessage(sessionId: string, messageId: string, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<boolean>;
@@ -63,7 +72,10 @@ export interface SessionStore {
   getMessagesAfter?(sessionId: string, messageId: string): Promise<Message[] | undefined>;
   listSessions(): Promise<Session[]>;
   getSession(sessionId: string): Promise<Session | undefined>;
-  /** Get the most recent session, optionally filtered by agent name. Pass `null` to match only orchestrator sessions. */
+  /**
+   * Get the most recent unscoped session, optionally filtered by agent name. Pass `null` to match
+   * only orchestrator sessions. Sessions with a scope (group conversations) are skipped.
+   */
   getLatestSession(agent?: string | null): Promise<Session | undefined>;
   /** Rename (update the title of) an existing session. */
   renameSession(sessionId: string, title: string): Promise<boolean>;

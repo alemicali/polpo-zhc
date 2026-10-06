@@ -1586,15 +1586,21 @@ export class Orchestrator extends TypedEmitter {
           sessionStore: this.sessionStore,
           channelConfig,
           approvalResolver: resolver,
-          onTyping: (chatId) => poller.sendTyping(chatId),
+          onTyping: (chatId, target) => poller.sendTyping(chatId, target),
         });
-        gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+        gateway.setPartialResponseHandler((chatId, text, target) => poller.sendPartial(chatId, text, target));
         gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
         // The main bot's menu is static; dedicated bots get theirs (agent suggestions) once agents are loaded.
         if (!channelConfig.gateway.agent) {
-          void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
+          void Promise.all([gateway.menuCommands(), gateway.groupMenuCommands()])
+            .then(([commands, groupCommands]) => poller.setMenuCommands(commands, groupCommands)).catch(() => {});
         }
+        void poller.getIdentity().then(me => {
+          if (me && me.canReadAllGroupMessages === false) {
+            this.emit("log", { level: "info", message: `[telegram] "${key}" (@${me.username}) has privacy mode on: in groups it only sees commands and replies to its messages. Turn it off in BotFather (/setprivacy) for mentions and group context.` });
+          }
+        });
         this.channelGateways.set(key, gateway);
         if (isPrimary) this.channelGateway = gateway;
 
@@ -1671,7 +1677,7 @@ export class Orchestrator extends TypedEmitter {
     try {
       const agents = await this.getAgents();
       if (!agents.some(a => a.name === bot.agent)) return false;
-      bot.poller.setMenuCommands(await bot.gateway.menuCommands());
+      bot.poller.setMenuCommands(await bot.gateway.menuCommands(), await bot.gateway.groupMenuCommands());
       await this.syncDedicatedBotProfile(key);
       return true;
     } catch (err) {

@@ -346,6 +346,7 @@ async function migrateSessionsAndMessages(ctx: Ctx): Promise<PerStoreResult> {
         createdAt,
         updatedAt,
         starred: header.starred === true ? 1 : header.starred === false ? 0 : null,
+        scope: header.scope ?? null,
       }).onConflictDoNothing();
       inserted++;
       for (const msg of lines) {

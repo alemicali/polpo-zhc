@@ -32,7 +32,7 @@ export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";
 export type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "./log-store.js";
-export type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState } from "./session-store.js";
+export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState } from "./session-store.js";
 export type { CodingSessionStore, CodingSessionState, CodingWorkspace, CodingTerminal, CodingCodeServerSession } from "./coding-session-store.js";
 export type { ApprovalStore } from "./approval-store.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "./notification-store.js";

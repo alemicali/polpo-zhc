@@ -535,6 +535,13 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
               : "/agent /polpo /new /status … (9)"}
             wrap
           />
+          <Row
+            label="Groups"
+            value={info.canReadAllGroupMessages === false
+              ? "Privacy mode on: in groups only commands and replies reach the bot. BotFather → /setprivacy → Disable, then add the bot again."
+              : "Add the bot to a group: enabled at once if you add it, or /enable"}
+            wrap
+          />
         </>
       )}
     </>

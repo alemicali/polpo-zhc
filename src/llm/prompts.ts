@@ -97,7 +97,10 @@ export function buildReachabilitySection(
       ? `dedicated to agent ${ch.gateway.agent} (every message goes to it)`
       : "talks to you; /agent NAME (or the /agent buttons) switches to an agent, /polpo comes back";
     const access = ch.gateway?.dmPolicy === "open" ? "open to anyone" : "authorized people only (pairing or invite link)";
-    return `- ${ch.type === "telegram" ? "Telegram" : "WhatsApp"} ${handle}: ${target}; ${access}. Accepts text, photos, documents, voice notes, audio and video.`;
+    const groups = ch.type === "telegram"
+      ? " Also works in Telegram groups: add the bot (enabled at once when an authorized person adds it, otherwise /enable), then everyone in the group can talk to it by mentioning it or replying to it; each group (and topic) has its own conversation."
+      : "";
+    return `- ${ch.type === "telegram" ? "Telegram" : "WhatsApp"} ${handle}: ${target}; ${access}. Accepts text, photos, documents, voice notes, audio and video.${groups}`;
   };
   const outboundPurpose: Record<string, string> = {
     webhook: "Polpo POSTs notifications to an external URL",
