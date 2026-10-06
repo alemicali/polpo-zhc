@@ -121,6 +121,7 @@ type TabGroup = {
 
 const pinnedTabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/events", icon: Radio, label: "Events" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
@@ -141,8 +142,6 @@ const secondaryGroups: TabGroup[] = [
     tabs: [
       { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { path: "/notifications", icon: Bell, label: "Notifications" },
-  { path: "/events", icon: Radio, label: "Events" },
-      { path: "/events", icon: Radio, label: "Events" },
       { path: "/schedules", icon: CalendarClock, label: "Schedules" },
     ],
   },
@@ -169,6 +168,7 @@ const secondaryTabs = secondaryGroups.flatMap(group => group.tabs);
 const defaultMorePath = secondaryTabs[0]?.path ?? "/approvals";
 const tabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/events", icon: Radio, label: "Events" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/approvals", icon: ShieldCheck, label: "Approvals" },

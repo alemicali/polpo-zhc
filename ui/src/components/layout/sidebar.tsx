@@ -49,6 +49,7 @@ const nav: NavSection[] = [
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
+      { to: "/events", icon: Radio, label: "Events" },
     ],
   },
   {
@@ -81,7 +82,6 @@ const nav: NavSection[] = [
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
-      { to: "/events", icon: Radio, label: "Events" },
       { to: "/config", icon: Settings2, label: "Configuration" },
     ],
   },

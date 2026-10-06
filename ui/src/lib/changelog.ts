@@ -40,7 +40,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- I messaggi testuali del server ora si chiamano **System**.",
       "- Nel dettaglio di un task, quello che ha fatto l'agente passo per passo è la scheda **Execution**.",
       "",
-      "La trovi nel menu, sotto System.",
+      "La trovi nel menu, subito sotto Chat.",
     ].join("\n"),
     cta: { label: "Apri Events", to: "/events" },
   },

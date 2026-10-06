@@ -45,6 +45,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/dashboard", icon: LayoutDashboard, label: "Home" },
       { to: "/chat", icon: MessageCircle, label: "Chat" },
+      { to: "/events", icon: Radio, label: "Events" },
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/agents", icon: Bot, label: "Agents" },
@@ -69,7 +70,6 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
     items: [
       { to: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { to: "/notifications", icon: Bell, label: "Notifications" },
-      { to: "/events", icon: Radio, label: "Events" },
       { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },
