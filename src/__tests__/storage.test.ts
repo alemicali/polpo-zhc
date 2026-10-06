@@ -461,3 +461,32 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     });
   });
 });
+
+describe("Files roots for mounted buckets", () => {
+  afterEach(async () => { await Promise.all(roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
+
+  it("adds mounted buckets as roots, browsable through the mount, never walked for stats or search", async () => {
+    const { fileRoutes } = await import("../server/routes/files.js");
+    const { NodeFileSystem } = await import("../adapters/node-filesystem.js");
+    const workDir = await tempDir("polpo-files-storage-");
+    const polpoDir = join(workDir, ".polpo");
+    const mount = join(polpoDir, "mounts", "docs");
+    await mkdir(join(mount, "reports"), { recursive: true });
+    await writeFile(join(mount, "reports", "q3-secret-report.txt"), "x".repeat(1000));
+    await writeFile(join(workDir, "readme.md"), "hi");
+    const app = fileRoutes(() => ({
+      polpoDir, workDir, agentWorkDir: workDir, fs: new NodeFileSystem(), emit: () => {},
+      storageRoots: async () => [{ slug: "docs", name: "Docs", path: mount, readOnly: true }],
+    }));
+    const roots = (await (await app.request("/roots")).json()).data.roots;
+    expect(roots.find((r: any) => r.id === "storage:docs")).toMatchObject({ name: "Docs", path: ".polpo/mounts/docs", absolutePath: mount, kind: "storage", readOnly: true });
+    // The mount's files are not counted in the project or .polpo stats.
+    expect(roots.find((r: any) => r.id === "polpo").totalSize).toBe(0);
+    const list = await (await app.request("/list?path=.polpo/mounts/docs/reports")).json();
+    expect(list.data.entries.map((e: any) => e.name)).toEqual(["q3-secret-report.txt"]);
+    const fromPolpo = await (await app.request("/search?root=.polpo&q=secret")).json();
+    expect(fromPolpo.data.files).toEqual([]);
+    const fromMount = await (await app.request("/search?root=.polpo/mounts/docs&q=secret")).json();
+    expect(fromMount.data.files.map((f: any) => f.name)).toEqual(["q3-secret-report.txt"]);
+  });
+});
