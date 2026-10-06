@@ -18,7 +18,7 @@ import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
 import type { LogPruneResult, LogStore } from "./log-store.js";
-import { assessTask } from "../assessment/assessor.js";
+import { sandboxedAssessFn } from "../assessment/sandboxed.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
@@ -55,6 +55,7 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
+import type { RunRecord } from "./run-store.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
 import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../llm/custom-providers.js";
 import { readProviderSecrets } from "../llm/provider-secrets.js";
@@ -237,6 +238,18 @@ export class Orchestrator extends TypedEmitter {
   private chatWorkspaces = new Map<string, { workspace: Promise<Workspace>; timer?: ReturnType<typeof setTimeout> }>();
 
   /** The storage feature registers what each agent may mount. */
+  /** Remote sandbox adapters: the workspace a finished task's checks run in (see assessment/sandboxed.ts). */
+  workspaceForAssessment?: (taskId: string, run: RunRecord) => Promise<Workspace | undefined>;
+
+  /** Assessment commands run in the sandbox the task ran in; without one, as before on this machine. */
+  private defaultAssessFn(): AssessFn {
+    return sandboxedAssessFn({
+      getRunByTaskId: (taskId) => this.runStore.getRunByTaskId(taskId),
+      workspaceForAssessment: (taskId, run) => this.workspaceForAssessment?.(taskId, run) ?? Promise.resolve(undefined),
+      hostMounts: async (agentName) => (await this.storageMountProvider?.mountsFor(agentName, "host")) ?? [],
+    });
+  }
+
   setStorageMountProvider(provider: StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
 
   /**
@@ -349,13 +362,13 @@ export class Orchestrator extends TypedEmitter {
       const workDir = workDirOrOptions ?? ".";
       this.workDir = resolve(workDir);
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = assessTask;
+      this.assessFn = this.defaultAssessFn();
       this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = opts.assessFn ?? assessTask;
+      this.assessFn = opts.assessFn ?? this.defaultAssessFn();
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
       this.injectedTaskControlStore = opts.taskControlStore;
