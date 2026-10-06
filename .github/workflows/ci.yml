@@ -37,14 +37,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
 
+  # Linux only: Polpo runs on Linux servers. macOS/Windows jobs were dropped to keep PRs fast;
+  # add the OS back to a matrix here if the CLI or the desktop app is distributed on them.
   test:
-    name: Test (Node ${{ matrix.node-version }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         node-version: [20, 22]
-        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -58,7 +59,7 @@ jobs:
       - run: pnpm run test run
       # UI component/hook tests (jsdom) live outside the root vitest include (src/**).
       - name: UI tests
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.node-version == 22
         run: pnpm --filter @polpo-ai/react build && npx vitest run --config ui/vitest.config.ts
 
   storage:
@@ -98,8 +99,10 @@ jobs:
         env:
           POLPO_TEST_DATABASE_URL: postgres://polpo:polpo@localhost:5432/polpo_test
 
+  # Verifies the npm package installs and imports: only relevant when releasing to main.
   install-check:
     name: Install Check
+    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
     runs-on: ubuntu-latest
     needs: [build]
     steps:
@@ -133,7 +136,6 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [typecheck]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
