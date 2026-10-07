@@ -11,6 +11,7 @@ import type { FileEntry, FileStat, FileSystem } from "@polpo-ai/core/filesystem"
 import { TOOL_PLACEMENT, toolPlacement } from "@polpo-ai/core/sandbox";
 import { createAllTools } from "../tools/system-tools.js";
 import { createPdfTools } from "../tools/pdf-tools.js";
+import { AGENT_BROWSER_CHECK_COMMAND } from "../tools/browser-tools.js";
 import { createExcelTools } from "../tools/excel-tools.js";
 import { createDocxTools } from "../tools/docx-tools.js";
 import { createImageTools } from "../tools/image-tools.js";
@@ -111,7 +112,7 @@ describe("file tools through the given FileSystem", () => {
       isRemote: async () => true,
       execute: async (command: string) => {
         commands.push(command);
-        if (command === "command -v agent-browser") return { stdout: "/usr/bin/agent-browser", stderr: "", exitCode: 0 };
+        if (command === AGENT_BROWSER_CHECK_COMMAND) return { stdout: "/usr/bin/agent-browser", stderr: "", exitCode: 0 };
         // the driver: node <driver> <params> <out>
         const [, , params, out] = command.split(" ").map((x) => x.replace(/^'|'$/g, ""));
         const p = JSON.parse(await fs.readFile(params!));

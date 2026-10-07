@@ -29,7 +29,7 @@ vi.mock("node:child_process", () => ({
   }),
 }));
 
-import { cleanupAgentBrowserSession, createBrowserTools, sandboxBrowserCommand, AGENT_BROWSER_INSTALL_COMMAND } from "../tools/browser-tools.js";
+import { cleanupAgentBrowserSession, createBrowserTools, sandboxBrowserCommand, AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND } from "../tools/browser-tools.js";
 import type { BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** A remote VM's shell: records commands, answers like agent-browser would. */
@@ -39,7 +39,7 @@ class FakeVmShell implements Shell {
   async isRemote() { return this.remote; }
   async execute(command: string, _opts?: ShellOptions): Promise<ShellResult> {
     this.commands.push(command);
-    if (command === "command -v agent-browser") return this.installed ? { stdout: "/usr/bin/agent-browser\n", stderr: "", exitCode: 0 } : { stdout: "", stderr: "", exitCode: 1 };
+    if (command === AGENT_BROWSER_CHECK_COMMAND) return this.installed ? { stdout: "/usr/bin/agent-browser\n", stderr: "", exitCode: 0 } : { stdout: "", stderr: "", exitCode: 1 };
     if (command === AGENT_BROWSER_INSTALL_COMMAND) {
       if (!this.canInstall) return { stdout: "", stderr: "npm: not found", exitCode: 127 };
       this.installed = true;
@@ -65,14 +65,14 @@ describe("browser in a remote sandbox", () => {
     const tools = createBrowserTools(CWD, "agent-a", ["browser_navigate", "browser_snapshot", "browser_close"], "/host/.polpo/browser-profiles/agent-a", "/vm/out", undefined, guard, { shell });
     const r = await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     expect(r.details).toEqual({ ran: expect.stringContaining("'open' 'https://example.com'") });
-    expect(shell.commands[0]).toBe("command -v agent-browser");
+    expect(shell.commands[0]).toBe(AGENT_BROWSER_CHECK_COMMAND);
     expect(shell.commands[1]).toBe(`agent-browser --session 'agent-a' --profile "$HOME"/'.polpo/browser-profiles/agent-a' 'open' 'https://example.com' --json`);
     await tool(tools, "browser_snapshot").execute("2", { interactive_only: true });
     expect(shell.commands.at(-1)).toContain("'snapshot' '-i' --json");
     await tool(tools, "browser_close").execute("3", {});
     expect(shell.commands.at(-1)).toBe("agent-browser --session 'agent-a' 'close' --json");
     // checked once per shell; nothing ran here; the host network guard is the VM's business
-    expect(shell.commands.filter((c) => c === "command -v agent-browser")).toHaveLength(1);
+    expect(shell.commands.filter((c) => c === AGENT_BROWSER_CHECK_COMMAND)).toHaveLength(1);
     expect(spawned).toEqual([]);
     expect(guard.checked).toEqual([]);
   });
@@ -101,7 +101,7 @@ describe("browser in a remote sandbox", () => {
     const shell = new FakeVmShell(false, true);
     const tools = createBrowserTools(CWD, "a", ["browser_get"], undefined, "/vm/out", undefined, undefined, { shell });
     const r = await tool(tools, "browser_get").execute("1", { what: "title" });
-    expect(shell.commands.slice(0, 2)).toEqual(["command -v agent-browser", AGENT_BROWSER_INSTALL_COMMAND]);
+    expect(shell.commands.slice(0, 2)).toEqual([AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND]);
     expect(r.details).toEqual({ ran: expect.stringContaining("'get' 'title'") });
   });
 

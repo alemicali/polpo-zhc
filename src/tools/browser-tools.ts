@@ -223,11 +223,23 @@ function parseShellBrowserResult(result: { stdout: string; stderr: string; exitC
   }
 }
 
-/** Command that installs agent-browser and its Chromium in a VM that lacks them (the runner image has both). */
+/** Libraries agent-browser's Chromium links against (Debian names; the runner image has them). */
+const CHROMIUM_LIBS = "libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 " +
+  "libxss1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 libwayland-client0 libxshmfence1 libxfixes3 libxext6 libxcursor1 " +
+  "libxi6 libxtst6 libxrender1 libxinerama1 libdbus-1-3 libatspi2.0-0 libdrm2 libx11-xcb1 fonts-liberation";
+
+/** True when agent-browser and a Chromium for it are there (its own download, or a system Chrome). */
+export const AGENT_BROWSER_CHECK_COMMAND =
+  "command -v agent-browser >/dev/null && { ls -d \"$HOME\"/.agent-browser/browsers/*/ >/dev/null 2>&1 || command -v chromium google-chrome chromium-browser >/dev/null; }";
+
+/**
+ * Installs what is missing in a VM without the runner image: the CLI (global npm, with sudo when
+ * needed), Chromium's libraries (apt, best effort) and Chromium itself, in the VM user's home.
+ */
 export const AGENT_BROWSER_INSTALL_COMMAND =
-  "(npm i -g agent-browser >/dev/null 2>&1 || sudo -n npm i -g agent-browser >/dev/null 2>&1)" +
-  " && (sudo -n env \"PATH=$PATH\" agent-browser install --with-deps >/dev/null 2>&1 || agent-browser install >/dev/null 2>&1)" +
-  " && command -v agent-browser";
+  "(command -v agent-browser >/dev/null || npm i -g agent-browser >/dev/null 2>&1 || sudo -n npm i -g agent-browser >/dev/null 2>&1)" +
+  ` && (sudo -n sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ${CHROMIUM_LIBS}' >/dev/null 2>&1 || true)` +
+  " && agent-browser install >/dev/null 2>&1 && command -v agent-browser";
 
 const browserReady = new WeakMap<Shell, Promise<string | undefined>>();
 
@@ -239,8 +251,8 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
   let ready = browserReady.get(shell);
   if (!ready) {
     ready = (async () => {
-      const found = await shell.execute("command -v agent-browser", { timeout: 20_000 }).catch(() => undefined);
-      if (found?.exitCode === 0 && found.stdout.trim()) return undefined;
+      const found = await shell.execute(AGENT_BROWSER_CHECK_COMMAND, { timeout: 20_000 }).catch(() => undefined);
+      if (found?.exitCode === 0) return undefined;
       const installed = await shell.execute(AGENT_BROWSER_INSTALL_COMMAND, { timeout: 600_000 }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String(err?.message ?? err) }));
       if (installed.exitCode === 0) return undefined;
       return "agent-browser is not installed in the sandbox and could not be installed there " +
