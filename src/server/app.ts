@@ -350,6 +350,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
             waBridge.markRead(keys)
         : undefined;
+      // The chat's sandbox provider: anything but "local" keeps secret values away from the model
+      // (vault_get → bash env_from_vault). If it cannot be resolved, fail closed.
+      const chatSandboxProvider = await o.chatSandbox(agentConfig).then((c) => c.sandbox.provider, () => "bwrap");
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
         allowedTools: agentConfig.allowedTools,
@@ -371,6 +374,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         shell: o.chatShell(agentConfig, context?.sessionId),
         // Cowork chats keep their files in the remote VM: the file tools go there too
         fs: o.chatFileSystem(agentConfig, context?.sessionId),
+        sandboxProvider: chatSandboxProvider,
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));

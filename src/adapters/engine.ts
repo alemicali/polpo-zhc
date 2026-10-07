@@ -69,7 +69,7 @@ function describeToolsForAgent(agent: AgentConfig): string {
     "- `read` — read file contents (supports offset/limit for large files)",
     "- `write` — create or overwrite files",
     "- `edit` — surgical string replacement in files (preferred over rewriting entire files)",
-    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands)",
+    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output",
     "- `glob` — find files by pattern (e.g. `**/*.ts`)",
     "- `grep` — search file contents by regex",
     "- `ls` — list directory contents",
@@ -520,12 +520,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       })
     : undefined;
   const shell = workspace ? new WorkspaceShell(workspace) : undefined;
+  // The provider commands really run in (a missing remote provider falls back to bwrap): anything
+  // but "local" keeps secret values away from the model (vault_get → env_from_vault).
+  const sandboxProvider = workspace?.provider ?? "local";
   // Remote sandboxes keep the agent's files in the VM: file tools read and write there too.
   const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell, { sandboxProvider });
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -748,7 +751,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }
@@ -773,6 +776,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           polpoDir: ctx?.polpoDir,
           shell,
           fs: remoteFs,
+          sandboxProvider,
         });
       }
       if (ctx?.polpoDir) {
@@ -953,6 +957,11 @@ export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts:
       ? ["This sandbox is a remote VM: your working directory was copied there (without node_modules, .polpo and files .gitignore excludes, such as .env), and the files you change come back when the task ends. Install what you need there; nothing outside your working directory and the output directory comes back."]
       : []),
     ...mounts.map((m) => `- storage "${m.name}": ${m.path}${m.readOnly ? " (read-only)" : ""}`),
+    "Secrets: vault_get shows an entry's type, label, key names and non-secret fields (host, port, user…), not secret values. "
+      + "To use a secret in a command, pass it with bash's env_from_vault, a map of variable names to \"service.key\" references to your vault entries, "
+      + "e.g. { \"command\": \"gh repo list\", \"env_from_vault\": { \"GH_TOKEN\": \"github.token\" } }, and use $GH_TOKEN in the command. "
+      + "The value exists only in that command's environment and appears as *** in its output. Do not write secrets to files; "
+      + "set them again with env_from_vault in every command that needs them.",
     "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
   ].join("\n");
 }
