@@ -7,7 +7,7 @@
  * Drop-in replacement pattern: swap with SandboxSpawner for cloud.
  */
 import { join, dirname } from "node:path";
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync, openSync, closeSync } from "node:fs";
 import { spawn as cpSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { Spawner, SpawnResult } from "../core/spawner.js";
@@ -56,11 +56,16 @@ export class NodeSpawner implements Spawner {
       spawnArgs = [process.execPath, runnerPath, "--config", configPath];
     }
 
+    // The runner's stderr goes to a file (crash reasons, library warnings); stdout is not used.
+    const stderrPath = join(tmpDir, `run-${config.runId}.stderr.log`);
+    let stderrFd: number | "ignore" = "ignore";
+    try { stderrFd = openSync(stderrPath, "a", 0o600); } catch { /* fall back to discarding */ }
     const child = cpSpawn(spawnArgs[0], spawnArgs.slice(1), {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", stderrFd],
       cwd: this.cwd,
     });
+    if (typeof stderrFd === "number") closeSync(stderrFd);
     child.unref();
 
     return {
