@@ -299,21 +299,29 @@ function buildNarrative(
   }
 
   if (category === "sandbox") {
-    const where = data?.scope === "task"
+    const where = data?.scope === "task" || (data?.scope === undefined && data?.taskId)
       ? `task ${String(data?.taskId ?? "").slice(0, 8)}${data?.agentName ? ` (${data.agentName})` : ""}`
       : `chat${data?.agentName ? ` with ${data.agentName}` : ""}`;
     const seconds = (ms: unknown) => `${Math.round(Number(ms ?? 0) / 100) / 10}s`;
     switch (eventName) {
       case "sandbox:created": return `Sandbox ${data?.provider} opened for ${where}, network ${data?.network}`;
-      case "sandbox:ready": return `Sandbox ${data?.provider} ready in ${seconds(data?.durationMs)}${data?.source === "pool" ? " (reused VM)" : data?.source === "warm" ? " (warm VM)" : data?.source === "created" ? " (new VM)" : ""}`;
+      case "sandbox:ready": return `Sandbox ${data?.provider} ready in ${seconds(data?.durationMs)}${data?.source === "pool" ? " (reused VM)" : data?.source === "warm" ? " (warm VM)" : data?.source === "shared" ? " (shared VM)" : data?.source === "created" ? " (new VM)" : ""}`;
       case "sandbox:suspended": return `Sandbox ${data?.provider} suspended after ${seconds(data?.idleMs)} without tools (${where})`;
       case "sandbox:resumed": return `Sandbox ${data?.provider} resumed in ${seconds(data?.durationMs)} (${where})`;
+      case "sandbox:volume": {
+        const rev = typeof data?.revision === "number" ? ` (revision ${data.revision})` : "";
+        if (data?.step === "prepared") return `Volume ${data?.name} attached${rev} (${where})`;
+        if (data?.step === "checkpointed") return `Volume ${data?.name} saved by checkpoint${rev}`;
+        if (data?.step === "finalized") return `Volume ${data?.name} written back${rev}`;
+        return data?.message ? String(data.message) : `Volume ${data?.name}: conflict`;
+      }
       case "sandbox:failed": return `Sandbox ${data?.provider} could not start for ${where}: ${data?.error}`;
       case "sandbox:destroyed": {
         const ran = typeof data?.runningMs === "number" ? `, ran ${seconds(data.runningMs)}` : "";
         if (data?.reason === "expired") return `Sandbox ${data?.provider} VM deleted: kept too long without reuse`;
         if (data?.reason === "orphan") return `Sandbox ${data?.provider} VM deleted: left behind by a crash`;
-        if (data?.outcome === "pooled") return `Sandbox ${data?.provider} suspended and kept for the next run${ran}`;
+        if (data?.outcome === "pooled") return `Sandbox ${data?.provider} kept for the next run${ran}`;
+        if (data?.outcome === "shared") return `Left the shared ${data?.provider} sandbox${ran}`;
         return `Sandbox ${data?.provider} closed after ${seconds(data?.durationMs)}${ran} (${data?.reason})`;
       }
       case "sandbox:override-denied": {

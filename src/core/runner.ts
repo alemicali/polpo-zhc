@@ -327,7 +327,7 @@ async function main(): Promise<void> {
       reasoning: config.reasoning,
       compaction: config.compaction,
       sandbox: config.sandbox,
-      mounts: config.mounts,
+      volumes: config.volumes,
       onNetworkDenied: config.notifySocket
         ? (d: { host: string; port?: number; reason: "not-allowed" | "private-address" }) => notifyNetworkDenied(config.notifySocket!, {
             runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", ...d,

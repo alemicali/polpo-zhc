@@ -25,6 +25,8 @@ export interface RemoteDriver {
   suspend(): Promise<void>;
   /** Make a suspended VM runnable again. */
   resume(): Promise<void>;
+  /** Keep a running VM alive this long from now (pooled VMs wait for reuse); optional. */
+  keepAlive?(ms: number): Promise<void>;
   destroy(): Promise<void>;
 }
 
@@ -44,6 +46,10 @@ export interface RemoteVmSummary { remoteId: string; state: string; labels: Reco
 
 export interface RemoteAdapter {
   readonly provider: RemoteSandboxProvider;
+  /** Suspending is cheap enough to do while the model thinks (E2B pause/resume ≈ 0.2–0.7 s). */
+  readonly fastSuspend: boolean;
+  /** Stop/pause a VM by id (the reaper stops idle pooled VMs). */
+  suspendById(remoteId: string): Promise<void>;
   create(spec: CreateSpec): Promise<RemoteDriver>;
   connect(remoteId: string): Promise<RemoteDriver>;
   list(labels: Record<string, string>): Promise<RemoteVmSummary[]>;
@@ -64,6 +70,8 @@ function allowHosts(sandbox: EffectiveSandbox): string[] {
 
 class DaytonaAdapter implements RemoteAdapter {
   readonly provider = "daytona" as const;
+  // container sandboxes cannot pause; stop/start (≈1 s each) is too slow between tool calls
+  readonly fastSuspend = false;
   private cached?: { fingerprint: string; client: any };
 
   /** A client for the current key (the key lives in a vault entry a person may change). */
@@ -127,6 +135,12 @@ class DaytonaAdapter implements RemoteAdapter {
     if (sandbox) await sandbox.delete();
   }
 
+  async suspendById(remoteId: string): Promise<void> {
+    const client = await this.client();
+    const sandbox = await client.get(remoteId);
+    if (sandbox.state === "started") await sandbox.pause(60).catch(() => sandbox.stop(120));
+  }
+
   private driver(sandbox: any): RemoteDriver {
     return {
       remoteId: sandbox.id,
@@ -155,6 +169,7 @@ class DaytonaAdapter implements RemoteAdapter {
 
 class E2BAdapter implements RemoteAdapter {
   readonly provider = "e2b" as const;
+  readonly fastSuspend = true;
 
   private async sdk() {
     const creds = await Promise.resolve(remoteProviderCredentials("e2b"));
@@ -167,7 +182,8 @@ class E2BAdapter implements RemoteAdapter {
   async create(spec: CreateSpec): Promise<RemoteDriver> {
     const { mod, conn, template: defaultTemplate } = await this.sdk();
     const { network } = spec.sandbox;
-    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels };
+    // autoPause: when the timeout hits, the sandbox pauses (files and memory kept) instead of dying
+    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { autoPause: true } : {}) };
     if (network.mode === "deny") opts.allowInternetAccess = false;
     if (network.mode === "allowlist") opts.network = { allowOut: allowHosts(spec.sandbox), denyOut: ["0.0.0.0/0"] };
     const template = (spec.sandbox.providerOptions.template as string | undefined) || defaultTemplate || undefined;
@@ -198,6 +214,11 @@ class E2BAdapter implements RemoteAdapter {
     await mod.Sandbox.kill(remoteId, conn as any);
   }
 
+  async suspendById(remoteId: string): Promise<void> {
+    const { mod, conn } = await this.sdk();
+    await mod.Sandbox.pause(remoteId, conn as any);
+  }
+
   private driver(mod: any, conn: Record<string, unknown>, initial: any, lifetimeMinutes: number | undefined): RemoteDriver {
     let sbx = initial;
     return {
@@ -216,6 +237,7 @@ class E2BAdapter implements RemoteAdapter {
       readFile: async (path) => new Uint8Array(await sbx.files.read(path, { format: "bytes" })),
       writeFile: async (path, data) => { await sbx.files.write(path, new Blob([new Uint8Array(data)])); },
       suspend: async () => { await sbx.pause(); },
+      keepAlive: async (ms) => { await sbx.setTimeout(ms); },
       resume: async () => {
         sbx = await mod.Sandbox.connect(sbx.sandboxId, { ...conn, ...(lifetimeMinutes ? { timeoutMs: lifetimeMinutes * 60_000 } : {}) } as any);
       },

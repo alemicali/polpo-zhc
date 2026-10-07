@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Check, ChevronRight, Cloud, FolderOpen, KeyRound, Loader2, Plug, PlugZap, Plus, Search, ShieldCheck, Trash2, Unplug, X,
+  Check, ChevronRight, Cloud, FolderOpen, HardDrive, KeyRound, Loader2, Plug, PlugZap, Plus, Search, ShieldCheck, Trash2, Unplug, Upload, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAgents } from "@polpo-ai/react";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useStorage,
+  storageEntryInput,
   type KeyStatus,
   type MountState,
   type StorageTemporarySettings,
@@ -19,12 +20,14 @@ import {
   type StorageEntry,
   type StorageEntryInput,
   type StorageGrant,
+  type StorageImportJob,
+  type StorageVolume,
 } from "@/hooks/use-storage";
 import { cn } from "@/lib/utils";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { describeVaultRef, type VaultRef } from "@/lib/vault-ref";
 
-type EntryTab = "overview" | "access";
+type EntryTab = "overview" | "access" | "volume";
 type Preset = "r2" | "aws" | "other";
 
 const PRESETS: Array<{ id: Preset; label: string; description: string }> = [
@@ -150,7 +153,7 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
           </div>
         </div>
         <Tabs value={tab} onValueChange={(value) => setTab(value as EntryTab)} className="mt-4">
-          <TabsList variant="line"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="access">Access</TabsTrigger></TabsList>
+          <TabsList variant="line"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="access">Access</TabsTrigger><TabsTrigger value="volume">Volume</TabsTrigger></TabsList>
         </Tabs>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-5">
@@ -200,6 +203,7 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
             </section>
           </div>
         )}
+        {tab === "volume" && <VolumeTab entry={entry} storage={storage} />}
         {tab === "access" && (
           <div className="mx-auto max-w-4xl">
             <div className="mb-4 flex items-start gap-3 border border-border bg-muted/20 p-3">
@@ -217,6 +221,7 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
                     <div className="truncate text-xs font-medium">{grant.agent === "*" ? "All agents" : grant.agent}</div>
                     <div className="truncate font-mono text-[10px] text-muted-foreground">{grant.prefix || "Whole bucket"}</div>
                   </div>
+                  {entry.volume?.enabled && grant.writeBack === "manual" && <span className="border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">manual write-back</span>}
                   <span className="border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">{entry.readOnly || grant.access === "read" ? "Read" : "Read & write"}</span>
                 </div>
               ))}
@@ -238,6 +243,152 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** The bucket as a sandbox volume (open Polpo): strategy, access, write-back, and moving files in. */
+function VolumeTab({ entry, storage }: { entry: StorageEntry; storage: ReturnType<typeof useStorage> }) {
+  const current: StorageVolume = entry.volume ?? { enabled: false, strategy: "mounted", access: entry.readOnly ? "read-only" : "read-write" };
+  const [draft, setDraft] = useState<StorageVolume>(current);
+  const [grantWriteBack, setGrantWriteBack] = useState<Record<string, "auto" | "manual" | undefined>>(() => Object.fromEntries(entry.grants.map((g) => [g.agent, g.writeBack])));
+  const [saving, setSaving] = useState(false);
+  const [source, setSource] = useState("");
+  const [target, setTarget] = useState("");
+  const [job, setJob] = useState<StorageImportJob | null>(null);
+  const validSlug = /^[a-z][a-z0-9_-]{1,62}$/.test(entry.slug);
+  const readWrite = draft.access === "read-write";
+  const mountedRw = draft.strategy === "mounted" && readWrite;
+  const problem = !draft.enabled ? undefined
+    : !validSlug ? "The slug must start with a letter to be used as a volume name."
+    : readWrite && entry.readOnly ? "This bucket is read-only: the volume can only be read-only."
+    : mountedRw && entry.driver === "mountpoint-s3" ? "A read-write mounted volume needs the rclone driver (Settings)."
+    : undefined;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(current) || entry.grants.some((g) => g.writeBack !== grantWriteBack[g.agent]);
+
+  useEffect(() => {
+    if (!job || job.state !== "running") return;
+    const timer = setInterval(() => {
+      void storage.importStatus(entry.id, job.id).then((next) => {
+        setJob(next);
+        if (next.state === "done") toast.success(`Copied ${next.files ?? 0} file(s) into ${entry.name}`);
+        if (next.state === "failed") toast.error(next.error ?? "The copy failed");
+      }).catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [job, entry.id, entry.name, storage]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const volume: StorageVolume | null = draft.enabled
+        ? { ...draft, ...(draft.strategy === "hydrated" && readWrite ? {} : { writeBack: undefined }) }
+        : entry.volume ? { ...draft, enabled: false } : null;
+      const grants = entry.grants.map((g) => ({ ...g, writeBack: grantWriteBack[g.agent] }));
+      await storage.updateEntry(entry.id, storageEntryInput(entry, { volume, grants }));
+      toast.success(draft.enabled ? `${entry.slug} is available as a volume` : "Volume settings saved");
+    } catch (error) { toast.error(message(error)); } finally { setSaving(false); }
+  };
+  const startImport = async () => {
+    try { setJob(await storage.importFolder(entry.id, source.trim(), target.trim() || undefined)); }
+    catch (error) { toast.error(message(error)); }
+  };
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-6">
+      <div className="flex items-start gap-3 border border-border bg-muted/20 p-3">
+        <HardDrive className="mt-0.5 h-4 w-4 text-primary" />
+        <div>
+          <h3 className="text-xs font-semibold">Volume in sandboxes</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Agents granted this bucket can attach it to their sandbox (Agent → Sandbox → Volumes) at <span className="font-mono">/volumes/{entry.slug}</span>.
+            Mounted: live files (rclone; mountpoint-s3 for read-only). Hydrated: copied in when the run starts and written back at the end
+            or on <span className="font-mono">sandbox_volume_checkpoint</span>; if someone else wrote it meanwhile, the run's version goes to <span className="font-mono">.conflicts/</span>.
+            On this machine (bubblewrap, docker) the volume is the bucket mounted here.
+          </p>
+        </div>
+      </div>
+      <section className="space-y-3">
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
+          Use this bucket as a sandbox volume
+        </label>
+        {draft.enabled && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-1">
+              <div className="text-[11px] text-muted-foreground">Strategy</div>
+              <Select value={draft.strategy} onValueChange={(v) => setDraft({ ...draft, strategy: v as StorageVolume["strategy"] })}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mounted" className="text-xs">Mounted (live)</SelectItem>
+                  <SelectItem value="hydrated" className="text-xs">Hydrated (copy in, write back)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] text-muted-foreground">Most access a run gets</div>
+              <Select value={draft.access} onValueChange={(v) => setDraft({ ...draft, access: v as StorageVolume["access"] })}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="read-write" className="text-xs" disabled={entry.readOnly}>Read & write</SelectItem>
+                  <SelectItem value="read-only" className="text-xs">Read only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {draft.strategy === "hydrated" && readWrite && (
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground">Write back</div>
+                <Select value={draft.writeBack ?? "auto"} onValueChange={(v) => setDraft({ ...draft, writeBack: v as "auto" | "manual" })}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto" className="text-xs">At the end of the run</SelectItem>
+                    <SelectItem value="manual" className="text-xs">Only on checkpoint</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
+        {draft.enabled && draft.strategy === "hydrated" && readWrite && entry.grants.some((g) => g.access === "write") && (
+          <div className="divide-y divide-border border-y border-border">
+            {entry.grants.filter((g) => g.access === "write").map((g) => (
+              <div key={g.agent} className="flex items-center gap-3 py-2 text-xs">
+                <span className="min-w-0 flex-1 truncate">{g.agent === "*" ? "All agents" : g.agent}</span>
+                <Select value={grantWriteBack[g.agent] ?? "__volume"} onValueChange={(v) => setGrantWriteBack({ ...grantWriteBack, [g.agent]: v === "__volume" ? undefined : v as "auto" | "manual" })}>
+                  <SelectTrigger className="h-7 w-48 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__volume" className="text-xs">As the volume</SelectItem>
+                    <SelectItem value="manual" className="text-xs">Only on checkpoint</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        )}
+        {problem && <div className="border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{problem}</div>}
+        {draft.enabled && !entry.temporaryCredentials && entry.keys.sandboxCredentials !== "set" && (
+          <p className="text-[10px] text-amber-500">Remote sandboxes (Daytona, E2B) attach it only with a sandbox key (Settings → Sandbox key or temporary keys).</p>
+        )}
+        <Button size="sm" className="h-8" onClick={() => void save()} disabled={!dirty || saving || !!problem}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save</Button>
+      </section>
+      <section className="space-y-3 border-t border-border pt-5">
+        <div>
+          <h3 className="text-xs font-semibold">Copy a folder into the bucket</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">Moves existing files onto the volume. The folder (relative to the project's working directory) is not changed; node_modules, .venv and .git are skipped.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Folder, e.g. dev/my-project" className="h-8 font-mono text-xs" />
+          <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Into (optional), e.g. my-project/" className="h-8 font-mono text-xs" />
+          <Button variant="outline" size="sm" className="h-8" onClick={() => void startImport()} disabled={!source.trim() || entry.readOnly || job?.state === "running"}>
+            {job?.state === "running" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Copy
+          </Button>
+        </div>
+        {job && (
+          <p className={cn("text-[11px]", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
+            {job.state === "running" ? `Copying… ${job.files ?? 0} file(s) so far` : job.state === "done" ? `Done: ${job.files ?? 0} file(s) copied` : `Failed: ${job.error ?? "unknown error"}`}
+          </p>
+        )}
+      </section>
     </div>
   );
 }
@@ -318,6 +469,8 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
       // temporary keys replace the fixed sandbox key
       sandboxCredentials: keyMode === "fixed" ? sandboxCredentials : null,
       temporaryCredentials: temporary,
+      // edited in the Volume tab: kept as it is
+      volume: entry?.volume ?? null,
     };
     try {
       const saved = entry ? await storage.updateEntry(entry.id, input) : await storage.createEntry(input);

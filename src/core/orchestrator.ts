@@ -109,7 +109,7 @@ import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
-import { normalizeSandboxSettings, type EffectiveSandbox, type StorageMountProvider, type StorageMountSpec, type Workspace } from "@polpo-ai/core/sandbox";
+import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
@@ -262,7 +262,7 @@ export class Orchestrator extends TypedEmitter {
     return sandboxedAssessFn({
       getRunByTaskId: (taskId) => this.runStore.getRunByTaskId(taskId),
       workspaceForAssessment: (taskId, run) => this.workspaceForAssessment?.(taskId, run) ?? Promise.resolve(undefined),
-      hostMounts: async (agentName) => (await this.storageMountProvider?.mountsFor(agentName, "host")) ?? [],
+      hostVolumes: async (agentName, selections) => (await this.storageMountProvider?.volumesFor(agentName, selections ?? [], "host")) ?? [],
     });
   }
 
@@ -318,8 +318,8 @@ export class Orchestrator extends TypedEmitter {
     return entry.workspace;
   }
 
-  /** The sandbox a chat with this agent (or with Polpo) runs its commands in, and the storage it sees. */
-  async chatSandbox(agent?: AgentConfig): Promise<{ sandbox: EffectiveSandbox; mounts: StorageMountSpec[] }> {
+  /** The sandbox a chat with this agent (or with Polpo) runs its commands in, and the volumes it selected. */
+  async chatSandbox(agent?: AgentConfig): Promise<{ sandbox: EffectiveSandbox; volumes: ResolvedSandboxVolume[] }> {
     const instanceSandbox = normalizeSandboxSettings(this.config?.settings?.sandbox);
     let sandbox = effectiveSandbox({
       scope: "chat",
@@ -330,22 +330,24 @@ export class Orchestrator extends TypedEmitter {
     // Polpo's own commands manage this instance: they never run in a remote VM
     if (!agent && (sandbox.provider === "daytona" || sandbox.provider === "e2b")) sandbox = { ...sandbox, provider: "bwrap" };
     const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
-    const mounts = (await this.storageMountProvider?.mountsFor(agent?.name, remote ? "remote" : "host").catch(() => [])) ?? [];
-    return { sandbox, mounts };
+    // a selected volume that is not granted is left out of the chat (tasks fail instead)
+    const volumes = sandbox.volumes?.length
+      ? (await this.storageMountProvider?.volumesFor(agent?.name, sandbox.volumes, remote ? "remote" : "host").catch((err) => {
+          this.emit("log", { level: "warn", message: `[sandbox ${agent?.name ?? "polpo"}] volumes not attached: ${(err as Error).message}` });
+          return [] as ResolvedSandboxVolume[];
+        })) ?? []
+      : [];
+    return { sandbox, volumes };
   }
 
   private async openChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
-    const { sandbox, mounts } = await this.chatSandbox(agent);
+    const { sandbox, volumes } = await this.chatSandbox(agent);
     const root = this.getAgentWorkDir();
     const agentName = agent?.name ?? "polpo";
     const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
     let workspaceId: string | undefined;
     try {
-      // Cowork chats suspend the VM while the person or the model thinks (default 60 s)
-      const chatSandbox = remote && sandbox.lifecycle && !sandbox.lifecycle.suspendAfterIdleSeconds
-        ? { ...sandbox, lifecycle: { ...sandbox.lifecycle, suspendAfterIdleSeconds: 60 } }
-        : sandbox;
-      const workspace = createWorkspace(chatSandbox, {
+      const workspace = createWorkspace(sandbox, {
         onNetworkDenied: (d) => this.reportNetworkDenied({ ...d, workspaceId, provider: sandbox.provider, scope: "chat", agentName }),
         root,
         readable: [
@@ -353,12 +355,16 @@ export class Orchestrator extends TypedEmitter {
           join(this.polpoDir, "skills"),
           join(this.polpoDir, "playbooks"),
         ],
-        mounts: remote ? mounts.filter((m) => m.remote) : mounts.filter((m) => m.hostPath),
+        volumes,
+        // Cowork: deliverables go to the chat's output directory, copied back after every command
+        ...(remote ? { writable: [chatOutputDir(this.polpoDir, agentName)] } : {}),
         // config, sessions, vault, control socket: never visible to commands
         hide: [this.polpoDir],
         ...(remote ? {
           pool: { polpoDir: this.polpoDir, owner: agentName, scope: "chat" as const, sessionKey },
           syncEachExec: true,
+          // the person reads and types between commands: suspend after a minute, not 1.5 s
+          idleSuspendMs: 60_000,
           onRemoteEvent: (e: RemoteWorkspaceEvent) => this.reportRemoteSandboxEvent(e, { workspaceId: workspaceId ?? "", provider: sandbox.provider, agentName, sessionId: sessionKey }),
         } : {}),
       });
@@ -374,6 +380,11 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** Where a Cowork chat (remote sandbox) puts the files it produces for the person. */
+  chatOutputDir(agentName: string): string {
+    return chatOutputDir(this.polpoDir, agentName);
+  }
+
   /** Remote VM lifecycle steps (from chats here, from task runners over the notification socket). */
   reportRemoteSandboxEvent(
     e: RemoteWorkspaceEvent,
@@ -385,6 +396,7 @@ export class Orchestrator extends TypedEmitter {
       case "suspended": this.emit("sandbox:suspended", { ...base, remoteId: e.remoteId, idleMs: e.idleMs }); break;
       case "resumed": this.emit("sandbox:resumed", { ...base, remoteId: e.remoteId, durationMs: e.durationMs }); break;
       case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
+      case "volume": this.emit("sandbox:volume", { ...base, step: e.step, name: e.name, revision: e.revision, message: e.message }); break;
       case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
       default: break;
     }
@@ -868,7 +880,7 @@ export class Orchestrator extends TypedEmitter {
       taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
       sandboxProviders: () => availableProviders(),
-      storageMounts: (agentName, target, options) => this.storageMountProvider?.mountsFor(agentName, target, options) ?? Promise.resolve([]),
+      sandboxVolumes: (agentName, selections, target, options) => this.storageMountProvider?.volumesFor(agentName, selections, target, options) ?? Promise.resolve([]),
       logStore: this.logStore,
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
@@ -2436,4 +2448,9 @@ export class Orchestrator extends TypedEmitter {
 
   /** Access the pure orchestration engine (for advanced use / testing). */
   getEngine(): OrchestratorEngine { return this.engine; }
+}
+
+/** Cowork chats: <polpoDir>/output/chat/<agent> (tasks use <polpoDir>/output/<task id>). */
+export function chatOutputDir(polpoDir: string, agentName: string): string {
+  return join(polpoDir, "output", "chat", agentName.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "default");
 }

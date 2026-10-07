@@ -21,6 +21,7 @@ import {
   type CreateStorageEntry,
   type StorageEntry,
 } from "@polpo-ai/core/storage-registry";
+import { SandboxVolumeGrantError } from "@polpo-ai/core/sandbox";
 import type { VaultEntry } from "@polpo-ai/core";
 import type { VaultStore } from "../core/vault-store.js";
 import { FileStorageRegistryStore } from "../stores/file-storage-registry-store.js";
@@ -317,6 +318,38 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     const listing = await runtime.listObjects("bob", "docs", {});
     expect(listing.items.map((i) => i.path).sort()).toEqual(["acme/", "other.txt"]);
     expect(await runtime.readObject("bob", "docs", "other.txt", { saveDir: polpoDir })).toMatchObject({ kind: "text", text: "other client\n" });
+  });
+
+  it("resolves selected volumes: granted entries only, narrowed by the volume, the grant and the run", async () => {
+    const { runtime, entry } = await setup([{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/" }, { id: "b", agent: "bob", access: "read" }], { prefix: "team" });
+    // not a volume yet: a grant error, as in open Polpo
+    await expect(runtime.volumesFor("alice", [{ name: "docs" }], "remote")).rejects.toBeInstanceOf(SandboxVolumeGrantError);
+    await runtime.update(entry.id, { volume: { enabled: true, strategy: "hydrated", access: "read-write" }, sandboxCredentials: SANDBOX });
+    expect(await runtime.volumesFor("alice", [{ name: "docs" }], "remote")).toEqual([{
+      name: "docs", strategy: "hydrated", mountPath: "/volumes/docs", access: "read-write", writeBack: "auto", driver: "rclone",
+      remote: { endpoint, region: "us-east-1", bucket: "bucket1", prefix: "team/clients/acme/", pathStyle: true, credentials: { accessKeyId: "sbx", secretAccessKey: "sbx-secret" } },
+    }]);
+    // a read grant makes it read-only; the run can ask for manual write-back or read-only
+    expect((await runtime.volumesFor("bob", [{ name: "docs" }], "remote"))[0]).toMatchObject({ access: "read-only", remote: { prefix: "team/" } });
+    expect((await runtime.volumesFor("bob", [{ name: "docs" }], "remote"))[0]!.writeBack).toBeUndefined();
+    expect((await runtime.volumesFor("alice", [{ name: "docs", writeBack: "manual" }], "remote"))[0]).toMatchObject({ writeBack: "manual" });
+    expect((await runtime.volumesFor("alice", [{ name: "docs", access: "read-only" }], "remote"))[0]).toMatchObject({ access: "read-only" });
+    // the grant can force manual write-back
+    await runtime.update(entry.id, { grants: [{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/", writeBack: "manual" }] });
+    expect((await runtime.volumesFor("alice", [{ name: "docs" }], "remote"))[0]).toMatchObject({ writeBack: "manual" });
+    // no grant: refused
+    await expect(runtime.volumesFor("carol", [{ name: "docs" }], "remote")).rejects.toThrow(/not granted/);
+    // host: only the bucket mounted here (not mounted in this test)
+    expect((await runtime.volumesFor("alice", [{ name: "docs" }], "host"))[0]!.hostPath).toBeUndefined();
+  });
+
+  it("validates volume settings", () => {
+    const base = { slug: "docs", bucket: "b", driver: "rclone" as const, readOnly: false, grants: [] };
+    expect(validateStorageEntry({ ...base, volume: { enabled: true, strategy: "mounted", access: "read-write" } })).toBeUndefined();
+    expect(validateStorageEntry({ ...base, readOnly: true, volume: { enabled: true, strategy: "mounted", access: "read-write" } })).toMatch(/read-only/);
+    expect(validateStorageEntry({ ...base, readOnly: true, driver: "mountpoint-s3", volume: { enabled: true, strategy: "mounted", access: "read-only" } })).toBeUndefined();
+    expect(validateStorageEntry({ ...base, slug: "1docs", volume: { enabled: true, strategy: "mounted", access: "read-only" } })).toMatch(/start with a letter/);
+    expect(validateStorageEntry({ ...base, grants: [{ id: "x", agent: "a", access: "write", writeBack: "later" as any }] })).toMatch(/write-back/);
   });
 
   it("gives remote mounts only to entries with sandbox credentials, and host mounts only when mounted", async () => {

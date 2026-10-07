@@ -794,7 +794,7 @@ const removeAgentTool: Tool = {
 
 /** An agent's sandbox, as Polpo may set it. "Without isolation" (allowLocal) stays a person's choice in the UI. */
 const agentSandboxParam = Type.Optional(Type.Object({
-  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker = a container here; daytona/e2b = a remote VM for tasks only (needs the vault entry with the provider key chosen in Settings → Sandbox; files are copied there and back). Unavailable providers fall back to bwrap." })),
+  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker = a container here; daytona/e2b = a remote VM (needs the vault entry with the provider key chosen in Settings → Sandbox; it starts with an empty working directory, deliverables come back from the output directory, persistent files live on volumes). Unavailable providers fall back to bwrap." })),
   network: Type.Optional(Type.Object({
     mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny"), Type.Literal("unrestricted")], { description: "open = every public destination through a proxy (never this machine's own services or private networks; the default); allowlist = only the listed hosts; deny = none; unrestricted = the whole network of this machine incl. local services (risky: ask the person first)" }),
     allow: Type.Optional(Type.Array(Type.String(), { description: "Hosts for allowlist mode: example.com, *.example.com (also covers example.com), optionally with a port (github.com:22)" })),
@@ -804,12 +804,17 @@ const agentSandboxParam = Type.Optional(Type.Object({
   }, { description: "Upper limits per command" })),
   allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
   chatRemote: Type.Optional(Type.Boolean({ description: "Cowork: this agent's chats run their sandbox tools on the remote provider (Daytona/E2B) instead of this machine. Tools with keys stay here." })),
+  isolation: Type.Optional(Type.Union([Type.Literal("reuse"), Type.Literal("fresh"), Type.Literal("shared")], { description: "Remote VMs. reuse = a VM this agent released (working directory reset, installed dependencies kept; the default); fresh = a clean VM for each run; shared = one VM concurrent runs use together" })),
   lifecycle: Type.Optional(Type.Object({
-    isolation: Type.Optional(Type.Union([Type.Literal("reuse"), Type.Literal("fresh")], { description: "reuse = take a suspended VM this agent used before (folder reset, dependencies kept); fresh = always new" })),
-    onRelease: Type.Optional(Type.Union([Type.Literal("pool"), Type.Literal("destroy")], { description: "pool = suspend and keep for the next run; destroy = delete at the end" })),
-    suspendAfterIdleSeconds: Type.Optional(Type.Number({ description: "Suspend the VM while no tool runs for this long (0 = never during a task)" })),
-    deleteAfterStopMinutes: Type.Optional(Type.Number({ description: "A kept VM nobody reuses is deleted after this long" })),
-  }, { description: "Remote VM lifecycle" })),
+    onRelease: Type.Optional(Type.Union([Type.Literal("pool"), Type.Literal("destroy")], { description: "pool = keep the VM for the next run (default); destroy = delete it at the end" })),
+    stopAfterIdleMinutes: Type.Optional(Type.Number({ description: "A pooled VM nobody uses is stopped after this many minutes (default 5)" })),
+    deleteAfterStopMinutes: Type.Optional(Type.Number({ description: "…and deleted this many minutes after stopping (default 30; 0 = right away)" })),
+  }, { description: "Remote VM lifecycle (open Polpo names)" })),
+  volumes: Type.Optional(Type.Array(Type.Object({
+    name: Type.String({ description: "Storage entry slug enabled as a volume and granted to the agent (Storage page)" }),
+    access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("read-write")], { description: "Narrow access (never wider than the grant)" })),
+    writeBack: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("manual")], { description: "Hydrated read-write volumes: auto = saved at the end; manual = only on sandbox_volume_checkpoint" })),
+  }), { description: "Volumes this agent's sandboxes attach at /volumes/<name> (replaces the list). Missions and tasks can only narrow it." })),
   inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
 }, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 

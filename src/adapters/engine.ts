@@ -6,7 +6,7 @@
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
 
-import type { EffectiveSandbox, StorageMountSpec } from "@polpo-ai/core/sandbox";
+import type { EffectiveSandbox, ResolvedSandboxVolume } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
 import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
@@ -21,7 +21,9 @@ import {
   type CompactionInfo,
 } from "@polpo-ai/core";
 import { effectiveCompactionSettings } from "../core/config.js";
-import { createWorkspace, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
+import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
+import { RemoteWorkspace } from "../sandbox/remote.js";
+import { createSandboxVolumeCheckpointTool } from "../tools/sandbox-volume-tools.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import { bridgeHostTools } from "../sandbox/tool-bridge.js";
 import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
@@ -494,8 +496,9 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
   }
 
-  // Storage mounted on the host: visible to file tools and commands at the same path
-  const hostMounts = (ctx?.mounts ?? []).filter((m) => m.hostPath);
+  // Volumes mounted on this machine: visible to file tools and commands at the same path
+  const remoteRun = ctx?.sandbox?.provider === "daytona" || ctx?.sandbox?.provider === "e2b";
+  const hostMounts = remoteRun ? [] : hostVolumeMounts(ctx?.volumes);
   if (hostMounts.length > 0) {
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), ...hostMounts.map((m) => m.hostPath!)];
   }
@@ -505,11 +508,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const workspace = ctx?.sandbox
     ? createWorkspace(ctx.sandbox, {
         root: cwd,
-        writable: [...(outputDir ? [outputDir] : []), ...(effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p))],
+        // remote VMs (open Polpo): an empty scratch working directory, deliverables in the
+        // output directory (copied back); here: the allowed paths as before
+        writable: [...(outputDir ? [outputDir] : []), ...(remoteRun ? [] : (effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p)))],
         // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
         readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
-        // host mounts are bound by local workspaces, remote ones are mounted inside remote VMs
-        mounts: (ctx.mounts ?? []).filter((m) => m.hostPath || m.remote),
+        // bound at their host directory by local workspaces, attached at /volumes/<name> in remote VMs
+        volumes: ctx.volumes ?? [],
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
         onRemoteEvent: (e) => {
           if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`);
@@ -527,6 +532,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
   const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell);
 
+  // Hydrated read-write volumes in a remote VM: the agent can persist them before the end
+  if (workspace instanceof RemoteWorkspace && (ctx?.volumes ?? []).some((v) => v.remote && v.strategy === "hydrated" && v.access === "read-write")) {
+    codingTools.push(createSandboxVolumeCheckpointTool((name) => workspace.checkpointVolume(name)) as any);
+  }
+
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
     codingTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
@@ -540,7 +550,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
   const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths)
     + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox,
-      isRemoteWorkspace(workspace) ? (ctx?.mounts ?? []).filter((m) => m.remote) : hostMounts);
+      isRemoteWorkspace(workspace) ? (ctx?.volumes ?? []).filter((v) => v.remote) : (ctx?.volumes ?? []).filter((v) => v.hostPath),
+      isRemoteWorkspace(workspace) ? { outputDir } : {});
   // ── Context compaction (packages/core/src/context-compactor.ts) ──
   // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
   // between calls (the prompt cache survives), and recompacts only when the window fills again.
@@ -933,7 +944,7 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
 }
 
 /** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
-export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts: StorageMountSpec[]): string {
+export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, volumes: ResolvedSandboxVolume[], opts: { outputDir?: string } = {}): string {
   if (!sandbox || sandbox.provider === "local") return "";
   const through = "through a proxy that speaks HTTP and SOCKS5: curl, git over https, npm, pip and ssh (git over ssh is preconfigured) work; programs that ignore proxy settings cannot connect";
   const network = sandbox.network.mode === "unrestricted" ? "unrestricted (the whole network of this machine)"
@@ -944,15 +955,20 @@ export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, mounts:
     sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",
   ].filter(Boolean).join(", ");
+  const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+  const describe = (v: ResolvedSandboxVolume) => {
+    const how = v.strategy === "mounted" ? "live" : v.access === "read-only" ? "a copy" : v.writeBack === "manual" ? "a copy, saved only when you call sandbox_volume_checkpoint" : "a copy, saved at the end (or earlier with sandbox_volume_checkpoint)";
+    return `- volume "${v.name}": ${v.mountPath} (${v.access}, ${remote ? how : "live"})`;
+  };
   return [
     "",
     "",
     "## Sandbox",
-    `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${mounts.length ? " and the storage mounts below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
-    ...(sandbox.provider === "daytona" || sandbox.provider === "e2b"
-      ? ["This sandbox is a remote VM: your working directory was copied there (without node_modules, .polpo and files .gitignore excludes, such as .env), and the files you change come back when the task ends. Install what you need there; nothing outside your working directory and the output directory comes back."]
+    `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${volumes.length ? " and the volumes below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
+    ...(remote
+      ? [`This sandbox is a remote VM. Your working directory there starts empty and is scratch space: it is not copied back. Put what you deliver in ${opts.outputDir ?? "your output directory"} — it comes back here. Files that must persist across runs live on volumes. Install what you need in the VM.`]
       : []),
-    ...mounts.map((m) => `- storage "${m.name}": ${m.path}${m.readOnly ? " (read-only)" : ""}`),
+    ...(volumes.length ? ["Volumes:", ...volumes.map(describe)] : []),
     "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
   ].join("\n");
 }

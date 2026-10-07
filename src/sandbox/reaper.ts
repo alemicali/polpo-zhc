@@ -28,6 +28,7 @@ const WARM_MAX_AGE_MINUTES = 12 * 60;
 export interface ReaperEvents {
   onDeleted?: (entry: { remoteId: string; provider: RemoteSandboxProvider; reason: "expired" | "orphan"; owner?: string }) => void;
   onWarmCreated?: (entry: { remoteId: string; provider: RemoteSandboxProvider }) => void;
+  onStopped?: (entry: { remoteId: string; provider: RemoteSandboxProvider; owner?: string }) => void;
   onError?: (message: string) => void;
 }
 
@@ -98,23 +99,42 @@ export class SandboxReaper {
     }
   }
 
-  /** Delete expired idle/warm VMs and those leased by dead processes on this host. */
+  /**
+   * Idle VMs (and shared ones nobody uses): stop them at stopAt, delete them deleteAfterStopMinutes
+   * after stopping. VMs leased by dead processes on this host are orphans: deleted. Shared VMs
+   * lose holders whose process died.
+   */
   async expire(): Promise<void> {
     const alive = this.opts.isAlive ?? processAlive;
+    const localHost = process.env.HOSTNAME ?? "";
     const now = this.now();
-    const doomed = await this.pool.update((entries) => {
-      const out: Array<PoolEntry & { reason: "expired" | "orphan" }> = [];
+    const { doomed, toStop } = await this.pool.update((entries) => {
+      const doomed: Array<PoolEntry & { reason: "expired" | "orphan" }> = [];
+      const toStop: PoolEntry[] = [];
       for (let i = entries.length - 1; i >= 0; i--) {
         const e = entries[i]!;
-        const expired = (e.state === "idle" || e.state === "warm") && !!e.deleteAt && Date.parse(e.deleteAt) <= now;
-        const orphan = e.state === "leased" && !!e.pid && (!e.host || e.host === (process.env.HOSTNAME ?? "")) && !alive(e.pid);
-        if (expired || orphan) {
-          out.push({ ...e, reason: expired ? "expired" : "orphan" });
-          entries.splice(i, 1);
+        if (e.state === "leased") {
+          if (e.pid && (!e.host || e.host === localHost) && !alive(e.pid)) { doomed.push({ ...e, reason: "orphan" }); entries.splice(i, 1); }
+          continue;
+        }
+        if (e.state === "shared" && e.holders?.length) {
+          e.holders = e.holders.filter((h) => !((!h.host || h.host === localHost) && !alive(h.pid)));
+          if (e.holders.length) continue;
+          Object.assign(e, { idleSince: new Date(now).toISOString(), stopAt: new Date(now + DEFAULT_LIFECYCLE.stopAfterIdleMinutes * 60_000).toISOString(), deleteAfterStopMinutes: e.deleteAfterStopMinutes ?? DEFAULT_LIFECYCLE.deleteAfterStopMinutes });
+        }
+        if (e.deleteAt && Date.parse(e.deleteAt) <= now) { doomed.push({ ...e, reason: "expired" }); entries.splice(i, 1); continue; }
+        if (!e.stoppedAt && e.stopAt && Date.parse(e.stopAt) <= now) {
+          toStop.push({ ...e });
+          e.stoppedAt = new Date(now).toISOString();
+          e.deleteAt = new Date(now + (e.deleteAfterStopMinutes ?? DEFAULT_LIFECYCLE.deleteAfterStopMinutes) * 60_000).toISOString();
         }
       }
-      return out;
+      return { doomed, toStop };
     });
+    for (const e of toStop) {
+      await this.adapter(e.provider).suspendById(e.remoteId).catch((err) => this.opts.onError?.(`Could not stop ${e.provider} VM ${e.remoteId}: ${(err as Error).message}`));
+      this.opts.onStopped?.({ remoteId: e.remoteId, provider: e.provider, owner: e.owner || undefined });
+    }
     for (const e of doomed) {
       await this.adapter(e.provider).remove(e.remoteId).catch((err) => this.opts.onError?.(`Could not delete ${e.provider} VM ${e.remoteId}: ${(err as Error).message}`));
       this.opts.onDeleted?.({ remoteId: e.remoteId, provider: e.provider, reason: e.reason, owner: e.owner || undefined });

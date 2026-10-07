@@ -32,6 +32,7 @@ export const POLPO_EVENT_NAMES = [
   "orchestrator:stopping", "orchestrator:stopped", "playbook:changed", "playbook:run",
   "context:compacted", "sandbox:created", "sandbox:ready",
   "sandbox:suspended",
+  "sandbox:volume",
   "sandbox:resumed", "sandbox:override-denied", "sandbox:network-denied",
   "sandbox:failed", "sandbox:destroyed", "storage:changed", "log",
 ] as const;

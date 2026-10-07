@@ -1,6 +1,6 @@
 /**
  * Assessment commands (test and script expectations, metrics) run in the sandbox the task ran
- * in: same working directory, output directory, hidden .polpo and storage mounts. A task that
+ * in: same working directory, output directory, hidden .polpo and volumes. A task that
  * ran on this machine without a sandbox ("local", or none resolved) is assessed as before.
  */
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import type { RunnerConfig, Task } from "../core/types.js";
 import type { RunRecord } from "../core/run-store.js";
 import type { Workspace } from "@polpo-ai/core/sandbox";
 import type { AssessFn } from "../core/orchestrator-context.js";
-import { createWorkspace, WorkspaceShell } from "../sandbox/manager.js";
+import { createWorkspace, hostVolumeMounts, WorkspaceShell } from "../sandbox/manager.js";
 import { assessTask } from "./assessor.js";
 
 export interface SandboxedAssessmentOptions {
@@ -18,8 +18,8 @@ export interface SandboxedAssessmentOptions {
    * the same files. When it returns nothing, commands run in a bubblewrap jail on this host.
    */
   workspaceForAssessment?: (taskId: string, run: RunRecord) => Promise<Workspace | undefined>;
-  /** Host storage mounts, for the bwrap fallback of a remote sandbox. */
-  hostMounts?: (agentName: string) => Promise<NonNullable<RunnerConfig["mounts"]>>;
+  /** The run's volumes as mounted on this machine, for the bwrap fallback of a remote sandbox. */
+  hostVolumes?: (agentName: string, selections: NonNullable<RunnerConfig["sandbox"]>["volumes"]) => Promise<NonNullable<RunnerConfig["volumes"]>>;
 }
 
 /** Open the workspace a finished run's checks should run in, or undefined for "as today". */
@@ -34,14 +34,16 @@ export async function openAssessmentWorkspace(opts: SandboxedAssessmentOptions, 
     const hooked = await opts.workspaceForAssessment?.(task.id, run);
     if (hooked) return hooked;
   }
-  const mounts = remote ? await opts.hostMounts?.(config.agent.name).catch(() => []) ?? [] : config.mounts ?? [];
-  const hostMounts = mounts.filter((m) => m.hostPath);
+  const volumes = remote
+    ? sandbox.volumes?.length ? await opts.hostVolumes?.(config.agent.name, sandbox.volumes).catch(() => []) ?? [] : []
+    : config.volumes ?? [];
+  const hostMounts = hostVolumeMounts(volumes);
   const allowed = config.agent.allowedPaths ?? [];
   return createWorkspace(sandbox, {
     root: config.cwd,
     writable: [...(config.outputDir ? [config.outputDir] : []), ...allowed.filter((p) => !hostMounts.some((m) => m.hostPath === p))],
     readable: [join(config.polpoDir, "skills"), join(config.polpoDir, "playbooks")],
-    mounts: hostMounts,
+    volumes,
     hide: [config.polpoDir],
   });
 }

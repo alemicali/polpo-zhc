@@ -292,9 +292,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         const entries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
         mailboxes = resolveAgentVault(entries).listMailboxes();
       } catch { /* ignore — keep prompt without mailboxes section */ }
-      const { sandbox, mounts } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, mounts: [] }));
+      const { sandbox, volumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] }));
+      const remote = sandbox?.provider === "daytona" || sandbox?.provider === "e2b";
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
-        + sandboxPromptNote(sandbox, mounts.filter((m) => m.hostPath));
+        + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
+          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
@@ -393,6 +395,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emit: (payload) => o.emit("storage:changed", payload),
         emitFileChanged: (payload) => o.emit("file:changed", payload),
       }));
+      // Cowork chats with hydrated read-write volumes: persist them on demand
+      {
+        const { sandbox: chatSbx, volumes: chatVolumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] as any[] }));
+        if ((chatSbx?.provider === "daytona" || chatSbx?.provider === "e2b") && chatVolumes.some((v: any) => v.remote && v.strategy === "hydrated" && v.access === "read-write")) {
+          const { createSandboxVolumeCheckpointTool } = await import("../tools/sandbox-volume-tools.js");
+          tools.push(createSandboxVolumeCheckpointTool(async (name) => {
+            const ws = await o.chatRemoteWorkspace(agentConfig, context?.sessionId);
+            if (!ws || !("checkpointVolume" in ws)) throw new Error("This chat has no remote sandbox with volumes");
+            await (ws as any).checkpointVolume(name);
+          }));
+        }
+      }
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
@@ -860,7 +874,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
   }));
   authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
-  authed.route("/storage", storageRoutes(activeStorage));
+  authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({
