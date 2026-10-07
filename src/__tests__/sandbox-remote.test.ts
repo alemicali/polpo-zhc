@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RemoteWorkspace, type RemoteDriver } from "../sandbox/remote.js";
+import type { RemoteAdapter, RemoteVmSummary } from "../sandbox/remote-adapters.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import {
   configureRemoteProviders, configuredRemoteProviders, remoteProviderCredentials, remoteProviderStatus,
@@ -14,10 +15,14 @@ const sandbox = { provider: "e2b" as const, network: { mode: "open" as const }, 
 
 /** A "VM" that is a directory on this machine: commands run with bash, paths are prefixed. */
 class DirDriver implements RemoteDriver {
-  readonly remoteId = "fake-vm";
   destroyed = false;
+  suspended = false;
+  suspends = 0;
+  resumes = 0;
   backTarball?: Uint8Array;
-  constructor(readonly vmRoot: string) {}
+  constructor(readonly vmRoot: string, readonly remoteId = "fake-vm") {}
+  async suspend() { this.suspended = true; this.suspends++; }
+  async resume() { this.suspended = false; this.resumes++; }
   private p(path: string) { return join(this.vmRoot, path); }
   async exec(command: string, opts: { cwd?: string; env?: Record<string, string> }) {
     // run inside the fake VM: rewrite absolute paths of the test's tmp dir to the VM's copy
@@ -40,12 +45,16 @@ class DirDriver implements RemoteDriver {
   async destroy() { this.destroyed = true; }
 }
 
-class FakeRemote extends RemoteWorkspace {
-  readonly provider = "e2b" as const;
-  constructor(opts: ConstructorParameters<typeof RemoteWorkspace>[0], readonly fake: DirDriver) { super(opts); }
-  protected async createDriver() { return this.fake; }
+/** An adapter that always hands out the same driver. */
+function singleAdapter(driver: DirDriver): RemoteAdapter {
+  return {
+    provider: "e2b",
+    create: async () => driver,
+    connect: async () => { await driver.resume(); return driver; },
+    list: async () => [],
+    remove: async () => { driver.destroyed = true; },
+  };
 }
-
 const dirs: string[] = [];
 const tmp = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix)); dirs.push(d); return d; };
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -62,7 +71,7 @@ describe("remote workspace", () => {
     execFileSync("git", ["init", "-q"], { cwd: root }); // --exclude-vcs-ignores reads .gitignore in a repo
     const driver = new DirDriver(vm);
     const warnings: string[] = [];
-    const ws = new FakeRemote({ root, sandbox, onEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); } }, driver);
+    const ws = new RemoteWorkspace("e2b", { root, sandbox, adapter: singleAdapter(driver), onEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); } });
 
     const r = await ws.exec("ls -a");
     expect(r.stdout).toContain("keep.txt");
@@ -83,7 +92,7 @@ describe("remote workspace", () => {
   test("the file tools' FileSystem goes through the workspace", async () => {
     const root = tmp("polpo-remote-root-");
     const vm = tmp("polpo-remote-vm-");
-    const ws = new FakeRemote({ root, sandbox }, new DirDriver(vm));
+    const ws = new RemoteWorkspace("e2b", { root, sandbox, adapter: singleAdapter(new DirDriver(vm)) });
     const fs = new WorkspaceFileSystem(ws);
     await fs.writeFile(join(root, "a", "b.txt"), "hello");
     expect(await fs.readFile(join(root, "a", "b.txt"))).toBe("hello");

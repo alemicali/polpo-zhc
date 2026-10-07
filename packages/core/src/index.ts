@@ -189,12 +189,12 @@ export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
 
 // ── Sandboxes and storage mounts ────────────────────────────────────────
 export {
-  resolveSandbox, normalizeSandboxSettings, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, REMOTE_SANDBOX_PROVIDERS, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
 } from "./sandbox.js";
 export type {
   Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProvider, SandboxNetwork,
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
-  StorageMountSpec, StorageMountProvider,
+  StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider,
 } from "./sandbox.js";
 export {
   STORAGE_SLUG_PATTERN, 

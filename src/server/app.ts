@@ -296,7 +296,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
         + sandboxPromptNote(sandbox, mounts.filter((m) => m.hostPath));
     },
-    resolveAgentTools: async (agentConfig: any) => {
+    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
@@ -368,7 +368,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         whatsappMarkRead,
         polpoDir,
         // commands (bash, grep, glob) run in this agent's chat sandbox
-        shell: o.chatShell(agentConfig),
+        shell: o.chatShell(agentConfig, context?.sessionId),
+        // Cowork chats keep their files in the remote VM: the file tools go there too
+        fs: o.chatFileSystem(agentConfig, context?.sessionId),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -423,6 +425,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (allowsRenderWidget && !existingToolNames.has("render_widget")) {
         tools.push(renderWidgetTool);
       }
+      // Cowork chats: tools that run here but use the agent's files follow the VM's files
+      const { bridgeHostTools } = await import("../sandbox/tool-bridge.js");
+      const bridged = bridgeHostTools(tools, {
+        cwd: o.getAgentWorkDir(), roots: [o.getAgentWorkDir()],
+        workspace: () => o.chatRemoteWorkspace(agentConfig, context?.sessionId),
+      });
+      tools.splice(0, tools.length, ...bridged);
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
         if (name === "render_widget") {

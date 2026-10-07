@@ -39,8 +39,12 @@ export interface WorkspaceRequest {
   mounts?: StorageMountSpec[];
   hide?: string[];
   onNetworkDenied?: (denial: NetworkDenial) => void;
-  /** Remote sandboxes: VM ready, files synced, problems. */
+  /** Remote sandboxes: VM ready, files synced, suspended, released, problems. */
   onRemoteEvent?: RemoteWorkspaceOptions["onEvent"];
+  /** Remote sandboxes: the project's pool (reuse, warm, orphan recovery). */
+  pool?: RemoteWorkspaceOptions["pool"];
+  /** Remote sandboxes in chats: bring changed files back after every command. */
+  syncEachExec?: boolean;
 }
 
 /** Resolve the cascade for a request on this machine. */
@@ -59,6 +63,7 @@ export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRe
   if ((sandbox.provider === "daytona" || sandbox.provider === "e2b") && configuredRemoteProviders().includes(sandbox.provider)) {
     return createRemoteWorkspace(sandbox.provider, {
       root: req.root, writable: req.writable, readable: req.readable, mounts: req.mounts, sandbox, onEvent: req.onRemoteEvent,
+      pool: req.pool, syncEachExec: req.syncEachExec,
     });
   }
   // a provider that is not available here: never fall back to weaker isolation silently

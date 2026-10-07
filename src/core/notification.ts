@@ -36,11 +36,22 @@ export interface NetworkDeniedMessage {
   reason: "not-allowed" | "private-address";
 }
 
+/** A remote sandbox lifecycle step inside a task run (ready, suspended, resumed, released). */
+export interface SandboxEventMessage {
+  type: "sandbox_event";
+  runId: string;
+  taskId: string;
+  agentName?: string;
+  provider: string;
+  event: Record<string, unknown> & { kind: string };
+}
+
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
   polpoDir: string,
   onRunComplete: (runId: string, taskId: string, status: string) => void,
   onNetworkDenied?: (msg: NetworkDeniedMessage) => void,
+  onSandboxEvent?: (msg: SandboxEventMessage) => void,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -55,11 +66,13 @@ export function startNotificationServer(
     conn.on("data", (chunk) => { buffer += chunk; });
     conn.on("end", () => {
       try {
-        const msg = JSON.parse(buffer.trim()) as RunCompleteMessage | NetworkDeniedMessage;
+        const msg = JSON.parse(buffer.trim()) as RunCompleteMessage | NetworkDeniedMessage | SandboxEventMessage;
         if (msg.type === "run_complete") {
           onRunComplete(msg.runId, msg.taskId, msg.status);
         } else if (msg.type === "network_denied") {
           onNetworkDenied?.(msg);
+        } else if (msg.type === "sandbox_event") {
+          onSandboxEvent?.(msg);
         }
       } catch { /* malformed message — ignore */ }
     });
@@ -94,6 +107,15 @@ export function notifyNetworkDenied(socketPath: string, msg: Omit<NetworkDeniedM
     const conn = createConnection(socketPath);
     conn.on("error", () => { /* orchestrator not listening — the refusal is still logged by the run */ });
     conn.end(JSON.stringify({ type: "network_denied", ...msg } satisfies NetworkDeniedMessage) + "\n");
+  } catch { /* ignore */ }
+}
+
+/** Client-side: runner reports a remote sandbox lifecycle step (fire-and-forget). */
+export function notifySandboxEvent(socketPath: string, msg: Omit<SandboxEventMessage, "type">): void {
+  try {
+    const conn = createConnection(socketPath);
+    conn.on("error", () => { /* orchestrator not listening */ });
+    conn.end(JSON.stringify({ type: "sandbox_event", ...msg } satisfies SandboxEventMessage) + "\n");
   } catch { /* ignore */ }
 }
 

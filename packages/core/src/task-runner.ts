@@ -46,7 +46,8 @@ export class TaskRunner {
     const terminalRuns = await this.ctx.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
       const runSandbox = (run.config as { sandbox?: { provider?: string } } | undefined)?.sandbox;
-      if (runSandbox?.provider) {
+      // remote VMs report their own release (pooled or deleted, running time) from the runner
+      if (runSandbox?.provider && runSandbox.provider !== "daytona" && runSandbox.provider !== "e2b") {
         this.ctx.emitter.emit("sandbox:destroyed", {
           workspaceId: run.id, provider: runSandbox.provider,
           durationMs: Math.max(0, Date.now() - Date.parse(run.startedAt)), reason: run.status === "failed" ? "error" : "done",

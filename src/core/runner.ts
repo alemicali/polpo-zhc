@@ -20,7 +20,7 @@ import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
-import { notifyRunComplete, notifyNetworkDenied } from "./notification.js";
+import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -324,6 +324,12 @@ async function main(): Promise<void> {
             runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", ...d,
           })
         : undefined,
+      onSandboxEvent: config.notifySocket
+        ? (event: unknown) => notifySandboxEvent(config.notifySocket!, {
+            runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", event: event as any,
+          })
+        : undefined,
+      runId: config.runId,
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,

@@ -305,9 +305,17 @@ function buildNarrative(
     const seconds = (ms: unknown) => `${Math.round(Number(ms ?? 0) / 100) / 10}s`;
     switch (eventName) {
       case "sandbox:created": return `Sandbox ${data?.provider} opened for ${where}, network ${data?.network}`;
-      case "sandbox:ready": return `Sandbox ${data?.provider} ready in ${seconds(data?.durationMs)}`;
+      case "sandbox:ready": return `Sandbox ${data?.provider} ready in ${seconds(data?.durationMs)}${data?.source === "pool" ? " (reused VM)" : data?.source === "warm" ? " (warm VM)" : data?.source === "created" ? " (new VM)" : ""}`;
+      case "sandbox:suspended": return `Sandbox ${data?.provider} suspended after ${seconds(data?.idleMs)} without tools (${where})`;
+      case "sandbox:resumed": return `Sandbox ${data?.provider} resumed in ${seconds(data?.durationMs)} (${where})`;
       case "sandbox:failed": return `Sandbox ${data?.provider} could not start for ${where}: ${data?.error}`;
-      case "sandbox:destroyed": return `Sandbox ${data?.provider} closed after ${seconds(data?.durationMs)} (${data?.reason})`;
+      case "sandbox:destroyed": {
+        const ran = typeof data?.runningMs === "number" ? `, ran ${seconds(data.runningMs)}` : "";
+        if (data?.reason === "expired") return `Sandbox ${data?.provider} VM deleted: kept too long without reuse`;
+        if (data?.reason === "orphan") return `Sandbox ${data?.provider} VM deleted: left behind by a crash`;
+        if (data?.outcome === "pooled") return `Sandbox ${data?.provider} suspended and kept for the next run${ran}`;
+        return `Sandbox ${data?.provider} closed after ${seconds(data?.durationMs)}${ran} (${data?.reason})`;
+      }
       case "sandbox:override-denied": {
         const show = (v: unknown) => typeof v === "object" && v !== null ? ((v as { mode?: string }).mode ?? JSON.stringify(v)) : String(v);
         return `${data?.level === "mission" ? "Mission" : "Task"} asked for ${data?.field} ${show(data?.requested)} for ${where}; kept ${show(data?.applied)}`;

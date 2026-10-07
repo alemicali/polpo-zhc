@@ -134,6 +134,8 @@ import { useFilePreview } from "@/components/shared/use-file-preview";
 import { mimeFromPath } from "@/components/shared/file-preview-utils";
 import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
+import { ChatSandboxContext, type ChatSandboxInfo } from "@/components/sandbox/sandbox-context";
+import { sandboxApi } from "@/lib/sandbox-api";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { Queue, PendingSteers } from "@/components/ai-elements/queue";
 import { BackgroundWaits } from "@/components/ai-elements/background-waits";
@@ -3215,8 +3217,24 @@ function ForkBreadcrumb({ forkId, parentId, parentTitle }: { forkId: string; par
   );
 }
 
+/** The sandbox this chat's tools run in (for the badges on tool calls); null until known. */
+function useChatSandboxInfo(agentName: string | null): ChatSandboxInfo | null {
+  const [info, setInfo] = useState<ChatSandboxInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    sandboxApi.overview().then((o) => {
+      if (!alive) return;
+      const provider = agentName ? o.agents.find((a) => a.name === agentName)?.chat.provider : o.polpo.provider;
+      setInfo(provider ? { provider } : null);
+    }).catch(() => { if (alive) setInfo(null); });
+    return () => { alive = false; };
+  }, [agentName]);
+  return info;
+}
+
 function ChatMessages() {
   const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
+  const chatSandbox = useChatSandboxInfo(selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null);
   const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign, forkSession, loadSession } = useChatActions();
 
   // Branches: this session's origin (breadcrumb) and the branches started from its messages.
@@ -3302,6 +3320,7 @@ function ChatMessages() {
   const virtuosoAllComponents = useMemo(() => ({ ...virtuosoComponents, Footer: ChatWorkingFooter }), [virtuosoComponents]);
 
   return (
+    <ChatSandboxContext.Provider value={chatSandbox}>
     <div className="relative flex-1 min-h-0">
       {messagesLoading ? (
         <div className="flex-1 overflow-hidden">
@@ -3621,6 +3640,7 @@ function ChatMessages() {
       {/* File preview dialog — for inline reopen clicks */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </div>
+    </ChatSandboxContext.Provider>
   );
 }
 

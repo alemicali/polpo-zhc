@@ -456,7 +456,7 @@ export interface CompletionRouteDeps {
   /** Build agent system prompt for conversational mode. */
   buildAgentPrompt: (agentConfig: any) => string | Promise<string>;
   /** Create tools + executor for the agent. Return empty arrays for chat-only. */
-  resolveAgentTools: (agentConfig: any) => Promise<{
+  resolveAgentTools: (agentConfig: any, context?: { sessionId: () => string | undefined }) => Promise<{
     tools: any[];
     executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive?: (name: string) => boolean;
@@ -652,7 +652,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       streamOpts = resolved.streamOpts;
 
       // Resolve tools via dep
-      const { tools, executor, isInteractive } = await deps.resolveAgentTools(agentConfig);
+      // the conversation is known once the session is resolved below; sandboxes open lazily
+      const { tools, executor, isInteractive } = await deps.resolveAgentTools(agentConfig, { sessionId: () => lease.sessionId ?? undefined });
       effectiveTools = tools;
       effectiveToolExecutor = executor;
       isInteractiveFn = isInteractive;
