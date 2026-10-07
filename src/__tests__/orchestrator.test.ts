@@ -437,7 +437,7 @@ describe("Orchestrator", () => {
       await runStore.upsertRun(createTestRunRecord({
         id: "run-sync",
         taskId: task.id,
-        pid: 42,
+        pid: process.pid, // a live process: dead runners are failed by the health check
         agentName: "agent-1",
         status: "running",
       }));
@@ -446,7 +446,7 @@ describe("Orchestrator", () => {
 
       const state = await store.getState();
       expect(state.processes).toHaveLength(1);
-      expect(state.processes[0].pid).toBe(42);
+      expect(state.processes[0].pid).toBe(process.pid);
       expect(state.processes[0].agentName).toBe("agent-1");
       expect(state.processes[0].alive).toBe(true);
     });
