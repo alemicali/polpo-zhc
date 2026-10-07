@@ -63,3 +63,26 @@ export class WorkspaceFileSystem implements FileSystem {
     if (r.exitCode !== 0) throw new Error(r.stderr.trim() || `mv failed (${r.exitCode})`);
   }
 }
+
+/**
+ * Reads look in the VM first, then on this machine (where the run's output directory is copied
+ * back); writes and listings stay on this machine. For host actions that act on files a remote
+ * run referred to (an email confirmed after its preview).
+ */
+export function remoteThenLocal(remote: FileSystem, local: FileSystem): FileSystem {
+  const inVm = (path: string) => remote.exists(path).catch(() => false);
+  const either = <K extends "readFile" | "readFileBuffer" | "stat">(name: K) =>
+    (async (path: string) => ((await inVm(path)) ? (remote[name] as any)(path) : (local[name] as any)(path))) as NonNullable<FileSystem[K]>;
+  return {
+    exists: async (path) => (await inVm(path)) || local.exists(path),
+    readFile: either("readFile"),
+    readFileBuffer: either("readFileBuffer"),
+    stat: either("stat"),
+    readdir: (path) => local.readdir(path),
+    mkdir: (path) => local.mkdir(path),
+    remove: (path) => local.remove(path),
+    rename: (from, to) => local.rename(from, to),
+    writeFile: (path, content) => local.writeFile(path, content),
+    ...(local.writeFileBuffer ? { writeFileBuffer: (path: string, data: Uint8Array) => local.writeFileBuffer!(path, data) } : {}),
+  };
+}

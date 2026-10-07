@@ -43,6 +43,8 @@ const SendEmailSchema = z.object({
    *  emailAllowedDomains override are used (parity with email_send when
    *  invoked in chat mode). Omitted = global config defaults. */
   agent: z.string().optional(),
+  /** The chat session the email comes from: in a Cowork chat its attachments live in the VM. */
+  sessionId: z.string().optional(),
 });
 
 export function emailRoutes(getDeps: () => {
@@ -55,7 +57,7 @@ export function emailRoutes(getDeps: () => {
     if (!parsed.success) {
       return c.json({ ok: false, error: parsed.error.issues.map(i => i.message).join("; ") }, 400);
     }
-    const { agent, ...payload } = parsed.data;
+    const { agent, sessionId, ...payload } = parsed.data;
     const { orchestrator } = getDeps();
 
     // Resolve scope: per-agent vault + emailAllowedDomains override
@@ -63,9 +65,10 @@ export function emailRoutes(getDeps: () => {
     // back to the global setting (orchestrator chat mode).
     let vault: ReturnType<typeof resolveAgentVault> | undefined;
     let emailAllowedDomains: string[] | undefined;
+    let agentConfig: Awaited<ReturnType<Orchestrator["getAgents"]>>[number] | undefined;
     if (agent) {
       const agents = await orchestrator.getAgents();
-      const agentConfig = agents.find((a) => a.name === agent);
+      agentConfig = agents.find((a) => a.name === agent);
       if (!agentConfig) {
         return c.json({ ok: false, error: `Agent "${agent}" not found` }, 404);
       }
@@ -85,6 +88,8 @@ export function emailRoutes(getDeps: () => {
         undefined,
         vault,
         emailAllowedDomains,
+        // attachments are read where the chat's files are (its VM while open, else this machine)
+        payload.attachments?.length ? await orchestrator.chatActionFileSystem(agentConfig, sessionId) : undefined,
       );
       return c.json({ ok: true, data: { id: result.messageId, ...result } });
     } catch (err) {

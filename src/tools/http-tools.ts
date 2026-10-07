@@ -41,7 +41,7 @@ const HttpFetchSchema = Type.Object({
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 30000)" })),
 });
 
-function createHttpFetchTool(toolOutputDir: string): AgentTool<typeof HttpFetchSchema> {
+function createHttpFetchTool(toolOutputDir: string, fs?: FileSystem): AgentTool<typeof HttpFetchSchema> {
   return {
     name: "http_fetch",
     label: "HTTP Fetch",
@@ -98,7 +98,7 @@ function createHttpFetchTool(toolOutputDir: string): AgentTool<typeof HttpFetchS
         let offloaded: { path?: string; totalBytes: number; totalLines: number } | undefined;
         if (isText) {
           const text = await response.text();
-          const off = await offloadToolOutput(text, { tool: "http_fetch", dir: toolOutputDir, maxChars: MAX_RESPONSE_BYTES });
+          const off = await offloadToolOutput(text, { tool: "http_fetch", dir: toolOutputDir, maxChars: MAX_RESPONSE_BYTES, fs });
           body = off.text;
           if (off.offloaded) offloaded = { path: off.path, totalBytes: off.totalBytes, totalLines: off.totalLines };
         } else {
@@ -246,7 +246,7 @@ export function createHttpTools(
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<HttpToolName, () => AgentTool<any>> = {
-    http_fetch: () => createHttpFetchTool(toolOutputDir),
+    http_fetch: () => createHttpFetchTool(toolOutputDir, fs),
     http_download: () => createHttpDownloadTool(cwd, sandbox, toolFs(fs)),
   };
 

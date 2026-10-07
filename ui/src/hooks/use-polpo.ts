@@ -2293,6 +2293,8 @@ export function useChat() {
             // right vault + per-agent emailAllowedDomains override
             // (parity with email_send when run inside the agent loop).
             agent: selectedAgentRef.current ?? undefined,
+            // a Cowork chat's attachments live in its VM: the server reads them there
+            sessionId: activeSessionKeyRef.current ?? undefined,
           }) as { id?: string };
           const recipient = Array.isArray(ep.to) ? ep.to.join(", ") : ep.to;
           await appendUserAndStream(

@@ -183,6 +183,8 @@ const BashSchema = Type.Object({
 export interface BashToolOptions {
   /** The agent's vault (own + shared entries): the only source env_from_vault can read. */
   vault?: ResolvedVault;
+  /** Where large outputs are saved (the run's FileSystem: the VM in a remote sandbox). */
+  fs?: FileSystem;
 }
 
 function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: BashToolOptions = {}): AgentTool<typeof BashSchema> {
@@ -217,7 +219,7 @@ function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: 
         const output = mask(result.stdout + (result.stderr ? "\n" + result.stderr : ""));
         // Above the limit: the full output goes to a private file, the model gets
         // head + tail (the tail weighs more: errors and summaries come last).
-        const off = await offloadToolOutput(output, { tool: "bash", dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3 });
+        const off = await offloadToolOutput(output, { tool: "bash", dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3, fs: opts.fs });
         return {
           content: [{ type: "text", text: `Exit code: ${result.exitCode}\n${off.text}` }],
           details: off.offloaded
@@ -300,7 +302,7 @@ const GREP_MAX_LINES = 100;
 const GREP_MAX_LINE_CHARS = 240;
 const GREP_MAX_TOTAL_CHARS = 8_000;
 
-function createGrepTool(cwd: string, sandbox: string[], shell: Shell, toolOutputDir: string): AgentTool<typeof GrepSchema> {
+function createGrepTool(cwd: string, sandbox: string[], shell: Shell, toolOutputDir: string, fs?: FileSystem): AgentTool<typeof GrepSchema> {
   return {
     name: "grep",
     label: "Search Code",
@@ -351,7 +353,7 @@ function createGrepTool(cwd: string, sandbox: string[], shell: Shell, toolOutput
         let outputPath: string | undefined;
         if (wasTruncated && !isPathAllowed(searchPath, [toolOutputDir])) {
           try {
-            outputPath = await saveToolOutput(raw + "\n", "grep", toolOutputDir);
+            outputPath = await saveToolOutput(raw + "\n", "grep", toolOutputDir, Date.now(), fs);
             text += `\n${offloadHint(outputPath)}`;
           } catch { /* keep the plain truncated result */ }
         }
@@ -491,9 +493,9 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
     read: () => createReadTool(cwd, readSandbox, _fs),
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
-    bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault }),
+    bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault, fs: _fs }),
     glob: () => createGlobTool(cwd, readSandbox, _shell),
-    grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir),
+    grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir, _fs),
     ls: () => createLsTool(cwd, readSandbox, _fs),
   };
 

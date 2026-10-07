@@ -648,7 +648,7 @@ function createEmailReadTool(fs: FileSystem, vault?: ResolvedVault, outputDir?: 
           if (headerEnd >= 0) {
             bodyText = source.slice(headerEnd + 4);
             if (bodyText.length > MAX_EMAIL_BODY_CHARS) {
-              const off = await offloadToolOutput(bodyText, { tool: "email_read", dir: toolOutputDir, maxChars: MAX_EMAIL_BODY_CHARS });
+              const off = await offloadToolOutput(bodyText, { tool: "email_read", dir: toolOutputDir, maxChars: MAX_EMAIL_BODY_CHARS, fs });
               bodyText = off.text;
               bodyOutputPath = off.path;
             }
