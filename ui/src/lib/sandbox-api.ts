@@ -40,20 +40,16 @@ export const DEFAULT_LIFECYCLE: Required<SandboxLifecycle> = {
 };
 
 /** Where each tool runs (same list as the server, TOOL_PLACEMENT in @polpo-ai/core/sandbox). */
-export type ToolPlacement = "sandbox" | "bridged" | "host";
-const SANDBOX_TOOLS = ["bash", "grep", "glob", "ls", "read", "write", "edit", "run_command"];
-const BRIDGED_TOOLS = ["pdf_*", "excel_*", "docx_*", "http_download", "image_generate", "video_generate", "audio_speak", "audio_transcribe",
-  "email_download_attachment", "whatsapp_send_file", "browser_screenshot", "storage_read", "storage_write", "register_outcome", "read_attachment"];
+export type ToolPlacement = "sandbox" | "host";
+const SANDBOX_TOOLS = ["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command",
+  "browser_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"];
 const matches = (pattern: string, name: string) => pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name;
 export function toolPlacement(name: string): ToolPlacement {
-  if (SANDBOX_TOOLS.some((p) => matches(p, name))) return "sandbox";
-  if (BRIDGED_TOOLS.some((p) => matches(p, name))) return "bridged";
-  return "host";
+  return SANDBOX_TOOLS.some((p) => matches(p, name)) ? "sandbox" : "host";
 }
 export const PLACEMENT_INFO: Record<ToolPlacement, { label: string; description: string }> = {
-  sandbox: { label: "In the sandbox", description: "Commands and the working files: they run where the sandbox is (bubblewrap here, or the remote VM)." },
-  bridged: { label: "Here, files bridged", description: "Run on this machine (a library or a key) but use the working files: with a remote VM, input files are fetched from it and produced files are copied into it." },
-  host: { label: "Here, keys stay here", description: "Use keys or integrations (vault, email, messaging, storage, data sources…) that never reach the sandbox." },
+  sandbox: { label: "In the sandbox", description: "Commands, the browser and the working files: they act where the sandbox is (bubblewrap here, or the remote VM, where the files they read and write live)." },
+  host: { label: "Here (keys stay here)", description: "Use keys or integrations (vault, email, messaging, storage, data sources…) that never reach the sandbox." },
 };
 
 export interface EffectiveSandbox {
