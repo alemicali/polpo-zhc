@@ -453,6 +453,11 @@ async function connectImap(vault?: ResolvedVault, overrides?: ImapConnectionOver
     auth: { user, pass: pass ?? "" },
     logger: false as any,
   });
+  // ImapFlow emits "error" when a connection drops (idle timeout, server logout, network):
+  // without a listener Node treats it as fatal and the whole agent process exits.
+  client.on?.("error", (err: Error) => {
+    process.stderr.write(`[email] IMAP connection error (${host}): ${err?.message ?? err}\n`);
+  });
   await client.connect();
   return client;
 }

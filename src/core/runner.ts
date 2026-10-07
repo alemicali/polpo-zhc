@@ -416,6 +416,29 @@ async function main(): Promise<void> {
     if (direction.mode !== "continue") await deliverDirection(direction);
   }
 
+  // Unexpected errors (an unhandled "error" event or rejection in a library) would otherwise end
+  // the process silently, leaving the run "running" until the stale check kills it. Close the
+  // run as failed with the reason instead.
+  let crashing = false;
+  const crash = async (kind: string, err: unknown) => {
+    if (crashing) return;
+    crashing = true;
+    const message = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    process.stderr.write(`[runner] ${kind}: ${message}\n`);
+    try { actLog.logEvent("error", { message: `${kind}: ${err instanceof Error ? err.message : String(err)}` }); } catch { /* best effort */ }
+    try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    try {
+      await runStore.completeRun(config.runId, "failed", {
+        exitCode: 1, stdout: "", stderr: `Runner crashed (${kind}): ${err instanceof Error ? err.message : String(err)}`, duration: 0,
+      } as any);
+      if (config.notifySocket) notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    } catch { /* best effort */ }
+    try { await runStore.close(); } catch { /* best effort */ }
+    process.exit(1);
+  };
+  process.on("uncaughtException", (err) => { void crash("uncaught exception", err); });
+  process.on("unhandledRejection", (reason) => { void crash("unhandled rejection", reason); });
+
   // SIGTERM handler: graceful kill
   let sigterm = false;
   process.on("SIGTERM", () => {

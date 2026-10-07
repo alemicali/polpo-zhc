@@ -239,6 +239,19 @@ export class TaskRunner {
 
     const activeRuns = await this.ctx.runStore.getActiveRuns();
     for (const run of activeRuns) {
+      // 0. The runner process is gone (crashed, killed by the system) but the run is still open:
+      // fail it now instead of waiting for the stale check, so retries start right away.
+      if (run.status === "running" && run.pid > 0 && !this.isProcessAlive(run.pid)) {
+        const elapsed = Date.now() - new Date(run.startedAt).getTime();
+        this.ctx.emitter.emit("log", { level: "error", message: `[${run.taskId}] Runner process ${run.pid} exited unexpectedly` });
+        await this.ctx.runStore.completeRun(run.id, "failed", {
+          exitCode: 1, stdout: "", duration: elapsed,
+          stderr: `The agent process (pid ${run.pid}) exited unexpectedly without reporting a result. It may have crashed or been killed by the system; its error output is in .polpo/tmp/run-${run.id}.stderr.log.`,
+        });
+        this.staleWarned.delete(run.taskId);
+        continue;
+      }
+
       // 1. Task timeout (hard kill)
       const task = await this.ctx.registry.getTask(run.taskId);
       const timeout = task?.maxDuration ?? defaultTimeout;
