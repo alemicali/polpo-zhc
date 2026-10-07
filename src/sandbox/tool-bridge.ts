@@ -6,7 +6,7 @@
  * sandbox (same disk) nothing happens.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { toolPlacement, type Workspace } from "@polpo-ai/core/sandbox";
@@ -69,18 +69,23 @@ export function bridgeHostTools<T extends AnyTool>(tools: T[], opts: BridgeOptio
         if (!workspace || (workspace.provider !== "daytona" && workspace.provider !== "e2b")) return execute(...callArgs);
         const params = callArgs[1];
         // in: the files the arguments point to, from the VM (when they exist there)
+        const fetched = new Set<string>();
         for (const path of pathArguments(params, opts.cwd).filter((p) => within(p, roots))) {
           const stat = await workspace.stat(path).catch(() => null);
-          if (stat?.type === "file") await workspace.download(path, path).catch((err) => opts.onWarning?.(`Could not fetch ${path} from the sandbox: ${(err as Error).message}`));
+          if (stat?.type !== "file") continue;
+          await workspace.download(path, path).then(() => fetched.add(path)).catch((err) => opts.onWarning?.(`Could not fetch ${path} from the sandbox: ${(err as Error).message}`));
         }
+        // file times move in coarse steps: a stamp in the past catches writes in the same tick
         const stampDir = mkdtempSync(join(tmpdir(), "polpo-bridge-"));
         const stamp = join(stampDir, "stamp");
         writeFileSync(stamp, "");
+        const past = new Date(Date.now() - 2000);
+        utimesSync(stamp, past, past);
         try {
           return await execute(...callArgs);
         } finally {
           // out: what the tool created or changed here, into the VM
-          for (const path of changedSince(stamp, roots)) {
+          for (const path of changedSince(stamp, roots).filter((p) => !fetched.has(p))) {
             await workspace.upload(path, path).catch((err) => opts.onWarning?.(`Could not copy ${path} into the sandbox: ${(err as Error).message}`));
           }
           rmSync(stampDir, { recursive: true, force: true });
