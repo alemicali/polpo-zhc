@@ -19,6 +19,10 @@
  * Retention: files older than 7 days in the same directory are deleted
  * opportunistically every time a new file is written. Only files that match
  * our own naming scheme are ever deleted.
+ *
+ * Where the file goes (open Polpo's rule: a tool's file I/O goes through the
+ * run's FileSystem): with a remote sandbox the file is written in the VM, where
+ * the agent's `read` and `grep` run; otherwise on this machine's disk.
  */
 
 import { mkdir, readdir, stat, unlink, writeFile, chmod } from "node:fs/promises";
@@ -26,6 +30,13 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
+
+/** A FileSystem other than this machine's disk (a remote sandbox): files go through it. */
+function elsewhere(fs: FileSystem | undefined): fs is FileSystem {
+  return !!fs && !(fs instanceof NodeFileSystem);
+}
 
 /** Default per-result limit (~8k tokens). */
 export const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 30_000;
@@ -74,6 +85,8 @@ export interface OffloadOptions {
   previewChars?: number;
   /** Clock override (tests). */
   now?: () => number;
+  /** The run's FileSystem: with a remote sandbox the full output is saved in the VM. */
+  fs?: FileSystem;
 }
 
 export interface OffloadResult {
@@ -129,6 +142,19 @@ export function offloadHint(path: string): string {
   return `Full output saved to ${path}. Read it with \`read\` using offset/limit, or search it with \`grep\`; do not read it all at once.`;
 }
 
+/** Retention through a FileSystem (remote sandbox). Best-effort. */
+async function cleanupToolOutputDirIn(fs: FileSystem, dir: string, now: number, retentionMs = TOOL_OUTPUT_RETENTION_MS): Promise<number> {
+  let removed = 0;
+  for (const name of await fs.readdir(dir).catch(() => [] as string[])) {
+    if (!OFFLOAD_FILE_RE.test(name)) continue;
+    try {
+      const s = await fs.stat(join(dir, name));
+      if (s.isFile && s.modifiedAt && now - s.modifiedAt.getTime() > retentionMs) { await fs.remove(join(dir, name)); removed++; }
+    } catch { /* skip */ }
+  }
+  return removed;
+}
+
 /** Delete our own files older than the retention window. Best-effort. */
 export async function cleanupToolOutputDir(dir: string, now = Date.now(), retentionMs = TOOL_OUTPUT_RETENTION_MS): Promise<number> {
   let removed = 0;
@@ -154,10 +180,19 @@ export async function cleanupToolOutputDir(dir: string, now = Date.now(), retent
 }
 
 /** Write the full output to a new private file (0600, dir 0700). Returns the absolute path. */
-export async function saveToolOutput(output: string, tool: string, dir: string, now = Date.now()): Promise<string> {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+export async function saveToolOutput(output: string, tool: string, dir: string, now = Date.now(), fs?: FileSystem): Promise<string> {
   const name = `${safeSegment(tool.toLowerCase(), "tool").replace(/\./g, "_")}-${now}-${randomBytes(4).toString("hex")}.txt`;
   const file = join(dir, name);
+  if (elsewhere(fs)) {
+    await fs.mkdir(dir);
+    await fs.writeFile(file, output);
+    // when that FileSystem is a proxy to this machine's disk (a chat that is not remote), keep
+    // the file private; in a VM these paths do not exist here and nothing happens
+    await chmod(file, 0o600).catch(() => {});
+    await cleanupToolOutputDirIn(fs, dir, now).catch(() => 0);
+    return file;
+  }
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   // "wx": never follow/overwrite an existing path. The umask can only remove
   // bits from 0600; the chmod is defensive (e.g. filesystems ignoring mode).
   await writeFile(file, output, { encoding: "utf-8", mode: 0o600, flag: "wx" });
@@ -183,7 +218,7 @@ export async function offloadToolOutput(output: string, opts: OffloadOptions): P
   let path: string | undefined;
   let saveError: string | undefined;
   try {
-    path = await saveToolOutput(output, opts.tool, opts.dir, now);
+    path = await saveToolOutput(output, opts.tool, opts.dir, now, opts.fs);
   } catch (err: any) {
     saveError = err?.code ?? err?.message ?? "write failed";
   }
@@ -208,7 +243,7 @@ export async function offloadToolOutput(output: string, opts: OffloadOptions): P
  */
 export function withToolOutputOffload<T extends AgentTool<any>>(
   tool: T,
-  opts: { dir: string; maxChars?: number; headRatio?: number },
+  opts: { dir: string; maxChars?: number; headRatio?: number; fs?: FileSystem },
 ): T {
   const maxChars = opts.maxChars ?? DEFAULT_TOOL_OUTPUT_MAX_CHARS;
   const execute = tool.execute.bind(tool);
@@ -219,7 +254,7 @@ export function withToolOutputOffload<T extends AgentTool<any>>(
     const textParts = content.filter((c: any) => c?.type === "text");
     const joined = textParts.map((c: any) => c.text ?? "").join("\n");
     if (joined.length <= maxChars) return result;
-    const off = await offloadToolOutput(joined, { tool: tool.name, dir: opts.dir, maxChars, headRatio: opts.headRatio });
+    const off = await offloadToolOutput(joined, { tool: tool.name, dir: opts.dir, maxChars, headRatio: opts.headRatio, fs: opts.fs });
     const newContent: any[] = [];
     let placed = false;
     for (const c of content as any[]) {

@@ -110,6 +110,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
+import { remoteThenLocal } from "../sandbox/workspace-fs.js";
 import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
@@ -283,6 +284,21 @@ export class Orchestrator extends TypedEmitter {
         return provider === "daytona" || provider === "e2b";
       },
     };
+  }
+
+  /**
+   * Files a confirmed chat action (an email sent after its preview) refers to: read in the chat's
+   * remote VM while it is open (open Polpo: a tool's file I/O goes through the run's FileSystem),
+   * otherwise on this machine — where the chat's output directory has been copied back. Never
+   * opens a VM just for this.
+   */
+  async chatActionFileSystem(agent: AgentConfig | undefined, sessionKey: string | undefined): Promise<FileSystem> {
+    const local = new NodeFileSystem();
+    const key = `${agent?.name ?? "polpo"}${sessionKey ? `:${sessionKey}` : ""}`;
+    const entry = this.chatWorkspaces.get(key);
+    const workspace = entry ? await entry.workspace.catch(() => undefined) : undefined;
+    if (!workspace || (workspace.provider !== "daytona" && workspace.provider !== "e2b")) return local;
+    return remoteThenLocal(new WorkspaceFileSystem(workspace), local);
   }
 
   /**

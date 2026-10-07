@@ -829,5 +829,5 @@ export function createBrowserTools(
     ? ALL_BROWSER_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_BROWSER_TOOL_NAMES;
 
-  return names.map(n => withToolOutputOffload(guardedByNetwork(factories[n](), network, inSandbox), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES }));
+  return names.map(n => withToolOutputOffload(guardedByNetwork(factories[n](), network, inSandbox), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs }));
 }
