@@ -1992,6 +1992,29 @@ describe("Vault API", () => {
     // 6. Verify deleted
     expect(await store.get(ag, svc)).toBeUndefined();
   });
+
+  test("GET /vault-catalog lists agents' own entries with key names, never values or system owners", async () => {
+    const store = orchestrator.getVaultStore()!;
+    await store.set("agent-1", "catalog-daytona", {
+      type: "api_key", label: "Daytona", credentials: { apiKey: "catalog-secret-value" }, allowedAgents: ["someone-else"],
+    });
+    await store.set("$sandbox", "sandbox-provider:e2b", { type: "api_key", credentials: { apiKey: "system-secret-value" } });
+
+    const res = await app.request(api("/vault-catalog"));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain("catalog-secret-value");
+    expect(text).not.toContain("system-secret-value");
+    expect(text).not.toContain("$sandbox");
+    const rows = JSON.parse(text).data as any[];
+    expect(rows.find((r) => r.service === "catalog-daytona")).toEqual({
+      owner: "agent-1", service: "catalog-daytona", type: "api_key", label: "Daytona", keys: ["apiKey"], allowedAgents: ["someone-else"],
+    });
+    expect(rows.every((r) => !r.owner.startsWith("$") && !("credentials" in r))).toBe(true);
+
+    await store.remove("agent-1", "catalog-daytona");
+    await store.remove("$sandbox", "sandbox-provider:e2b");
+  });
 });
 
 // ── OpenAPI Spec ─────────────────────────────────────────────────────

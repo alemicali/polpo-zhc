@@ -1,6 +1,6 @@
 /**
- * Storage runtime of a project: the registry of buckets, their credentials in the system vault,
- * the host mounts (server process only) and the object operations behind the storage_* tools.
+ * Storage runtime of a project: the registry of buckets, the vault entries holding their keys
+ * (references: owner + service, resolved here and never returned), the host mounts (server process only) and the object operations behind the storage_* tools.
  *
  * It is also the StorageMountProvider workspaces ask for the mounts an agent may see.
  */
@@ -25,7 +25,7 @@ import {
   type StorageRegistryStore,
 } from "@polpo-ai/core/storage-registry";
 import type { VaultStore } from "../core/vault-store.js";
-import { CREDENTIAL_NAMES, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
+import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileStorageRegistryStore } from "../stores/file-storage-registry-store.js";
 import { StorageMountManager, type MountManagerOptions, type MountStatus } from "./mount-manager.js";
@@ -215,7 +215,7 @@ export class StorageRuntime implements StorageMountProvider {
   }
 
   async create(input: CreateStorageEntry): Promise<PublicStorageEntry> {
-    const entry = await this.store.create(input);
+    const entry = await this.store.create(prepareEntry(input) as CreateStorageEntry);
     if (this.mountingActive && entry.enabled) await this.mounts.mount(entry);
     return this.toPublic(entry);
   }
@@ -223,7 +223,7 @@ export class StorageRuntime implements StorageMountProvider {
   async update(idOrSlug: string, patch: Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>): Promise<PublicStorageEntry | null> {
     const current = await this.store.get(idOrSlug);
     if (!current) return null;
-    const updated = (await this.store.update(current.id, patch))!;
+    const updated = (await this.store.update(current.id, prepareEntry(patch, current)))!;
     const keysChanged = ["credentials", "sandboxCredentials", "temporaryCredentials"].some((f) => JSON.stringify((current as any)[f]) !== JSON.stringify((updated as any)[f]));
     if (keysChanged) this.tempCache.clear(`${updated.id}|`);
     const mountChanged = MOUNT_FIELDS.some((field) => JSON.stringify(current[field]) !== JSON.stringify(updated[field]))
@@ -434,6 +434,37 @@ export class StorageRuntime implements StorageMountProvider {
     if (!credentials) throw new Error(`Credentials for storage "${entry.name}" are not set`);
     return new S3Client(s3TargetFor(entry), credentials);
   }
+}
+
+type EntryPatch = Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>;
+
+/**
+ * Normalize the vault references of a create/update (null clears one; a malformed reference or a
+ * system "$" owner is refused) and validate the resulting entry.
+ */
+function prepareEntry<T extends EntryPatch>(patch: T, current?: StorageEntry): T {
+  const out = { ...patch } as T & Record<string, unknown>;
+  const ref = (value: unknown, what: string): VaultRef | undefined => {
+    if (value === null || value === undefined) return undefined;
+    const normalized = normalizeVaultRef(value);
+    if (!normalized) throw new Error(`${what}: choose an agent's vault entry (owner and service)`);
+    return normalized;
+  };
+  if ("credentials" in out) out.credentials = ref(out.credentials, "Main keys");
+  if ("sandboxCredentials" in out) out.sandboxCredentials = ref(out.sandboxCredentials, "Sandbox keys");
+  if ("temporaryCredentials" in out) {
+    const temp = out.temporaryCredentials as StorageTemporaryCredentials | null | undefined;
+    if (!temp) out.temporaryCredentials = undefined;
+    else if (temp.kind === "r2") {
+      const { token, ...rest } = temp;
+      const normalized = ref(token, "Cloudflare API token");
+      out.temporaryCredentials = { ...rest, ...(normalized ? { token: normalized } : {}) };
+    }
+  }
+  const merged = { ...current, ...out } as StorageEntry;
+  const problem = validateStorageEntry({ ...merged, grants: merged.grants ?? [] });
+  if (problem) throw new Error(problem);
+  return out;
 }
 
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|c|h|cpp|hpp|sh|sql|log|ini|cfg|conf|env|svg)$/i;

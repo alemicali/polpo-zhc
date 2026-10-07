@@ -24,7 +24,7 @@ export function availableProviders(): Set<SandboxProvider> {
   const out = new Set<SandboxProvider>(["local"]);
   if (bwrapAvailable()) out.add("bwrap");
   if (dockerAvailable()) out.add("docker");
-  // remote providers are available once their keys are set (Settings → Sandbox)
+  // remote providers are available once their vault entry is chosen (Settings → Sandbox)
   for (const id of configuredRemoteProviders()) out.add(id);
   return out;
 }
