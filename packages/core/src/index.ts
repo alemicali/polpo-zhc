@@ -189,13 +189,21 @@ export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
 
 // ── Sandboxes and storage mounts ────────────────────────────────────────
 export {
-  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, DEFAULT_ISOLATION, REMOTE_SANDBOX_PROVIDERS, effectiveLifecycle, narrowVolumeSelections, SandboxVolumeGrantError, SANDBOX_VOLUME_ROOT, SANDBOX_VOLUME_NAME_PATTERN, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, DEFAULT_ISOLATION, REMOTE_SANDBOX_PROVIDERS, effectiveLifecycle, resolveRuntimeLevels, SandboxVolumeGrantError, SANDBOX_VOLUME_ROOT, SANDBOX_VOLUME_NAME_PATTERN, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
 } from "./sandbox.js";
 export type {
-  Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProvider, SandboxNetwork,
+  Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProviderId, SandboxNetwork,
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
   StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider, SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack, SandboxVolumeStrategy, SandboxVolumeSelection, ResolvedSandboxVolume,
 } from "./sandbox.js";
+// open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
+export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
+export type { RuntimeSandboxOptions, RuntimeSandboxLifecycleOptions, RuntimeSandboxVolumeSelection } from "./runtime-sandbox.js";
+export type {
+  SandboxProvider, SandboxSession, SandboxLifecycle, SandboxUsage, SandboxRuntimeEvent,
+  SandboxRuntimeEventType, SandboxRuntimeOperation, SandboxAcquisitionSource, SandboxReleaseOutcome, SandboxLifecycleInfo,
+  ResolvedSandboxVolumeAttachment, SandboxWorkspaceContext,
+} from "./sandbox-provider.js";
 export {
   STORAGE_SLUG_PATTERN, 
   normalizeStoragePrefix, normalizeStoragePath, storageGrantFor, storageAccessFor, storagePathAllowed,

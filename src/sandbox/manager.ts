@@ -7,7 +7,7 @@ import {
   resolveSandbox,
   type EffectiveSandbox,
   type SandboxCascade,
-  type SandboxProvider,
+  type SandboxProviderId,
   type SandboxSettings,
   type ResolvedSandboxVolume,
   type StorageMountSpec,
@@ -21,8 +21,8 @@ import { configuredRemoteProviders } from "./remote-providers.js";
 import { createRemoteWorkspace, type RemoteWorkspaceOptions } from "./remote.js";
 
 /** Providers this machine can run right now. */
-export function availableProviders(): Set<SandboxProvider> {
-  const out = new Set<SandboxProvider>(["local"]);
+export function availableProviders(): Set<SandboxProviderId> {
+  const out = new Set<SandboxProviderId>(["local"]);
   if (bwrapAvailable()) out.add("bwrap");
   if (dockerAvailable()) out.add("docker");
   // remote providers are available once their vault entry is chosen (Settings → Sandbox)
