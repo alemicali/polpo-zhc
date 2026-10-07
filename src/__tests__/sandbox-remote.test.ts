@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RemoteWorkspace, type RemoteDriver } from "../sandbox/remote.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import {
-  configuredRemoteProviders, loadRemoteProviders, remoteProviderCredentials, remoteProviderStatus, removeRemoteProvider, saveRemoteProvider,
+  configureRemoteProviders, configuredRemoteProviders, remoteProviderCredentials, remoteProviderStatus,
 } from "../sandbox/remote-providers.js";
 import { availableProviders, createWorkspace, isRemoteWorkspace } from "../sandbox/manager.js";
 
@@ -101,32 +101,48 @@ describe("remote workspace", () => {
 });
 
 describe("remote provider credentials", () => {
+  // A vault with one agent's entries; the providers reference them (owner + service).
   const entries = new Map<string, any>();
   const vault = {
-    get: async (_o: string, s: string) => entries.get(s),
-    set: async (_o: string, s: string, e: any) => { entries.set(s, e); },
-    remove: async (_o: string, s: string) => { entries.delete(s); return true; },
+    get: async (owner: string, service: string) => entries.get(`${owner}/${service}`),
   } as any;
+  let providers: Record<string, unknown> = {};
+  afterEach(() => configureRemoteProviders(undefined, () => undefined));
 
-  test("keys are stored in the vault, never returned, and make the provider available", async () => {
-    await loadRemoteProviders(vault);
+  test("the key comes from the referenced vault entry, is never returned, and makes the provider available", async () => {
+    configureRemoteProviders(vault, () => providers);
     expect(configuredRemoteProviders()).toEqual([]);
     expect(availableProviders().has("daytona")).toBe(false);
-    await saveRemoteProvider("daytona", { apiKey: "dtn_secret", target: "eu" });
+
+    // chosen, but the entry does not exist yet: configured, no key found
+    providers = { daytona: { credential: { owner: "alice", service: "daytona" }, target: "eu" } };
     expect(availableProviders().has("daytona")).toBe(true);
-    const status = remoteProviderStatus().find((p) => p.id === "daytona")!;
-    expect(status).toMatchObject({ configured: true, apiKey: "set", target: "eu" });
-    expect(JSON.stringify(remoteProviderStatus())).not.toContain("dtn_secret");
-    // an empty key keeps the stored one
-    await saveRemoteProvider("daytona", { apiKey: "", apiUrl: "https://example.test/api" });
-    expect(remoteProviderCredentials("daytona")).toMatchObject({ apiKey: "dtn_secret", apiUrl: "https://example.test/api", target: "eu" });
-    // reload from the vault
-    await loadRemoteProviders(vault);
-    expect(remoteProviderCredentials("daytona")?.apiKey).toBe("dtn_secret");
+    expect(await remoteProviderCredentials("daytona")).toBeUndefined();
+    let status = (await remoteProviderStatus()).find((p) => p.id === "daytona")!;
+    expect(status).toMatchObject({ configured: true, keyFound: false, target: "eu" });
+
+    // any common key name works ("API_KEY" → apiKey)
+    entries.set("alice/daytona", { type: "api_key", credentials: { API_KEY: "dtn_secret" } });
+    status = (await remoteProviderStatus()).find((p) => p.id === "daytona")!;
+    expect(status).toMatchObject({ configured: true, keyFound: true, credential: { owner: "alice", service: "daytona" } });
+    expect(JSON.stringify(await remoteProviderStatus())).not.toContain("dtn_secret");
+
+    providers = { daytona: { credential: { owner: "alice", service: "daytona" }, apiUrl: "https://example.test/api", target: "eu" } };
+    expect(await remoteProviderCredentials("daytona")).toEqual({ apiKey: "dtn_secret", apiUrl: "https://example.test/api", target: "eu" });
     const ws = createWorkspace({ ...sandbox, provider: "daytona" }, { root: tmpdir() });
     expect(isRemoteWorkspace(ws)).toBe(true);
-    await removeRemoteProvider("daytona");
+
+    // disconnect: the setting is removed, the vault entry stays
+    providers = {};
     expect(availableProviders().has("daytona")).toBe(false);
-    await expect(saveRemoteProvider("e2b", {})).rejects.toThrow(/API key is required/);
+    expect(entries.has("alice/daytona")).toBe(true);
+  });
+
+  test("system \"$\" owners and malformed references are ignored", async () => {
+    entries.set("$sandbox/sandbox-provider:e2b", { credentials: { apiKey: "e2b_secret" } });
+    providers = { e2b: { credential: { owner: "$sandbox", service: "sandbox-provider:e2b" } }, daytona: { credential: "alice/daytona" } };
+    configureRemoteProviders(vault, () => providers);
+    expect(configuredRemoteProviders()).toEqual([]);
+    expect(await remoteProviderCredentials("e2b")).toBeUndefined();
   });
 });

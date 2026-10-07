@@ -12,15 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useStorage,
+  type KeyStatus,
   type MountState,
-  type StorageCredentialsInput,
-  type StorageTemporaryInput,
+  type StorageTemporarySettings,
   type StorageDriver,
   type StorageEntry,
   type StorageEntryInput,
   type StorageGrant,
 } from "@/hooks/use-storage";
 import { cn } from "@/lib/utils";
+import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
+import { describeVaultRef, type VaultRef } from "@/lib/vault-ref";
 
 type EntryTab = "overview" | "access";
 type Preset = "r2" | "aws" | "other";
@@ -43,7 +45,7 @@ export function StoragePage() {
     <div className="flex h-full min-h-0 flex-col gap-3 bg-background">
       <div className="flex shrink-0 items-center gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs text-muted-foreground">S3-compatible buckets mounted as folders for agents. Credentials stay in the encrypted Vault.</p>
+          <p className="truncate text-xs text-muted-foreground">S3-compatible buckets mounted as folders for agents. Keys stay in an agent's vault; a bucket only references the entry.</p>
         </div>
         <Button size="sm" className="h-8" onClick={() => setDialog({ open: true })}><Plus className="h-3.5 w-3.5" /> Add bucket</Button>
       </div>
@@ -184,16 +186,16 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
             <section>
               <h3 className="text-xs font-semibold">Credentials</h3>
               <dl className="mt-3 divide-y divide-border border-y border-border">
-                <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Access key</dt><dd><CredentialState value={entry.credentials} /></dd></div>
+                <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Access key</dt><dd><CredentialState value={entry.keys.credentials} source={entry.credentials} /></dd></div>
                 {entry.temporaryCredentials
-                  ? <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd>Temporary keys per run ({entry.temporaryCredentials.kind === "r2" ? "Cloudflare R2" : "STS role"})</dd></div>
-                  : <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd><CredentialState value={entry.sandboxCredentials} /></dd></div>}
+                  ? <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd>Temporary keys per run ({entry.temporaryCredentials.kind === "r2" ? "Cloudflare R2" : "STS role"}){entry.temporaryCredentials.kind === "r2" && <> · API token <CredentialState value={entry.keys.temporaryToken} source={entry.temporaryCredentials.token} /></>}</dd></div>
+                  : <div className="grid grid-cols-[150px_1fr] gap-4 py-3 text-xs"><dt className="text-muted-foreground">Sandbox key</dt><dd><CredentialState value={entry.keys.sandboxCredentials} source={entry.sandboxCredentials} /></dd></div>}
               </dl>
-              <p className="mt-2 text-[10px] text-muted-foreground">Keys are stored encrypted in the Vault and are never shown again.</p>
+              <p className="mt-2 text-[10px] text-muted-foreground">Keys stay in the referenced vault entries (an agent's Credentials tab) and are never shown here.</p>
             </section>
             <section className="border-t border-border pt-5">
               <h3 className="text-xs font-semibold text-destructive">Danger zone</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Removing the bucket unmounts it and deletes its stored keys. The files in the bucket are not touched.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Removing the bucket unmounts it. The files in the bucket and the vault entries are not touched.</p>
               <Button variant="outline" size="sm" className="mt-3 h-8 border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setConfirmDelete(true)}><Trash2 className="h-3.5 w-3.5" /> Remove bucket</Button>
             </section>
           </div>
@@ -228,7 +230,7 @@ function EntryDetail({ entry, storage, onEdit }: { entry: StorageEntry; storage:
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Remove {entry.name}?</DialogTitle>
-            <DialogDescription>The bucket is unmounted and its stored keys are deleted. Agents lose access. The files in the bucket are not deleted.</DialogDescription>
+            <DialogDescription>The bucket is unmounted and agents lose access. The files in the bucket and the vault entries with its keys are not deleted.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
@@ -258,15 +260,12 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
   const [driver, setDriver] = useState<StorageDriver>("rclone");
   const [cacheMode, setCacheMode] = useState<"writes" | "full">("writes");
   const [cacheSize, setCacheSize] = useState("1024");
-  const [accessKeyId, setAccessKeyId] = useState("");
-  const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [sandboxKeyId, setSandboxKeyId] = useState("");
-  const [sandboxSecret, setSandboxSecret] = useState("");
-  const [removeSandbox, setRemoveSandbox] = useState(false);
+  const [credentials, setCredentials] = useState<VaultRef | null>(null);
+  const [sandboxCredentials, setSandboxCredentials] = useState<VaultRef | null>(null);
   const [keyMode, setKeyMode] = useState<"fixed" | "temporary">("fixed");
   const [tmpAccountId, setTmpAccountId] = useState("");
   const [tmpParentKey, setTmpParentKey] = useState("");
-  const [tmpToken, setTmpToken] = useState("");
+  const [tmpToken, setTmpToken] = useState<VaultRef | null>(null);
   const [tmpRoleArn, setTmpRoleArn] = useState("");
   const [tmpEndpoint, setTmpEndpoint] = useState("");
   const [grants, setGrants] = useState<StorageGrant[]>([]);
@@ -281,10 +280,10 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
     setBucket(entry?.bucket ?? ""); setPrefix(entry?.prefix ?? ""); setPathStyle(entry?.pathStyle ?? true);
     setReadOnly(entry?.readOnly ?? false); setEnabled(entry?.enabled ?? true); setDriver(entry?.driver ?? "rclone");
     setCacheMode(entry?.cache?.mode ?? "writes"); setCacheSize(String(entry?.cache?.maxSizeMb ?? 1024));
-    setAccessKeyId(""); setSecretAccessKey(""); setSandboxKeyId(""); setSandboxSecret(""); setRemoveSandbox(false);
+    setCredentials(entry?.credentials ?? null); setSandboxCredentials(entry?.sandboxCredentials ?? null);
     const temp = entry?.temporaryCredentials;
     setKeyMode(temp ? "temporary" : "fixed");
-    setTmpAccountId(temp?.kind === "r2" ? temp.accountId : r2?.[1] ?? ""); setTmpParentKey(temp?.kind === "r2" ? temp.parentAccessKeyId : ""); setTmpToken("");
+    setTmpAccountId(temp?.kind === "r2" ? temp.accountId : r2?.[1] ?? ""); setTmpParentKey(temp?.kind === "r2" ? temp.parentAccessKeyId : ""); setTmpToken(temp?.kind === "r2" ? temp.token ?? null : null);
     setTmpRoleArn(temp?.kind === "sts" ? temp.roleArn : ""); setTmpEndpoint(temp?.kind === "sts" ? temp.endpoint ?? "" : "");
     setGrants(entry?.grants ?? []);
   }, [open, entry]);
@@ -296,20 +295,15 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
     if (next === "other") { setRegion("us-east-1"); setPathStyle(true); setEndpoint(""); }
   };
   const resolvedEndpoint = preset === "r2" ? (accountId.trim() ? r2Endpoint(accountId.trim()) : "") : preset === "aws" ? "" : endpoint.trim();
-  const credentials = accessKeyId.trim() || secretAccessKey.trim() ? { accessKeyId: accessKeyId.trim(), secretAccessKey: secretAccessKey.trim() } : undefined;
-  const sandboxCredentials: StorageCredentialsInput | null | undefined = removeSandbox ? null
-    : sandboxKeyId.trim() || sandboxSecret.trim() ? { accessKeyId: sandboxKeyId.trim(), secretAccessKey: sandboxSecret.trim() } : undefined;
-  const temporary: StorageTemporaryInput | null | undefined = keyMode === "fixed" ? (entry?.temporaryCredentials ? null : undefined)
+  const temporary: StorageTemporarySettings | null = keyMode === "fixed" ? null
     : preset === "r2"
-      ? { kind: "r2", accountId: tmpAccountId.trim(), parentAccessKeyId: tmpParentKey.trim(), ...(tmpToken.trim() ? { apiToken: tmpToken.trim() } : {}) }
+      ? { kind: "r2", accountId: tmpAccountId.trim(), parentAccessKeyId: tmpParentKey.trim(), ...(tmpToken ? { token: tmpToken } : {}) }
       : { kind: "sts", roleArn: tmpRoleArn.trim(), ...(tmpEndpoint.trim() ? { endpoint: tmpEndpoint.trim() } : {}) };
   const temporaryIncomplete = !!temporary && (temporary.kind === "r2"
-    ? !temporary.accountId || !temporary.parentAccessKeyId || (!temporary.apiToken && entry?.temporaryToken !== "set")
+    ? !temporary.accountId || !temporary.parentAccessKeyId || !temporary.token
     : !temporary.roleArn);
   const missing = temporaryIncomplete || !name.trim() || !bucket.trim() || (preset === "r2" && !accountId.trim()) || (preset === "other" && !endpoint.trim())
-    || (!entry && !credentials) || (credentials && (!credentials.accessKeyId || !credentials.secretAccessKey))
-    || (!!sandboxCredentials && (!sandboxCredentials.accessKeyId || !sandboxCredentials.secretAccessKey))
-    || grants.some((grant) => !grant.agent);
+    || !credentials || grants.some((grant) => !grant.agent);
 
   const save = async () => {
     if (missing) return;
@@ -320,9 +314,10 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
       pathStyle, driver: readOnly ? driver : "rclone", readOnly, enabled,
       cache: { mode: cacheMode, maxSizeMb: Math.max(64, Number(cacheSize) || 1024) },
       grants: grants.map((grant) => ({ ...grant, prefix: grant.prefix?.trim() || undefined })),
-      ...(credentials ? { credentials } : {}),
-      ...(sandboxCredentials !== undefined ? { sandboxCredentials } : {}),
-      ...(temporary !== undefined ? { temporary } : {}),
+      credentials,
+      // temporary keys replace the fixed sandbox key
+      sandboxCredentials: keyMode === "fixed" ? sandboxCredentials : null,
+      temporaryCredentials: temporary,
     };
     try {
       const saved = entry ? await storage.updateEntry(entry.id, input) : await storage.createEntry(input);
@@ -341,7 +336,7 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-auto">
         <DialogHeader>
           <DialogTitle>{entry ? "Bucket settings" : "Add a bucket"}</DialogTitle>
-          <DialogDescription>Keys are encrypted in the Vault and never returned to the browser.</DialogDescription>
+          <DialogDescription>Keys stay in an agent's vault (shared with others if needed): choose the entries that hold them.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div>
@@ -398,12 +393,11 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
           <section className="grid gap-3 border-t border-border pt-4">
             <div>
               <h3 className="text-xs font-semibold">Access key</h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">{entry?.credentials === "set" ? "A key is stored. Leave blank to keep it." : "Used on this server to mount the bucket and by the storage tools."}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">The vault entry with the access key ID and secret: used on this server to mount the bucket and by the storage tools.</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Access key ID"><Input value={accessKeyId} onChange={(event) => setAccessKeyId(event.target.value)} className="font-mono" autoComplete="off" placeholder={entry?.credentials === "set" ? "Leave blank to keep" : "Access key ID"} /></Field>
-              <Field label="Secret access key"><Input value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} type="password" autoComplete="new-password" placeholder={entry?.credentials === "set" ? "Leave blank to keep" : "Secret access key"} /></Field>
-            </div>
+            <PickerField label="Vault entry">
+              <VaultRefPicker value={credentials} onChange={setCredentials} requiredKeys={["accessKeyId", "secretAccessKey"]} placeholder="Choose the vault entry with the access key" aria-label="Access key vault entry" />
+            </PickerField>
           </section>
 
           <section className="grid gap-3 border-t border-border pt-4">
@@ -412,26 +406,24 @@ function EntryDialog({ open, entry, storage, onClose, onSaved }: {
               <p className="mt-1 text-[11px] text-muted-foreground">Remote sandboxes mount the bucket themselves, so they need a key inside the sandbox. Use a fixed key limited to this bucket (and prefix), or let Polpo mint temporary keys for each task run. Never your main key as a fixed key. Without either, the bucket is not mounted in remote sandboxes.</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {([["fixed", "Fixed key", "One dedicated key, stored in the Vault."], ["temporary", "Temporary keys per run", "Minted per task, limited to the agent's prefix, expire with the task."]] as const).map(([id, title, text]) => (
+              {([["fixed", "Fixed key", "One dedicated key, in a vault entry."], ["temporary", "Temporary keys per run", "Minted per task, limited to the agent's prefix, expire with the task."]] as const).map(([id, title, text]) => (
                 <button key={id} type="button" onClick={() => setKeyMode(id)} className={cn("border p-2 text-left", keyMode === id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
                   <span className="block text-xs font-medium">{title}</span><span className="block text-[11px] text-muted-foreground">{text}</span>
                 </button>
               ))}
             </div>
             {keyMode === "fixed" && (<>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Access key ID"><Input value={sandboxKeyId} onChange={(event) => { setSandboxKeyId(event.target.value); setRemoveSandbox(false); }} className="font-mono" autoComplete="off" placeholder={entry?.sandboxCredentials === "set" ? "Leave blank to keep" : "Optional"} /></Field>
-              <Field label="Secret access key"><Input value={sandboxSecret} onChange={(event) => { setSandboxSecret(event.target.value); setRemoveSandbox(false); }} type="password" autoComplete="new-password" placeholder={entry?.sandboxCredentials === "set" ? "Leave blank to keep" : "Optional"} /></Field>
-            </div>
-            {entry?.sandboxCredentials === "set" && (
-              <label className="flex items-center gap-2 text-[11px] text-muted-foreground"><input type="checkbox" checked={removeSandbox} onChange={(event) => { setRemoveSandbox(event.target.checked); if (event.target.checked) { setSandboxKeyId(""); setSandboxSecret(""); } }} /> Remove the stored sandbox key</label>
-            )}
+            <PickerField label="Vault entry (optional)">
+              <VaultRefPicker value={sandboxCredentials} onChange={setSandboxCredentials} requiredKeys={["accessKeyId", "secretAccessKey"]} placeholder="Optional: the vault entry with the sandbox key" aria-label="Sandbox key vault entry" />
+            </PickerField>
             </>)}
             {keyMode === "temporary" && (preset === "r2" ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Cloudflare account ID"><Input value={tmpAccountId} onChange={(event) => setTmpAccountId(event.target.value)} className="font-mono" autoComplete="off" /></Field>
                 <Field label="Parent access key ID"><Input value={tmpParentKey} onChange={(event) => setTmpParentKey(event.target.value)} className="font-mono" autoComplete="off" /></Field>
-                <Field label="Cloudflare API token"><Input value={tmpToken} onChange={(event) => setTmpToken(event.target.value)} type="password" autoComplete="new-password" placeholder={entry?.temporaryToken === "set" ? "Leave blank to keep" : "API token"} /></Field>
+                <PickerField label="Cloudflare API token">
+                  <VaultRefPicker value={tmpToken} onChange={setTmpToken} requiredKeys={["apiToken"]} placeholder="Vault entry with the API token" aria-label="Cloudflare API token vault entry" />
+                </PickerField>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -495,10 +487,15 @@ function MountBadge({ entry, compact }: { entry: StorageEntry; compact?: boolean
   return <span className="inline-flex items-center gap-1.5 border border-border px-1.5 py-0.5 text-[9px] uppercase text-muted-foreground"><span className={cn("h-1.5 w-1.5", style.dot)} />{style.label}</span>;
 }
 
-function CredentialState({ value }: { value: "set" | "not set" }) {
-  return value === "set"
-    ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Check className="h-3 w-3" /> Set</span>
-    : <span className="text-muted-foreground">Not set</span>;
+function CredentialState({ value, source }: { value: KeyStatus; source?: VaultRef }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2">
+      {value === "set"
+        ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><Check className="h-3 w-3" /> Set</span>
+        : <span className="text-muted-foreground">{source ? "Not found in the vault" : "Not set"}</span>}
+      {source && <span className="font-mono text-[10px] text-muted-foreground">{describeVaultRef(source)}</span>}
+    </span>
+  );
 }
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (value: boolean) => void }) {
@@ -517,6 +514,8 @@ function bucketLabel(entry: StorageEntry) {
 /** The Files page addresses .polpo paths relative to the project (".polpo/mounts/<slug>"). */
 function relativeToProject(path: string) { const index = path.lastIndexOf("/.polpo/"); return index >= 0 ? path.slice(index + 1) : path; }
 function r2Endpoint(accountId: string) { return `https://${accountId}.r2.cloudflarestorage.com`; }
+/** Like Field, but not a <label>: the picker holds its own buttons and links. */
+function PickerField({ label, children }: { label: string; children: React.ReactNode }) { return <div className="grid gap-1.5"><span className="text-xs font-medium">{label}</span>{children}</div>; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="grid gap-1.5"><span className="text-xs font-medium">{label}</span>{children}</label>; }
 function Loading() { return <div className="flex min-h-0 flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>; }
 function Empty({ title, description, compact, action }: { title: string; description?: string; compact?: boolean; action?: React.ReactNode }) {

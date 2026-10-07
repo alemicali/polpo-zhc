@@ -1,19 +1,24 @@
 /**
- * Settings → Sandbox → Remote providers: the keys of Daytona and E2B, where tasks can run in a
- * remote VM. Keys go to the vault; the page only learns whether one is set.
+ * Settings → Sandbox → Remote providers: Daytona and E2B, where tasks can run in a remote VM.
+ * The API key stays in an agent's vault entry (shared if needed); the provider references it
+ * (settings.sandbox.providers.<id>.credential) together with its non-secret options.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Activity, Cloud, KeyRound, Loader2, Save, Trash2 } from "lucide-react";
+import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { sandboxApi, type RemoteProviderId, type RemoteProviderInput, type RemoteProviderStatus } from "@/lib/sandbox-api";
+import { sandboxApi, type RemoteProviderId, type RemoteProviderSettings, type RemoteProviderStatus } from "@/lib/sandbox-api";
+import { sameVaultRef, type VaultRef } from "@/lib/vault-ref";
+
+type TextField = Exclude<keyof RemoteProviderSettings, "credential">;
 
 const META: Record<RemoteProviderId, {
   name: string; tagline: string; mark: string; hue: { tile: string; ring: string; glow: string; line: string; text: string; hover: string };
-  fields: Array<{ key: keyof RemoteProviderInput; label: string; placeholder: string; hint?: string }>;
+  fields: Array<{ key: TextField; label: string; placeholder: string; hint?: string }>;
   keyUrl: string;
 }> = {
   daytona: {
@@ -42,15 +47,23 @@ const META: Record<RemoteProviderId, {
 
 function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onChanged: () => void }) {
   const meta = META[status.id];
-  const [draft, setDraft] = useState<RemoteProviderInput>({});
+  // undefined = unchanged; credential null = cleared in the draft
+  const [draft, setDraft] = useState<Partial<Record<TextField, string>> & { credential?: VaultRef | null }>({});
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const test = status.lastTest;
-  const dirty = Object.values(draft).some((v) => v !== undefined);
+  const credential = draft.credential !== undefined ? draft.credential : status.credential ?? null;
+  const dirty = (draft.credential !== undefined && !sameVaultRef(draft.credential, status.credential) && !(draft.credential === null && !status.credential))
+    || meta.fields.some((f) => draft[f.key] !== undefined && draft[f.key]!.trim() !== (status[f.key] ?? ""));
 
   const save = async () => {
     setBusy("save");
     try {
-      await sandboxApi.saveProvider(status.id, draft);
+      const next: RemoteProviderSettings = { ...(credential ? { credential } : {}) };
+      for (const f of meta.fields) {
+        const value = (draft[f.key] ?? status[f.key] ?? "").trim();
+        if (value) next[f.key] = value;
+      }
+      await sandboxApi.saveProvider(status.id, Object.keys(next).length ? next : null);
       setDraft({});
       toast.success(`${meta.name} saved`);
       onChanged();
@@ -78,8 +91,9 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
   const remove = async () => {
     setBusy("remove");
     try {
-      await sandboxApi.removeProvider(status.id);
-      toast.success(`${meta.name} removed`);
+      await sandboxApi.saveProvider(status.id, null);
+      setDraft({});
+      toast.success(`${meta.name} disconnected`);
       onChanged();
     } catch (e) {
       toast.error((e as Error).message);
@@ -94,7 +108,9 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
       ? { label: "Test failed", cls: "border-destructive/30 bg-destructive/10 text-destructive", dot: "bg-destructive", ping: false }
       : test?.ok
         ? { label: `Ready · ${((test.durationMs ?? 0) / 1000).toFixed(1)}s`, cls: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400", dot: "bg-emerald-400", ping: true }
-        : { label: "Key set", cls: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400", dot: "bg-emerald-400", ping: false };
+        : !status.keyFound
+          ? { label: "Key not found", cls: "border-amber-500/30 bg-amber-500/10 text-amber-400", dot: "bg-amber-400", ping: false }
+          : { label: "Key found", cls: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400", dot: "bg-emerald-400", ping: false };
 
   return (
     <Card className={cn(
@@ -127,26 +143,25 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
         </div>
 
         <div className="space-y-2.5 px-4 pt-4">
-          <label className="block">
+          <div className="block">
             <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
-              <KeyRound className="h-3 w-3" /> API key
+              <KeyRound className="h-3 w-3" /> API key (vault entry)
             </span>
-            <Input
-              type="password"
-              autoComplete="off"
-              className="h-8 text-xs font-mono"
-              value={draft.apiKey ?? ""}
-              placeholder={status.apiKey === "set" ? "•••••••• set — leave empty to keep it" : "Paste the API key"}
-              onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value || undefined }))}
+            <VaultRefPicker
+              value={credential}
+              onChange={(ref) => setDraft((d) => ({ ...d, credential: ref }))}
+              requiredKeys={["apiKey"]}
+              placeholder={`Choose the vault entry with the ${meta.name} key`}
+              aria-label={`${meta.name} API key vault entry`}
             />
-          </label>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {meta.fields.map((f) => (
               <label key={f.key} className="block min-w-0">
                 <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground/70">{f.label}</span>
                 <Input
                   className="h-8 text-xs"
-                  value={draft[f.key] ?? status[f.key as keyof RemoteProviderStatus] as string ?? ""}
+                  value={draft[f.key] ?? status[f.key] ?? ""}
                   placeholder={f.placeholder}
                   onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
                 />
@@ -156,7 +171,8 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
           </div>
           {!status.configured && (
             <p className="text-[10.5px] text-muted-foreground">
-              Create a key in the <a href={meta.keyUrl} target="_blank" rel="noreferrer" className={cn("underline", meta.hue.text)}>{meta.name} dashboard</a>. It is kept in the vault and never shown again.
+              Create a key in the <a href={meta.keyUrl} target="_blank" rel="noreferrer" className={cn("underline", meta.hue.text)}>{meta.name} dashboard</a>,
+              save it in an agent's vault (Credentials tab, shared with others if needed), then choose that entry here. Polpo can do it for you.
             </p>
           )}
           {test && !test.ok && test.error && (
@@ -183,7 +199,8 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
               className="ml-auto h-7 w-7 rounded-full text-muted-foreground/60 hover:text-destructive"
               disabled={busy !== null}
               onClick={() => void remove()}
-              aria-label={`Remove ${meta.name}`}
+              aria-label={`Disconnect ${meta.name}`}
+              title="Disconnect (the vault entry stays)"
             >
               {busy === "remove" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
             </Button>

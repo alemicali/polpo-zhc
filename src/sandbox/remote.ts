@@ -288,8 +288,8 @@ export class DaytonaWorkspace extends RemoteWorkspace {
   readonly provider = "daytona" as const;
 
   protected async createDriver(): Promise<RemoteDriver> {
-    const creds = remoteProviderCredentials("daytona");
-    if (!creds?.apiKey) throw new Error("Daytona is not configured (Settings → Sandbox)");
+    const creds = await remoteProviderCredentials("daytona");
+    if (!creds?.apiKey) throw new Error("Daytona has no API key: choose its vault entry in Settings → Sandbox");
     const { Daytona } = await import("@daytonaio/sdk");
     const client = new Daytona({ apiKey: creds.apiKey, apiUrl: creds.apiUrl || undefined, target: creds.target || undefined });
     const { network } = this.opts.sandbox;
@@ -341,8 +341,8 @@ export class E2BWorkspace extends RemoteWorkspace {
   readonly provider = "e2b" as const;
 
   protected async createDriver(): Promise<RemoteDriver> {
-    const creds = remoteProviderCredentials("e2b");
-    if (!creds?.apiKey) throw new Error("E2B is not configured (Settings → Sandbox)");
+    const creds = await remoteProviderCredentials("e2b");
+    if (!creds?.apiKey) throw new Error("E2B has no API key: choose its vault entry in Settings → Sandbox");
     const { Sandbox, CommandExitError } = await import("e2b");
     const { network } = this.opts.sandbox;
     const opts: Record<string, unknown> = {

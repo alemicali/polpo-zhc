@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { VaultEntry } from "@polpo-ai/core";
-import { STORAGE_VAULT_OWNER, type CreateStorageEntry } from "@polpo-ai/core/storage-registry";
+import type { CreateStorageEntry } from "@polpo-ai/core/storage-registry";
 import type { VaultStore } from "../core/vault-store.js";
 import { StorageRuntime } from "../storage/runtime.js";
 import { TemporaryCredentialCache, sessionPolicy } from "../storage/temp-credentials.js";
@@ -55,25 +55,30 @@ async function setup(overrides: Partial<CreateStorageEntry> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "polpo-temp-"));
   roots.push(dir);
   const vault = new MemoryVault();
+  // the keys live in an agent's vault; the entry references them (key names vary on purpose)
+  await vault.set("ops", "bucket-main", { type: "custom", credentials: { accessKeyId: "MAINKEY", secretAccessKey: "main-secret" } });
+  await vault.set("ops", "bucket-sandbox", { type: "custom", credentials: { access_key_id: "fixed-ak", SECRET_ACCESS_KEY: "fixed-sk" } });
+  await vault.set("ops", "cloudflare", { type: "api_key", credentials: { token: "cf-token-secret" } });
   const events: Array<{ name: string; action: string; error?: string }> = [];
   const runtime = new StorageRuntime(dir, vault as unknown as VaultStore, (e) => events.push(e));
   runtime.cloudflareApi = `${base}/client/v4`;
   const entry = await runtime.create({
     name: "Docs", slug: "docs", provider: "s3", bucket: "bucket1", driver: "rclone", readOnly: false, enabled: true, prefix: "team",
     endpoint: base, region: "us-east-1",
-    grants: [{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/" }, { id: "b", agent: "bob", access: "read" }], ...overrides,
-  }, { credentials: { accessKeyId: "MAINKEY", secretAccessKey: "main-secret" }, sandboxCredentials: { accessKeyId: "fixed-ak", secretAccessKey: "fixed-sk" } });
+    grants: [{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/" }, { id: "b", agent: "bob", access: "read" }],
+    credentials: { owner: "ops", service: "bucket-main" }, sandboxCredentials: { owner: "ops", service: "bucket-sandbox" }, ...overrides,
+  });
   return { runtime, entry, vault, events };
 }
 
 describe("temporary keys: Cloudflare R2", () => {
-  const r2 = { kind: "r2" as const, accountId: "acct1", parentAccessKeyId: "parent-key", apiToken: "cf-token-secret" };
+  const r2 = { kind: "r2" as const, accountId: "acct1", parentAccessKeyId: "parent-key", token: { owner: "ops", service: "cloudflare" } };
 
   it("mints keys scoped to bucket, prefix and permission, and returns them instead of the fixed key", async () => {
     const { runtime, entry } = await setup();
-    const status = await runtime.update(entry.id, {}, { temporary: r2 });
-    expect(status!.temporaryCredentials).toEqual({ kind: "r2", accountId: "acct1", parentAccessKeyId: "parent-key" });
-    expect(status!.temporaryToken).toBe("set");
+    const status = await runtime.update(entry.id, { temporaryCredentials: r2 });
+    expect(status!.temporaryCredentials).toEqual(r2);
+    expect(status!.keys).toEqual({ credentials: "set", sandboxCredentials: "set", temporaryToken: "set" });
     expect(JSON.stringify(status)).not.toContain("cf-token-secret");
 
     const [alice] = await runtime.mountsFor("alice", "remote", { ttlSeconds: 3600 });
@@ -92,38 +97,42 @@ describe("temporary keys: Cloudflare R2", () => {
 
   it("caches per agent and entry, then mints again when the keys are about to expire", async () => {
     const { runtime, entry } = await setup();
-    await runtime.update(entry.id, {}, { temporary: r2 });
+    await runtime.update(entry.id, { temporaryCredentials: r2 });
     await runtime.mountsFor("alice", "remote");
     await runtime.mountsFor("alice", "remote");
     expect(seen).toHaveLength(1);
     await runtime.mountsFor("bob", "remote");
     expect(seen).toHaveLength(2);
     // changing the settings drops the cached keys
-    await runtime.update(entry.id, {}, { temporary: { ...r2, parentAccessKeyId: "other" } });
+    await runtime.update(entry.id, { temporaryCredentials: { ...r2, parentAccessKeyId: "other" } });
     await runtime.mountsFor("alice", "remote");
     expect(seen).toHaveLength(3);
   });
 
   it("falls back to the fixed key when minting fails, and says so", async () => {
     const { runtime, entry, events } = await setup();
-    await runtime.update(entry.id, {}, { temporary: r2 });
+    await runtime.update(entry.id, { temporaryCredentials: r2 });
     fail = true;
     const [alice] = await runtime.mountsFor("alice", "remote");
     expect(alice!.remote!.credentials).toEqual({ accessKeyId: "fixed-ak", secretAccessKey: "fixed-sk" });
     expect(events).toContainEqual({ name: "docs", action: "mount-failed", error: "Temporary keys: Cloudflare temporary credentials failed: denied" });
   });
 
-  it("requires the API token the first time, keeps it afterwards, and removes it with the settings", async () => {
-    const { runtime, entry, vault } = await setup();
-    await expect(runtime.update(entry.id, {}, { temporary: { ...r2, apiToken: undefined } })).rejects.toThrow(/API token is required/);
-    await runtime.update(entry.id, {}, { temporary: r2 });
-    await runtime.update(entry.id, {}, { temporary: { ...r2, apiToken: undefined, accountId: "acct2" } });
-    expect(vault.data.get(`${STORAGE_VAULT_OWNER}/storage-temp:${entry.id}`)?.credentials.apiToken).toBe("cf-token-secret");
-    const fixed = await runtime.update(entry.id, {}, { temporary: null });
-    expect(fixed!.temporaryCredentials).toBeUndefined();
-    expect(fixed!.temporaryToken).toBe("not set");
-    const [alice] = await runtime.mountsFor("alice", "remote");
+  it("without a token entry the fixed key is used; clearing the settings goes back to it", async () => {
+    const { runtime, entry, events } = await setup();
+    const noToken = await runtime.update(entry.id, { temporaryCredentials: { ...r2, token: undefined } });
+    expect(noToken!.keys.temporaryToken).toBe("not set");
+    let [alice] = await runtime.mountsFor("alice", "remote");
     expect(alice!.remote!.credentials.accessKeyId).toBe("fixed-ak");
+    expect(events.at(-1)?.error).toMatch(/Cloudflare API token is not set/);
+    // a reference to an entry that does not exist resolves to nothing as well
+    const missing = await runtime.update(entry.id, { temporaryCredentials: { ...r2, token: { owner: "ops", service: "nope" } } });
+    expect(missing!.keys.temporaryToken).toBe("not set");
+    const fixed = await runtime.update(entry.id, { temporaryCredentials: null as any });
+    expect(fixed!.temporaryCredentials).toBeUndefined();
+    [alice] = await runtime.mountsFor("alice", "remote");
+    expect(alice!.remote!.credentials.accessKeyId).toBe("fixed-ak");
+    expect(seen).toHaveLength(0);
   });
 });
 
@@ -132,7 +141,7 @@ describe("temporary keys: STS AssumeRole (AWS S3, MinIO)", () => {
 
   it("signs AssumeRole with the main keys and limits the session policy to the bucket and prefix", async () => {
     const { runtime, entry } = await setup();
-    await runtime.update(entry.id, {}, { temporary: sts });
+    await runtime.update(entry.id, { temporaryCredentials: sts });
     const [alice] = await runtime.mountsFor("alice", "remote", { ttlSeconds: 5400 });
     expect(alice!.remote!.credentials).toEqual({ accessKeyId: "sts-ak-1", secretAccessKey: "sts-sk-1", sessionToken: "sts-st-1" });
 
@@ -162,7 +171,7 @@ describe("temporary keys: STS AssumeRole (AWS S3, MinIO)", () => {
 
   it("clamps the lifetime to 15 minutes .. 12 hours, and uses the settings' STS endpoint when given", async () => {
     const { runtime, entry } = await setup({ endpoint: undefined, region: "eu-west-1" });
-    await runtime.update(entry.id, {}, { temporary: { ...sts, endpoint: `${base}/sts` } });
+    await runtime.update(entry.id, { temporaryCredentials: { ...sts, endpoint: `${base}/sts` } });
     await runtime.mountsFor("alice", "remote", { ttlSeconds: 99 * 3600 });
     expect(seen[0]!.url).toBe("/sts/");
     expect(seen[0]!.headers.authorization).toContain("/eu-west-1/sts/aws4_request");
@@ -171,7 +180,7 @@ describe("temporary keys: STS AssumeRole (AWS S3, MinIO)", () => {
 
   it("falls back to the fixed key when STS refuses", async () => {
     const { runtime, entry } = await setup();
-    await runtime.update(entry.id, {}, { temporary: sts });
+    await runtime.update(entry.id, { temporaryCredentials: sts });
     fail = true;
     const [alice] = await runtime.mountsFor("alice", "remote");
     expect(alice!.remote!.credentials.accessKeyId).toBe("fixed-ak");
@@ -179,14 +188,14 @@ describe("temporary keys: STS AssumeRole (AWS S3, MinIO)", () => {
 
   it("an entry without a fixed key and without working temporary keys is not mounted remotely", async () => {
     const { runtime, entry } = await setup();
-    await runtime.update(entry.id, {}, { sandboxCredentials: null, temporary: sts });
+    await runtime.update(entry.id, { sandboxCredentials: null as any, temporaryCredentials: sts });
     fail = true;
     expect(await runtime.mountsFor("alice", "remote")).toEqual([]);
   });
 
   it("rejects settings without a role ARN", async () => {
     const { runtime, entry } = await setup();
-    await expect(runtime.update(entry.id, {}, { temporary: { kind: "sts", roleArn: "nope" } })).rejects.toThrow(/role ARN/);
+    await expect(runtime.update(entry.id, { temporaryCredentials: { kind: "sts", roleArn: "nope" } })).rejects.toThrow(/role ARN/);
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * Storage: registry, grants, credentials in the vault, the S3 client, mounts and tools.
+ * Storage: registry, grants, keys in referenced vault entries, the S3 client, mounts and tools.
  *
  * Integration parts run against a local S3 server (`rclone serve s3` over a temp directory) and,
  * when FUSE is usable, real `rclone mount`s. They are skipped when rclone is not installed.
@@ -12,7 +12,6 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  STORAGE_VAULT_OWNER,
   assertStorageAccess,
   normalizeStoragePath,
   normalizeStoragePrefix,
@@ -58,6 +57,8 @@ function entryInput(overrides: Partial<CreateStorageEntry> = {}): CreateStorageE
 const RCLONE = findBinary("rclone");
 const FUSE = !!RCLONE && !!fusermountBinary() && existsSync("/dev/fuse");
 const AK = "test-access-key";
+const MAIN = { owner: "ops", service: "s3-main" };
+const SANDBOX = { owner: "ops", service: "s3-sandbox" };
 const SK = "test-secret-key-0123456789";
 
 async function freePort(): Promise<number> {
@@ -231,25 +232,38 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
   async function setup(grants: StorageEntry["grants"] = [], overrides: Partial<CreateStorageEntry> = {}) {
     polpoDir = await tempDir("polpo-storage-");
     vault = new MemoryVault();
+    // keys live in an agent's vault; the entry references the vault entry (owner + service)
+    await vault.set("ops", "s3-main", { type: "custom", credentials: { accessKeyId: AK, secretAccessKey: SK } });
+    await vault.set("ops", "s3-sandbox", { type: "custom", credentials: { access_key: "sbx", secret: "sbx-secret" } });
     events = [];
     const runtime = new StorageRuntime(polpoDir, vault as unknown as VaultStore, (payload) => events.push(payload), { backoffMs: 200, maxBackoffMs: 400 });
     runtimes.push(runtime);
-    const entry = await runtime.create(entryInput({ endpoint, region: "us-east-1", grants, ...overrides }), { credentials: { accessKeyId: AK, secretAccessKey: SK } });
+    const entry = await runtime.create(entryInput({ endpoint, region: "us-east-1", grants, credentials: MAIN, ...overrides }));
     return { runtime, entry };
   }
 
-  it("stores credentials in the $storage vault namespace and only reports whether they are set", async () => {
+  it("resolves keys through vault references and only reports whether they resolve", async () => {
     const { runtime, entry } = await setup();
-    expect(entry).toMatchObject({ credentials: "set", sandboxCredentials: "not set" });
+    expect(entry).toMatchObject({ credentials: MAIN, keys: { credentials: "set", sandboxCredentials: "not set", temporaryToken: "not set" } });
     expect(JSON.stringify(entry)).not.toContain(SK);
-    expect(vault.data.get(`${STORAGE_VAULT_OWNER}/storage:${entry.id}`)?.credentials.secretAccessKey).toBe(SK);
-    await runtime.update(entry.id, {}, { sandboxCredentials: { accessKeyId: "sbx", secretAccessKey: "sbx-secret" } });
-    expect((await runtime.get("docs"))?.sandboxCredentials).toBe("set");
-    await runtime.update(entry.id, {}, { sandboxCredentials: null });
-    expect((await runtime.get("docs"))?.sandboxCredentials).toBe("not set");
+    expect(await runtime.credentials(entry)).toEqual({ accessKeyId: AK, secretAccessKey: SK });
+    // aliases: "access_key" / "secret" work as access key id / secret access key
+    await runtime.update(entry.id, { sandboxCredentials: SANDBOX });
+    expect((await runtime.get("docs"))?.keys.sandboxCredentials).toBe("set");
+    expect(await runtime.sandboxCredentials((await runtime.entry("docs"))!)).toEqual({ accessKeyId: "sbx", secretAccessKey: "sbx-secret" });
+    await runtime.update(entry.id, { sandboxCredentials: null as any });
+    expect((await runtime.get("docs"))?.keys.sandboxCredentials).toBe("not set");
+    expect((await runtime.entry("docs"))?.sandboxCredentials).toBeUndefined();
+    // a reference to a missing entry, or one without both keys, does not resolve
+    await vault.set("ops", "half", { type: "custom", credentials: { accessKeyId: "only-id" } });
+    await runtime.update(entry.id, { sandboxCredentials: { owner: "ops", service: "half" } });
+    expect((await runtime.get("docs"))?.keys.sandboxCredentials).toBe("not set");
+    // system "$" owners cannot be referenced
+    await expect(runtime.update(entry.id, { credentials: { owner: "$storage", service: "storage:x" } })).rejects.toThrow(/vault entry/);
     expect(await runtime.delete("docs")).toBe(true);
-    expect(vault.data.size).toBe(0);
-    expect(events.map((e) => e.action)).toEqual(["created", "updated", "updated", "deleted"]);
+    // removing the bucket leaves the vault entries alone
+    expect(vault.data.has("ops/s3-main")).toBe(true);
+    expect(events.map((e) => e.action)).toEqual(["created", "updated", "updated", "updated", "deleted"]);
   });
 
   it("tests the connection with one listed object, and reports bad credentials", async () => {
@@ -257,7 +271,8 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     const result = await runtime.test(entry.id);
     expect(result.ok).toBe(true);
     expect(result.sampleKey).toBeTruthy();
-    await runtime.update(entry.id, {}, { credentials: { accessKeyId: AK, secretAccessKey: "wrong-secret" } });
+    await vault.set("ops", "s3-wrong", { type: "custom", credentials: { accessKeyId: AK, secretAccessKey: "wrong-secret" } });
+    await runtime.update(entry.id, { credentials: { owner: "ops", service: "s3-wrong" } });
     await expect(runtime.test(entry.id)).rejects.toThrow(/SignatureDoesNotMatch|403/);
   });
 
@@ -308,7 +323,7 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     const { runtime, entry } = await setup([{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/" }, { id: "b", agent: "bob", access: "read" }], { prefix: "team" });
     expect(await runtime.mountsFor("alice", "remote")).toEqual([]);
     expect(await runtime.mountsFor("alice", "host")).toEqual([]);
-    await runtime.update(entry.id, {}, { sandboxCredentials: { accessKeyId: "sbx", secretAccessKey: "sbx-secret" } });
+    await runtime.update(entry.id, { sandboxCredentials: SANDBOX });
     expect(await runtime.mountsFor("alice", "remote")).toEqual([{
       name: "docs", path: "/mnt/storage/docs", readOnly: false,
       remote: { driver: "rclone", endpoint, region: "us-east-1", bucket: "bucket1", prefix: "team/clients/acme/", pathStyle: true, credentials: { accessKeyId: "sbx", secretAccessKey: "sbx-secret" } },
@@ -327,15 +342,18 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
       body: JSON.stringify({
         name: "Media", slug: "media", endpoint, bucket: "bucket1", readOnly: true,
         grants: [{ agent: "bob", access: "read", prefix: "public" }],
-        credentials: { accessKeyId: AK, secretAccessKey: SK },
-        sandboxCredentials: { accessKeyId: "sbx-key", secretAccessKey: "sbx-secret-value" },
+        credentials: MAIN,
+        sandboxCredentials: SANDBOX,
       }),
     });
     expect(created.status).toBe(201);
     const body = await created.text();
     expect(body).not.toContain(SK);
-    expect(body).not.toContain("sbx-secret-value");
-    expect(JSON.parse(body).data).toMatchObject({ slug: "media", credentials: "set", sandboxCredentials: "set", grants: [{ agent: "bob", access: "read", prefix: "public" }] });
+    expect(body).not.toContain("sbx-secret");
+    expect(JSON.parse(body).data).toMatchObject({
+      slug: "media", credentials: MAIN, sandboxCredentials: SANDBOX,
+      keys: { credentials: "set", sandboxCredentials: "set" }, grants: [{ agent: "bob", access: "read", prefix: "public" }],
+    });
     const list = await (await app.request("/")).text();
     expect(list).not.toContain(SK);
     expect(list).not.toContain(AK);
@@ -348,10 +366,25 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     });
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error).toMatch(/read-only/);
-    const credentials = await app.request("/media/credentials", {
-      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ sandboxCredentials: null }),
+    // keys are never sent: a key-shaped body is not a reference
+    const keysInBody = await app.request("/", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Y", slug: "y", bucket: "b", credentials: { accessKeyId: AK, secretAccessKey: SK } }),
     });
-    expect((await credentials.json()).data.sandboxCredentials).toBe("not set");
+    expect(keysInBody.status).toBe(400);
+    const systemOwner = await app.request("/", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Y", slug: "y", bucket: "b", credentials: { owner: "$storage", service: "storage:x" } }),
+    });
+    expect(systemOwner.status).toBe(400);
+    // updates go through the entry: null clears the sandbox reference
+    const current = (await (await app.request("/media")).json()).data;
+    const updated = await app.request("/media", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: current.name, slug: current.slug, endpoint, bucket: "bucket1", readOnly: true, grants: current.grants, credentials: MAIN, sandboxCredentials: null }),
+    });
+    expect((await updated.json()).data).toMatchObject({ keys: { credentials: "set", sandboxCredentials: "not set" } });
+    expect((await app.request("/media/credentials", { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(404);
     expect((await app.request("/missing")).status).toBe(404);
     expect((await app.request("/media", { method: "DELETE" })).status).toBe(200);
     expect((await app.request("/media")).status).toBe(404);
@@ -381,7 +414,7 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     await expect(executeStorageTool("storage_list_entries", {}, { polpoDir, agent: "alice", vaultStore: vault as unknown as VaultStore })).rejects.toThrow(/reserved to Polpo/);
     const entries = await executeStorageTool("storage_list_entries", {}, { polpoDir, vaultStore: vault as unknown as VaultStore });
     expect(entries).not.toContain(SK);
-    expect(JSON.parse(entries)[0]).toMatchObject({ slug: "docs", credentials: "set", mount: { state: "unmounted" } });
+    expect(JSON.parse(entries)[0]).toMatchObject({ slug: "docs", credentials: MAIN, keys: { credentials: "set" }, mount: { state: "unmounted" } });
     void runtime;
   });
 

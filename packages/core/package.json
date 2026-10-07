@@ -254,6 +254,10 @@
       "types": "./dist/sandbox.d.ts",
       "import": "./dist/sandbox.js"
     },
+    "./vault-ref": {
+      "types": "./dist/vault-ref.d.ts",
+      "import": "./dist/vault-ref.js"
+    },
     "./storage-registry": {
       "types": "./dist/storage-registry.d.ts",
       "import": "./dist/storage-registry.js"

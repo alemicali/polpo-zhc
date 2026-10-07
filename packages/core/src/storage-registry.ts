@@ -2,11 +2,12 @@
  * Storage: S3-compatible buckets (AWS S3, Cloudflare R2, MinIO, Backblaze B2, Wasabi…) registered
  * once and shown to agents as directories (FUSE mounts) and through host-side storage_* tools.
  *
- * The registry holds only non-secret settings. Credentials live in the system vault namespace
- * STORAGE_VAULT_OWNER and are never returned by APIs or shown to agents.
+ * The registry holds only non-secret settings. Keys stay in the vault: an entry references the
+ * vault entries that hold them (owner + service), chosen by a person; APIs never return values.
  *
  * Design: polpo-arch/SANDBOX.md, "Storage: bucket montati con FUSE".
  */
+import type { VaultRef } from "./vault-ref.js";
 
 export type StorageProvider = "s3";
 export type StorageDriver = "rclone" | "mountpoint-s3";
@@ -33,11 +34,11 @@ export interface StorageCacheOptions {
 /**
  * Optional: remote sandboxes get temporary keys minted per task run (scoped to the bucket, the
  * agent's prefix and read-only or read-write) instead of the entry's fixed sandbox key.
- * Non-secret settings only; the Cloudflare API token lives in the vault.
+ * Non-secret settings only; the Cloudflare API token is in the referenced vault entry.
  */
 export type StorageTemporaryCredentials =
   /** Cloudflare R2: POST /accounts/{accountId}/r2/temp-access-credentials. */
-  | { kind: "r2"; accountId: string; parentAccessKeyId: string }
+  | { kind: "r2"; accountId: string; parentAccessKeyId: string; /** Vault entry with the API token. */ token?: VaultRef }
   /** AWS S3, MinIO and other S3-compatible: STS AssumeRole signed with the entry's main keys. */
   | { kind: "sts"; roleArn: string; /** Default: AWS regional STS, or the entry's endpoint. */ endpoint?: string };
 
@@ -59,6 +60,10 @@ export interface StorageEntry {
   driver: StorageDriver;
   readOnly: boolean;
   cache?: StorageCacheOptions;
+  /** Vault entry with the main keys (access key id + secret): host mounts and storage_* tools. */
+  credentials?: VaultRef;
+  /** Vault entry with dedicated, limited keys for remote sandboxes. */
+  sandboxCredentials?: VaultRef;
   /** Per-run temporary keys for remote sandboxes (default: the fixed sandbox key). */
   temporaryCredentials?: StorageTemporaryCredentials;
   /** Enabled entries are mounted on the host at server start. */
@@ -89,17 +94,7 @@ export interface StorageRegistryStore {
   setEmitter?(emitChange?: StorageRegistryChangeEmitter): void;
 }
 
-// ── Credentials (in the vault, never in the registry) ───────────────────
-
-/** System vault namespace holding storage credentials ("$"-prefixed: never visible to agents). */
-export const STORAGE_VAULT_OWNER = "$storage";
-/** Vault service of an entry's host credentials (mounts and storage_* tools). */
-export const storageCredentialsService = (entryId: string): string => `storage:${entryId}`;
-/** Vault service of an entry's dedicated, limited credentials for remote sandboxes. */
-export const storageSandboxCredentialsService = (entryId: string): string => `storage-sandbox:${entryId}`;
-
-/** Vault service of the Cloudflare API token an entry uses to mint temporary keys (credentials.apiToken). */
-export const storageTemporaryTokenService = (entryId: string): string => `storage-temp:${entryId}`;
+// ── Credentials (in the referenced vault entries, never in the registry) ─
 
 export interface StorageCredentials {
   accessKeyId: string;
