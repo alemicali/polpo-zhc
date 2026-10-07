@@ -72,7 +72,7 @@ export const STORAGE_AGENT_TOOLS: Tool[] = [
 export const STORAGE_ADMIN_TOOLS: Tool[] = [
   {
     name: "storage_list_entries",
-    description: "List registered storage buckets with their settings, agent grants, whether credentials are set, and mount status on this server.",
+    description: "List registered storage buckets with their settings, agent grants, the vault entries holding their keys (owner + service) and whether each resolves (never values), and mount status on this server.",
     parameters: Type.Object({}),
   },
   {
