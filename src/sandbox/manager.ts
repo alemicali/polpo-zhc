@@ -77,6 +77,10 @@ export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRe
 /** The Shell the system tools use (bash, grep, glob), running inside a workspace. */
 export class WorkspaceShell implements Shell {
   constructor(private readonly workspace: Workspace) {}
+  /** Remote VM: the browser and other programs next to the files run through this shell. */
+  async isRemote(): Promise<boolean> {
+    return isRemoteWorkspace(this.workspace);
+  }
   async execute(command: string, options: ShellOptions = {}): Promise<ShellResult> {
     const result = await this.workspace.exec(command, { cwd: options.cwd, env: options.env, timeoutMs: options.timeout });
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };

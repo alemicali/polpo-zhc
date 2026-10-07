@@ -343,13 +343,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
         : undefined;
       const whatsappSendMedia = waBridge
-        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean }) =>
+        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean; data?: Uint8Array }) =>
             waBridge.sendMediaMessage(jid, opts)
         : undefined;
       const whatsappMarkRead = waBridge
         ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
             waBridge.markRead(keys)
         : undefined;
+      // commands (bash, grep, glob, the browser in Cowork chats) run in this agent's chat sandbox;
+      // Cowork chats keep their files in the remote VM: every tool that touches files goes there too
+      const chatShell = o.chatShell(agentConfig, context?.sessionId);
+      const chatFs = o.chatFileSystem(agentConfig, context?.sessionId);
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
         allowedTools: agentConfig.allowedTools,
@@ -367,10 +371,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         whatsappSendMedia,
         whatsappMarkRead,
         polpoDir,
-        // commands (bash, grep, glob) run in this agent's chat sandbox
-        shell: o.chatShell(agentConfig, context?.sessionId),
-        // Cowork chats keep their files in the remote VM: the file tools go there too
-        fs: o.chatFileSystem(agentConfig, context?.sessionId),
+        shell: chatShell,
+        fs: chatFs,
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -392,6 +394,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         cwd: o.getAgentWorkDir(),
         emit: (payload) => o.emit("storage:changed", payload),
         emitFileChanged: (payload) => o.emit("file:changed", payload),
+        fs: chatFs,
       }));
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
@@ -425,13 +428,6 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (allowsRenderWidget && !existingToolNames.has("render_widget")) {
         tools.push(renderWidgetTool);
       }
-      // Cowork chats: tools that run here but use the agent's files follow the VM's files
-      const { bridgeHostTools } = await import("../sandbox/tool-bridge.js");
-      const bridged = bridgeHostTools(tools, {
-        cwd: o.getAgentWorkDir(), roots: [o.getAgentWorkDir()],
-        workspace: () => o.chatRemoteWorkspace(agentConfig, context?.sessionId),
-      });
-      tools.splice(0, tools.length, ...bridged);
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
         if (name === "render_widget") {

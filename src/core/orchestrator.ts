@@ -276,6 +276,11 @@ export class Orchestrator extends TypedEmitter {
   chatShell(agent?: AgentConfig, session?: () => string | undefined): Shell {
     return {
       execute: async (command, options = {}) => new WorkspaceShell(await this.acquireChatWorkspace(agent, session?.())).execute(command, options),
+      // Cowork chats (remote VM): known from the settings, without opening the workspace
+      isRemote: async () => {
+        const { provider } = (await this.chatSandbox(agent)).sandbox;
+        return provider === "daytona" || provider === "e2b";
+      },
     };
   }
 
@@ -296,13 +301,6 @@ export class Orchestrator extends TypedEmitter {
       readdirWithTypes: call("readdirWithTypes"), mkdir: call("mkdir"), remove: call("remove"), stat: call("stat"),
       rename: call("rename"), readFileBuffer: call("readFileBuffer"), writeFileBuffer: call("writeFileBuffer"),
     } as FileSystem;
-  }
-
-  /** The chat's workspace when it is a remote VM (Cowork); undefined otherwise (nothing to bridge). */
-  async chatRemoteWorkspace(agent?: AgentConfig, session?: () => string | undefined): Promise<Workspace | undefined> {
-    const { sandbox } = await this.chatSandbox(agent);
-    if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") return undefined;
-    return this.acquireChatWorkspace(agent, session?.());
   }
 
   private acquireChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {

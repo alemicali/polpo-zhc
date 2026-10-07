@@ -175,20 +175,19 @@ export interface SandboxCascade {
 // ── Where each tool runs ─────────────────────────────────────────────────
 
 /**
- * - "sandbox": runs in the agent's sandbox (commands and the working files).
- * - "bridged": runs on this machine (a library or a key), but reads or writes files of the
- *   working directory: with a remote sandbox, input files are fetched from the VM and the files
- *   it produces are copied into the VM.
+ * Same semantics as open Polpo's `requiresSandbox` (packages/tools/src/runtime-requirements.ts):
+ *
+ * - "sandbox": works on the agent's files or runs programs, so it acts in the agent's sandbox.
+ *   Commands (and the browser, with a remote VM) run there; the other tools read and write the
+ *   agent's files through the sandbox's FileSystem, so with a remote VM the bytes live in the VM.
  * - "host": runs on this machine because it uses keys or integrations that must not reach the
  *   sandbox (vault, email, messaging, storage, data sources…), or manages the instance.
  */
-export type ToolPlacement = "sandbox" | "bridged" | "host";
+export type ToolPlacement = "sandbox" | "host";
 
 export const TOOL_PLACEMENT: ReadonlyArray<{ pattern: string; placement: ToolPlacement }> = [
-  ...["bash", "grep", "glob", "ls", "read", "write", "edit", "run_command"].map((pattern) => ({ pattern, placement: "sandbox" as const })),
-  ...["pdf_*", "excel_*", "docx_*", "http_download", "image_generate", "video_generate", "audio_speak", "audio_transcribe",
-    "email_download_attachment", "whatsapp_send_file", "browser_screenshot", "storage_read", "storage_write", "register_outcome",
-    "read_attachment"].map((pattern) => ({ pattern, placement: "bridged" as const })),
+  ...["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command",
+    "browser_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"].map((pattern) => ({ pattern, placement: "sandbox" as const })),
 ];
 
 export function toolPlacement(name: string): ToolPlacement {

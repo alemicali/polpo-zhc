@@ -8,7 +8,6 @@ import { RemoteWorkspace } from "../sandbox/remote.js";
 import type { CreateSpec, RemoteAdapter, RemoteDriver, RemoteVmSummary } from "../sandbox/remote-adapters.js";
 import { SandboxPool, instanceLabel, poolFilePath, poolKey } from "../sandbox/pool.js";
 import { SandboxReaper } from "../sandbox/reaper.js";
-import { bridgeHostTools, pathArguments } from "../sandbox/tool-bridge.js";
 
 const dirs: string[] = [];
 const tmp = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix)); dirs.push(d); return d; };
@@ -97,8 +96,8 @@ describe("lifecycle cascade", () => {
   test("tool placement", () => {
     expect(toolPlacement("bash")).toBe("sandbox");
     expect(toolPlacement("read")).toBe("sandbox");
-    expect(toolPlacement("pdf_read")).toBe("bridged");
-    expect(toolPlacement("http_download")).toBe("bridged");
+    expect(toolPlacement("pdf_read")).toBe("sandbox");
+    expect(toolPlacement("http_download")).toBe("sandbox");
     expect(toolPlacement("email_send")).toBe("host");
     expect(toolPlacement("vault_get")).toBe("host");
     expect(toolPlacement("storage_list")).toBe("host");
@@ -239,36 +238,3 @@ describe("reaper", () => {
   });
 });
 
-describe("tool bridge", () => {
-  test("path arguments are found and resolved", () => {
-    expect(pathArguments({ path: "report.pdf", outputPath: "/abs/out.xlsx", files: ["a.docx", "b.docx"], url: "https://x/y.pdf", text: "hello" }, "/w"))
-      .toEqual(["/w/report.pdf", "/abs/out.xlsx", "/w/a.docx", "/w/b.docx"]);
-  });
-
-  test("a host tool reads the VM's file and its output goes into the VM", async () => {
-    const root = tmp("polpo-root-");
-    const provider = new FakeProvider();
-    const ws = new RemoteWorkspace("e2b", { root, sandbox: remoteSandbox(), adapter: provider });
-    await ws.exec("echo from-vm > input.txt");
-    expect(existsSync(join(root, "input.txt"))).toBe(false);
-    const tool = {
-      name: "pdf_create",
-      execute: async (_id: string, params: { path: string; outputPath: string }) => {
-        const text = readFileSync(join(root, params.path), "utf8");
-        writeFileSync(join(root, params.outputPath), `pdf of ${text}`);
-        return { content: [] };
-      },
-    };
-    const [bridged] = bridgeHostTools([tool], { cwd: root, roots: [root], workspace: async () => ws });
-    await bridged!.execute("call", { path: "input.txt", outputPath: "out.pdf" });
-    const r = await ws.exec("cat out.pdf");
-    expect(r.stdout.trim()).toBe("pdf of from-vm");
-    await ws.dispose();
-  });
-
-  test("other tools and local workspaces are untouched", async () => {
-    const tool = { name: "email_send", execute: async () => "sent" };
-    const [same] = bridgeHostTools([tool], { cwd: "/w", roots: ["/w"], workspace: async () => undefined });
-    expect(same).toBe(tool);
-  });
-});
