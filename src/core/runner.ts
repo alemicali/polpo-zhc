@@ -227,6 +227,15 @@ async function main(): Promise<void> {
     let vaultStore: VaultStore | undefined = drizzleVaultStore;
     if (!vaultStore) try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
 
+    // Remote sandbox (Daytona, E2B): this process creates the VM, so it needs the provider's
+    // settings (they travel with the resolved sandbox: the key's vault reference, region…) and
+    // the vault to read the key from. Without this the run silently fell back to bubblewrap.
+    const remoteProvider = config.sandbox?.provider;
+    if (remoteProvider === "daytona" || remoteProvider === "e2b") {
+      const { configureRemoteProviders } = await import("../sandbox/remote-providers.js");
+      configureRemoteProviders(vaultStore, () => ({ [remoteProvider]: config.sandbox!.providerOptions }));
+    }
+
     // WhatsApp store + send function (if configured)
     let waStore: WhatsAppMessageStore | undefined;
     let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;

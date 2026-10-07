@@ -155,3 +155,28 @@ describe("remote provider credentials", () => {
     expect(await remoteProviderCredentials("e2b")).toBeUndefined();
   });
 });
+
+describe("task runner processes", () => {
+  test("configured from the resolved sandbox's provider options and the vault (as runner.ts does)", async () => {
+    const { resolveSandbox } = await import("@polpo-ai/core/sandbox");
+    const settings = { provider: "daytona" as const, providers: { daytona: { credential: { owner: "alessio", service: "daytona" }, target: "eu" } } };
+    const sandbox = resolveSandbox({ instance: settings }, { scope: "task", available: new Set(["local", "bwrap", "daytona"] as const) });
+    expect(sandbox.providerOptions).toMatchObject({ credential: { owner: "alessio", service: "daytona" }, target: "eu" });
+    const vault = { get: async (o: string, s: string) => (o === "alessio" && s === "daytona" ? { type: "api_key", credentials: { apiKey: "k" } } : undefined) } as any;
+    configureRemoteProviders(vault, () => ({ [sandbox.provider]: sandbox.providerOptions }));
+    expect(configuredRemoteProviders()).toEqual(["daytona"]);
+    expect(await remoteProviderCredentials("daytona")).toMatchObject({ apiKey: "k", target: "eu" });
+    const ws = createWorkspace(sandbox, { root: tmpdir() });
+    expect(isRemoteWorkspace(ws)).toBe(true);
+  });
+
+  test("a remote provider that is not configured falls back to bubblewrap and says so", () => {
+    configureRemoteProviders(undefined, () => undefined);
+    const warnings: string[] = [];
+    const ws = createWorkspace({ provider: "daytona", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] }, {
+      root: tmpdir(), onRemoteEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); },
+    });
+    expect(ws.provider).toBe("bwrap");
+    expect(warnings[0]).toMatch(/not configured.*bubblewrap/);
+  });
+});

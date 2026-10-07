@@ -66,7 +66,10 @@ export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRe
       pool: req.pool, syncEachExec: req.syncEachExec,
     });
   }
-  // a provider that is not available here: never fall back to weaker isolation silently
+  // a provider that is not available here: never fall back to weaker isolation, and say so
+  if (sandbox.provider === "daytona" || sandbox.provider === "e2b") {
+    req.onRemoteEvent?.({ kind: "warning", message: `${sandbox.provider === "daytona" ? "Daytona" : "E2B"} is not configured where this run executes: commands run in bubblewrap on this server instead` });
+  }
   if (bwrapAvailable()) return new BwrapWorkspace({ ...opts, sandbox: { ...sandbox, provider: "bwrap" } });
   throw new Error(`Sandbox provider "${sandbox.provider}" is not available on this server`);
 }
