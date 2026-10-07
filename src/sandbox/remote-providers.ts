@@ -1,18 +1,19 @@
 /**
- * Credentials of the remote sandbox providers (Daytona, E2B).
+ * Remote sandbox providers (Daytona, E2B).
  *
- * Kept in the vault under the reserved owner "$sandbox" (agents can't resolve "$" owners), and
- * cached in memory after load so choosing a provider stays synchronous. APIs only ever say
- * whether a key is set; non-secret fields (API URL, region, template) are returned as is.
+ * Settings live with the other sandbox settings (settings.sandbox.providers.<id>): the vault entry
+ * holding the API key (a reference: owner + service), plus non-secret options (API URL, region,
+ * template). The key itself stays in that vault entry and is read when a VM is created.
  */
 import type { VaultStore } from "@polpo-ai/core";
+import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 
 export type RemoteProviderId = "daytona" | "e2b";
 export const REMOTE_PROVIDERS: RemoteProviderId[] = ["daytona", "e2b"];
-export const SANDBOX_VAULT_OWNER = "$sandbox";
 
-export interface RemoteProviderCredentials {
-  apiKey: string;
+/** settings.sandbox.providers.<id> for a remote provider (no secrets). */
+export interface RemoteProviderSettings {
+  credential?: VaultRef;
   /** Daytona: API URL (default https://app.daytona.io/api). */
   apiUrl?: string;
   /** Daytona: region/target (e.g. "eu", "us"). */
@@ -23,85 +24,65 @@ export interface RemoteProviderCredentials {
   template?: string;
 }
 
-export interface RemoteProviderStatus {
+export interface RemoteProviderCredentials extends Omit<RemoteProviderSettings, "credential"> {
+  apiKey: string;
+}
+
+export interface RemoteProviderStatus extends RemoteProviderSettings {
   id: RemoteProviderId;
+  /** A vault entry is chosen. */
   configured: boolean;
-  apiKey: "set" | "not set";
-  apiUrl?: string;
-  target?: string;
-  domain?: string;
-  template?: string;
+  /** The chosen entry exists and holds a key. */
+  keyFound: boolean;
   lastTest?: { ok: boolean; at: string; durationMs?: number; error?: string };
 }
 
-const PUBLIC_FIELDS = ["apiUrl", "target", "domain", "template"] as const;
-const cache = new Map<RemoteProviderId, RemoteProviderCredentials>();
-const lastTests = new Map<RemoteProviderId, RemoteProviderStatus["lastTest"]>();
 let store: VaultStore | undefined;
-
-const service = (id: RemoteProviderId) => `sandbox-provider:${id}`;
+let readSettings: () => Record<string, unknown> | undefined = () => undefined;
+const lastTests = new Map<RemoteProviderId, RemoteProviderStatus["lastTest"]>();
 
 export function isRemoteProvider(id: string): id is RemoteProviderId {
   return (REMOTE_PROVIDERS as string[]).includes(id);
 }
 
-/** Load all provider credentials from the vault (server start). */
-export async function loadRemoteProviders(vaultStore: VaultStore | undefined): Promise<void> {
+/** Where to read the provider settings (the instance's settings.sandbox.providers) and keys. */
+export function configureRemoteProviders(vaultStore: VaultStore | undefined, providersSettings: () => Record<string, unknown> | undefined): void {
   store = vaultStore;
-  cache.clear();
-  if (!vaultStore) return;
-  for (const id of REMOTE_PROVIDERS) {
-    const entry = await vaultStore.get(SANDBOX_VAULT_OWNER, service(id)).catch(() => undefined);
-    const c = entry?.credentials as Record<string, string> | undefined;
-    if (c?.apiKey) cache.set(id, { apiKey: c.apiKey, ...Object.fromEntries(PUBLIC_FIELDS.filter((f) => c[f]).map((f) => [f, c[f]])) });
+  readSettings = providersSettings;
+}
+
+export function remoteProviderSettings(id: RemoteProviderId): RemoteProviderSettings {
+  const raw = (readSettings()?.[id] ?? {}) as Record<string, unknown>;
+  const out: RemoteProviderSettings = {};
+  const credential = normalizeVaultRef(raw.credential);
+  if (credential) out.credential = credential;
+  for (const f of ["apiUrl", "target", "domain", "template"] as const) {
+    if (typeof raw[f] === "string" && (raw[f] as string).trim()) out[f] = (raw[f] as string).trim();
   }
+  return out;
 }
 
-export function remoteProviderCredentials(id: RemoteProviderId): RemoteProviderCredentials | undefined {
-  return cache.get(id);
-}
-
+/** Providers with a key chosen (synchronous: used when picking where a task runs). */
 export function configuredRemoteProviders(): RemoteProviderId[] {
-  return REMOTE_PROVIDERS.filter((id) => !!cache.get(id)?.apiKey);
+  return REMOTE_PROVIDERS.filter((id) => !!remoteProviderSettings(id).credential);
 }
 
-export function remoteProviderStatus(): RemoteProviderStatus[] {
-  return REMOTE_PROVIDERS.map((id) => {
-    const c = cache.get(id);
+/** The key (from the referenced vault entry) and the options, when a VM is about to be created. */
+export async function remoteProviderCredentials(id: RemoteProviderId): Promise<RemoteProviderCredentials | undefined> {
+  const { credential, ...options } = remoteProviderSettings(id);
+  const apiKey = pickCredential(await resolveVaultRef(store, credential), [...CREDENTIAL_NAMES.apiKey]);
+  return apiKey ? { apiKey, ...options } : undefined;
+}
+
+export async function remoteProviderStatus(): Promise<RemoteProviderStatus[]> {
+  return Promise.all(REMOTE_PROVIDERS.map(async (id) => {
+    const settings = remoteProviderSettings(id);
+    const keyFound = !!(await remoteProviderCredentials(id));
     return {
-      id,
-      configured: !!c?.apiKey,
-      apiKey: c?.apiKey ? "set" : "not set",
-      ...Object.fromEntries(PUBLIC_FIELDS.filter((f) => c?.[f]).map((f) => [f, c![f]])),
+      id, ...settings, configured: !!settings.credential, keyFound,
       ...(lastTests.get(id) ? { lastTest: lastTests.get(id) } : {}),
-    } as RemoteProviderStatus;
-  });
-}
-
-/** Save credentials. An empty apiKey keeps the stored one (the UI never sees it). */
-export async function saveRemoteProvider(id: RemoteProviderId, input: Partial<RemoteProviderCredentials>): Promise<void> {
-  if (!store) throw new Error("The vault is not available");
-  const current = cache.get(id);
-  const apiKey = input.apiKey?.trim() || current?.apiKey;
-  if (!apiKey) throw new Error("The API key is required");
-  const next: RemoteProviderCredentials = { apiKey };
-  for (const f of PUBLIC_FIELDS) {
-    const v = input[f] !== undefined ? input[f]?.trim() : current?.[f];
-    if (v) next[f] = v;
-  }
-  await store.set(SANDBOX_VAULT_OWNER, service(id), {
-    type: "api_key",
-    label: id === "daytona" ? "Daytona sandboxes" : "E2B sandboxes",
-    credentials: next as unknown as Record<string, string>,
-  });
-  cache.set(id, next);
-  lastTests.delete(id);
-}
-
-export async function removeRemoteProvider(id: RemoteProviderId): Promise<void> {
-  if (store) await store.remove(SANDBOX_VAULT_OWNER, service(id)).catch(() => undefined);
-  cache.delete(id);
-  lastTests.delete(id);
+    };
+  }));
 }
 
 /** Create a throwaway sandbox, run a command, delete it. */

@@ -641,36 +641,32 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Destinations the sandbox network rule refused recently (last ~100, in memory): the "approve a new domain" list
   authed.get("/sandbox/network-denied", (c) => c.json({ ok: true, data: o.getNetworkDenied() }));
 
-  // Remote sandbox providers (Daytona, E2B): keys go to the vault and are never returned.
+  // Remote sandbox providers (Daytona, E2B): settings are edited with the other sandbox settings
+  // (PATCH /config/settings), keys stay in the vault entry each provider references.
+  // Vault entries a feature can reference (owner + service): every agent's own entries, names and
+  // key names only — never values, never the system "$" owners.
+  authed.get("/vault-catalog", async (c) => {
+    const store = o.getVaultStore();
+    if (!store) return c.json({ ok: true, data: [] });
+    const agents = await o.getAgents();
+    const rows = (await Promise.all(agents.map(async (agent) => {
+      const entries = await store.list(agent.name).catch(() => []);
+      return entries.filter((e: any) => !e.sharedFrom).map((e: any) => ({
+        owner: agent.name, service: e.service, type: e.type, label: e.label, keys: e.keys, allowedAgents: e.allowedAgents ?? [],
+      }));
+    }))).flat();
+    return c.json({ ok: true, data: rows });
+  });
+
   authed.get("/sandbox/providers", async (c) => {
     const { remoteProviderStatus } = await import("../sandbox/remote-providers.js");
-    return c.json({ ok: true, data: remoteProviderStatus() });
-  });
-  authed.put("/sandbox/providers/:id", async (c) => {
-    const { isRemoteProvider, saveRemoteProvider, remoteProviderStatus } = await import("../sandbox/remote-providers.js");
-    const id = c.req.param("id");
-    if (!isRemoteProvider(id)) return c.json({ ok: false, error: `Unknown provider "${id}"` }, 404);
-    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    const pick = (k: string) => typeof body[k] === "string" ? body[k] as string : undefined;
-    try {
-      await saveRemoteProvider(id, { apiKey: pick("apiKey"), apiUrl: pick("apiUrl"), target: pick("target"), domain: pick("domain"), template: pick("template") });
-    } catch (err) {
-      return c.json({ ok: false, error: (err as Error).message }, 400);
-    }
-    return c.json({ ok: true, data: remoteProviderStatus().find((p) => p.id === id) });
-  });
-  authed.delete("/sandbox/providers/:id", async (c) => {
-    const { isRemoteProvider, removeRemoteProvider } = await import("../sandbox/remote-providers.js");
-    const id = c.req.param("id");
-    if (!isRemoteProvider(id)) return c.json({ ok: false, error: `Unknown provider "${id}"` }, 404);
-    await removeRemoteProvider(id);
-    return c.json({ ok: true, data: { removed: id } });
+    return c.json({ ok: true, data: await remoteProviderStatus() });
   });
   authed.post("/sandbox/providers/:id/test", async (c) => {
     const { isRemoteProvider, testRemoteProvider, remoteProviderCredentials } = await import("../sandbox/remote-providers.js");
     const id = c.req.param("id");
     if (!isRemoteProvider(id)) return c.json({ ok: false, error: `Unknown provider "${id}"` }, 404);
-    if (!remoteProviderCredentials(id)) return c.json({ ok: false, error: "Set the API key first" }, 400);
+    if (!(await remoteProviderCredentials(id))) return c.json({ ok: false, error: "Choose a vault entry with the API key first" }, 400);
     return c.json({ ok: true, data: await testRemoteProvider(id) });
   });
 
