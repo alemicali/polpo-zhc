@@ -12,11 +12,55 @@
  * All file operations enforce path sandboxing.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
+import type { Shell } from "@polpo-ai/core/shell";
+import { createHash } from "node:crypto";
+import { nanoid } from "nanoid";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs, withHostCopy, writeBytes } from "./tool-fs.js";
+import { ensureSandboxBrowser, shellIsRemote } from "./browser-tools.js";
+import { PDF_RENDER_DRIVER } from "./pdf-render-driver.js";
+
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+const DRIVER_PATH = `/tmp/polpo-pdf-render-${createHash("sha256").update(PDF_RENDER_DRIVER).digest("hex").slice(0, 12)}.mjs`;
+/** Installs playwright-core globally in a VM that lacks it (the runner image has it). */
+export const PLAYWRIGHT_INSTALL_COMMAND = "npm i -g playwright-core >/dev/null 2>&1 || sudo -n npm i -g playwright-core >/dev/null 2>&1";
+
+/**
+ * Render HTML to `outPath` inside a remote sandbox: the driver runs there with node, playwright-core
+ * and agent-browser's Chromium (open Polpo's pdf_create). Throws with the driver's error.
+ */
+async function renderInSandbox(
+  shell: Shell, fs: FileSystem,
+  source: { html?: string; htmlPath?: string }, pdf: Record<string, unknown>, waitUntil: string, outPath: string,
+): Promise<void> {
+  const missing = await ensureSandboxBrowser(shell);
+  if (missing) throw new Error(missing);
+  if (!(await fs.exists(DRIVER_PATH).catch(() => false))) await fs.writeFile(DRIVER_PATH, PDF_RENDER_DRIVER);
+  const paramsPath = `/tmp/polpo-pdf-${nanoid(10)}.json`;
+  await fs.writeFile(paramsPath, JSON.stringify({ ...source, pdf, waitUntil }));
+  await fs.mkdir(outPath.slice(0, outPath.lastIndexOf("/")) || "/");
+  const run = () => shell.execute(`node ${shq(DRIVER_PATH)} ${shq(paramsPath)} ${shq(outPath)}`, { timeout: 90_000 });
+  try {
+    let r = await run();
+    if (r.exitCode !== 0 && /playwright-core is not installed/.test(r.stderr)) {
+      await shell.execute(PLAYWRIGHT_INSTALL_COMMAND, { timeout: 300_000 });
+      r = await run();
+    }
+    if (r.exitCode !== 0) {
+      const raw = (r.stderr || r.stdout || `node exited with ${r.exitCode}`).trim();
+      let message = raw;
+      try { message = JSON.parse(raw).error ?? raw; } catch { /* not JSON */ }
+      throw new Error(message);
+    }
+  } finally {
+    await fs.remove(paramsPath).catch(() => undefined);
+  }
+}
 
 const MAX_TEXT_OUTPUT = 50_000;
 
@@ -40,7 +84,7 @@ const PdfReadSchema = Type.Object({
   max_chars: Type.Optional(Type.Number({ description: "Max characters to return (default: 50000)" })),
 });
 
-function createPdfReadTool(cwd: string, sandbox: string[]): AgentTool<typeof PdfReadSchema> {
+function createPdfReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof PdfReadSchema> {
   return {
     name: "pdf_read",
     label: "Read PDF",
@@ -52,7 +96,7 @@ function createPdfReadTool(cwd: string, sandbox: string[]): AgentTool<typeof Pdf
 
       try {
         const { PDFDocument } = await import("pdf-lib");
-        const bytes = readFileSync(filePath);
+        const bytes = await readBytes(fs, filePath);
         const pdfDoc = await PDFDocument.load(bytes);
         const pageCount = pdfDoc.getPageCount();
         const title = pdfDoc.getTitle() ?? "";
@@ -85,12 +129,12 @@ function createPdfReadTool(cwd: string, sandbox: string[]): AgentTool<typeof Pdf
           const pagesArgs = pageNums.length > 0
             ? ["-f", String(Math.min(...pageNums)), "-l", String(Math.max(...pageNums))]
             : [];
-          // Argument array, no shell (the path may contain shell metacharacters).
-          extractedText = execFileSync(
+          // Argument array, no shell. pdftotext takes a path: a private copy of the bytes on this machine.
+          extractedText = await withHostCopy(bytes, "input.pdf", async (hostPath) => execFileSync(
             "pdftotext",
-            [...pagesArgs, "-layout", filePath, "-"],
+            [...pagesArgs, "-layout", hostPath, "-"],
             { encoding: "utf-8", timeout: 15_000, stdio: ["ignore", "pipe", "ignore"] },
-          ).trim();
+          ).trim());
         } catch {
           // pdftotext not available - that's fine
         }
@@ -147,7 +191,7 @@ const PdfCreateSchema = Type.Object({
   wait_for_network: Type.Optional(Type.Boolean({ description: "Wait for network idle before rendering (default: true). Disable for offline HTML with no external resources." })),
 });
 
-function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof PdfCreateSchema> {
+function createPdfCreateTool(cwd: string, sandbox: string[], fs: FileSystem, shell?: Shell): AgentTool<typeof PdfCreateSchema> {
   return {
     name: "pdf_create",
     label: "Create PDF",
@@ -180,7 +224,41 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
 
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "pdf_create");
-      mkdirSync(dirname(filePath), { recursive: true });
+
+      // Default margins
+      const defaultMargin = { top: "20mm", right: "15mm", bottom: "25mm", left: "15mm" };
+      const margin = params.margin ? { ...defaultMargin, ...params.margin } : defaultMargin;
+      // Determine if custom header/footer templates are provided
+      const hasHeaderFooter = !!(params.header_template || params.footer_template);
+      const pdfOptions = {
+        format: params.format ?? "A4",
+        landscape: params.landscape ?? false,
+        printBackground: params.print_background ?? true,
+        scale: Math.max(0.1, Math.min(2, params.scale ?? 1)),
+        margin,
+        displayHeaderFooter: hasHeaderFooter,
+        ...(hasHeaderFooter ? {
+          headerTemplate: params.header_template ?? "<div></div>",
+          footerTemplate: params.footer_template ?? "<div></div>",
+        } : {}),
+      };
+      const waitUntil = (params.wait_for_network ?? true) ? "networkidle" : "domcontentloaded";
+
+      // Remote sandbox: Chromium renders in the VM, next to the agent's files
+      if (shell && await shellIsRemote(shell)) {
+        const htmlPath = params.html_path ? resolve(cwd, params.html_path) : undefined;
+        if (htmlPath) assertPathAllowed(htmlPath, sandbox, "pdf_create");
+        try {
+          await renderInSandbox(shell, fs, htmlPath ? { htmlPath } : { html: params.html! }, pdfOptions, waitUntil, filePath);
+          return await createdResult(filePath, await readBytes(fs, filePath));
+        } catch (err: any) {
+          const msg = err.message ?? String(err);
+          return {
+            content: [{ type: "text", text: `PDF create error (in the sandbox): ${msg}` }],
+            details: { error: msg },
+          };
+        }
+      }
 
       // Resolve HTML content
       let htmlContent: string;
@@ -188,7 +266,7 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
         const htmlFilePath = resolve(cwd, params.html_path);
         assertPathAllowed(htmlFilePath, sandbox, "pdf_create");
         try {
-          htmlContent = readFileSync(htmlFilePath, "utf-8");
+          htmlContent = await fs.readFile(htmlFilePath);
         } catch (err: any) {
           return {
             content: [{ type: "text", text: `Error reading HTML file: ${err.message}` }],
@@ -212,50 +290,13 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
         const page = await browser.newPage();
 
         // Load HTML content
-        const waitUntil = (params.wait_for_network ?? true) ? "networkidle" : "domcontentloaded";
         await page.setContent(htmlContent, { waitUntil, timeout: 30_000 });
 
-        // Default margins
-        const defaultMargin = { top: "20mm", right: "15mm", bottom: "25mm", left: "15mm" };
-        const margin = params.margin
-          ? { ...defaultMargin, ...params.margin }
-          : defaultMargin;
-
-        // Determine if custom header/footer templates are provided
-        const hasHeaderFooter = !!(params.header_template || params.footer_template);
-
         // Generate PDF
-        const pdfBuffer = await page.pdf({
-          path: filePath,
-          format: params.format ?? "A4",
-          landscape: params.landscape ?? false,
-          printBackground: params.print_background ?? true,
-          scale: Math.max(0.1, Math.min(2, params.scale ?? 1)),
-          margin,
-          displayHeaderFooter: hasHeaderFooter,
-          ...(hasHeaderFooter ? {
-            headerTemplate: params.header_template ?? "<div></div>",
-            footerTemplate: params.footer_template ?? "<div></div>",
-          } : {}),
-        });
+        const pdfBuffer: Uint8Array = await page.pdf(pdfOptions);
 
-        const bytes = pdfBuffer.byteLength;
-
-        // Count pages in the generated PDF for reporting
-        let pageCount = 0;
-        try {
-          const { PDFDocument } = await import("pdf-lib");
-          const doc = await PDFDocument.load(readFileSync(filePath));
-          pageCount = doc.getPageCount();
-        } catch {
-          // Best effort — pdf-lib may fail on some PDFs
-        }
-
-        const pageInfo = pageCount > 0 ? `${pageCount} pages, ` : "";
-        return {
-          content: [{ type: "text", text: `PDF created: ${filePath} (${pageInfo}${bytes} bytes)` }],
-          details: { path: filePath, pages: pageCount, bytes },
-        };
+        await writeBytes(fs, filePath, pdfBuffer);
+        return await createdResult(filePath, pdfBuffer);
       } catch (err: any) {
         const msg = err.message ?? String(err);
         // Provide actionable hints for common errors
@@ -278,6 +319,23 @@ function createPdfCreateTool(cwd: string, sandbox: string[]): AgentTool<typeof P
   };
 }
 
+/** "PDF created" result, with the page count when pdf-lib can read it. */
+async function createdResult(filePath: string, pdfBuffer: Uint8Array) {
+  const bytes = pdfBuffer.byteLength;
+  let pageCount = 0;
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    pageCount = (await PDFDocument.load(pdfBuffer)).getPageCount();
+  } catch {
+    // Best effort — pdf-lib may fail on some PDFs
+  }
+  const pageInfo = pageCount > 0 ? `${pageCount} pages, ` : "";
+  return {
+    content: [{ type: "text" as const, text: `PDF created: ${filePath} (${pageInfo}${bytes} bytes)` }],
+    details: { path: filePath, pages: pageCount, bytes },
+  };
+}
+
 // ─── Tool: pdf_merge ───
 
 const PdfMergeSchema = Type.Object({
@@ -285,7 +343,7 @@ const PdfMergeSchema = Type.Object({
   output: Type.String({ description: "Output merged PDF path" }),
 });
 
-function createPdfMergeTool(cwd: string, sandbox: string[]): AgentTool<typeof PdfMergeSchema> {
+function createPdfMergeTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof PdfMergeSchema> {
   return {
     name: "pdf_merge",
     label: "Merge PDFs",
@@ -294,7 +352,6 @@ function createPdfMergeTool(cwd: string, sandbox: string[]): AgentTool<typeof Pd
     async execute(_id, params) {
       const outputPath = resolve(cwd, params.output);
       assertPathAllowed(outputPath, sandbox, "pdf_merge");
-      mkdirSync(dirname(outputPath), { recursive: true });
 
       try {
         const { PDFDocument } = await import("pdf-lib");
@@ -304,7 +361,7 @@ function createPdfMergeTool(cwd: string, sandbox: string[]): AgentTool<typeof Pd
         for (const inputPath of params.inputs) {
           const fullPath = resolve(cwd, inputPath);
           assertPathAllowed(fullPath, sandbox, "pdf_merge");
-          const bytes = readFileSync(fullPath);
+          const bytes = await readBytes(fs, fullPath);
           const src = await PDFDocument.load(bytes);
           const indices = Array.from({ length: src.getPageCount() }, (_, i) => i);
           const copiedPages = await merged.copyPages(src, indices);
@@ -313,7 +370,7 @@ function createPdfMergeTool(cwd: string, sandbox: string[]): AgentTool<typeof Pd
         }
 
         const mergedBytes = await merged.save();
-        writeFileSync(outputPath, mergedBytes);
+        await writeBytes(fs, outputPath, mergedBytes);
 
         return {
           content: [{ type: "text", text: `Merged ${params.inputs.length} PDFs -> ${outputPath} (${totalPages} pages, ${mergedBytes.byteLength} bytes)` }],
@@ -335,7 +392,7 @@ const PdfInfoSchema = Type.Object({
   path: Type.String({ description: "Path to PDF file" }),
 });
 
-function createPdfInfoTool(cwd: string, sandbox: string[]): AgentTool<typeof PdfInfoSchema> {
+function createPdfInfoTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof PdfInfoSchema> {
   return {
     name: "pdf_info",
     label: "PDF Info",
@@ -347,7 +404,7 @@ function createPdfInfoTool(cwd: string, sandbox: string[]): AgentTool<typeof Pdf
 
       try {
         const { PDFDocument } = await import("pdf-lib");
-        const bytes = readFileSync(filePath);
+        const bytes = await readBytes(fs, filePath);
         const pdfDoc = await PDFDocument.load(bytes);
 
         const pages = pdfDoc.getPageCount();
@@ -406,15 +463,18 @@ export const ALL_PDF_TOOL_NAMES: PdfToolName[] = ["pdf_read", "pdf_create", "pdf
  * @param cwd - Working directory
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
+ * @param fs - Where the files are read and written (default: this machine's disk)
+ * @param shell - The sandbox's shell: with a remote VM, pdf_create renders there
  */
-export function createPdfTools(cwd: string, allowedPaths?: string[], allowedTools?: string[]): AgentTool<any>[] {
+export function createPdfTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], fs?: FileSystem, shell?: Shell): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   const factories: Record<PdfToolName, () => AgentTool<any>> = {
-    pdf_read: () => createPdfReadTool(cwd, sandbox),
-    pdf_create: () => createPdfCreateTool(cwd, sandbox),
-    pdf_merge: () => createPdfMergeTool(cwd, sandbox),
-    pdf_info: () => createPdfInfoTool(cwd, sandbox),
+    pdf_read: () => createPdfReadTool(cwd, sandbox, _fs),
+    pdf_create: () => createPdfCreateTool(cwd, sandbox, _fs, shell),
+    pdf_merge: () => createPdfMergeTool(cwd, sandbox, _fs),
+    pdf_info: () => createPdfInfoTool(cwd, sandbox, _fs),
   };
 
   const names = allowedTools

@@ -25,7 +25,6 @@ import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } 
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { createSandboxVolumeCheckpointTool } from "../tools/sandbox-volume-tools.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
-import { bridgeHostTools } from "../sandbox/tool-bridge.js";
 import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** Create a fresh AgentActivity object */
@@ -528,7 +527,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // The provider commands really run in (a missing remote provider falls back to bwrap): anything
   // but "local" keeps secret values away from the model (vault_get → env_from_vault).
   const sandboxProvider = workspace?.provider ?? "local";
-  // Remote sandboxes keep the agent's files in the VM: file tools read and write there too.
+  // Remote sandboxes keep the agent's files in the VM: every tool that touches the agent's files
+  // (read/write/edit, pdf, excel, docx, images, audio, downloads, outcomes…) reads and writes there.
   const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
@@ -768,7 +768,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
 
       if (hasExtendedTools) {
-        // the browser runs on the host: it follows the sandbox network rule too
+        // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
         browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
         allTools = await createAllTools({
           cwd,
@@ -793,15 +793,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       if (ctx?.polpoDir) {
         allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
-        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir }));
-      }
-      // Remote sandbox: tools that run here but use the agent's files follow the VM's files
-      if (isRemoteWorkspace(workspace)) {
-        allTools = bridgeHostTools(allTools, {
-          cwd, roots: [cwd, ...(outputDir ? [outputDir] : [])],
-          workspace: async () => workspace,
-          onWarning: (m) => console.warn(`[sandbox] ${agentConfig.name}: ${m}`),
-        });
+        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
       }
       agent.state.tools = allTools;
 
@@ -879,13 +871,14 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         duration: Date.now() - start,
       };
     } finally {
-      await workspace?.dispose().catch(() => undefined);
-      await browserNetwork?.close().catch(() => undefined);
-      // Close agent-browser session (profile data auto-persisted by --profile)
+      // Close agent-browser session (profile data auto-persisted by --profile); a browser in a
+      // remote sandbox is closed there, before the VM goes away
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
-        await cleanupAgentBrowserSession(agentConfig.name).catch(() => {});
+        await cleanupAgentBrowserSession(agentConfig.name, shell).catch(() => {});
       }
+      await workspace?.dispose().catch(() => undefined);
+      await browserNetwork?.close().catch(() => undefined);
     }
   })();
 

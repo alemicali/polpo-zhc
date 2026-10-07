@@ -504,10 +504,10 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
   const tools = names.map(n => factories[n]());
 
   // register_outcome is always included — agents must always be able to declare artifacts
-  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir));
+  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir, _fs));
 
   // http_fetch + http_download are always included — core tools with SSRF protection
-  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir));
+  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir, _fs));
 
   // vault_get + vault_list are always included — core tools for credential access
   if (vault) {
@@ -620,6 +620,8 @@ export interface CreateAllToolsOptions {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function (for whatsapp_read markRead). */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
@@ -627,9 +629,13 @@ export interface CreateAllToolsOptions {
   polpoDir?: string;
   /** Agent name — scopes the offload dir of large tool outputs when there is no outputDir (default: browserSession). */
   agentName?: string;
-  /** FileSystem implementation (default: NodeFileSystem). */
+  /**
+   * Where the agent's files live (default: NodeFileSystem). Every tool that reads or writes the
+   * agent's files (read/write/edit/ls, pdf, excel, docx, images, audio, downloads, attachments,
+   * outcomes, screenshots) goes through it, so with a remote sandbox the bytes stay in the VM.
+   */
   fs?: FileSystem;
-  /** Shell implementation (default: NodeShell). */
+  /** Where commands run (default: NodeShell). A remote sandbox's shell also runs the browser. */
   shell?: Shell;
   /** The run's effective sandbox provider: anything but "local" hides secret values from vault_get. */
   sandboxProvider?: string;
@@ -677,37 +683,37 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs }));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir, options.fs));
   }
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
   if (categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
-    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault));
+    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault, options.fs));
   }
 
   // Audio tools — activated when any audio_* tool is in allowedTools
   if (categoryRequested(ALL_AUDIO_TOOL_NAMES)) {
-    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault));
+    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault, options.fs));
   }
 
   // Excel tools — activated when any excel_* tool is in allowedTools
   if (categoryRequested(ALL_EXCEL_TOOL_NAMES)) {
-    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools, options.fs));
   }
 
   // PDF tools — activated when any pdf_* tool is in allowedTools
   if (categoryRequested(ALL_PDF_TOOL_NAMES)) {
-    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools, options.fs, options.shell));
   }
 
   // Docx tools — activated when any docx_* tool is in allowedTools
   if (categoryRequested(ALL_DOCX_TOOL_NAMES)) {
-    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools, options.fs));
   }
 
   // Search tools (Exa) — activated when any search_* tool is in allowedTools
@@ -727,6 +733,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
       allowedTools,
       cwd,
       allowedPaths,
+      options.fs,
     ));
   }
 
@@ -736,7 +743,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   }
 
   // Attachment tool — always included (reads any file type attached by user)
-  tools.push(...createAttachmentTools(cwd, allowedPaths, allowedTools));
+  tools.push(...createAttachmentTools(cwd, allowedPaths, allowedTools, options.fs));
 
   // HTTP, register_outcome, and vault are already included via createSystemTools() above — no need to add again
 

@@ -10,8 +10,9 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { basename, extname, resolve } from "node:path";
-import { statSync } from "node:fs";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs } from "./tool-fs.js";
 
 // ─── Schemas ──────────────────────────────────
 
@@ -89,6 +90,8 @@ interface WhatsAppToolDeps {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   markRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
 }
@@ -210,7 +213,7 @@ function createWhatsAppSendTool(deps: WhatsAppToolDeps): AgentTool<typeof WhatsA
   };
 }
 
-function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox: string[]): AgentTool<typeof WhatsAppSendFileSchema> {
+function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof WhatsAppSendFileSchema> {
   return {
     name: "whatsapp_send_file",
     label: "Send WhatsApp File",
@@ -224,8 +227,10 @@ function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox
       const filePath = resolve(cwd, params.path);
       try {
         assertPathAllowed(filePath, sandbox, "whatsapp_send_file");
-        const stat = statSync(filePath);
-        if (!stat.isFile()) throw new Error("Path is not a file");
+        const stat = await fs.stat(filePath);
+        if (!stat.isFile) throw new Error("Path is not a file");
+        // the bytes come from where the agent's files live (this machine or the sandbox VM)
+        const data = await readBytes(fs, filePath);
         const mimeType = params.mimeType ?? guessMime(filePath);
         const fileName = params.fileName ?? basename(filePath);
         const msgId = await deps.sendMedia(jid, {
@@ -235,6 +240,7 @@ function createWhatsAppSendFileTool(deps: WhatsAppToolDeps, cwd: string, sandbox
           fileName,
           mediaKind: params.mediaKind ?? "auto",
           viewOnce: params.viewOnce,
+          data,
         });
         return {
           content: [{ type: "text", text: `WhatsApp attachment sent to ${params.to}: ${fileName} (${mimeType}, ${(stat.size / 1024).toFixed(1)} KB).` }],
@@ -331,13 +337,14 @@ export function createWhatsAppTools(
   allowedTools?: string[],
   cwd = process.cwd(),
   allowedPaths?: string[],
+  fs?: FileSystem,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
   const factories: Record<WhatsAppToolName, () => AgentTool<any>> = {
     whatsapp_list: () => createWhatsAppListTool(deps),
     whatsapp_read: () => createWhatsAppReadTool(deps),
     whatsapp_send: () => createWhatsAppSendTool(deps),
-    whatsapp_send_file: () => createWhatsAppSendFileTool(deps, cwd, sandbox),
+    whatsapp_send_file: () => createWhatsAppSendFileTool(deps, cwd, sandbox, toolFs(fs)),
     whatsapp_search: () => createWhatsAppSearchTool(deps),
     whatsapp_contacts: () => createWhatsAppContactsTool(deps),
   };

@@ -23,11 +23,12 @@
  *   ANTHROPIC_API_KEY   — anthropic vision provider
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname, extname } from "node:path";
+import { resolve, extname } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 
 type ToolResult = AgentToolResult<any>;
@@ -178,7 +179,7 @@ const ImageGenerateSchema = Type.Object({
   })),
 });
 
-function createGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof ImageGenerateSchema> {
+function createGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof ImageGenerateSchema> {
   return {
     name: "image_generate",
     label: "Generate Image",
@@ -192,7 +193,7 @@ function createGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVaul
       assertPathAllowed(filePath, sandbox, "image_generate");
 
       try {
-        return await generateFal(filePath, params, vault, signal);
+        return await generateFal(fs, filePath, params, vault, signal);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Image generation error: ${err.message}` }],
@@ -204,6 +205,7 @@ function createGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVaul
 }
 
 async function generateFal(
+  fs: FileSystem,
   filePath: string,
   params: {
     prompt: string;
@@ -251,8 +253,7 @@ async function generateFal(
   if (!imgResp.ok) throw new Error(`Failed to download generated image: ${imgResp.status}`);
   const buffer = Buffer.from(await imgResp.arrayBuffer());
 
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
+  await writeBytes(fs, filePath, buffer);
 
   const info = [
     `Image saved: ${filePath}`,
@@ -299,7 +300,7 @@ const VideoGenerateSchema = Type.Object({
   })),
 });
 
-function createVideoGenerateTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof VideoGenerateSchema> {
+function createVideoGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof VideoGenerateSchema> {
   return {
     name: "video_generate",
     label: "Generate Video",
@@ -314,7 +315,7 @@ function createVideoGenerateTool(cwd: string, sandbox: string[], vault?: Resolve
       assertPathAllowed(filePath, sandbox, "video_generate");
 
       try {
-        return await generateVideo(filePath, params, vault, signal);
+        return await generateVideo(fs, filePath, params, vault, signal);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Video generation error: ${err.message}` }],
@@ -326,6 +327,7 @@ function createVideoGenerateTool(cwd: string, sandbox: string[], vault?: Resolve
 }
 
 async function generateVideo(
+  fs: FileSystem,
   filePath: string,
   params: {
     prompt: string;
@@ -371,8 +373,7 @@ async function generateVideo(
   if (!videoResp.ok) throw new Error(`Failed to download generated video: ${videoResp.status}`);
   const buffer = Buffer.from(await videoResp.arrayBuffer());
 
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
+  await writeBytes(fs, filePath, buffer);
 
   const sizeMB = (buffer.byteLength / 1024 / 1024).toFixed(2);
   const info = [
@@ -405,7 +406,7 @@ const ImageAnalyzeSchema = Type.Object({
   max_tokens: Type.Optional(Type.Number({ description: "Max tokens in response (default: 1024)" })),
 });
 
-function createAnalyzeTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof ImageAnalyzeSchema> {
+function createAnalyzeTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof ImageAnalyzeSchema> {
   return {
     name: "image_analyze",
     label: "Analyze Image",
@@ -420,7 +421,7 @@ function createAnalyzeTool(cwd: string, sandbox: string[], vault?: ResolvedVault
 
       let fileBuffer: Buffer;
       try {
-        fileBuffer = readFileSync(filePath);
+        fileBuffer = await readBytes(fs, filePath);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Error reading image file: ${err.message}` }],
@@ -626,19 +627,22 @@ export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_a
  *   Supports wildcards expanded upstream (e.g. "image_*", "video_*").
  * @param vault - Resolved vault for credential resolution (fal-ai, openai, anthropic).
  *   Credentials are resolved as: vault > environment variable.
+ * @param fs - Where images and videos are read and saved (default: this machine's disk).
  */
 export function createImageTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
   vault?: ResolvedVault,
+  fs?: FileSystem,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   const factories: Record<ImageToolName, () => AgentTool<any>> = {
-    image_generate: () => createGenerateTool(cwd, sandbox, vault),
-    image_analyze: () => createAnalyzeTool(cwd, sandbox, vault),
-    video_generate: () => createVideoGenerateTool(cwd, sandbox, vault),
+    image_generate: () => createGenerateTool(cwd, sandbox, _fs, vault),
+    image_analyze: () => createAnalyzeTool(cwd, sandbox, _fs, vault),
+    video_generate: () => createVideoGenerateTool(cwd, sandbox, _fs, vault),
   };
 
   const names = allowedTools

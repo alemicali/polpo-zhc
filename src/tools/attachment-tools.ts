@@ -12,10 +12,12 @@
  */
 
 import { resolve, extname } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs } from "./tool-fs.js";
 
 const MAX_TEXT_OUTPUT = 50_000;
 
@@ -34,9 +36,8 @@ const MIME_MAP: Record<string, string> = {
   ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".bmp": "image/bmp",
 };
 
-async function readPdf(filePath: string, maxChars: number): Promise<string> {
+async function readPdf(filePath: string, bytes: Buffer, maxChars: number): Promise<string> {
   const { PDFDocument } = await import("pdf-lib");
-  const bytes = readFileSync(filePath);
   const doc = await PDFDocument.load(bytes);
   const pageCount = doc.getPageCount();
   const title = doc.getTitle() ?? "";
@@ -49,17 +50,17 @@ async function readPdf(filePath: string, maxChars: number): Promise<string> {
   return info;
 }
 
-async function readDocx(filePath: string, maxChars: number): Promise<string> {
+async function readDocx(bytes: Buffer, maxChars: number): Promise<string> {
   const mammoth = await import("mammoth");
-  const result = await mammoth.default.extractRawText({ path: filePath });
+  const result = await mammoth.default.extractRawText({ buffer: bytes });
   const text = result.value;
   return text.length > maxChars ? text.slice(0, maxChars) + "\n...(truncated)" : text;
 }
 
-async function readExcel(filePath: string, maxChars: number): Promise<string> {
+async function readExcel(bytes: Buffer, maxChars: number): Promise<string> {
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
-  await workbook.xlsx.readFile(filePath);
+  await workbook.xlsx.load(bytes as any);
 
   const parts: string[] = [];
   for (const sheet of workbook.worksheets) {
@@ -76,17 +77,25 @@ async function readExcel(filePath: string, maxChars: number): Promise<string> {
   return text.length > maxChars ? text.slice(0, maxChars) + "\n...(truncated)" : text;
 }
 
-async function readCsv(filePath: string, maxChars: number): Promise<string> {
-  const content = readFileSync(filePath, "utf-8");
+function readText(bytes: Buffer, maxChars: number): string {
+  const content = bytes.toString("utf-8");
   return content.length > maxChars ? content.slice(0, maxChars) + "\n...(truncated)" : content;
 }
 
-async function readText(filePath: string, maxChars: number): Promise<string> {
-  const content = readFileSync(filePath, "utf-8");
-  return content.length > maxChars ? content.slice(0, maxChars) + "\n...(truncated)" : content;
+/**
+ * The attachment's bytes, through the tools' FileSystem (the agent's files may live in a remote
+ * sandbox). Chat attachments are saved by this server: one uploaded after the sandbox started is
+ * only on this machine, so it is read here when the FileSystem does not have it.
+ */
+async function readAttachmentBytes(fs: FileSystem, filePath: string): Promise<Buffer> {
+  try {
+    return await readBytes(fs, filePath);
+  } catch (err) {
+    try { return await readFile(filePath); } catch { throw err; }
+  }
 }
 
-function createReadAttachmentTool(cwd: string, sandbox: string[]): AgentTool<typeof ReadAttachmentSchema> {
+function createReadAttachmentTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ReadAttachmentSchema> {
   return {
     name: "read_attachment",
     label: "Read Attachment",
@@ -102,9 +111,9 @@ function createReadAttachmentTool(cwd: string, sandbox: string[]): AgentTool<typ
       const ext = extname(filePath).toLowerCase();
 
       try {
+        const data = await readAttachmentBytes(fs, filePath);
         // Images → return as ImageContent for multimodal models
         if (IMAGE_EXTS.has(ext)) {
-          const data = readFileSync(filePath);
           const base64 = data.toString("base64");
           const mimeType = MIME_MAP[ext] ?? "image/png";
           return {
@@ -118,30 +127,30 @@ function createReadAttachmentTool(cwd: string, sandbox: string[]): AgentTool<typ
 
         // PDF
         if (PDF_EXTS.has(ext)) {
-          const text = await readPdf(filePath, MAX_TEXT_OUTPUT);
+          const text = await readPdf(filePath, data, MAX_TEXT_OUTPUT);
           return { content: [{ type: "text", text }], details: undefined };
         }
 
         // DOCX
         if (DOCX_EXTS.has(ext)) {
-          const text = await readDocx(filePath, MAX_TEXT_OUTPUT);
+          const text = await readDocx(data, MAX_TEXT_OUTPUT);
           return { content: [{ type: "text", text }], details: undefined };
         }
 
         // Excel
         if (EXCEL_EXTS.has(ext)) {
-          const text = await readExcel(filePath, MAX_TEXT_OUTPUT);
+          const text = await readExcel(data, MAX_TEXT_OUTPUT);
           return { content: [{ type: "text", text }], details: undefined };
         }
 
         // CSV/TSV
         if (CSV_EXTS.has(ext)) {
-          const text = await readCsv(filePath, MAX_TEXT_OUTPUT);
+          const text = readText(data, MAX_TEXT_OUTPUT);
           return { content: [{ type: "text", text }], details: undefined };
         }
 
         // Everything else → plain text
-        const text = await readText(filePath, MAX_TEXT_OUTPUT);
+        const text = readText(data, MAX_TEXT_OUTPUT);
         return { content: [{ type: "text", text }], details: undefined };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -151,12 +160,12 @@ function createReadAttachmentTool(cwd: string, sandbox: string[]): AgentTool<typ
   };
 }
 
-export function createAttachmentTools(cwd: string, allowedPaths?: string[], allowedTools?: string[]): AgentTool<any>[] {
+export function createAttachmentTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], fs?: FileSystem): AgentTool<any>[] {
   const tools: AgentTool<any>[] = [];
   const sandbox = allowedPaths ?? [cwd];
 
   if (!allowedTools || allowedTools.includes("read_attachment")) {
-    tools.push(createReadAttachmentTool(cwd, sandbox));
+    tools.push(createReadAttachmentTool(cwd, sandbox, toolFs(fs)));
   }
 
   return tools;

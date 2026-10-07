@@ -109,6 +109,7 @@ import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
+import { RemoteWorkspace } from "../sandbox/remote.js";
 import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
@@ -276,6 +277,11 @@ export class Orchestrator extends TypedEmitter {
   chatShell(agent?: AgentConfig, session?: () => string | undefined): Shell {
     return {
       execute: async (command, options = {}) => new WorkspaceShell(await this.acquireChatWorkspace(agent, session?.())).execute(command, options),
+      // Cowork chats (remote VM): known from the settings, without opening the workspace
+      isRemote: async () => {
+        const { provider } = (await this.chatSandbox(agent)).sandbox;
+        return provider === "daytona" || provider === "e2b";
+      },
     };
   }
 
@@ -298,11 +304,13 @@ export class Orchestrator extends TypedEmitter {
     } as FileSystem;
   }
 
-  /** The chat's workspace when it is a remote VM (Cowork); undefined otherwise (nothing to bridge). */
-  async chatRemoteWorkspace(agent?: AgentConfig, session?: () => string | undefined): Promise<Workspace | undefined> {
+  /** sandbox_volume_checkpoint in a Cowork chat: persist the chat VM's hydrated volumes now. */
+  async checkpointChatVolume(agent: AgentConfig, sessionKey: string | undefined, name?: string): Promise<void> {
     const { sandbox } = await this.chatSandbox(agent);
-    if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") return undefined;
-    return this.acquireChatWorkspace(agent, session?.());
+    if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") throw new Error("This chat has no remote sandbox with volumes");
+    const workspace = await this.acquireChatWorkspace(agent, sessionKey);
+    if (!(workspace instanceof RemoteWorkspace)) throw new Error("This chat has no remote sandbox with volumes");
+    await workspace.checkpointVolume(name);
   }
 
   private acquireChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
