@@ -64,16 +64,18 @@ function allowHosts(sandbox: EffectiveSandbox): string[] {
 
 class DaytonaAdapter implements RemoteAdapter {
   readonly provider = "daytona" as const;
-  private clientPromise?: Promise<any>;
+  private cached?: { fingerprint: string; client: any };
 
-  private client(): Promise<any> {
-    this.clientPromise ??= (async () => {
-      const creds = await Promise.resolve(remoteProviderCredentials("daytona"));
-      if (!creds?.apiKey) throw new Error("Daytona has no API key (Settings → Sandbox)");
+  /** A client for the current key (the key lives in a vault entry a person may change). */
+  private async client(): Promise<any> {
+    const creds = await Promise.resolve(remoteProviderCredentials("daytona"));
+    if (!creds?.apiKey) throw new Error("Daytona has no API key (Settings → Sandbox)");
+    const fingerprint = JSON.stringify([creds.apiKey, creds.apiUrl, creds.target]);
+    if (this.cached?.fingerprint !== fingerprint) {
       const { Daytona } = await import("@daytonaio/sdk");
-      return new Daytona({ apiKey: creds.apiKey, apiUrl: creds.apiUrl || undefined, target: creds.target || undefined });
-    })().catch((err) => { this.clientPromise = undefined; throw err; });
-    return this.clientPromise;
+      this.cached = { fingerprint, client: new Daytona({ apiKey: creds.apiKey, apiUrl: creds.apiUrl || undefined, target: creds.target || undefined }) };
+    }
+    return this.cached.client;
   }
 
   async create(spec: CreateSpec): Promise<RemoteDriver> {

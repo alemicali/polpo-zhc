@@ -4,19 +4,20 @@ import { validateStorageEntry, type StorageEntry } from "@polpo-ai/core/storage-
 import type { StorageRuntime } from "../../storage/runtime.js";
 
 /**
- * Storage buckets (S3, Cloudflare R2, MinIO, B2, Wasabi…): registry CRUD, credentials (accepted,
- * never returned: responses say only "set" / "not set"), connection test, mount and unmount.
+ * Storage buckets (S3, Cloudflare R2, MinIO, B2, Wasabi…): registry CRUD, connection test, mount
+ * and unmount. Keys are not sent here: an entry references the vault entries that hold them
+ * (owner + service); responses say only whether each one resolves ("set" / "not set").
  */
 
-const CredentialsSchema = z.object({
-  accessKeyId: z.string().trim().min(1),
-  secretAccessKey: z.string().trim().min(1),
-  sessionToken: z.string().trim().optional(),
+/** An existing vault entry: an agent's (possibly shared), never a system "$" owner. */
+const VaultRefSchema = z.object({
+  owner: z.string().trim().min(1).refine((o) => !o.startsWith("$"), { message: "System vault owners cannot be referenced" }),
+  service: z.string().trim().min(1),
 });
 
-/** Temporary keys per run for remote sandboxes; null goes back to the fixed sandbox key. */
+/** Temporary keys per run for remote sandboxes; omitted/null = the fixed sandbox key. */
 const TemporarySchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("r2"), accountId: z.string().trim().min(1), parentAccessKeyId: z.string().trim().min(1), apiToken: z.string().trim().optional() }),
+  z.object({ kind: z.literal("r2"), accountId: z.string().trim().min(1), parentAccessKeyId: z.string().trim().min(1), token: VaultRefSchema.optional() }),
   z.object({ kind: z.literal("sts"), roleArn: z.string().trim().min(1), endpoint: z.string().trim().optional() }),
 ]).nullable();
 
@@ -46,12 +47,12 @@ const EntrySchema = z.object({
   }).optional(),
   enabled: z.boolean().default(true),
   grants: z.array(GrantSchema).default([]),
-  /** Write-only. */
-  credentials: CredentialsSchema.optional(),
-  /** Write-only; null removes them. */
-  sandboxCredentials: CredentialsSchema.nullable().optional(),
-  /** Write-only; null goes back to the fixed sandbox key. */
-  temporary: TemporarySchema.optional(),
+  /** Vault entry with the main keys (access key id + secret). */
+  credentials: VaultRefSchema.nullable().optional(),
+  /** Vault entry with limited keys for remote sandboxes. */
+  sandboxCredentials: VaultRefSchema.nullable().optional(),
+  /** Temporary keys per run (R2 token in a vault entry, or STS role). */
+  temporaryCredentials: TemporarySchema.optional(),
 });
 
 const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
@@ -81,7 +82,7 @@ const getRoute = createRoute({
 });
 const updateRoute = createRoute({
   method: "put", path: "/{id}", tags: ["Storage"], summary: "Update a storage bucket",
-  description: "Omitted credentials stay as they are. Changing mount settings remounts the bucket.",
+  description: "Changing mount settings or the main vault entry remounts the bucket.",
   request: { params: idParam, body: { content: { "application/json": { schema: EntrySchema } } } },
   responses: {
     200: { content: { "application/json": { schema: okAny } }, description: "Updated" },
@@ -91,23 +92,10 @@ const updateRoute = createRoute({
 });
 const deleteRoute = createRoute({
   method: "delete", path: "/{id}", tags: ["Storage"], summary: "Remove a storage bucket",
-  description: "Unmounts it and deletes its credentials. The bucket and its files are not touched.",
+  description: "Unmounts it. The bucket, its files and the vault entries are not touched.",
   request: { params: idParam },
   responses: {
     200: { content: { "application/json": { schema: z.object({ ok: z.literal(true) }) } }, description: "Removed" },
-    404: { content: { "application/json": { schema: errorSchema } }, description: "Not found" },
-  },
-});
-const credentialsRoute = createRoute({
-  method: "put", path: "/{id}/credentials", tags: ["Storage"], summary: "Set storage credentials",
-  description: "Stored in the vault (system namespace). `sandboxCredentials`: a dedicated, limited key for remote sandboxes; null removes it. `temporary`: mint temporary keys per task run instead (R2: account id, parent access key id, API token; S3/MinIO: STS role ARN); null goes back to the fixed key. The API token is never returned.",
-  request: {
-    params: idParam,
-    body: { content: { "application/json": { schema: z.object({ credentials: CredentialsSchema.optional(), sandboxCredentials: CredentialsSchema.nullable().optional(), temporary: TemporarySchema.optional() }) } } },
-  },
-  responses: {
-    200: { content: { "application/json": { schema: okAny } }, description: "Updated" },
-    400: { content: { "application/json": { schema: errorSchema } }, description: "Invalid" },
     404: { content: { "application/json": { schema: errorSchema } }, description: "Not found" },
   },
 });
@@ -135,9 +123,12 @@ const statusRoute = createRoute({
 type EntryInput = z.infer<typeof EntrySchema>;
 
 function toEntry(input: EntryInput): Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> {
-  const { credentials: _c, sandboxCredentials: _s, temporary: _t, ...rest } = input;
+  const { credentials, sandboxCredentials, temporaryCredentials, ...rest } = input;
   return {
     ...rest,
+    credentials: credentials ?? undefined,
+    sandboxCredentials: sandboxCredentials ?? undefined,
+    temporaryCredentials: temporaryCredentials ?? undefined,
     endpoint: rest.endpoint || undefined,
     region: rest.region || undefined,
     prefix: rest.prefix || undefined,
@@ -161,7 +152,7 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {
-      const created = await getRuntime().create(entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials, temporary: input.temporary });
+      const created = await getRuntime().create(entry);
       return c.json({ ok: true, data: created }, 201);
     } catch (error) { return failure(c, error); }
   }) as any);
@@ -177,7 +168,7 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {
-      const updated = await getRuntime().update(c.req.valid("param").id, entry, { credentials: input.credentials, sandboxCredentials: input.sandboxCredentials, temporary: input.temporary });
+      const updated = await getRuntime().update(c.req.valid("param").id, entry);
       return updated ? c.json({ ok: true, data: updated }, 200) : notFound(c);
     } catch (error) { return failure(c, error); }
   }) as any);
@@ -185,14 +176,6 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
   app.openapi(deleteRoute, (async (c: any) => {
     try {
       return (await getRuntime().delete(c.req.valid("param").id)) ? c.json({ ok: true }, 200) : notFound(c);
-    } catch (error) { return failure(c, error); }
-  }) as any);
-
-  app.openapi(credentialsRoute, (async (c: any) => {
-    const body = c.req.valid("json");
-    try {
-      const updated = await getRuntime().update(c.req.valid("param").id, {}, body);
-      return updated ? c.json({ ok: true, data: updated }, 200) : notFound(c);
     } catch (error) { return failure(c, error); }
   }) as any);
 

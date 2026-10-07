@@ -1,6 +1,6 @@
 /**
- * Storage runtime of a project: the registry of buckets, their credentials in the system vault,
- * the host mounts (server process only) and the object operations behind the storage_* tools.
+ * Storage runtime of a project: the registry of buckets, the vault entries holding their keys
+ * (references: owner + service, resolved here and never returned), the host mounts (server process only) and the object operations behind the storage_* tools.
  *
  * It is also the StorageMountProvider workspaces ask for the mounts an agent may see.
  */
@@ -11,14 +11,10 @@ import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { StorageMountOptions, StorageMountProvider, StorageMountSpec } from "@polpo-ai/core/sandbox";
 import {
-  STORAGE_VAULT_OWNER,
   assertStorageAccess,
   normalizeStoragePrefix,
   scopeStorageListing,
   storageAccessFor,
-  storageCredentialsService,
-  storageSandboxCredentialsService,
-  storageTemporaryTokenService,
   validateStorageEntry,
   type StorageTemporaryCredentials,
   type CreateStorageEntry,
@@ -29,6 +25,7 @@ import {
   type StorageRegistryStore,
 } from "@polpo-ai/core/storage-registry";
 import type { VaultStore } from "../core/vault-store.js";
+import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileStorageRegistryStore } from "../stores/file-storage-registry-store.js";
 import { StorageMountManager, type MountManagerOptions, type MountStatus } from "./mount-manager.js";
@@ -39,8 +36,9 @@ export type StorageChangeAction = "created" | "updated" | "deleted" | "mounted" 
 /** Emits "storage:changed" (the orchestrator adds the event origin). */
 export type StorageEventEmitter = (payload: { name: string; action: StorageChangeAction; error?: string }) => void;
 
-/** An entry as APIs return it: settings, whether credentials are set (never their values), mount state. */
-export interface PublicStorageEntry extends StorageEntry, StorageCredentialStatus {
+/** An entry as APIs return it: settings (with the vault references), whether each referenced key resolves (never its value), mount state. */
+export interface PublicStorageEntry extends StorageEntry {
+  keys: StorageCredentialStatus;
   mount: MountStatus;
 }
 
@@ -61,17 +59,6 @@ export interface StorageListItem {
   size?: number;
   lastModified?: string;
 }
-
-/**
- * Temporary-key settings as the credentials API receives them: "fixed" (null) goes back to the
- * entry's fixed sandbox key. The Cloudflare API token is write-only (kept in the vault).
- */
-export type TemporaryCredentialsInput =
-  | null
-  | { kind: "r2"; accountId: string; parentAccessKeyId: string; apiToken?: string }
-  | { kind: "sts"; roleArn: string; endpoint?: string };
-
-type Secrets = { credentials?: StorageCredentials; sandboxCredentials?: StorageCredentials | null; temporary?: TemporaryCredentialsInput };
 
 export class StorageRuntime implements StorageMountProvider {
   readonly store: StorageRegistryStore;
@@ -106,7 +93,7 @@ export class StorageRuntime implements StorageMountProvider {
     this.mountManager ??= new StorageMountManager({
       ...this.mountOptions,
       polpoDir: this.polpoDir,
-      credentialsFor: (entry) => this.credentials(entry.id),
+      credentialsFor: (entry) => this.credentials(entry),
       onEvent: (entry, action, error) => this.emit?.({ name: entry.slug, action, ...(error ? { error } : {}) }),
     });
     return this.mountManager;
@@ -182,7 +169,7 @@ export class StorageRuntime implements StorageMountProvider {
    * (cached per agent and entry), else, or when minting fails, the entry's fixed sandbox key.
    */
   private async remoteCredentials(entry: StorageEntry, agent: string | undefined, prefix: string, readOnly: boolean, ttlSeconds?: number): Promise<StorageCredentials | undefined> {
-    const fixed = await this.sandboxCredentials(entry.id);
+    const fixed = await this.sandboxCredentials(entry);
     if (!entry.temporaryCredentials) return fixed;
     const ttl = clampTtl(ttlSeconds);
     const cacheKey = `${entry.id}|${agent ?? ""}|${readOnly ? "ro" : "rw"}|${prefix}`;
@@ -203,11 +190,11 @@ export class StorageRuntime implements StorageMountProvider {
 
   private async mint(entry: StorageEntry, settings: StorageTemporaryCredentials, agent: string | undefined, req: Parameters<typeof mintR2>[2]): Promise<MintedCredentials> {
     if (settings.kind === "r2") {
-      const token = (await this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entry.id)).catch(() => undefined))?.credentials?.apiToken;
-      if (!token) throw new Error("the Cloudflare API token is not set");
+      const token = pickCredential(await resolveVaultRef(this.vaultStore, settings.token), [...CREDENTIAL_NAMES.apiToken]);
+      if (!token) throw new Error("the Cloudflare API token is not set (choose its vault entry)");
       return mintR2(settings, token, req, this.cloudflareApi);
     }
-    const main = await this.credentials(entry.id);
+    const main = await this.credentials(entry);
     if (!main) throw new Error("the entry's main credentials are not set");
     return mintSts(settings, main, entry, req, sessionNameFor(agent));
   }
@@ -224,45 +211,23 @@ export class StorageRuntime implements StorageMountProvider {
   }
 
   async toPublic(entry: StorageEntry): Promise<PublicStorageEntry> {
-    return { ...entry, ...(await this.credentialStatus(entry.id)), mount: this.mountStatus(entry) };
+    return { ...entry, keys: await this.credentialStatus(entry), mount: this.mountStatus(entry) };
   }
 
-  async create(input: CreateStorageEntry, secrets: Secrets = {}): Promise<PublicStorageEntry> {
-    if ((secrets.credentials || secrets.sandboxCredentials) && !this.vaultStore) throw vaultUnavailable();
-    const entry = await this.store.create(input);
-    try {
-      if (secrets.credentials) await this.saveCredentials(storageCredentialsService(entry.id), entry, secrets.credentials);
-      if (secrets.sandboxCredentials) await this.saveCredentials(storageSandboxCredentialsService(entry.id), entry, secrets.sandboxCredentials);
-      if (secrets.temporary) await this.update(entry.id, {}, { temporary: secrets.temporary });
-    } catch (error) {
-      await this.store.delete(entry.id).catch(() => undefined);
-      throw error;
-    }
+  async create(input: CreateStorageEntry): Promise<PublicStorageEntry> {
+    const entry = await this.store.create(prepareEntry(input) as CreateStorageEntry);
     if (this.mountingActive && entry.enabled) await this.mounts.mount(entry);
     return this.toPublic(entry);
   }
 
-  async update(
-    idOrSlug: string,
-    patch: Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>,
-    secrets: Secrets = {},
-  ): Promise<PublicStorageEntry | null> {
+  async update(idOrSlug: string, patch: Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>): Promise<PublicStorageEntry | null> {
     const current = await this.store.get(idOrSlug);
     if (!current) return null;
-    if ((secrets.credentials || secrets.sandboxCredentials || secrets.temporary?.kind === "r2") && !this.vaultStore) throw vaultUnavailable();
-    if (secrets.temporary !== undefined) patch = { ...patch, temporaryCredentials: await this.prepareTemporary(current, secrets.temporary) };
-    const updated = (await this.store.update(current.id, patch))!;
-    if (secrets.temporary !== undefined || secrets.credentials) this.tempCache.clear(`${updated.id}|`);
-    if (secrets.credentials) await this.saveCredentials(storageCredentialsService(updated.id), updated, secrets.credentials);
-    if (secrets.sandboxCredentials) await this.saveCredentials(storageSandboxCredentialsService(updated.id), updated, secrets.sandboxCredentials);
-    if (secrets.sandboxCredentials === null) await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageSandboxCredentialsService(updated.id));
-    if (secrets.temporary === null) await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageTemporaryTokenService(updated.id)).catch(() => undefined);
-    if (secrets.temporary?.kind === "r2" && secrets.temporary.apiToken?.trim()) {
-      await this.vaultStore!.set(STORAGE_VAULT_OWNER, storageTemporaryTokenService(updated.id), {
-        type: "custom", label: `Storage ${updated.slug} (temporary keys API token)`, credentials: { apiToken: secrets.temporary.apiToken.trim() },
-      });
-    }
-    const mountChanged = MOUNT_FIELDS.some((field) => JSON.stringify(current[field]) !== JSON.stringify(updated[field])) || !!secrets.credentials;
+    const updated = (await this.store.update(current.id, prepareEntry(patch, current)))!;
+    const keysChanged = ["credentials", "sandboxCredentials", "temporaryCredentials"].some((f) => JSON.stringify((current as any)[f]) !== JSON.stringify((updated as any)[f]));
+    if (keysChanged) this.tempCache.clear(`${updated.id}|`);
+    const mountChanged = MOUNT_FIELDS.some((field) => JSON.stringify(current[field]) !== JSON.stringify(updated[field]))
+      || JSON.stringify(current.credentials) !== JSON.stringify(updated.credentials);
     if (this.mountingActive && mountChanged) {
       if (current.slug !== updated.slug) await this.mounts.remove(current);
       if (updated.enabled) await this.mounts.mount(updated);
@@ -271,28 +236,11 @@ export class StorageRuntime implements StorageMountProvider {
     return this.toPublic(updated);
   }
 
-  /** Validate temporary-key settings and return what the registry stores (no secrets). */
-  private async prepareTemporary(entry: StorageEntry, input: TemporaryCredentialsInput): Promise<StorageTemporaryCredentials | undefined> {
-    if (input === null) return undefined;
-    const settings: StorageTemporaryCredentials = input.kind === "r2"
-      ? { kind: "r2", accountId: input.accountId.trim(), parentAccessKeyId: input.parentAccessKeyId.trim() }
-      : { kind: "sts", roleArn: input.roleArn.trim(), ...(input.endpoint?.trim() ? { endpoint: input.endpoint.trim() } : {}) };
-    const problem = validateStorageEntry({ ...entry, temporaryCredentials: settings });
-    if (problem) throw new Error(problem);
-    if (input.kind === "r2" && !input.apiToken?.trim() && !(await this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entry.id)).catch(() => undefined))) {
-      throw new Error("The Cloudflare API token is required");
-    }
-    return settings;
-  }
-
   async delete(idOrSlug: string): Promise<boolean> {
     const current = await this.store.get(idOrSlug);
     if (!current) return false;
     if (this.mountManager) await this.mountManager.remove(current);
     const deleted = await this.store.delete(current.id);
-    await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageCredentialsService(current.id)).catch(() => undefined);
-    await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageSandboxCredentialsService(current.id)).catch(() => undefined);
-    await this.vaultStore?.remove(STORAGE_VAULT_OWNER, storageTemporaryTokenService(current.id)).catch(() => undefined);
     this.tempCache.clear(`${current.id}|`);
     return deleted;
   }
@@ -316,43 +264,35 @@ export class StorageRuntime implements StorageMountProvider {
 
   // ── Credentials ────────────────────────────────────────────────────
 
-  async credentialStatus(entryId: string): Promise<StorageCredentialStatus> {
-    const [host, sandbox, token] = await Promise.all([
-      this.credentials(entryId), this.sandboxCredentials(entryId),
-      this.vaultStore?.get(STORAGE_VAULT_OWNER, storageTemporaryTokenService(entryId)).catch(() => undefined),
-    ]);
-    return { credentials: host ? "set" : "not set", sandboxCredentials: sandbox ? "set" : "not set", temporaryToken: token ? "set" : "not set" };
+  /** Whether each referenced vault entry exists and holds what it should (never the values). */
+  async credentialStatus(entry: StorageEntry): Promise<StorageCredentialStatus> {
+    const token = entry.temporaryCredentials?.kind === "r2"
+      ? pickCredential(await resolveVaultRef(this.vaultStore, entry.temporaryCredentials.token), [...CREDENTIAL_NAMES.apiToken])
+      : undefined;
+    return {
+      credentials: (await this.credentials(entry)) ? "set" : "not set",
+      sandboxCredentials: (await this.sandboxCredentials(entry)) ? "set" : "not set",
+      temporaryToken: token ? "set" : "not set",
+    };
   }
 
-  /** Host credentials (never returned by APIs or given to agents). */
-  async credentials(entryId: string): Promise<StorageCredentials | undefined> {
-    return this.readCredentials(storageCredentialsService(entryId));
+  /** Host credentials, from the referenced vault entry (never returned by APIs or given to agents). */
+  async credentials(entry: StorageEntry): Promise<StorageCredentials | undefined> {
+    return this.readCredentials(entry.credentials);
   }
 
-  /** The dedicated, limited credentials a person provided for remote sandboxes. */
-  async sandboxCredentials(entryId: string): Promise<StorageCredentials | undefined> {
-    return this.readCredentials(storageSandboxCredentialsService(entryId));
+  /** The dedicated, limited credentials for remote sandboxes, from the referenced vault entry. */
+  async sandboxCredentials(entry: StorageEntry): Promise<StorageCredentials | undefined> {
+    return this.readCredentials(entry.sandboxCredentials);
   }
 
-  private async readCredentials(service: string): Promise<StorageCredentials | undefined> {
-    const entry = await this.vaultStore?.get(STORAGE_VAULT_OWNER, service).catch(() => undefined);
-    const c = entry?.credentials;
-    if (!c?.accessKeyId || !c.secretAccessKey) return undefined;
-    return { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, ...(c.sessionToken ? { sessionToken: c.sessionToken } : {}) };
-  }
-
-  private async saveCredentials(service: string, entry: StorageEntry, credentials: StorageCredentials): Promise<void> {
-    if (!this.vaultStore) throw vaultUnavailable();
-    if (!credentials.accessKeyId?.trim() || !credentials.secretAccessKey?.trim()) throw new Error("Both the access key ID and the secret access key are required");
-    await this.vaultStore.set(STORAGE_VAULT_OWNER, service, {
-      type: "custom",
-      label: `Storage ${entry.slug}${service.startsWith("storage-sandbox:") ? " (sandbox)" : ""}`,
-      credentials: {
-        accessKeyId: credentials.accessKeyId.trim(),
-        secretAccessKey: credentials.secretAccessKey.trim(),
-        ...(credentials.sessionToken?.trim() ? { sessionToken: credentials.sessionToken.trim() } : {}),
-      },
-    });
+  private async readCredentials(ref: VaultRef | undefined): Promise<StorageCredentials | undefined> {
+    const c = await resolveVaultRef(this.vaultStore, ref);
+    const accessKeyId = pickCredential(c, [...CREDENTIAL_NAMES.accessKeyId]);
+    const secretAccessKey = pickCredential(c, [...CREDENTIAL_NAMES.secretAccessKey]);
+    if (!accessKeyId || !secretAccessKey) return undefined;
+    const sessionToken = pickCredential(c, [...CREDENTIAL_NAMES.sessionToken]);
+    return { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
   }
 
   // ── Object operations (storage_* tools; host-side, credentials stay here) ──
@@ -490,14 +430,41 @@ export class StorageRuntime implements StorageMountProvider {
   }
 
   private async client(entry: StorageEntry): Promise<S3Client> {
-    const credentials = await this.credentials(entry.id);
+    const credentials = await this.credentials(entry);
     if (!credentials) throw new Error(`Credentials for storage "${entry.name}" are not set`);
     return new S3Client(s3TargetFor(entry), credentials);
   }
 }
 
-function vaultUnavailable(): Error {
-  return new Error("Vault is unavailable; storage credentials could not be stored securely");
+type EntryPatch = Partial<Omit<StorageEntry, "id" | "createdAt" | "updatedAt">>;
+
+/**
+ * Normalize the vault references of a create/update (null clears one; a malformed reference or a
+ * system "$" owner is refused) and validate the resulting entry.
+ */
+function prepareEntry<T extends EntryPatch>(patch: T, current?: StorageEntry): T {
+  const out = { ...patch } as T & Record<string, unknown>;
+  const ref = (value: unknown, what: string): VaultRef | undefined => {
+    if (value === null || value === undefined) return undefined;
+    const normalized = normalizeVaultRef(value);
+    if (!normalized) throw new Error(`${what}: choose an agent's vault entry (owner and service)`);
+    return normalized;
+  };
+  if ("credentials" in out) out.credentials = ref(out.credentials, "Main keys");
+  if ("sandboxCredentials" in out) out.sandboxCredentials = ref(out.sandboxCredentials, "Sandbox keys");
+  if ("temporaryCredentials" in out) {
+    const temp = out.temporaryCredentials as StorageTemporaryCredentials | null | undefined;
+    if (!temp) out.temporaryCredentials = undefined;
+    else if (temp.kind === "r2") {
+      const { token, ...rest } = temp;
+      const normalized = ref(token, "Cloudflare API token");
+      out.temporaryCredentials = { ...rest, ...(normalized ? { token: normalized } : {}) };
+    }
+  }
+  const merged = { ...current, ...out } as StorageEntry;
+  const problem = validateStorageEntry({ ...merged, grants: merged.grants ?? [] });
+  if (problem) throw new Error(problem);
+  return out;
 }
 
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|c|h|cpp|hpp|sh|sql|log|ini|cfg|conf|env|svg)$/i;

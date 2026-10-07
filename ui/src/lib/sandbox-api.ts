@@ -5,6 +5,7 @@
  * block. Same envelope ({ ok, data } / { ok, error }) as the other page-level clients.
  */
 import { apiUrl, config } from "@/lib/config";
+import type { VaultRef } from "@/lib/vault-ref";
 
 export type SandboxProvider = "local" | "bwrap" | "docker" | "daytona" | "e2b";
 export type SandboxNetworkMode = "deny" | "allowlist" | "open" | "unrestricted";
@@ -17,6 +18,8 @@ export interface SandboxSettings {
   confineExternalContent?: boolean;
   allowLocal?: boolean;
   chatIdleMinutes?: number;
+  /** Per-provider options; for Daytona/E2B the vault entry with the key (a reference) and non-secret settings. */
+  providers?: Partial<Record<SandboxProvider, Record<string, unknown>>>;
 }
 
 export interface EffectiveSandbox {
@@ -96,32 +99,58 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type RemoteProviderId = "daytona" | "e2b";
 
-export interface RemoteProviderStatus {
-  id: RemoteProviderId;
-  configured: boolean;
-  apiKey: "set" | "not set";
+/** settings.sandbox.providers.<id> for Daytona/E2B: no secrets, the key stays in the referenced vault entry. */
+export interface RemoteProviderSettings {
+  credential?: VaultRef;
+  /** Daytona: API URL. */
   apiUrl?: string;
+  /** Daytona: region. */
   target?: string;
+  /** E2B: custom domain (self-hosted). */
   domain?: string;
+  /** E2B: default template. */
   template?: string;
+}
+
+export interface RemoteProviderStatus extends RemoteProviderSettings {
+  id: RemoteProviderId;
+  /** A vault entry is chosen. */
+  configured: boolean;
+  /** The chosen entry exists and holds a key. */
+  keyFound: boolean;
   lastTest?: { ok: boolean; at: string; durationMs?: number; error?: string };
 }
 
-export interface RemoteProviderInput {
-  apiKey?: string;
-  apiUrl?: string;
-  target?: string;
-  domain?: string;
-  template?: string;
+/**
+ * The instance sandbox settings with one remote provider set (or removed with null): the rest of
+ * the sandbox settings and the other providers are kept as they are.
+ */
+export function withRemoteProvider(current: SandboxSettings | null | undefined, id: RemoteProviderId, settings: RemoteProviderSettings | null): SandboxSettings {
+  const providers = { ...(current?.providers ?? {}) };
+  if (settings) {
+    const clean = Object.fromEntries(Object.entries(settings).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    providers[id] = clean;
+  } else {
+    delete providers[id];
+  }
+  const next: SandboxSettings = { ...(current ?? {}) };
+  if (Object.keys(providers).length) next.providers = providers;
+  else delete next.providers;
+  return next;
 }
 
 export const sandboxApi = {
   overview: () => request<SandboxOverview>("/sandbox"),
   providers: () => request<RemoteProviderStatus[]>("/sandbox/providers"),
-  saveProvider: (id: RemoteProviderId, input: RemoteProviderInput) =>
-    request<RemoteProviderStatus>(`/sandbox/providers/${id}`, { method: "PUT", body: JSON.stringify(input) }),
-  removeProvider: (id: RemoteProviderId) =>
-    request<unknown>(`/sandbox/providers/${id}`, { method: "DELETE" }),
+  /**
+   * Save one remote provider (null disconnects it) with the other sandbox settings: reads the
+   * current instance settings first so nothing else changes.
+   */
+  saveProvider: async (id: RemoteProviderId, settings: RemoteProviderSettings | null) => {
+    const { settings: current } = await request<SandboxOverview>("/sandbox");
+    const next = withRemoteProvider(current, id, settings);
+    return request<unknown>("/config/settings", { method: "PATCH", body: JSON.stringify({ sandbox: Object.keys(next).length ? next : null }) });
+  },
   testProvider: (id: RemoteProviderId) =>
     request<NonNullable<RemoteProviderStatus["lastTest"]>>(`/sandbox/providers/${id}/test`, { method: "POST" }),
   /** Destinations refused recently, newest first. */
@@ -145,6 +174,8 @@ export function compactSandbox(s: SandboxSettings): SandboxSettings {
   if (s.allowLocal) out.allowLocal = true;
   if (s.confineExternalContent) out.confineExternalContent = true;
   if (s.chatIdleMinutes && s.chatIdleMinutes > 0) out.chatIdleMinutes = s.chatIdleMinutes;
+  // provider options (remote providers' vault references) are edited elsewhere: keep them
+  if (s.providers && Object.keys(s.providers).length) out.providers = s.providers;
   return out;
 }
 

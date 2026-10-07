@@ -197,7 +197,7 @@ export type {
   StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider,
 } from "./sandbox.js";
 export {
-  STORAGE_VAULT_OWNER, STORAGE_SLUG_PATTERN, storageCredentialsService, storageSandboxCredentialsService,
+  STORAGE_SLUG_PATTERN, 
   normalizeStoragePrefix, normalizeStoragePath, storageGrantFor, storageAccessFor, storagePathAllowed,
   assertStorageAccess, scopeStorageListing, validateStorageEntry,
 } from "./storage-registry.js";
@@ -206,3 +206,6 @@ export type {
   StorageRegistryChangeEvent, StorageRegistryChangeEmitter, StorageRegistryStore, StorageCredentials,
   StorageCredentialStatus, StorageAccessGrant,
 } from "./storage-registry.js";
+
+export { isVaultRef, normalizeVaultRef, describeVaultRef, resolveVaultRef, pickCredential, CREDENTIAL_NAMES } from "./vault-ref.js";
+export type { VaultRef } from "./vault-ref.js";
