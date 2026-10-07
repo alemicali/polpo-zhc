@@ -11,7 +11,7 @@
  * - Explicit variant components for each tab
  */
 
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -118,6 +118,9 @@ function AgentDetailContent() {
   const {
     state: { agent, process, taskStats, sortedTasks, enabledCategories, vaultEntries },
   } = useAgentDetail();
+  // ?tab=credentials opens a tab directly (e.g. from a vault picker's "add it" link)
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") ?? "overview";
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -135,7 +138,7 @@ function AgentDetailContent() {
         </Card>
       )}
 
-      <Tabs defaultValue="overview" className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs defaultValue={initialTab} className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
