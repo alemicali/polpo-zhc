@@ -11,11 +11,12 @@
  * registering them.
  */
 
-import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { fileSize as sizeOf, toolFs } from "./tool-fs.js";
 
 // ─── Tool: register_outcome ───
 
@@ -61,7 +62,7 @@ function guessMime(filePath: string): string | undefined {
   return EXT_MIME[filePath.slice(dot).toLowerCase()];
 }
 
-function createRegisterOutcomeTool(cwd: string, sandbox: string[], outputDir?: string): AgentTool<typeof RegisterOutcomeSchema> {
+function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSystem, outputDir?: string): AgentTool<typeof RegisterOutcomeSchema> {
   // Use outputDir in examples when available so the agent naturally writes there
   const exampleDir = outputDir ? outputDir.replace(/\/$/, "") : "output";
   return {
@@ -117,19 +118,15 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], outputDir?: s
         filePath = resolve(cwd, params.path);
         assertPathAllowed(filePath, sandbox, "register_outcome");
 
-        if (!existsSync(filePath)) {
+        // where the agent's files live (this machine or the sandbox VM)
+        if (!(await fs.exists(filePath))) {
           return {
             content: [{ type: "text", text: `Error: file not found: ${filePath}` }],
             details: { error: "file_not_found", path: filePath },
           };
         }
 
-        try {
-          const stats = statSync(filePath);
-          fileSize = stats.size;
-        } catch {
-          // stat failed — file may have been deleted between exists check and stat
-        }
+        fileSize = await sizeOf(fs, filePath);
 
         mimeType = guessMime(filePath);
       }
@@ -186,12 +183,13 @@ export const ALL_OUTCOME_TOOL_NAMES: OutcomeToolName[] = ["register_outcome"];
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
  * @param outputDir - Per-task output directory for deliverables
+ * @param fs - Where the agent's files live (default: this machine's disk)
  */
-export function createOutcomeTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], outputDir?: string): AgentTool<any>[] {
+export function createOutcomeTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], outputDir?: string, fs?: FileSystem): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<OutcomeToolName, () => AgentTool<any>> = {
-    register_outcome: () => createRegisterOutcomeTool(cwd, sandbox, outputDir),
+    register_outcome: () => createRegisterOutcomeTool(cwd, sandbox, toolFs(fs), outputDir),
   };
 
   const names = allowedTools

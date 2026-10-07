@@ -90,10 +90,11 @@ function buildWaMediaContent(
   caption?: string,
   mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
   viewOnce?: boolean,
+  data?: Uint8Array,
 ): any {
   const mime = mimeType ?? guessMime(path);
   const kind = resolveMediaKind(mediaKind, mime);
-  const file = { url: path };
+  const file = data ? Buffer.from(data) : { url: path };
   const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
   if (kind === "image") return { image: file, ...base };
   if (kind === "video") return { video: file, ...base };
@@ -246,6 +247,7 @@ async function main(): Promise<void> {
       fileName?: string;
       mediaKind?: "auto" | "image" | "video" | "audio" | "document";
       viewOnce?: boolean;
+      data?: Uint8Array;
     }) => Promise<string | undefined>) | undefined;
     let waMarkRead: ((keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>) | undefined;
     if (config.whatsappDbPath && config.whatsappProfilePath) {
@@ -296,7 +298,7 @@ async function main(): Promise<void> {
         };
         waSendMedia = async (jid, opts) => {
           const sock = await ensureWaSock();
-          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce, opts.data);
           const result = await sock.sendMessage(jid, content);
           return result?.key?.id ?? undefined;
         };

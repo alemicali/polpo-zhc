@@ -305,10 +305,12 @@ export class WhatsAppBridge {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }): Promise<string | undefined> {
     const sock = this.channel.getSocket();
     if (!sock) throw new Error("WhatsApp not connected");
-    const content = buildMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+    const content = buildMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce, opts.data);
     const result = await sock.sendMessage(jid, content as any);
     const msgId = result?.key?.id ?? undefined;
 
@@ -731,10 +733,11 @@ function buildMediaContent(
   caption?: string,
   mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
   viewOnce?: boolean,
+  data?: Uint8Array,
 ): Record<string, unknown> {
   const mime = mimeType ?? guessMime(path);
   const kind = resolveMediaKind(mediaKind, mime);
-  const file = { url: path };
+  const file = data ? Buffer.from(data) : { url: path };
   const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
   if (kind === "image") return { image: file, ...base };
   if (kind === "video") return { video: file, ...base };

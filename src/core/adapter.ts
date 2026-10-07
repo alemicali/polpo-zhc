@@ -85,6 +85,8 @@ export interface SpawnContext {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function — for whatsapp_read markRead. */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
