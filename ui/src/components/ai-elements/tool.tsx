@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useChatSandbox } from "@/components/sandbox/sandbox-context";
 import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
+import { EnvFromVaultChips, envFromVaultRefs } from "@/components/ai-elements/env-from-vault-chips";
 
 // ── Types ──
 
@@ -188,6 +189,7 @@ export function ToolInvocation({
   const [movingToBackground, setMovingToBackground] = useState(false);
   const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
+  const vaultEnv = tool.name === "bash" ? envFromVaultRefs(tool.arguments) : [];
   const { previewState, openPreview, closePreview } = useFilePreview();
 
   useEffect(() => {
@@ -296,6 +298,7 @@ export function ToolInvocation({
                 <span className="truncate">{filePath.split("/").pop()}</span>
               </button>
             )}
+            <EnvFromVaultChips refs={vaultEnv} />
             <span className="flex-1" />
             <SandboxBadge toolName={tool.name} />
             {tool.name === "wait_for_task" && tool.state === "calling" && (
