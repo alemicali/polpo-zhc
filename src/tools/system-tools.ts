@@ -19,6 +19,7 @@ import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createVaultToolsCore } from "./vault-tools.js";
 import type { ResolvedVault } from "../vault/index.js";
+import { createSecretMasker, resolveEnvFromVault } from "../vault/env-from-vault.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
 
@@ -164,35 +165,70 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
 
 // === Bash Tool ===
 
+const VaultRefSchema = Type.Union([
+  Type.String({ description: '"service.key", e.g. "github.token"' }),
+  Type.Object({ service: Type.String(), key: Type.String() }),
+]);
+
 const BashSchema = Type.Object({
   command: Type.String({ description: "Shell command to execute" }),
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 120000)" })),
+  env_from_vault: Type.Optional(Type.Record(Type.String(), VaultRefSchema, {
+    description: "Secrets from your vault as environment variables of this command only: { VAR_NAME: \"service.key\" }, "
+      + "e.g. { \"GITHUB_TOKEN\": \"github.token\" }, then use \"$GITHUB_TOKEN\" in the command. Names: uppercase letters, digits and _ "
+      + "(not PATH, HOME or LD_*). Values are never shown to you: they appear as *** in the output.",
+  })),
 });
 
-function createBashTool(cwd: string, shell: Shell, toolOutputDir: string): AgentTool<typeof BashSchema> {
+export interface BashToolOptions {
+  /** The agent's vault (own + shared entries): the only source env_from_vault can read. */
+  vault?: ResolvedVault;
+}
+
+function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: BashToolOptions = {}): AgentTool<typeof BashSchema> {
   return {
     name: "bash",
     label: "Execute Shell",
-    description: "Execute a shell command and return its output. Use for running tests, installing packages, git operations, etc.",
+    description: "Execute a shell command and return its output. Use for running tests, installing packages, git operations, etc. "
+      + "To give the command a secret from your vault (API token, password), pass env_from_vault, e.g. "
+      + "{ \"command\": \"gh repo list\", \"env_from_vault\": { \"GH_TOKEN\": \"github.token\" } }: the value is set in that command's "
+      + "environment only, never written to files, and replaced with *** in the output (values shorter than 6 characters are not masked).",
     parameters: BashSchema,
     async execute(_toolCallId, params) {
       const timeout = params.timeout ?? 120_000;
+      // Secrets are resolved here, on the host, and only the references ("service.key") are kept
+      // in details: the values exist in the command's environment and nowhere else.
+      const fromVault = resolveEnvFromVault(params.env_from_vault, opts.vault);
+      const envRefs = Object.keys(fromVault.refs).length > 0 ? { envFromVault: fromVault.refs } : {};
+      if (fromVault.errors.length > 0) {
+        const message = `env_from_vault: ${fromVault.errors.join("; ")}. The command was not run.`;
+        return {
+          content: [{ type: "text", text: `Error: ${message}` }],
+          details: { command: params.command, error: message, ...envRefs },
+        };
+      }
+      // Every value (and its base64/URL-encoded forms) becomes *** before the output reaches the
+      // model, the tool result, the offloaded file, activity logs and transcripts.
+      const mask = createSecretMasker(fromVault.secrets);
       try {
-        const result = await shell.execute(params.command, { cwd, timeout });
-        const output = result.stdout + (result.stderr ? "\n" + result.stderr : "");
+        const result = await shell.execute(params.command, {
+          cwd, timeout, ...(Object.keys(fromVault.env).length > 0 ? { env: fromVault.env } : {}),
+        });
+        const output = mask(result.stdout + (result.stderr ? "\n" + result.stderr : ""));
         // Above the limit: the full output goes to a private file, the model gets
         // head + tail (the tail weighs more: errors and summaries come last).
         const off = await offloadToolOutput(output, { tool: "bash", dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, headRatio: 1 / 3 });
         return {
           content: [{ type: "text", text: `Exit code: ${result.exitCode}\n${off.text}` }],
           details: off.offloaded
-            ? { command: params.command, exitCode: result.exitCode, outputPath: off.path, outputBytes: off.totalBytes, outputLines: off.totalLines }
-            : { command: params.command, exitCode: result.exitCode },
+            ? { command: params.command, exitCode: result.exitCode, outputPath: off.path, outputBytes: off.totalBytes, outputLines: off.totalLines, ...envRefs }
+            : { command: params.command, exitCode: result.exitCode, ...envRefs },
         };
       } catch (err: any) {
+        const message = mask(String(err?.message ?? err));
         return {
-          content: [{ type: "text", text: `Error: ${err.message}` }],
-          details: { command: params.command, error: err.message },
+          content: [{ type: "text", text: `Error: ${message}` }],
+          details: { command: params.command, error: message, ...envRefs },
         };
       }
     },
@@ -419,6 +455,12 @@ export interface SystemToolsOptions {
   polpoDir?: string;
   /** Agent name, used for the default per-agent offload dir. */
   agentName?: string;
+  /**
+   * The run's effective sandbox provider ("local", "bwrap", "docker", "daytona", "e2b"). Anything
+   * but "local" makes vault_get hide secret values (commands get them through env_from_vault).
+   * Undefined = no sandbox.
+   */
+  sandboxProvider?: string;
 }
 
 /**
@@ -449,7 +491,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
     read: () => createReadTool(cwd, readSandbox, _fs),
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
-    bash: () => createBashTool(cwd, _shell, toolOutputDir),
+    bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault }),
     glob: () => createGlobTool(cwd, readSandbox, _shell),
     grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir),
     ls: () => createLsTool(cwd, readSandbox, _fs),
@@ -462,14 +504,14 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
   const tools = names.map(n => factories[n]());
 
   // register_outcome is always included — agents must always be able to declare artifacts
-  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir));
+  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir, _fs));
 
   // http_fetch + http_download are always included — core tools with SSRF protection
-  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir));
+  tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir, _fs));
 
   // vault_get + vault_list are always included — core tools for credential access
   if (vault) {
-    tools.push(...createVaultToolsCore(vault));
+    tools.push(...createVaultToolsCore(vault, { sandboxProvider: options.sandboxProvider }));
   }
 
   return tools;
@@ -578,6 +620,8 @@ export interface CreateAllToolsOptions {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function (for whatsapp_read markRead). */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;
@@ -585,10 +629,16 @@ export interface CreateAllToolsOptions {
   polpoDir?: string;
   /** Agent name — scopes the offload dir of large tool outputs when there is no outputDir (default: browserSession). */
   agentName?: string;
-  /** FileSystem implementation (default: NodeFileSystem). */
+  /**
+   * Where the agent's files live (default: NodeFileSystem). Every tool that reads or writes the
+   * agent's files (read/write/edit/ls, pdf, excel, docx, images, audio, downloads, attachments,
+   * outcomes, screenshots) goes through it, so with a remote sandbox the bytes stay in the VM.
+   */
   fs?: FileSystem;
-  /** Shell implementation (default: NodeShell). */
+  /** Where commands run (default: NodeShell). A remote sandbox's shell also runs the browser. */
   shell?: Shell;
+  /** The run's effective sandbox provider: anything but "local" hides secret values from vault_get. */
+  sandboxProvider?: string;
 }
 
 /**
@@ -624,7 +674,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     polpoDir: options.polpoDir,
     agentName: options.agentName ?? browserSession,
   });
-  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir }));
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider }));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {
@@ -633,37 +683,37 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs }));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools
   if (categoryRequested(ALL_EMAIL_TOOL_NAMES)) {
-    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir));
+    tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir, options.fs));
   }
 
   // Image & video tools — activated when any image_* or video_* tool is in allowedTools
   if (categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
-    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault));
+    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault, options.fs));
   }
 
   // Audio tools — activated when any audio_* tool is in allowedTools
   if (categoryRequested(ALL_AUDIO_TOOL_NAMES)) {
-    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault));
+    tools.push(...createAudioTools(cwd, allowedPaths, allowedTools, options.vault, options.fs));
   }
 
   // Excel tools — activated when any excel_* tool is in allowedTools
   if (categoryRequested(ALL_EXCEL_TOOL_NAMES)) {
-    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createExcelTools(cwd, allowedPaths, allowedTools, options.fs));
   }
 
   // PDF tools — activated when any pdf_* tool is in allowedTools
   if (categoryRequested(ALL_PDF_TOOL_NAMES)) {
-    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools, options.fs, options.shell));
   }
 
   // Docx tools — activated when any docx_* tool is in allowedTools
   if (categoryRequested(ALL_DOCX_TOOL_NAMES)) {
-    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools));
+    tools.push(...createDocxTools(cwd, allowedPaths, allowedTools, options.fs));
   }
 
   // Search tools (Exa) — activated when any search_* tool is in allowedTools
@@ -683,6 +733,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
       allowedTools,
       cwd,
       allowedPaths,
+      options.fs,
     ));
   }
 
@@ -692,7 +743,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   }
 
   // Attachment tool — always included (reads any file type attached by user)
-  tools.push(...createAttachmentTools(cwd, allowedPaths, allowedTools));
+  tools.push(...createAttachmentTools(cwd, allowedPaths, allowedTools, options.fs));
 
   // HTTP, register_outcome, and vault are already included via createSystemTools() above — no need to add again
 

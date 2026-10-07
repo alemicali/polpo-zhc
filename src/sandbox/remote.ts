@@ -1,17 +1,20 @@
 /**
- * Remote workspaces (Daytona, E2B): a task's commands and file tools run in a VM elsewhere.
+ * Remote workspaces (Daytona, E2B): a run's commands and file tools run in a VM elsewhere, the
+ * agent's brain stays here (open Polpo's proxy model).
  *
- * The VM is created on first use, at the same absolute paths as on this server, so the agent's
- * paths need no translation. Context goes over once (the working directory as a tarball, without
- * node_modules, .polpo and whatever .gitignore excludes — secrets in .env stay here), and the
- * files changed in the VM come back when the workspace is disposed. Storage mounts are mounted in
- * the VM with rclone, using the limited keys the storage feature hands out for remote targets.
+ * Files (open Polpo semantics): the VM's working directory is the sandbox's own scratch space —
+ * it starts empty and is not copied back. Deliverables go to the task's output directory (copied
+ * back at the end, or after every command in Cowork chats). Persistent files live on volumes:
+ * buckets selected by name (sandbox.volumes), "mounted" live in the VM (rclone or mountpoint-s3)
+ * or "hydrated" (copied in at start, written back at the end or on sandbox_volume_checkpoint,
+ * guarded by the volume's revision so concurrent writers produce a conflict, not a loss).
  *
- * Lifecycle (the "lease"): the VM is acquired on the first tool call — from the pool (a VM the
- * same agent used before, its working directory reset), from the warm VMs, or created — and can
- * be suspended while no tool runs (the model is thinking) and resumed on the next call. At the
- * end it goes back to the pool suspended or is deleted, as the sandbox lifecycle says. Running
- * time is measured (the billable part).
+ * Lifecycle (the "lease"): the VM is acquired on the first tool call according to isolation —
+ * "reuse" a VM this agent released, "fresh" a clean one (a warm one when available), "shared"
+ * the project-scoped VM concurrent runs use together. Where suspending is cheap (E2B) it is
+ * suspended while no tool runs and resumed on the next call. On release it goes back to the pool
+ * (running until stopAfterIdleMinutes, then stopped, deleted deleteAfterStopMinutes later) or is
+ * destroyed. Running time is measured (the billable part).
  *
  * The provider-specific part is in remote-adapters.ts; everything else is built on exec.
  */
@@ -20,8 +23,8 @@ import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { nanoid } from "nanoid";
 import {
-  DEFAULT_LIFECYCLE,
-  type EffectiveSandbox, type ExecOptions, type ExecResult, type RemoteSandboxProvider, type StorageMountSpec, type Workspace, type WorkspaceEntry, type WorkspaceFileStat,
+  DEFAULT_ISOLATION, VOLUME_REVISION_OBJECT, effectiveLifecycle,
+  type EffectiveSandbox, type ResolvedSandboxVolume, type SandboxIsolation, type ExecOptions, type ExecResult, type RemoteSandboxProvider, type StorageMountSpec, type Workspace, type WorkspaceEntry, type WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
 import { remoteAdapter, type RemoteAdapter, type RemoteDriver } from "./remote-adapters.js";
 import { SandboxPool, instanceLabel, poolFilePath, poolKey } from "./pool.js";
@@ -34,21 +37,27 @@ const CONTEXT_EXCLUDES = ["node_modules", ".polpo", ".venv", "__pycache__", ".ne
 const DEFAULT_TIMEOUT_MIN = 60;
 /** Kept across reuse: installed dependencies are the point of reusing a VM. */
 const KEEP_ON_RESET = ["node_modules", ".venv"];
+/** open Polpo's lease default: suspend after this long without fs/shell activity. */
+export const DEFAULT_IDLE_SUSPEND_MS = 1500;
 
 export type RemoteWorkspaceEvent =
-  | { kind: "ready"; message: string; durationMs: number; steps: Record<string, number>; remoteId: string; source: "created" | "pool" | "warm" }
+  | { kind: "ready"; message: string; durationMs: number; steps: Record<string, number>; remoteId: string; source: "created" | "pool" | "warm" | "shared" }
   | { kind: "synced"; message: string; durationMs: number }
   | { kind: "warning"; message: string }
   | { kind: "suspended"; remoteId: string; idleMs: number }
   | { kind: "resumed"; remoteId: string; durationMs: number }
-  | { kind: "released"; remoteId: string; outcome: "pooled" | "destroyed"; runningMs: number; durationMs: number };
+  | { kind: "released"; remoteId: string; outcome: "pooled" | "destroyed" | "shared"; runningMs: number; durationMs: number }
+  | { kind: "volume"; step: "prepared" | "checkpointed" | "finalized" | "conflict"; name: string; revision?: number; message?: string };
 
 export interface RemoteWorkspaceOptions {
   root: string;
   writable?: string[];
   readable?: string[];
-  mounts?: StorageMountSpec[];
+  /** Selected volumes resolved by the host (only those with a remote bucket and keys are used). */
+  volumes?: ResolvedSandboxVolume[];
   sandbox: EffectiveSandbox;
+  /** Suspend after this long without tools (default: 1.5 s where suspending is cheap, else never). */
+  idleSuspendMs?: number;
   /** Progress and problems (VM ready, sync done, suspended, mount failed…). */
   onEvent?: (event: RemoteWorkspaceEvent) => void;
   /** The project's pool (reuse, warm VMs, orphan recovery). Without it the VM is created and deleted. */
@@ -89,6 +98,10 @@ export class RemoteWorkspace implements Workspace {
   private disposed = false;
   private marker = `/tmp/.polpo-context-${nanoid(8)}`;
   private readonly lifecycle;
+  private readonly isolation: SandboxIsolation;
+  private shared = false;
+  /** Hydrated volumes: the revision each was copied at. */
+  private readonly volumeBase = new Map<string, number>();
   private readonly pool?: SandboxPool;
   private readonly adapter: RemoteAdapter;
   // lease: in-flight operations, idle suspend, running time
@@ -106,9 +119,10 @@ export class RemoteWorkspace implements Workspace {
     this.paths = [
       ...(opts.writable ?? []).map((path) => ({ path: resolve(path), readOnly: false })),
       ...(opts.readable ?? []).map((path) => ({ path: resolve(path), readOnly: true })),
-      ...(opts.mounts ?? []).filter((m) => m.remote).map((m) => ({ path: m.path, readOnly: m.readOnly })),
+      ...this.remoteVolumes().map((v) => ({ path: v.mountPath, readOnly: v.access === "read-only" })),
     ];
-    this.lifecycle = { ...DEFAULT_LIFECYCLE, ...(opts.sandbox.lifecycle ?? {}) };
+    this.lifecycle = opts.sandbox.lifecycle ?? effectiveLifecycle(undefined);
+    this.isolation = opts.sandbox.isolation ?? DEFAULT_ISOLATION;
     this.pool = opts.pool ? new SandboxPool(poolFilePath(opts.pool.polpoDir)) : undefined;
     this.adapter = opts.adapter ?? remoteAdapter(provider);
   }
@@ -146,10 +160,11 @@ export class RemoteWorkspace implements Workspace {
   }
 
   private armIdle(driver: RemoteDriver): void {
-    const seconds = this.lifecycle.suspendAfterIdleSeconds;
-    if (!seconds || this.disposed) return;
+    // a shared VM is used by other runs too: never suspended by one of them
+    const ms = this.shared ? 0 : this.opts.idleSuspendMs ?? (this.adapter.fastSuspend ? DEFAULT_IDLE_SUSPEND_MS : 0);
+    if (!ms || this.disposed) return;
     this.idleSince = Date.now();
-    this.idleTimer = setTimeout(() => { void this.suspendVm(driver); }, seconds * 1000);
+    this.idleTimer = setTimeout(() => { void this.suspendVm(driver); }, ms);
     this.idleTimer.unref?.();
   }
 
@@ -191,32 +206,45 @@ export class RemoteWorkspace implements Workspace {
     };
   }
 
-  /** From the pool (same agent), from the warm VMs, or new. */
-  private async acquire(): Promise<{ driver: RemoteDriver; source: "created" | "pool" | "warm" }> {
+  /** By isolation: the shared VM, a VM this agent released (reuse), a warm VM, or a new one. */
+  private async acquire(): Promise<{ driver: RemoteDriver; source: "created" | "pool" | "warm" | "shared" }> {
     const key = poolKey(this.provider, this.opts.sandbox);
     const pool = this.pool;
     const lease = { runId: this.opts.pool?.runId, sessionKey: this.opts.pool?.sessionKey };
-    if (pool && this.lifecycle.isolation === "reuse") {
+    const discard = async (remoteId: string) => { await pool?.remove(remoteId); await this.adapter.remove(remoteId).catch(() => undefined); };
+    if (pool && this.isolation === "shared") {
+      const entry = await pool.takeShared(this.provider, key, { ...lease, holderId: this.id });
+      if (entry) {
+        try { this.shared = true; return { driver: await this.adapter.connect(entry.remoteId), source: "shared" }; }
+        catch { this.shared = false; await discard(entry.remoteId); }
+      }
+    }
+    if (pool && this.isolation === "reuse") {
       for (let attempt = 0; attempt < 2; attempt++) {
         const entry = await pool.takeIdle(this.provider, key, this.opts.pool!.owner, lease);
         if (!entry) break;
         try { return { driver: await this.adapter.connect(entry.remoteId), source: "pool" }; }
-        catch { await pool.remove(entry.remoteId); await this.adapter.remove(entry.remoteId).catch(() => undefined); }
+        catch { await discard(entry.remoteId); }
       }
     }
-    if (pool) {
+    if (pool && this.isolation !== "shared") {
       const entry = await pool.takeWarm(this.provider, key, this.opts.pool!.owner, lease);
       if (entry) {
         try { return { driver: await this.adapter.connect(entry.remoteId), source: "warm" }; }
-        catch { await pool.remove(entry.remoteId); await this.adapter.remove(entry.remoteId).catch(() => undefined); }
+        catch { await discard(entry.remoteId); }
       }
     }
-    const keep = !!pool && this.lifecycle.onRelease === "pool";
+    const keep = !!pool && (this.lifecycle.onRelease === "pool" || this.isolation === "shared");
     const driver = await this.adapter.create({
       sandbox: this.opts.sandbox, labels: this.labels(), lifetimeMinutes: lifetimeMinutes(this.opts.sandbox),
       deleteAfterStopMinutes: this.lifecycle.deleteAfterStopMinutes, keep,
     });
-    if (pool) await pool.addLeased({ remoteId: driver.remoteId, provider: this.provider, key, owner: this.opts.pool!.owner, ...lease }).catch(() => undefined);
+    if (pool && this.isolation === "shared") {
+      this.shared = true;
+      await pool.addShared({ remoteId: driver.remoteId, provider: this.provider, key }, { ...lease, holderId: this.id }).catch(() => undefined);
+    } else if (pool) {
+      await pool.addLeased({ remoteId: driver.remoteId, provider: this.provider, key, owner: this.opts.pool!.owner, ...lease }).catch(() => undefined);
+    }
     return { driver, source: "created" };
   }
 
@@ -227,16 +255,20 @@ export class RemoteWorkspace implements Workspace {
     this.acquiredAt = Date.now();
     this.runningSince = Date.now();
     try {
-      // same absolute paths as here, owned by the VM's user; a reused VM is reset first
-      const dirs = [this.root, ...this.paths.filter((p) => !this.isMount(p.path)).map((p) => p.path)];
+      // The working directory is the sandbox's own scratch space (empty, at the same path as
+      // here); a reused VM is reset first (installed dependencies kept). A shared VM is shared.
+      const writable = this.paths.filter((p) => !p.readOnly && !this.isVolume(p.path)).map((p) => p.path);
+      const readable = this.paths.filter((p) => p.readOnly && !this.isVolume(p.path)).map((p) => p.path);
       const keep = KEEP_ON_RESET.map((k) => `! -name ${q(k)}`).join(" ");
-      const reset = source === "created" ? "" : `find "$d" -mindepth 1 -maxdepth 1 ${keep} -exec rm -rf {} + 2>/dev/null; `;
+      const reset = source === "pool" || source === "warm" ? `find "$d" -mindepth 1 -maxdepth 1 ${keep} -exec rm -rf {} + 2>/dev/null; ` : "";
+      const dirs = [this.root, ...writable, ...readable];
       const mk = await driver.exec(`for d in ${dirs.map(q).join(" ")}; do mkdir -p "$d" 2>/dev/null || { sudo mkdir -p "$d" && sudo chown "$(id -u):$(id -g)" "$d"; }; ${reset}done`, {});
       if (mk.exitCode !== 0) throw new Error(`Could not prepare the working directory: ${(mk.stderr || mk.stdout).trim().slice(0, 300)}`);
 
+      // read-only context the agent may need (skills, playbooks): small, copied in
       const t1 = Date.now();
       let uploaded = 0;
-      for (const dir of dirs) {
+      for (const dir of readable) {
         if (!existsSync(dir)) continue;
         uploaded += await this.uploadTree(driver, dir);
       }
@@ -244,24 +276,33 @@ export class RemoteWorkspace implements Workspace {
       const synced = Date.now() - t1;
 
       const t2 = Date.now();
-      await this.mountStorage(driver);
+      await this.prepareVolumes(driver);
       const mounted = Date.now() - t2;
 
       this.opts.onEvent?.({
         kind: "ready", remoteId: driver.remoteId, source,
-        message: `${this.provider} sandbox ${driver.remoteId} ready (${source === "created" ? "new" : source === "pool" ? "reused" : "warm"}, ${Math.round(uploaded / 1024)} KB of context)`,
-        durationMs: Date.now() - t0, steps: { acquireMs: created, syncMs: synced, mountMs: mounted },
+        message: `${this.provider} sandbox ${driver.remoteId} ready (${source === "created" ? "new" : source === "pool" ? "reused" : source}, ${this.remoteVolumes().length} volume(s), ${Math.round(uploaded / 1024)} KB of context)`,
+        durationMs: Date.now() - t0, steps: { acquireMs: created, syncMs: synced, volumesMs: mounted },
       });
       return driver;
     } catch (err) {
-      await driver.destroy().catch(() => undefined);
-      await this.pool?.remove(driver.remoteId).catch(() => undefined);
+      if (this.shared) {
+        await this.pool?.leaveShared(driver.remoteId, this.lifecycle, this.id).catch(() => undefined);
+      } else {
+        await driver.destroy().catch(() => undefined);
+        await this.pool?.remove(driver.remoteId).catch(() => undefined);
+      }
       throw err;
     }
   }
 
-  private isMount(path: string): boolean {
-    return (this.opts.mounts ?? []).some((m) => m.remote && m.path === path);
+  /** Volumes this VM can attach: those with a remote bucket and keys. */
+  private remoteVolumes(): ResolvedSandboxVolume[] {
+    return (this.opts.volumes ?? []).filter((v) => v.remote);
+  }
+
+  private isVolume(path: string): boolean {
+    return this.remoteVolumes().some((v) => v.mountPath === path);
   }
 
   /** Copy a host directory into the VM at the same path (tarball, ignoring dependencies and ignored files). */
@@ -275,39 +316,133 @@ export class RemoteWorkspace implements Workspace {
     return tarball.length;
   }
 
-  /** Mount the granted buckets in the VM with rclone (installed on the fly when missing). */
-  private async mountStorage(driver: RemoteDriver): Promise<void> {
-    const mounts = (this.opts.mounts ?? []).filter((m) => m.remote);
-    if (!mounts.length) return;
+  // ── Volumes ───────────────────────────────────────────────────────────
+
+  /** rclone remote "polpo" for a volume's bucket, as environment variables (keys never on disk). */
+  private rcloneEnv(v: ResolvedSandboxVolume): Record<string, string> {
+    const r = v.remote!;
+    return {
+      RCLONE_CONFIG_POLPO_TYPE: "s3",
+      RCLONE_CONFIG_POLPO_PROVIDER: "Other",
+      RCLONE_CONFIG_POLPO_ACCESS_KEY_ID: r.credentials.accessKeyId,
+      RCLONE_CONFIG_POLPO_SECRET_ACCESS_KEY: r.credentials.secretAccessKey,
+      ...(r.credentials.sessionToken ? { RCLONE_CONFIG_POLPO_SESSION_TOKEN: r.credentials.sessionToken } : {}),
+      ...(r.endpoint ? { RCLONE_CONFIG_POLPO_ENDPOINT: r.endpoint } : {}),
+      ...(r.region ? { RCLONE_CONFIG_POLPO_REGION: r.region } : {}),
+      ...(r.pathStyle ? { RCLONE_CONFIG_POLPO_FORCE_PATH_STYLE: "true" } : {}),
+    };
+  }
+
+  private remoteSource(v: ResolvedSandboxVolume, sub = ""): string {
+    const r = v.remote!;
+    const prefix = (r.prefix ?? "").replace(/^\/+|\/+$/g, "");
+    return `polpo:${r.bucket}${prefix ? `/${prefix}` : ""}${sub ? `/${sub}` : ""}`;
+  }
+
+  private async ensureTool(driver: RemoteDriver, tool: "rclone" | "mount-s3"): Promise<boolean> {
+    const install = tool === "rclone"
+      ? "curl -fsSL https://rclone.org/install.sh | sudo bash"
+      : "curl -fsSL -o /tmp/mount-s3.deb https://s3.amazonaws.com/mountpoint-s3-release/latest/x86_64/mount-s3.deb && sudo apt-get install -y /tmp/mount-s3.deb";
+    const r = await driver.exec(`command -v ${tool} >/dev/null || (${install}) >/dev/null 2>&1; command -v ${tool}`, { timeoutMs: 300_000 });
+    return r.exitCode === 0;
+  }
+
+  /** The volume's revision in its bucket (.polpo-volume.json; 0 when absent). */
+  private async readRevision(driver: RemoteDriver, v: ResolvedSandboxVolume): Promise<number> {
+    const r = await driver.exec(`rclone cat ${q(this.remoteSource(v, VOLUME_REVISION_OBJECT))} 2>/dev/null || true`, { env: this.rcloneEnv(v), timeoutMs: 60_000 });
+    try { return Number(JSON.parse(r.stdout || "{}").revision) || 0; } catch { return 0; }
+  }
+
+  /** Attach every selected volume: mounted live, or hydrated (copied in at its current revision). */
+  private async prepareVolumes(driver: RemoteDriver): Promise<void> {
+    const volumes = this.remoteVolumes();
+    for (const v of (this.opts.volumes ?? []).filter((x) => !x.remote)) {
+      this.opts.onEvent?.({ kind: "warning", message: `Volume "${v.name}" is not attached: its storage entry has no keys for sandboxes` });
+    }
+    if (!volumes.length) return;
     if (this.opts.sandbox.network.mode === "deny") {
-      this.opts.onEvent?.({ kind: "warning", message: "Storage is not mounted: the sandbox has no network" });
+      this.opts.onEvent?.({ kind: "warning", message: "Volumes are not attached: the sandbox has no network" });
       return;
     }
-    const install = await driver.exec("command -v rclone >/dev/null || (curl -fsSL https://rclone.org/install.sh | sudo bash) >/dev/null 2>&1; command -v rclone", { timeoutMs: 180_000 });
-    if (install.exitCode !== 0) {
-      this.opts.onEvent?.({ kind: "warning", message: "Storage is not mounted: rclone could not be installed in the sandbox" });
-      return;
-    }
-    for (const m of mounts) {
-      const r = m.remote!;
-      const env: Record<string, string> = {
-        RCLONE_CONFIG_POLPO_TYPE: "s3",
-        RCLONE_CONFIG_POLPO_PROVIDER: "Other",
-        RCLONE_CONFIG_POLPO_ACCESS_KEY_ID: r.credentials.accessKeyId,
-        RCLONE_CONFIG_POLPO_SECRET_ACCESS_KEY: r.credentials.secretAccessKey,
-        ...(r.credentials.sessionToken ? { RCLONE_CONFIG_POLPO_SESSION_TOKEN: r.credentials.sessionToken } : {}),
-        ...(r.endpoint ? { RCLONE_CONFIG_POLPO_ENDPOINT: r.endpoint } : {}),
-        ...(r.region ? { RCLONE_CONFIG_POLPO_REGION: r.region } : {}),
-        ...(r.pathStyle ? { RCLONE_CONFIG_POLPO_FORCE_PATH_STYLE: "true" } : {}),
-      };
-      const source = `polpo:${r.bucket}${r.prefix ? `/${r.prefix.replace(/^\/+|\/+$/g, "")}` : ""}`;
-      const flags = ["--daemon", "--vfs-cache-mode", "writes", "--dir-cache-time", "30s", ...(m.readOnly ? ["--read-only"] : [])];
-      const cmd = `sudo mkdir -p ${q(m.path)} && sudo chown "$(id -u):$(id -g)" ${q(m.path)} && rclone mount ${q(source)} ${q(m.path)} ${flags.join(" ")} && sleep 1 && mountpoint -q ${q(m.path)}`;
-      const res = await driver.exec(cmd, { env, timeoutMs: 60_000 });
-      if (res.exitCode !== 0) {
-        this.opts.onEvent?.({ kind: "warning", message: `Storage "${m.name}" could not be mounted in the sandbox: ${(res.stderr || res.stdout).trim().slice(0, 200) || "FUSE not available"}` });
+    const needsRclone = volumes.some((v) => v.strategy === "hydrated" || v.driver === "rclone");
+    if (needsRclone && !(await this.ensureTool(driver, "rclone"))) throw new Error("rclone could not be installed in the sandbox (needed for volumes)");
+    for (const v of volumes) {
+      const env = this.rcloneEnv(v);
+      const readOnly = v.access === "read-only";
+      const mk = `{ mkdir -p ${q(v.mountPath)} 2>/dev/null || { sudo mkdir -p ${q(v.mountPath)} && sudo chown "$(id -u):$(id -g)" ${q(v.mountPath)}; }; }`;
+      if (v.strategy === "mounted") {
+        let cmd: string;
+        if (v.driver === "mountpoint-s3") {
+          if (!(await this.ensureTool(driver, "mount-s3"))) throw new Error(`mountpoint-s3 could not be installed in the sandbox (volume "${v.name}")`);
+          const r = v.remote!;
+          const prefix = (r.prefix ?? "").replace(/^\/+|\/+$/g, "");
+          const flags = [
+            ...(prefix ? ["--prefix", q(`${prefix}/`)] : []), ...(r.endpoint ? ["--endpoint-url", q(r.endpoint)] : []),
+            ...(r.region ? ["--region", q(r.region)] : []), ...(r.pathStyle ? ["--force-path-style"] : []),
+            ...(readOnly ? ["--read-only"] : ["--allow-overwrite", "--allow-delete"]),
+          ];
+          const awsEnv = { AWS_ACCESS_KEY_ID: r.credentials.accessKeyId, AWS_SECRET_ACCESS_KEY: r.credentials.secretAccessKey, ...(r.credentials.sessionToken ? { AWS_SESSION_TOKEN: r.credentials.sessionToken } : {}) };
+          cmd = `${mk} && mount-s3 ${q(r.bucket)} ${q(v.mountPath)} ${flags.join(" ")}`;
+          const res = await driver.exec(cmd, { env: awsEnv, timeoutMs: 120_000 });
+          if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be mounted: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
+        } else {
+          const flags = ["--daemon", "--vfs-cache-mode", "writes", "--dir-cache-time", "30s", ...(readOnly ? ["--read-only"] : [])];
+          cmd = `${mk} && rclone mount ${q(this.remoteSource(v))} ${q(v.mountPath)} ${flags.join(" ")} && sleep 1 && mountpoint -q ${q(v.mountPath)}`;
+          const res = await driver.exec(cmd, { env, timeoutMs: 120_000 });
+          if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be mounted: ${(res.stderr || res.stdout).trim().slice(0, 300) || "FUSE not available"}`);
+        }
+        this.opts.onEvent?.({ kind: "volume", step: "prepared", name: v.name });
+      } else {
+        const revision = await this.readRevision(driver, v);
+        const res = await driver.exec(`${mk} && rclone copy ${q(this.remoteSource(v))} ${q(v.mountPath)} --exclude ${q(VOLUME_REVISION_OBJECT)} --exclude '.conflicts/**'${readOnly ? ` && chmod -R a-w ${q(v.mountPath)}` : ""}`, { env, timeoutMs: 900_000 });
+        if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be copied in: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
+        this.volumeBase.set(v.name, revision);
+        this.opts.onEvent?.({ kind: "volume", step: "prepared", name: v.name, revision });
       }
     }
+  }
+
+  /**
+   * Write a hydrated read-write volume back to its bucket, guarded by its revision: if another
+   * run wrote it since we copied it, our changes go to .conflicts/<workspace id>/ instead.
+   */
+  private async writeBackVolume(driver: RemoteDriver, v: ResolvedSandboxVolume, step: "checkpointed" | "finalized"): Promise<void> {
+    const env = this.rcloneEnv(v);
+    const base = this.volumeBase.get(v.name) ?? 0;
+    const current = await this.readRevision(driver, v);
+    if (current !== base) {
+      const target = this.remoteSource(v, `.conflicts/${this.id}`);
+      await driver.exec(`rclone copy ${q(v.mountPath)} ${q(target)}`, { env, timeoutMs: 900_000 });
+      this.opts.onEvent?.({ kind: "volume", step: "conflict", name: v.name, revision: current, message: `Volume "${v.name}" changed elsewhere (revision ${base} → ${current}): this run's version was saved under .conflicts/${this.id}/` });
+      this.volumeBase.set(v.name, current);
+      return;
+    }
+    const next = base + 1;
+    const res = await driver.exec(
+      `rclone sync ${q(v.mountPath)} ${q(this.remoteSource(v))} --exclude ${q(VOLUME_REVISION_OBJECT)} --exclude '.conflicts/**' && ` +
+      `printf %s ${q(JSON.stringify({ revision: next, updatedAt: new Date().toISOString(), by: this.opts.pool?.owner ?? "" }))} | rclone rcat ${q(this.remoteSource(v, VOLUME_REVISION_OBJECT))}`,
+      { env, timeoutMs: 900_000 },
+    );
+    if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be written back: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
+    this.volumeBase.set(v.name, next);
+    this.opts.onEvent?.({ kind: "volume", step, name: v.name, revision: next });
+  }
+
+  /** sandbox_volume_checkpoint: persist one (or every) hydrated read-write volume now. */
+  async checkpointVolume(name?: string): Promise<void> {
+    const targets = this.remoteVolumes().filter((v) => v.strategy === "hydrated" && v.access === "read-write" && (!name || v.name === name));
+    if (name && !targets.length) throw new Error(`No hydrated read-write volume named "${name}" in this sandbox`);
+    await this.op(async (driver) => {
+      for (const v of targets) await this.writeBackVolume(driver, v, "checkpointed");
+    });
+  }
+
+  /** Detach volumes before the VM is pooled or shared on: unmount, drop copies (and their keys). */
+  private async detachVolumes(driver: RemoteDriver): Promise<void> {
+    const volumes = this.remoteVolumes();
+    if (!volumes.length) return;
+    const paths = volumes.map((v) => q(v.mountPath)).join(" ");
+    await driver.exec(`for d in ${paths}; do if mountpoint -q "$d" 2>/dev/null; then fusermount -u "$d" 2>/dev/null || sudo umount "$d"; fi; chmod -R u+w "$d" 2>/dev/null; rm -rf "$d" 2>/dev/null || sudo rm -rf "$d"; done; true`, { timeoutMs: 60_000 }).catch(() => undefined);
   }
 
   // ── Workspace ─────────────────────────────────────────────────────────
@@ -382,8 +517,10 @@ export class RemoteWorkspace implements Workspace {
   }
 
   /**
-   * Bring back what changed in the VM (working directory and writable paths), then return the
-   * VM to the pool suspended or delete it, as the lifecycle says.
+   * Release (open Polpo's finalize): bring back the output directory, write back the hydrated
+   * volumes with automatic write-back, detach the volumes, then — by isolation and lifecycle —
+   * leave the shared VM, return the VM to the pool (running until stopAfterIdleMinutes, then
+   * stopped by the reaper and deleted deleteAfterStopMinutes later) or destroy it.
    */
   async dispose(reason?: string): Promise<void> {
     if (this.disposed) return;
@@ -397,12 +534,21 @@ export class RemoteWorkspace implements Workspace {
     } catch (err) {
       this.opts.onEvent?.({ kind: "warning", message: `Files changed in the sandbox could not be copied back: ${(err as Error).message}` });
     }
+    for (const v of this.remoteVolumes().filter((x) => x.strategy === "hydrated" && x.access === "read-write" && x.writeBack !== "manual")) {
+      try { await this.writeBackVolume(driver, v, "finalized"); }
+      catch (err) { this.opts.onEvent?.({ kind: "warning", message: (err as Error).message }); }
+    }
+    await this.detachVolumes(driver);
     if (!this.suspended) this.runningMs += Date.now() - this.runningSince;
-    let outcome: "pooled" | "destroyed" = "destroyed";
-    if (this.pool && this.lifecycle.onRelease === "pool" && reason !== "error") {
+    let outcome: "pooled" | "destroyed" | "shared" = "destroyed";
+    if (this.shared && this.pool) {
+      await this.pool.leaveShared(driver.remoteId, this.lifecycle, this.id).catch(() => undefined);
+      outcome = "shared";
+    } else if (this.pool && this.lifecycle.onRelease === "pool" && reason !== "error") {
       try {
-        if (!this.suspended) await driver.suspend();
-        await this.pool.release(driver.remoteId, this.lifecycle.deleteAfterStopMinutes);
+        // keeps running until the reaper stops it (E2B: its own timeout pauses it as well)
+        await driver.keepAlive?.((this.lifecycle.stopAfterIdleMinutes + 2) * 60_000).catch(() => undefined);
+        await this.pool.release(driver.remoteId, this.lifecycle);
         outcome = "pooled";
       } catch {
         outcome = "destroyed";
@@ -425,7 +571,10 @@ export class RemoteWorkspace implements Workspace {
 
   private async syncBack(driver: RemoteDriver): Promise<void> {
     const t0 = Date.now();
-    const targets = [this.root, ...this.paths.filter((p) => !p.readOnly && !this.isMount(p.path)).map((p) => p.path)];
+    // the scratch working directory stays in the sandbox; deliverables come back from the
+    // writable paths (the task's output directory)
+    const targets = this.paths.filter((p) => !p.readOnly && !this.isVolume(p.path)).map((p) => p.path);
+    if (!targets.length) return;
     const prune = CONTEXT_EXCLUDES.filter((e) => !e.includes("/")).map((e) => `-name ${q(e)} -prune`).join(" -o ");
     const tarPath = `/tmp/.polpo-back-${nanoid(8)}.tgz`;
     // the next sync starts from now: a fresh marker before listing

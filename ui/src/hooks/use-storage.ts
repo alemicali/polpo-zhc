@@ -5,7 +5,10 @@ import type { VaultRef } from "@/lib/vault-ref";
 
 export type StorageAccess = "read" | "write";
 export type StorageDriver = "rclone" | "mountpoint-s3";
-export type StorageGrant = { id?: string; agent: string; access: StorageAccess; prefix?: string };
+export type StorageGrant = { id?: string; agent: string; access: StorageAccess; prefix?: string; writeBack?: "auto" | "manual" };
+/** Sandbox volume (open Polpo): the bucket at /volumes/<slug> in the sandboxes that select it. */
+export type StorageVolume = { enabled: boolean; strategy: "mounted" | "hydrated"; access: "read-only" | "read-write"; writeBack?: "auto" | "manual"; label?: string };
+export type StorageImportJob = { id: string; entry: string; source: string; target: string; state: "running" | "done" | "failed"; files?: number; error?: string; startedAt: string; finishedAt?: string };
 export type MountState = "unmounted" | "mounting" | "mounted" | "error";
 export type MountStatus = { entryId: string; slug: string; state: MountState; path: string; error?: string; since: string; restarts: number; pid?: number };
 export type KeyStatus = "set" | "not set";
@@ -30,18 +33,21 @@ export type StorageEntry = {
   /** Vault entry with limited keys for remote sandboxes. */
   sandboxCredentials?: VaultRef;
   temporaryCredentials?: StorageTemporarySettings;
+  volume?: StorageVolume;
   keys: { credentials: KeyStatus; sandboxCredentials: KeyStatus; temporaryToken: KeyStatus };
   mount: MountStatus;
   createdAt: string; updatedAt: string;
 };
 
 /** Create/update body (PUT replaces the entry: references left out or null are cleared). */
-export type StorageEntryInput = Omit<StorageEntry, "id" | "credentials" | "sandboxCredentials" | "temporaryCredentials" | "keys" | "mount" | "createdAt" | "updatedAt" | "provider"> & {
+export type StorageEntryInput = Omit<StorageEntry, "id" | "credentials" | "sandboxCredentials" | "temporaryCredentials" | "volume" | "keys" | "mount" | "createdAt" | "updatedAt" | "provider"> & {
   provider?: "s3";
   credentials?: VaultRef | null;
   sandboxCredentials?: VaultRef | null;
   /** null = the fixed sandbox key. */
   temporaryCredentials?: StorageTemporarySettings | null;
+  /** null = not a sandbox volume. */
+  volume?: StorageVolume | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,7 +104,10 @@ export function useStorage() {
     try { return await request<MountStatus>(at(id, "/unmount"), { method: "POST" }); }
     finally { await refetch(); }
   }, [refetch]);
-  return { entries, loading, error, refetch, createEntry, updateEntry, deleteEntry, testEntry, mountEntry, unmountEntry };
+  const importFolder = useCallback((id: string, source: string, target?: string) =>
+    request<StorageImportJob>(at(id, "/import"), { method: "POST", body: JSON.stringify({ source, ...(target ? { target } : {}) }) }), []);
+  const importStatus = useCallback((id: string, job: string) => request<StorageImportJob>(at(id, `/import/${encodeURIComponent(job)}`)), []);
+  return { entries, loading, error, refetch, createEntry, updateEntry, deleteEntry, testEntry, mountEntry, unmountEntry, importFolder, importStatus };
 }
 
 /** The editable fields of an entry, for PUT (which replaces them, vault references included). */
@@ -108,6 +117,6 @@ export function storageEntryInput(entry: StorageEntry, override?: Partial<Storag
     bucket: entry.bucket, prefix: entry.prefix, pathStyle: entry.pathStyle, driver: entry.driver, readOnly: entry.readOnly,
     enabled: entry.enabled, cache: entry.cache, grants: entry.grants,
     credentials: entry.credentials ?? null, sandboxCredentials: entry.sandboxCredentials ?? null,
-    temporaryCredentials: entry.temporaryCredentials ?? null, ...override,
+    temporaryCredentials: entry.temporaryCredentials ?? null, volume: entry.volume ?? null, ...override,
   };
 }

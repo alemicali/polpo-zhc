@@ -9,13 +9,18 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { StorageMountOptions, StorageMountProvider, StorageMountSpec } from "@polpo-ai/core/sandbox";
+import { spawn } from "node:child_process";
+import { nanoid } from "nanoid";
+import { childEnv, findBinary, rcloneRemoteEnv, rcloneRemotePath } from "./rclone.js";
+import { SANDBOX_VOLUME_ROOT, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxVolumeSelection, type SandboxVolumeWriteBack, type StorageMountOptions, type StorageMountProvider, type StorageMountSpec } from "@polpo-ai/core/sandbox";
 import {
   assertStorageAccess,
   normalizeStoragePrefix,
   scopeStorageListing,
   storageAccessFor,
+  storageGrantFor,
   validateStorageEntry,
+  VOLUME_REVISION_OBJECT,
   type StorageTemporaryCredentials,
   type CreateStorageEntry,
   type StorageAccess,
@@ -58,6 +63,18 @@ export interface StorageListItem {
   type: "file" | "dir";
   size?: number;
   lastModified?: string;
+}
+
+export interface StorageImportJob {
+  id: string;
+  entry: string;
+  source: string;
+  target: string;
+  state: "running" | "done" | "failed";
+  files?: number;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
 }
 
 export class StorageRuntime implements StorageMountProvider {
@@ -121,6 +138,111 @@ export class StorageRuntime implements StorageMountProvider {
   }
 
   // ── StorageMountProvider ───────────────────────────────────────────
+
+  /**
+   * The volumes a run selected (open Polpo semantics): each name must be a storage entry enabled
+   * as a volume and granted to the agent; the selection is narrowed by the volume's maximum
+   * access, the entry's read-only flag, the agent's grant (read → read-only, writeBack) and the
+   * run's own request. "host": the bucket as mounted here (hostPath). "remote": the bucket,
+   * prefix and the limited sandbox keys (temporary ones when configured).
+   */
+  async volumesFor(agentName: string | undefined, selections: SandboxVolumeSelection[], target: "host" | "remote", options: StorageMountOptions = {}): Promise<ResolvedSandboxVolume[]> {
+    const entries = await this.store.list();
+    const out: ResolvedSandboxVolume[] = [];
+    for (const selection of selections) {
+      const entry = entries.find((e) => e.slug === selection.name && e.volume?.enabled && e.enabled);
+      const grant = entry ? storageAccessFor(entry, agentName) : null;
+      if (!entry || !grant) throw new SandboxVolumeGrantError(selection.name);
+      const volume = entry.volume!;
+      const readOnly = volume.access === "read-only" || grant.access !== "write" || selection.access === "read-only";
+      const grantWriteBack = agentName !== undefined ? storageGrantFor(entry, agentName)?.writeBack : undefined;
+      const writeBack: SandboxVolumeWriteBack | undefined = readOnly ? undefined
+        : [volume.writeBack, grantWriteBack, selection.writeBack].includes("manual") ? "manual" : "auto";
+      const prefix = `${normalizeStoragePrefix(entry.prefix)}${grant.prefix}`;
+      const resolved: ResolvedSandboxVolume = {
+        name: entry.slug, strategy: volume.strategy, mountPath: `${SANDBOX_VOLUME_ROOT}/${entry.slug}`,
+        access: readOnly ? "read-only" : "read-write", ...(writeBack ? { writeBack } : {}), driver: entry.driver,
+      };
+      if (target === "host") {
+        const status = this.mountStatus(entry);
+        if (status.state === "mounted") resolved.hostPath = resolved.mountPath = grant.prefix ? join(status.path, grant.prefix) : status.path;
+      } else {
+        const credentials = await this.remoteCredentials(entry, agentName, prefix, readOnly, options.ttlSeconds);
+        if (credentials) {
+          const s3 = s3TargetFor(entry);
+          resolved.remote = {
+            ...(entry.endpoint ? { endpoint: s3.endpoint } : {}), region: s3.region, bucket: entry.bucket,
+            ...(prefix ? { prefix } : {}), pathStyle: s3.pathStyle, credentials,
+          };
+        }
+      }
+      out.push(resolved);
+    }
+    return out;
+  }
+
+  private readonly imports = new Map<string, StorageImportJob>();
+
+  /**
+   * Copy a folder of this server into the bucket (under `targetPrefix`), with rclone in the
+   * background: how a person moves existing files (a project, datasets) onto a volume. The
+   * folder itself is not touched. Dependencies and VCS folders are skipped.
+   */
+  async importFolder(idOrSlug: string, sourceDir: string, targetPrefix = ""): Promise<StorageImportJob> {
+    const entry = await this.require(idOrSlug);
+    if (entry.readOnly) throw new Error("This storage entry is read-only");
+    const binary = findBinary("rclone");
+    if (!binary) throw new Error("rclone is not installed on this server");
+    const credentials = await this.credentials(entry);
+    if (!credentials?.accessKeyId || !credentials.secretAccessKey) throw new Error("Credentials are not set");
+    const s = await stat(sourceDir).catch(() => null);
+    if (!s?.isDirectory()) throw new Error(`${sourceDir} is not a folder`);
+    const sub = normalizeStoragePrefix(targetPrefix).replace(/\/$/, "");
+    const target = `${rcloneRemotePath(entry)}${sub ? `/${sub}` : ""}`;
+    const job: StorageImportJob = { id: nanoid(10), entry: entry.slug, source: sourceDir, target: sub, state: "running", startedAt: new Date().toISOString() };
+    this.imports.set(job.id, job);
+    const excludes = ["node_modules/**", ".git/**", ".venv/**", "__pycache__/**", ".polpo/**", ".next/**", "dist/**.map"].flatMap((e) => ["--exclude", e]);
+    const child = spawn(binary, ["copy", sourceDir, target, ...excludes, "--transfers", "8", "--stats", "0", "--stats-one-line", "--use-json-log", "-v"],
+      { env: childEnv(rcloneRemoteEnv(entry, credentials)), stdio: ["ignore", "ignore", "pipe"] });
+    let tail = "";
+    let files = 0;
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      files += (text.match(/"msg":"Copied/g) ?? []).length;
+      job.files = files;
+      tail = (tail + text).slice(-2000);
+    });
+    child.on("close", (code) => {
+      job.state = code === 0 ? "done" : "failed";
+      job.finishedAt = new Date().toISOString();
+      if (code !== 0) job.error = (tail.match(/"msg":"([^"]+)"/g)?.pop()?.slice(7, -1) ?? `rclone exited with ${code}`).slice(0, 300);
+      this.onImportFinished?.(job);
+    });
+    child.on("error", (err) => { job.state = "failed"; job.error = err.message; });
+    return job;
+  }
+
+  importStatus(jobId: string): StorageImportJob | undefined {
+    return this.imports.get(jobId);
+  }
+
+  /** Called when a folder import ends (the server emits storage:changed). */
+  onImportFinished?: (job: StorageImportJob) => void;
+
+  /** The volume's current revision, from .polpo-volume.json in its prefix (0 when absent). */
+  async volumeRevision(idOrSlug: string): Promise<number> {
+    const entry = await this.require(idOrSlug);
+    const client = await this.client(entry);
+    try {
+      const obj = await client.get(`${normalizeStoragePrefix(entry.prefix)}${VOLUME_REVISION_OBJECT}`);
+      const chunks: Buffer[] = [];
+      for await (const c of obj.body) chunks.push(c as Buffer);
+      const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { revision?: number };
+      return typeof parsed.revision === "number" ? parsed.revision : 0;
+    } catch {
+      return 0;
+    }
+  }
 
   /**
    * The mounts an agent may see. "host": the host mount directories that are mounted now (path
@@ -450,6 +572,7 @@ function prepareEntry<T extends EntryPatch>(patch: T, current?: StorageEntry): T
     if (!normalized) throw new Error(`${what}: choose an agent's vault entry (owner and service)`);
     return normalized;
   };
+  if ("volume" in out && !out.volume) out.volume = undefined;
   if ("credentials" in out) out.credentials = ref(out.credentials, "Main keys");
   if ("sandboxCredentials" in out) out.sandboxCredentials = ref(out.sandboxCredentials, "Sandbox keys");
   if ("temporaryCredentials" in out) {

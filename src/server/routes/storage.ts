@@ -1,3 +1,4 @@
+import { resolve as resolvePath, sep } from "node:path";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
 import { validateStorageEntry, type StorageEntry } from "@polpo-ai/core/storage-registry";
@@ -26,7 +27,18 @@ const GrantSchema = z.object({
   agent: z.string().trim().min(1),
   access: z.enum(["read", "write"]),
   prefix: z.string().trim().optional(),
+  /** Sandbox volume: this agent's hydrated write-back ("manual" = only on checkpoint). */
+  writeBack: z.enum(["auto", "manual"]).optional(),
 });
+
+/** Sandbox volume (open Polpo): the bucket appears at /volumes/<slug> in the sandboxes that select it. */
+const VolumeSchema = z.object({
+  enabled: z.boolean(),
+  strategy: z.enum(["mounted", "hydrated"]).default("mounted"),
+  access: z.enum(["read-only", "read-write"]).default("read-write"),
+  writeBack: z.enum(["auto", "manual"]).optional(),
+  label: z.string().trim().optional(),
+}).nullable();
 
 const EntrySchema = z.object({
   name: z.string().trim().min(1),
@@ -53,6 +65,7 @@ const EntrySchema = z.object({
   sandboxCredentials: VaultRefSchema.nullable().optional(),
   /** Temporary keys per run (R2 token in a vault entry, or STS role). */
   temporaryCredentials: TemporarySchema.optional(),
+  volume: VolumeSchema.optional(),
 });
 
 const errorSchema = z.object({ ok: z.literal(false), error: z.string() });
@@ -123,9 +136,10 @@ const statusRoute = createRoute({
 type EntryInput = z.infer<typeof EntrySchema>;
 
 function toEntry(input: EntryInput): Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> {
-  const { credentials, sandboxCredentials, temporaryCredentials, ...rest } = input;
+  const { credentials, sandboxCredentials, temporaryCredentials, volume, ...rest } = input;
   return {
     ...rest,
+    volume: volume ?? undefined,
     credentials: credentials ?? undefined,
     sandboxCredentials: sandboxCredentials ?? undefined,
     temporaryCredentials: temporaryCredentials ?? undefined,
@@ -137,7 +151,26 @@ function toEntry(input: EntryInput): Omit<StorageEntry, "id" | "createdAt" | "up
   };
 }
 
-export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
+const importRoute = createRoute({
+  method: "post", path: "/{id}/import", tags: ["Storage"], summary: "Copy a folder into the bucket",
+  description: "Copies a folder of the project (path relative to the working directory) into the bucket, under an optional prefix, in the background. Dependencies (node_modules, .venv) and .git are skipped; the folder is not touched.",
+  request: { params: idParam, body: { content: { "application/json": { schema: z.object({ source: z.string().trim().min(1), target: z.string().trim().optional() }) } } } },
+  responses: {
+    202: { content: { "application/json": { schema: okAny } }, description: "Started" },
+    400: { content: { "application/json": { schema: errorSchema } }, description: "Invalid" },
+    404: { content: { "application/json": { schema: errorSchema } }, description: "Not found" },
+  },
+});
+const importStatusRoute = createRoute({
+  method: "get", path: "/{id}/import/{job}", tags: ["Storage"], summary: "Folder copy status",
+  request: { params: z.object({ id: z.string(), job: z.string() }) },
+  responses: {
+    200: { content: { "application/json": { schema: okAny } }, description: "Status" },
+    404: { content: { "application/json": { schema: errorSchema } }, description: "Not found" },
+  },
+});
+
+export function storageRoutes(getRuntime: () => StorageRuntime, getWorkDir?: () => string): OpenAPIHono {
   const app = new OpenAPIHono({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ ok: false, error: result.error.issues[0]?.message ?? "Invalid request" }, 400);
@@ -203,6 +236,23 @@ export function storageRoutes(getRuntime: () => StorageRuntime): OpenAPIHono {
     if (!(await runtime.entry(id))) return notFound(c);
     try { return c.json({ ok: true, data: await runtime.unmount(id) }, 200); }
     catch (error) { return failure(c, error); }
+  }) as any);
+
+  app.openapi(importRoute, (async (c: any) => {
+    const runtime = getRuntime();
+    const id = c.req.valid("param").id;
+    if (!(await runtime.entry(id))) return notFound(c);
+    const { source, target } = c.req.valid("json");
+    const root = resolvePath(getWorkDir?.() ?? process.cwd());
+    const dir = resolvePath(root, source);
+    if (dir !== root && !dir.startsWith(root + sep)) return c.json({ ok: false, error: "The folder must be inside the project's working directory" }, 400);
+    try { return c.json({ ok: true, data: await runtime.importFolder(id, dir, target) }, 202); }
+    catch (error) { return failure(c, error); }
+  }) as any);
+
+  app.openapi(importStatusRoute, (async (c: any) => {
+    const job = getRuntime().importStatus(c.req.valid("param").job);
+    return job ? c.json({ ok: true, data: job }, 200) : c.json({ ok: false, error: "Copy not found" }, 404);
   }) as any);
 
   app.openapi(statusRoute, (async (c: any) => {

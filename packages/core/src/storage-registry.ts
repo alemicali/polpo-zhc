@@ -8,6 +8,7 @@
  * Design: polpo-arch/SANDBOX.md, "Storage: bucket montati con FUSE".
  */
 import type { VaultRef } from "./vault-ref.js";
+import { SANDBOX_VOLUME_NAME_PATTERN, type SandboxVolumeAccess, type SandboxVolumeStrategy, type SandboxVolumeWriteBack } from "./sandbox.js";
 
 export type StorageProvider = "s3";
 export type StorageDriver = "rclone" | "mountpoint-s3";
@@ -18,6 +19,8 @@ export interface StorageGrant {
   id: string;
   agent: string;
   access: StorageAccess;
+  /** Sandbox volume: narrow write-back for this agent ("manual" = only on checkpoint). */
+  writeBack?: SandboxVolumeWriteBack;
   /** Limit the grant to keys under this prefix (relative to the entry's own prefix), e.g. "clients/acme/". */
   prefix?: string;
 }
@@ -66,12 +69,31 @@ export interface StorageEntry {
   sandboxCredentials?: VaultRef;
   /** Per-run temporary keys for remote sandboxes (default: the fixed sandbox key). */
   temporaryCredentials?: StorageTemporaryCredentials;
+  /**
+   * Sandbox volume (open Polpo semantics): this bucket (prefix) appears at /volumes/<slug> in the
+   * sandboxes of agents that are granted it and select it (sandbox.volumes). Its revision lives
+   * in the bucket (.polpo-volume.json), so hydrated write-backs can detect conflicts.
+   */
+  volume?: StorageVolumeSettings;
   /** Enabled entries are mounted on the host at server start. */
   enabled: boolean;
   grants: StorageGrant[];
   createdAt: string;
   updatedAt: string;
 }
+
+export interface StorageVolumeSettings {
+  enabled: boolean;
+  /** "mounted": live in the sandbox (driver of the entry); "hydrated": copied in at start, written back. */
+  strategy: SandboxVolumeStrategy;
+  /** The most any run may get. */
+  access: SandboxVolumeAccess;
+  /** Hydrated read-write volumes: write back at the end ("auto") or only on sandbox_volume_checkpoint ("manual"). */
+  writeBack?: SandboxVolumeWriteBack;
+  label?: string;
+}
+
+export { VOLUME_REVISION_OBJECT } from "./sandbox.js";
 
 export type CreateStorageEntry = Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> & { id?: string };
 
@@ -193,7 +215,7 @@ export function scopeStorageListing(grantPrefix: string, requested: string | und
 }
 
 /** Validation shared by the API, the tools and the stores' callers. Returns the first problem. */
-export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants"> & { temporaryCredentials?: StorageTemporaryCredentials }): string | undefined {
+export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants"> & { temporaryCredentials?: StorageTemporaryCredentials; volume?: StorageVolumeSettings }): string | undefined {
   if (!STORAGE_SLUG_PATTERN.test(entry.slug)) return "Slug must be lowercase letters, digits and dashes";
   if (!entry.bucket.trim() || /[\s/]/.test(entry.bucket)) return "Bucket must be a bucket name (no spaces or slashes)";
   if (entry.driver === "mountpoint-s3" && !entry.readOnly) return 'The "mountpoint-s3" driver is allowed only for read-only storage';
@@ -213,8 +235,17 @@ export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket"
       }
     }
   }
+  const volume = (entry as { volume?: StorageVolumeSettings }).volume;
+  if (volume?.enabled) {
+    if (!SANDBOX_VOLUME_NAME_PATTERN.test(entry.slug)) return "As a sandbox volume, the slug must start with a letter (2–63 chars: letters, digits, - and _)";
+    if (volume.strategy !== "mounted" && volume.strategy !== "hydrated") return 'Volume strategy must be "mounted" or "hydrated"';
+    if (volume.access !== "read-only" && volume.access !== "read-write") return 'Volume access must be "read-only" or "read-write"';
+    if (volume.access === "read-write" && entry.readOnly) return "A read-only storage entry can only be a read-only volume";
+    if (volume.strategy === "mounted" && volume.access === "read-write" && entry.driver === "mountpoint-s3") return 'A read-write mounted volume needs the "rclone" driver (mountpoint-s3 cannot edit files)';
+  }
   const agents = new Set<string>();
   for (const grant of entry.grants) {
+    if (grant.writeBack !== undefined && grant.writeBack !== "auto" && grant.writeBack !== "manual") return 'Grant write-back must be "auto" or "manual"';
     if (!grant.agent.trim()) return "Every grant needs an agent";
     if (agents.has(grant.agent)) return `Agent "${grant.agent}" has more than one grant`;
     agents.add(grant.agent);

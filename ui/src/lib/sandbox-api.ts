@@ -20,8 +20,12 @@ export interface SandboxSettings {
   chatIdleMinutes?: number;
   /** Opt-in "Cowork": chats may run their sandbox tools on a remote provider (Daytona, E2B). */
   chatRemote?: boolean;
-  /** Remote VMs: reuse (same agent) or fresh, keep (pool) or delete at the end, idle suspend, expiry. */
+  /** Remote VMs (open Polpo): reuse a VM this agent released, a fresh one, or one shared by concurrent runs. */
+  isolation?: "reuse" | "fresh" | "shared";
+  /** Remote VMs: keep (pool) or delete at the end; a pooled VM is stopped after idle, then deleted. */
   lifecycle?: SandboxLifecycle;
+  /** Volumes (Storage entries enabled as volumes) attached at /volumes/<name>; lower levels only narrow. */
+  volumes?: SandboxVolumeSelection[];
   /** Instance: remote VMs kept ready per provider (cost money while they exist). */
   warm?: Partial<Record<"daytona" | "e2b", number>>;
   /** Per-provider options; for Daytona/E2B the vault entry with the key (a reference) and non-secret settings. */
@@ -29,31 +33,32 @@ export interface SandboxSettings {
 }
 
 export interface SandboxLifecycle {
-  isolation?: "reuse" | "fresh";
   onRelease?: "pool" | "destroy";
-  suspendAfterIdleSeconds?: number;
+  stopAfterIdleMinutes?: number;
   deleteAfterStopMinutes?: number;
 }
 
+export interface SandboxVolumeSelection {
+  name: string;
+  access?: "read-only" | "read-write";
+  writeBack?: "auto" | "manual";
+}
+
 export const DEFAULT_LIFECYCLE: Required<SandboxLifecycle> = {
-  isolation: "reuse", onRelease: "pool", suspendAfterIdleSeconds: 0, deleteAfterStopMinutes: 30,
+  onRelease: "pool", stopAfterIdleMinutes: 5, deleteAfterStopMinutes: 30,
 };
 
 /** Where each tool runs (same list as the server, TOOL_PLACEMENT in @polpo-ai/core/sandbox). */
-export type ToolPlacement = "sandbox" | "bridged" | "host";
-const SANDBOX_TOOLS = ["bash", "grep", "glob", "ls", "read", "write", "edit", "run_command"];
-const BRIDGED_TOOLS = ["pdf_*", "excel_*", "docx_*", "http_download", "image_generate", "video_generate", "audio_speak", "audio_transcribe",
-  "email_download_attachment", "whatsapp_send_file", "browser_screenshot", "storage_read", "storage_write", "register_outcome", "read_attachment"];
+export type ToolPlacement = "sandbox" | "host";
+const SANDBOX_TOOLS = ["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command",
+  "browser_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"];
 const matches = (pattern: string, name: string) => pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name;
 export function toolPlacement(name: string): ToolPlacement {
-  if (SANDBOX_TOOLS.some((p) => matches(p, name))) return "sandbox";
-  if (BRIDGED_TOOLS.some((p) => matches(p, name))) return "bridged";
-  return "host";
+  return SANDBOX_TOOLS.some((p) => matches(p, name)) ? "sandbox" : "host";
 }
 export const PLACEMENT_INFO: Record<ToolPlacement, { label: string; description: string }> = {
-  sandbox: { label: "In the sandbox", description: "Commands and the working files: they run where the sandbox is (bubblewrap here, or the remote VM)." },
-  bridged: { label: "Here, files bridged", description: "Run on this machine (a library or a key) but use the working files: with a remote VM, input files are fetched from it and produced files are copied into it." },
-  host: { label: "Here, keys stay here", description: "Use keys or integrations (vault, email, messaging, storage, data sources…) that never reach the sandbox." },
+  sandbox: { label: "In the sandbox", description: "Commands, the browser and the working files: they act where the sandbox is (bubblewrap here, or the remote VM, where the files they read and write live)." },
+  host: { label: "Here (keys stay here)", description: "Use keys or integrations (vault, email, messaging, storage, data sources…) that never reach the sandbox." },
 };
 
 export interface EffectiveSandbox {
@@ -209,6 +214,8 @@ export function compactSandbox(s: SandboxSettings): SandboxSettings {
   if (s.confineExternalContent) out.confineExternalContent = true;
   if (s.chatIdleMinutes && s.chatIdleMinutes > 0) out.chatIdleMinutes = s.chatIdleMinutes;
   if (s.chatRemote) out.chatRemote = true;
+  if (s.isolation) out.isolation = s.isolation;
+  if (s.volumes?.length) out.volumes = s.volumes;
   if (s.lifecycle) {
     const lc = Object.fromEntries(Object.entries(s.lifecycle).filter(([, v]) => v !== undefined && v !== null && v !== ""));
     if (Object.keys(lc).length) out.lifecycle = lc as SandboxLifecycle;

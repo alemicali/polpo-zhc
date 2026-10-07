@@ -5,7 +5,11 @@
  * file next to the project's state, changed only under a lock file. It records
  *   - "leased" VMs: in use by a process (pid), so a crashed runner's VM can be found and deleted;
  *   - "idle" VMs: suspended after a run, kept for the same agent's next run until deleteAt;
- *   - "warm" VMs: created ahead of time for nobody in particular (instance setting "warm").
+ *   - "warm" VMs: created ahead of time for nobody in particular (instance setting "warm");
+ *   - "shared" VMs: one per key, used by concurrent runs together (isolation "shared"); holders
+ *     lists the processes using it, and with none it waits like an idle VM.
+ * Idle (and holder-less shared) VMs keep running until stopAt, are stopped by the reaper, and are
+ * deleted deleteAfterStopMinutes later (open Polpo's stopAfterIdleMinutes/deleteAfterStopMinutes).
  * The server's reaper deletes expired and orphaned VMs and refills the warm ones.
  */
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -13,7 +17,7 @@ import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { EffectiveSandbox, RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
 
-export type PoolEntryState = "leased" | "idle" | "warm";
+export type PoolEntryState = "leased" | "idle" | "warm" | "shared";
 
 export interface PoolEntry {
   remoteId: string;
@@ -30,10 +34,18 @@ export interface PoolEntry {
   leasedAt?: string;
   runId?: string;
   sessionKey?: string;
-  /** Idle/warm: suspended since, and when the reaper deletes it if nobody takes it. */
+  /** Idle/warm/shared without holders: since when, when the reaper stops it, and deletes it. */
   idleSince?: string;
+  stopAt?: string;
+  stoppedAt?: string;
+  /** Minutes between stopping and deleting (set on release). */
+  deleteAfterStopMinutes?: number;
   deleteAt?: string;
+  /** Shared VMs: the processes using it now. */
+  holders?: Array<{ id?: string; pid: number; host?: string; runId?: string; sessionKey?: string; since: string }>;
 }
+
+export interface ReleaseTimes { stopAfterIdleMinutes: number; deleteAfterStopMinutes: number }
 
 interface PoolFile { version: 1; entries: PoolEntry[] }
 
@@ -86,8 +98,40 @@ export class SandboxPool {
         .filter((e) => e.state === "idle" && e.provider === provider && e.key === key && e.owner === owner && (!e.deleteAt || Date.parse(e.deleteAt) > now))
         .sort((a, b) => Date.parse(b.idleSince ?? b.createdAt) - Date.parse(a.idleSince ?? a.createdAt))[0];
       if (!entry) return undefined;
-      Object.assign(entry, this.leaseFields(lease), { owner, idleSince: undefined, deleteAt: undefined });
+      Object.assign(entry, this.leaseFields(lease), { owner, idleSince: undefined, stopAt: undefined, stoppedAt: undefined, deleteAt: undefined });
       return { ...entry };
+    });
+  }
+
+  /** Join the shared VM for this key (isolation "shared"), adding this process as a holder. */
+  takeShared(provider: RemoteSandboxProvider, key: string, lease: Partial<PoolEntry> & { holderId?: string } = {}): Promise<PoolEntry | undefined> {
+    return this.update((entries) => {
+      const entry = entries.find((e) => e.state === "shared" && e.provider === provider && e.key === key);
+      if (!entry) return undefined;
+      entry.holders = [...(entry.holders ?? []), this.holder(lease)];
+      Object.assign(entry, { idleSince: undefined, stopAt: undefined, stoppedAt: undefined, deleteAt: undefined });
+      return { ...entry };
+    });
+  }
+
+  /** Record a new shared VM created by this process. */
+  addShared(entry: Pick<PoolEntry, "remoteId" | "provider" | "key">, lease: Partial<PoolEntry> & { holderId?: string } = {}): Promise<void> {
+    return this.update((entries) => {
+      entries.push({ ...entry, owner: "", state: "shared", createdAt: new Date().toISOString(), holders: [this.holder(lease)] });
+    });
+  }
+
+  /** A workspace stops using a shared VM; with no holders left it waits like an idle VM. */
+  leaveShared(remoteId: string, times: ReleaseTimes, holderId?: string): Promise<number> {
+    return this.update((entries) => {
+      const entry = entries.find((e) => e.remoteId === remoteId);
+      if (!entry) return 0;
+      const holders = entry.holders ?? [];
+      const i = holders.findIndex((h) => holderId ? h.id === holderId : h.pid === process.pid);
+      if (i >= 0) holders.splice(i, 1);
+      entry.holders = holders;
+      if (!entry.holders.length) Object.assign(entry, this.idleFields(times));
+      return entry.holders.length;
     });
   }
 
@@ -96,7 +140,7 @@ export class SandboxPool {
     return this.update((entries) => {
       const entry = entries.find((e) => e.state === "warm" && e.provider === provider && e.key === key);
       if (!entry) return undefined;
-      Object.assign(entry, this.leaseFields(lease), { owner, idleSince: undefined, deleteAt: undefined });
+      Object.assign(entry, this.leaseFields(lease), { owner, idleSince: undefined, stopAt: undefined, stoppedAt: undefined, deleteAt: undefined });
       return { ...entry };
     });
   }
@@ -110,13 +154,12 @@ export class SandboxPool {
     });
   }
 
-  /** Back to the pool, suspended, until deleteAt. */
-  release(remoteId: string, deleteAfterMinutes: number): Promise<void> {
+  /** Back to the pool: running until stopAt, then stopped by the reaper and deleted later. */
+  release(remoteId: string, times: ReleaseTimes): Promise<void> {
     return this.update((entries) => {
       const entry = entries.find((e) => e.remoteId === remoteId);
       if (!entry) return;
-      const now = Date.now();
-      Object.assign(entry, { state: "idle" as const, idleSince: new Date(now).toISOString(), deleteAt: new Date(now + deleteAfterMinutes * 60_000).toISOString(), pid: undefined, host: undefined, leasedAt: undefined, runId: undefined, sessionKey: undefined });
+      Object.assign(entry, { state: "idle" as const, pid: undefined, host: undefined, leasedAt: undefined, runId: undefined, sessionKey: undefined }, this.idleFields(times));
     });
   }
 
@@ -124,7 +167,8 @@ export class SandboxPool {
   addWarm(entry: Pick<PoolEntry, "remoteId" | "provider" | "key">, deleteAfterMinutes: number): Promise<void> {
     return this.update((entries) => {
       const now = Date.now();
-      entries.push({ ...entry, owner: "", state: "warm", createdAt: new Date(now).toISOString(), idleSince: new Date(now).toISOString(), deleteAt: new Date(now + deleteAfterMinutes * 60_000).toISOString() });
+      // warm VMs wait already stopped/paused
+      entries.push({ ...entry, owner: "", state: "warm", createdAt: new Date(now).toISOString(), idleSince: new Date(now).toISOString(), stoppedAt: new Date(now).toISOString(), deleteAt: new Date(now + deleteAfterMinutes * 60_000).toISOString() });
     });
   }
 
@@ -133,6 +177,21 @@ export class SandboxPool {
       const i = entries.findIndex((e) => e.remoteId === remoteId);
       if (i >= 0) entries.splice(i, 1);
     });
+  }
+
+  private idleFields(times: ReleaseTimes): Partial<PoolEntry> {
+    const now = Date.now();
+    return {
+      idleSince: new Date(now).toISOString(),
+      stopAt: new Date(now + times.stopAfterIdleMinutes * 60_000).toISOString(),
+      stoppedAt: undefined,
+      deleteAfterStopMinutes: times.deleteAfterStopMinutes,
+      deleteAt: undefined,
+    };
+  }
+
+  private holder(lease: Partial<PoolEntry> & { holderId?: string }): NonNullable<PoolEntry["holders"]>[number] {
+    return { ...(lease.holderId ? { id: lease.holderId } : {}), pid: lease.pid ?? process.pid, host: this.hostname, runId: lease.runId, sessionKey: lease.sessionKey, since: new Date().toISOString() };
   }
 
   private leaseFields(lease: Partial<PoolEntry>): Partial<PoolEntry> {

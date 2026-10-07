@@ -218,12 +218,29 @@ describe("agents are told about their sandbox", () => {
     expect(sandboxPromptNote({ provider: "local", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] }, [])).toBe("");
     const note = sandboxPromptNote(
       { provider: "bwrap", network: { mode: "allowlist", allow: ["github.com"] }, resources: { timeoutMin: 10 }, providerOptions: {}, denied: [] },
-      [{ name: "docs", path: "/p/.polpo/mounts/docs", hostPath: "/p/.polpo/mounts/docs", readOnly: true }],
+      [{ name: "docs", strategy: "mounted", mountPath: "/p/.polpo/mounts/docs", hostPath: "/p/.polpo/mounts/docs", access: "read-only", driver: "rclone" }],
     );
     expect(note).toContain("## Sandbox");
     expect(note).toContain("github.com");
     expect(note).toContain("10 min per command");
-    expect(note).toContain('storage "docs": /p/.polpo/mounts/docs (read-only)');
+    expect(note).toContain('volume "docs": /p/.polpo/mounts/docs (read-only, live)');
+    expect(note).not.toContain("remote VM");
+  });
+
+  test("prompt note for a remote VM: empty scratch, output directory, volumes", async () => {
+    const { sandboxPromptNote } = await import("../adapters/engine.js");
+    const note = sandboxPromptNote(
+      { provider: "e2b", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] },
+      [
+        { name: "data", strategy: "hydrated", mountPath: "/volumes/data", access: "read-write", writeBack: "manual", driver: "rclone" },
+        { name: "refs", strategy: "mounted", mountPath: "/volumes/refs", access: "read-only", driver: "mountpoint-s3" },
+      ],
+      { outputDir: "/p/.polpo/output/t1" },
+    );
+    expect(note).toContain("starts empty");
+    expect(note).toContain("/p/.polpo/output/t1");
+    expect(note).toContain('volume "data": /volumes/data (read-write, a copy, saved only when you call sandbox_volume_checkpoint)');
+    expect(note).toContain('volume "refs": /volumes/refs (read-only, live)');
   });
 });
 

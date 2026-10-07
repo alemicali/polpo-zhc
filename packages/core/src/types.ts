@@ -676,8 +676,8 @@ export interface RunnerConfig {
   compaction?: import("./context-compactor.js").CompactionSettings;
   /** The sandbox this run uses, already resolved from the cascade by the orchestrator. */
   sandbox?: import("./sandbox.js").EffectiveSandbox;
-  /** Storage mounts for this run (host paths for local sandboxes, remote specs for remote ones). */
-  mounts?: import("./sandbox.js").StorageMountSpec[];
+  /** Volumes this run selected (host mount paths for local sandboxes, buckets and keys for remote ones). */
+  volumes?: import("./sandbox.js").ResolvedSandboxVolume[];
   /** WhatsApp message DB path (for whatsapp_* agent tools). */
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */

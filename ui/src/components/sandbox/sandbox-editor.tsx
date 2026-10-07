@@ -3,6 +3,8 @@
  * Missions and tasks may only tighten what is set here; they are edited in the mission document.
  */
 import { AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useStorage } from "@/hooks/use-storage";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +23,7 @@ import {
   type SandboxNetworkMode,
   type SandboxProvider,
   type SandboxSettings,
+  type SandboxVolumeSelection,
 } from "@/lib/sandbox-api";
 
 const INHERIT = "__inherit";
@@ -84,9 +87,11 @@ export interface SandboxEditorProps {
   readsExternalContent?: boolean;
   /** Agent level: the instance isolates agents that read external content. */
   confineExternal?: boolean;
+  /** Agent level: the agent's name (the volumes it is granted). */
+  agentName?: string;
 }
 
-export function SandboxEditor({ level, value, onChange, available, readsExternalContent, confineExternal }: SandboxEditorProps) {
+export function SandboxEditor({ level, value, onChange, available, readsExternalContent, confineExternal, agentName }: SandboxEditorProps) {
   const set = (patch: Partial<SandboxSettings>) => onChange({ ...value, ...patch });
   const resources = value.resources ?? {};
   const setResource = (key: keyof NonNullable<SandboxSettings["resources"]>, n?: number) =>
@@ -186,6 +191,8 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
         Upper limits for each command. Missions and tasks can lower them, not raise them. Empty: no limit.
       </p>
 
+      <VolumesField level={level} value={value} set={set} agentName={agentName} />
+
       <RemoteLifecycle level={level} value={value} set={set} available={available} />
 
       {level === "instance" && (
@@ -231,7 +238,80 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
   );
 }
 
-/** Remote VMs (Daytona, E2B): Cowork chats, reuse, idle suspend, expiry, warm VMs. */
+/**
+ * Volumes (open Polpo): Storage entries enabled as volumes and granted to the agent, attached at
+ * /volumes/<name>. The instance can preselect; an agent (and its missions and tasks) only narrow.
+ */
+function VolumesField({ level, value, set, agentName }: {
+  level: "instance" | "agent";
+  value: SandboxSettings;
+  set: (patch: Partial<SandboxSettings>) => void;
+  agentName?: string;
+}) {
+  const storage = useStorage();
+  const candidates = storage.entries.filter((e) => e.volume?.enabled && (level === "instance" || e.grants.some((g) => g.agent === agentName || g.agent === "*")));
+  const selected = value.volumes ?? [];
+  if (!candidates.length && !selected.length) {
+    return (
+      <Field label="Volumes" hint="Persistent files in R2/S3, attached at /volumes/<name>.">
+        <p className="text-[10px] text-muted-foreground leading-tight">
+          No volume {level === "agent" ? "granted to this agent" : "yet"}: enable one on a bucket in <Link to="/storage" className="underline">Storage</Link> (Volume tab) and grant it.
+        </p>
+      </Field>
+    );
+  }
+  const toggle = (name: string, on: boolean) => {
+    const next = on ? [...selected, { name }] : selected.filter((v) => v.name !== name);
+    set({ volumes: next.length ? next : undefined });
+  };
+  const update = (name: string, patch: Partial<SandboxVolumeSelection>) =>
+    set({ volumes: selected.map((v) => v.name === name ? Object.fromEntries(Object.entries({ ...v, ...patch }).filter(([, x]) => x !== undefined)) as unknown as SandboxVolumeSelection : v) });
+  return (
+    <Field label="Volumes" hint="Attached at /volumes/<name> in this sandbox. Missions and tasks can only narrow the list. Nothing selected: inherit.">
+      <div className="space-y-1.5">
+        {candidates.map((e) => {
+          const sel = selected.find((v) => v.name === e.slug);
+          const rw = e.volume!.access === "read-write" && !e.readOnly;
+          return (
+            <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex min-w-0 flex-1 items-center gap-2">
+                <input type="checkbox" checked={!!sel} onChange={(ev) => toggle(e.slug, ev.target.checked)} />
+                <span className="font-mono truncate">/volumes/{e.slug}</span>
+                <Badge variant="outline" className="text-[9px]">{e.volume!.strategy}</Badge>
+              </label>
+              {sel && rw && (
+                <Select value={sel.access ?? "__max"} onValueChange={(v) => update(e.slug, { access: v === "__max" ? undefined : v as "read-only" | "read-write", ...(v === "read-only" ? { writeBack: undefined } : {}) })}>
+                  <SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__max" className="text-xs">As granted</SelectItem>
+                    <SelectItem value="read-only" className="text-xs">Read only</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {sel && rw && e.volume!.strategy === "hydrated" && sel.access !== "read-only" && (
+                <Select value={sel.writeBack ?? "__default"} onValueChange={(v) => update(e.slug, { writeBack: v === "__default" ? undefined : v as "auto" | "manual" })}>
+                  <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default" className="text-xs">Write back as set</SelectItem>
+                    <SelectItem value="manual" className="text-xs">Only on checkpoint</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          );
+        })}
+        {selected.filter((v) => !candidates.some((e) => e.slug === v.name)).map((v) => (
+          <div key={v.name} className="flex items-center gap-2 text-xs text-amber-500">
+            <AlertTriangle className="h-3 w-3" /> <span className="font-mono">{v.name}</span> is not a volume granted here: runs fail until it is granted or removed.
+            <button className="underline" onClick={() => toggle(v.name, false)}>Remove</button>
+          </div>
+        ))}
+      </div>
+    </Field>
+  );
+}
+
+/** Remote VMs (Daytona, E2B): Cowork chats, isolation, stop/delete times, warm VMs. */
 function RemoteLifecycle({ level, value, set, available }: {
   level: "instance" | "agent";
   value: SandboxSettings;
@@ -259,36 +339,37 @@ function RemoteLifecycle({ level, value, set, available }: {
         />
         <p className="text-[10px] text-muted-foreground leading-tight">
           Off: chats stay on this machine (bubblewrap at most) and remote VMs are for tasks. On: when the provider above is Daytona or E2B,
-          a chat gets its own VM; commands and file tools run there, files changed there come back after every command, tools with keys stay here.
+          a chat gets its own VM; commands and file tools run there, files the agent puts in the chat's output folder come back after every command (persistent files: volumes), tools with keys stay here.
           The VM is suspended after a minute without tools and goes back to the pool when the chat is idle.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Reuse" hint="Reuse: a suspended VM this same agent used before (dependencies kept, working folder reset). Fresh: always a new VM.">
-          <Select value={lc.isolation ?? "__inherit"} onValueChange={(v) => setLc({ isolation: v === "__inherit" ? undefined : v as "reuse" | "fresh" })}>
+        <Field label="Isolation" hint="Reuse: a VM this agent released (dependencies kept, working folder reset). Fresh: a clean VM each run. Shared: one VM concurrent runs use together.">
+          <Select value={value.isolation ?? "__inherit"} onValueChange={(v) => set({ isolation: v === "__inherit" ? undefined : v as "reuse" | "fresh" | "shared" })}>
             <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__inherit" className="text-xs">{inherit ? "Inherit from instance" : "Reuse (default)"}</SelectItem>
               <SelectItem value="reuse" className="text-xs">Reuse the agent's VM</SelectItem>
-              <SelectItem value="fresh" className="text-xs">Always a new VM</SelectItem>
+              <SelectItem value="fresh" className="text-xs">Fresh VM each run</SelectItem>
+              <SelectItem value="shared" className="text-xs">Shared by concurrent runs</SelectItem>
             </SelectContent>
           </Select>
         </Field>
-        <Field label="At the end" hint="Keep: suspended in the pool for the next run (costs storage only). Delete: gone when the run ends.">
+        <Field label="At the end" hint="Keep: back to the pool for the next run (stopped after idle, then deleted). Delete: gone when the run ends.">
           <Select value={lc.onRelease ?? "__inherit"} onValueChange={(v) => setLc({ onRelease: v === "__inherit" ? undefined : v as "pool" | "destroy" })}>
             <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="__inherit" className="text-xs">{inherit ? "Inherit from instance" : "Keep suspended (default)"}</SelectItem>
-              <SelectItem value="pool" className="text-xs">Keep suspended for reuse</SelectItem>
+              <SelectItem value="__inherit" className="text-xs">{inherit ? "Inherit from instance" : "Keep for reuse (default)"}</SelectItem>
+              <SelectItem value="pool" className="text-xs">Keep for reuse</SelectItem>
               <SelectItem value="destroy" className="text-xs">Delete</SelectItem>
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Suspend tasks' VMs after (seconds idle)" hint="While the model thinks between tools. Resuming takes under a second. Empty: never during a task (chats: 60 s).">
-          <NumberInput value={lc.suspendAfterIdleSeconds || undefined} onChange={(n) => setLc({ suspendAfterIdleSeconds: n })} placeholder="—" />
+        <Field label="Stop kept VMs after (minutes idle)" hint="A pooled VM nobody uses is stopped after this time (its files kept). Default 5. During a run, E2B VMs pause between tools by themselves.">
+          <NumberInput value={lc.stopAfterIdleMinutes} onChange={(n) => setLc({ stopAfterIdleMinutes: n })} placeholder="5" />
         </Field>
-        <Field label="Delete kept VMs after (minutes)" hint="A suspended VM nobody reuses is deleted after this time. Default 30.">
+        <Field label="Delete stopped VMs after (minutes)" hint="A stopped VM nobody reuses is deleted after this time. Default 30.">
           <NumberInput value={lc.deleteAfterStopMinutes} onChange={(n) => setLc({ deleteAfterStopMinutes: n })} placeholder="30" />
         </Field>
       </div>

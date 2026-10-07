@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
-import { normalizeSandboxSettings, resolveSandbox, type SandboxSettings, type StorageMountSpec } from "./sandbox.js";
+import { normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
@@ -579,22 +579,36 @@ export class TaskRunner {
         taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
       } catch { /* a mission document without a sandbox section */ }
     }
-    const sandbox = resolveSandbox(
-      {
-        instance: normalizeSandboxSettings(this.ctx.config.settings.sandbox),
-        agent: normalizeSandboxSettings(agent.sandbox),
-        mission: missionSandbox,
-        task: taskSandbox,
-      },
-      { scope: "task", agentTools: agent.allowedTools, available: this.ctx.sandboxProviders?.() },
-    );
+    // a volume selected by a mission or task must be granted above (open Polpo's narrowing),
+    // and every volume must be a storage entry granted to the agent: otherwise the run fails
+    let sandbox: ReturnType<typeof resolveSandbox>;
+    let volumes: ResolvedSandboxVolume[] = [];
+    try {
+      sandbox = resolveSandbox(
+        {
+          instance: normalizeSandboxSettings(this.ctx.config.settings.sandbox),
+          agent: normalizeSandboxSettings(agent.sandbox),
+          mission: missionSandbox,
+          task: taskSandbox,
+        },
+        { scope: "task", agentTools: agent.allowedTools, available: this.ctx.sandboxProviders?.() },
+      );
+      // temporary bucket keys (remote sandboxes) live as long as the task may run, plus a margin
+      const ttlSeconds = task.maxDuration ? Math.ceil(task.maxDuration / 1000) + 300 : undefined;
+      if (sandbox.volumes?.length && this.ctx.sandboxVolumes) {
+        volumes = await this.ctx.sandboxVolumes(agent.name, sandbox.volumes, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host", { ttlSeconds });
+      }
+    } catch (err) {
+      if (!(err instanceof SandboxVolumeGrantError)) throw err;
+      const message = `${err.message}. Grant the volume to agent "${agent.name}" (Storage → the entry → access) or remove it from the mission/task sandbox.`;
+      this.ctx.emitter.emit("log", { level: "error", message: `[${task.id}] ${message}` });
+      await this.ctx.registry.updateTask(task.id, { result: { exitCode: 1, stdout: "", stderr: message, duration: 0 } }).catch(() => undefined);
+      await this.ctx.registry.transition(task.id, "failed");
+      return;
+    }
     for (const d of sandbox.denied) {
       this.ctx.emitter.emit("sandbox:override-denied", { scope: "task", taskId: task.id, agentName: agent.name, ...d });
     }
-    // temporary bucket keys (remote sandboxes) live as long as the task may run, plus a margin
-    const ttlSeconds = task.maxDuration ? Math.ceil(task.maxDuration / 1000) + 300 : undefined;
-    const mounts = await this.ctx.storageMounts?.(agent.name, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host", { ttlSeconds })
-      .catch(() => [] as StorageMountSpec[]) ?? [];
 
     // WhatsApp tools: if agent has whatsapp_* in allowedTools and a WhatsApp channel is configured,
     // pass the DB path and profile path so the runner can create its own store + connection
@@ -627,7 +641,7 @@ export class TaskRunner {
       reasoning: this.ctx.config.settings.reasoning,
       compaction: this.ctx.config.settings.compaction,
       sandbox,
-      ...(mounts.length ? { mounts } : {}),
+      ...(volumes.length ? { volumes } : {}),
       whatsappDbPath,
       whatsappProfilePath,
     };

@@ -27,8 +27,10 @@
  *   ELEVENLABS_API_KEY — elevenlabs provider (TTS)
  */
 
-import { readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from "node:fs";
-import { resolve, dirname, extname } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { resolve, extname, join } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { execFile, execFileSync } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -36,6 +38,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 // Re-export with concrete generic to avoid "requires 1 type argument" errors
 type ToolResult = AgentToolResult<any>;
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs, withHostTempDir, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 
 // ─── Constants ───
@@ -94,7 +97,7 @@ const AudioTranscribeSchema = Type.Object({
   prompt: Type.Optional(Type.String({ description: "Optional context/prompt to guide transcription (OpenAI only)" })),
 });
 
-function createTranscribeTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof AudioTranscribeSchema> {
+function createTranscribeTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof AudioTranscribeSchema> {
   return {
     name: "audio_transcribe",
     label: "Transcribe Audio",
@@ -110,7 +113,7 @@ function createTranscribeTool(cwd: string, sandbox: string[], vault?: ResolvedVa
       const provider = params.provider ?? "openai";
       let fileBuffer: Buffer;
       try {
-        fileBuffer = readFileSync(filePath);
+        fileBuffer = await readBytes(fs, filePath);
       } catch (err: any) {
         return {
           content: [{ type: "text", text: `Error reading audio file: ${err.message}` }],
@@ -295,7 +298,7 @@ const AudioSpeakSchema = Type.Object({
   instructions: Type.Optional(Type.String({ description: "Voice style instructions (OpenAI gpt-4o-mini-tts only, e.g. 'Speak in a cheerful tone')" })),
 });
 
-function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault): AgentTool<typeof AudioSpeakSchema> {
+function createSpeakTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof AudioSpeakSchema> {
   return {
     name: "audio_speak",
     label: "Text to Speech",
@@ -315,7 +318,7 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
       // Direct edge-tts request — no fallback needed
       if (provider === "edge") {
         try {
-          return await speakEdgeTts(filePath, params, signal);
+          return await speakEdgeTts(fs, filePath, params, signal);
         } catch (err: any) {
           return {
             content: [{ type: "text", text: `TTS error (edge): ${err.message}` }],
@@ -327,17 +330,17 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
       // Cloud provider with edge-tts fallback
       try {
         if (provider === "openai") {
-          return await speakOpenAI(filePath, params, vault, signal);
+          return await speakOpenAI(fs, filePath, params, vault, signal);
         } else if (provider === "deepgram") {
-          return await speakDeepgram(filePath, params, vault, signal);
+          return await speakDeepgram(fs, filePath, params, vault, signal);
         } else {
-          return await speakElevenLabs(filePath, params, vault, signal);
+          return await speakElevenLabs(fs, filePath, params, vault, signal);
         }
       } catch (err: any) {
         // Automatic fallback to edge-tts if available
         if (edgeTtsAvailable()) {
           try {
-            const result = await speakEdgeTts(filePath, params, signal);
+            const result = await speakEdgeTts(fs, filePath, params, signal);
             // Prepend fallback notice
             const notice = `[Fallback] ${provider} failed (${err.message}), used edge-tts instead.\n`;
             return {
@@ -362,6 +365,7 @@ function createSpeakTool(cwd: string, sandbox: string[], vault?: ResolvedVault):
 }
 
 async function speakOpenAI(
+  fs: FileSystem,
   filePath: string,
   params: { text: string; model?: string; voice?: string; speed?: number; instructions?: string },
   vault?: ResolvedVault,
@@ -408,8 +412,7 @@ async function speakOpenAI(
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
+  await writeBytes(fs, filePath, buffer);
 
   return {
     content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(buffer.byteLength / 1024).toFixed(1)} KB, ${responseFormat}, voice: ${voice}, model: ${model})` }],
@@ -426,6 +429,7 @@ async function speakOpenAI(
 }
 
 async function speakDeepgram(
+  fs: FileSystem,
   filePath: string,
   params: { text: string; model?: string },
   vault?: ResolvedVault,
@@ -459,8 +463,7 @@ async function speakDeepgram(
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
+  await writeBytes(fs, filePath, buffer);
 
   return {
     content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(buffer.byteLength / 1024).toFixed(1)} KB, model: ${model})` }],
@@ -476,6 +479,7 @@ async function speakDeepgram(
 }
 
 async function speakElevenLabs(
+  fs: FileSystem,
   filePath: string,
   params: { text: string; model?: string; voice?: string },
   vault?: ResolvedVault,
@@ -520,8 +524,7 @@ async function speakElevenLabs(
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, buffer);
+  await writeBytes(fs, filePath, buffer);
 
   return {
     content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(buffer.byteLength / 1024).toFixed(1)} KB, voice: ${voiceId}, model: ${model})` }],
@@ -632,6 +635,7 @@ export function edgeTtsAvailable(): boolean {
 export { resolveEdgeVoice };
 
 async function speakEdgeTts(
+  fs: FileSystem,
   filePath: string,
   params: { text: string; voice?: string; language?: string; gender?: "male" | "female" },
   signal?: AbortSignal,
@@ -642,43 +646,40 @@ async function speakEdgeTts(
   }
 
   const voice = resolveEdgeVoice(params.voice, params.language, params.gender);
-  mkdirSync(dirname(filePath), { recursive: true });
 
-  // Determine rate from speed if present
-  const args = [
-    "--text", params.text,
-    "--voice", voice,
-    "--write-media", filePath,
-  ];
-
-  return new Promise<ToolResult>((resolvePromise, reject) => {
-    const child = execFile(bin, args, { timeout: DEFAULT_TIMEOUT }, (err, _stdout, stderr) => {
-      if (err) {
-        reject(new Error(`edge-tts failed: ${err.message}${stderr ? ` — ${stderr}` : ""}`));
-        return;
-      }
-
-      let bytes = 0;
-      try {
-        bytes = statSync(filePath).size;
-      } catch { /* ignore */ }
-
-      resolvePromise({
-        content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(bytes / 1024).toFixed(1)} KB, voice: ${voice}, provider: edge-tts)` }],
-        details: {
-          provider: "edge",
-          voice,
-          path: filePath,
-          bytes,
-          textLength: params.text.length,
-        },
+  // edge-tts writes to a path on this machine: a private temporary file, then the bytes go
+  // through the tools' FileSystem (the agent's files may live in a remote sandbox).
+  const bytes = await withHostTempDir(async (dir) => {
+    const hostPath = join(dir, `speech${extname(filePath) || ".mp3"}`);
+    const args = [
+      "--text", params.text,
+      "--voice", voice,
+      "--write-media", hostPath,
+    ];
+    await new Promise<void>((resolvePromise, reject) => {
+      const child = execFile(bin, args, { timeout: DEFAULT_TIMEOUT }, (err, _stdout, stderr) => {
+        if (err) reject(new Error(`edge-tts failed: ${err.message}${stderr ? ` — ${stderr}` : ""}`));
+        else resolvePromise();
       });
+      if (signal) {
+        signal.addEventListener("abort", () => child.kill(), { once: true });
+      }
     });
-
-    if (signal) {
-      signal.addEventListener("abort", () => child.kill(), { once: true });
-    }
+    const data = await readFile(hostPath);
+    await writeBytes(fs, filePath, data);
+    return data.byteLength;
   });
+
+  return {
+    content: [{ type: "text", text: `Speech audio saved: ${filePath} (${(bytes / 1024).toFixed(1)} KB, voice: ${voice}, provider: edge-tts)` }],
+    details: {
+      provider: "edge",
+      voice,
+      path: filePath,
+      bytes,
+      textLength: params.text.length,
+    },
+  };
 }
 
 // ─── Factory ───
@@ -694,18 +695,21 @@ export const ALL_AUDIO_TOOL_NAMES: AudioToolName[] = ["audio_transcribe", "audio
  * @param allowedPaths - Sandbox paths for file validation
  * @param allowedTools - Optional filter
  * @param vault - Resolved vault credentials for credential resolution
+ * @param fs - Where audio files are read and saved (default: this machine's disk)
  */
 export function createAudioTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
   vault?: ResolvedVault,
+  fs?: FileSystem,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   const factories: Record<AudioToolName, () => AgentTool<any>> = {
-    audio_transcribe: () => createTranscribeTool(cwd, sandbox, vault),
-    audio_speak: () => createSpeakTool(cwd, sandbox, vault),
+    audio_transcribe: () => createTranscribeTool(cwd, sandbox, _fs, vault),
+    audio_speak: () => createSpeakTool(cwd, sandbox, _fs, vault),
   };
 
   const names = allowedTools

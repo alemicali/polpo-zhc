@@ -10,6 +10,11 @@
 export interface Shell {
   /** Execute a command and return the result. */
   execute(command: string, options?: ShellOptions): Promise<ShellResult>;
+  /**
+   * True when commands run on another machine (a remote sandbox VM): tools that need programs
+   * next to the agent's files (the browser) then run them through this shell.
+   */
+  isRemote?(): Promise<boolean>;
 }
 
 export interface ShellOptions {

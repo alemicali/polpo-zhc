@@ -189,22 +189,22 @@ export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
 
 // ── Sandboxes and storage mounts ────────────────────────────────────────
 export {
-  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, REMOTE_SANDBOX_PROVIDERS, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, DEFAULT_ISOLATION, REMOTE_SANDBOX_PROVIDERS, effectiveLifecycle, narrowVolumeSelections, SandboxVolumeGrantError, SANDBOX_VOLUME_ROOT, SANDBOX_VOLUME_NAME_PATTERN, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
 } from "./sandbox.js";
 export type {
   Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProvider, SandboxNetwork,
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
-  StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider,
+  StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider, SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack, SandboxVolumeStrategy, SandboxVolumeSelection, ResolvedSandboxVolume,
 } from "./sandbox.js";
 export {
   STORAGE_SLUG_PATTERN, 
   normalizeStoragePrefix, normalizeStoragePath, storageGrantFor, storageAccessFor, storagePathAllowed,
-  assertStorageAccess, scopeStorageListing, validateStorageEntry,
+  assertStorageAccess, scopeStorageListing, validateStorageEntry, VOLUME_REVISION_OBJECT,
 } from "./storage-registry.js";
 export type {
   StorageProvider, StorageDriver, StorageAccess, StorageGrant, StorageCacheOptions, StorageEntry, CreateStorageEntry,
   StorageRegistryChangeEvent, StorageRegistryChangeEmitter, StorageRegistryStore, StorageCredentials,
-  StorageCredentialStatus, StorageAccessGrant,
+  StorageCredentialStatus, StorageAccessGrant, StorageVolumeSettings,
 } from "./storage-registry.js";
 
 export { isVaultRef, normalizeVaultRef, describeVaultRef, resolveVaultRef, pickCredential, CREDENTIAL_NAMES } from "./vault-ref.js";

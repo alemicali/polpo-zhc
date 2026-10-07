@@ -48,9 +48,9 @@ export interface AgentHandle {
 
 /** Extra context passed to the engine at spawn time. */
 export interface SpawnContext {
-  /** The sandbox this run uses (resolved by the orchestrator) and the storage it mounts. */
+  /** The sandbox this run uses (resolved by the orchestrator) and the volumes it selected. */
   sandbox?: import("@polpo-ai/core/sandbox").EffectiveSandbox;
-  mounts?: import("@polpo-ai/core/sandbox").StorageMountSpec[];
+  volumes?: import("@polpo-ai/core/sandbox").ResolvedSandboxVolume[];
   /** Called when the sandbox network rule refuses a destination (commands or browser). */
   onNetworkDenied?: (denial: import("../sandbox/net-proxy.js").NetworkDenial) => void;
   /** Remote sandbox lifecycle steps (ready, suspended, resumed, released). */
@@ -85,6 +85,8 @@ export interface SpawnContext {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function — for whatsapp_read markRead. */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;

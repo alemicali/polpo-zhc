@@ -292,9 +292,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         const entries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
         mailboxes = resolveAgentVault(entries).listMailboxes();
       } catch { /* ignore — keep prompt without mailboxes section */ }
-      const { sandbox, mounts } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, mounts: [] }));
+      const { sandbox, volumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] }));
+      const remote = sandbox?.provider === "daytona" || sandbox?.provider === "e2b";
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
-        + sandboxPromptNote(sandbox, mounts.filter((m) => m.hostPath));
+        + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
+          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
@@ -343,13 +345,20 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
         : undefined;
       const whatsappSendMedia = waBridge
-        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean }) =>
+        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean; data?: Uint8Array }) =>
             waBridge.sendMediaMessage(jid, opts)
         : undefined;
       const whatsappMarkRead = waBridge
         ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
             waBridge.markRead(keys)
         : undefined;
+      // The chat's sandbox provider: anything but "local" keeps secret values away from the model
+      // (vault_get → bash env_from_vault). If it cannot be resolved, fail closed.
+      const chatSandboxProvider = await o.chatSandbox(agentConfig).then((c) => c.sandbox.provider, () => "bwrap");
+      // commands (bash, grep, glob, the browser in Cowork chats) run in this agent's chat sandbox;
+      // Cowork chats keep their files in the remote VM: every tool that touches files goes there too
+      const chatShell = o.chatShell(agentConfig, context?.sessionId);
+      const chatFs = o.chatFileSystem(agentConfig, context?.sessionId);
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
         allowedTools: agentConfig.allowedTools,
@@ -367,10 +376,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         whatsappSendMedia,
         whatsappMarkRead,
         polpoDir,
-        // commands (bash, grep, glob) run in this agent's chat sandbox
-        shell: o.chatShell(agentConfig, context?.sessionId),
-        // Cowork chats keep their files in the remote VM: the file tools go there too
-        fs: o.chatFileSystem(agentConfig, context?.sessionId),
+        shell: chatShell,
+        fs: chatFs,
+        sandboxProvider: chatSandboxProvider,
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -392,7 +400,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         cwd: o.getAgentWorkDir(),
         emit: (payload) => o.emit("storage:changed", payload),
         emitFileChanged: (payload) => o.emit("file:changed", payload),
+        fs: chatFs,
       }));
+      // Cowork chats with hydrated read-write volumes: persist them on demand
+      {
+        const { sandbox: chatSbx, volumes: chatVolumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] as any[] }));
+        if ((chatSbx?.provider === "daytona" || chatSbx?.provider === "e2b") && chatVolumes.some((v: any) => v.remote && v.strategy === "hydrated" && v.access === "read-write")) {
+          const { createSandboxVolumeCheckpointTool } = await import("../tools/sandbox-volume-tools.js");
+          tools.push(createSandboxVolumeCheckpointTool((name) => o.checkpointChatVolume(agentConfig, context?.sessionId?.(), name)));
+        }
+      }
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
@@ -425,13 +442,6 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (allowsRenderWidget && !existingToolNames.has("render_widget")) {
         tools.push(renderWidgetTool);
       }
-      // Cowork chats: tools that run here but use the agent's files follow the VM's files
-      const { bridgeHostTools } = await import("../sandbox/tool-bridge.js");
-      const bridged = bridgeHostTools(tools, {
-        cwd: o.getAgentWorkDir(), roots: [o.getAgentWorkDir()],
-        workspace: () => o.chatRemoteWorkspace(agentConfig, context?.sessionId),
-      });
-      tools.splice(0, tools.length, ...bridged);
       const toolMap = new Map(tools.map((t: any) => [t.name, t]));
       const executor = async (name: string, args: Record<string, unknown>): Promise<string> => {
         if (name === "render_widget") {
@@ -860,7 +870,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
   }));
   authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
-  authed.route("/storage", storageRoutes(activeStorage));
+  authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({

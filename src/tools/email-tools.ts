@@ -17,12 +17,13 @@
  * IMAP env vars: IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, basename, join, dirname } from "node:path";
+import { resolve, basename, join } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
+import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 
 // ─── Tool: email_send ───
@@ -184,8 +185,11 @@ export async function sendEmail(
   allowedPaths?: string[],
   vault?: ResolvedVault,
   emailAllowedDomains?: string[],
+  /** Where attachments are read (default: this machine's disk). */
+  fs?: FileSystem,
 ): Promise<SendEmailResult> {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   // Mailbox selector. If params carry explicit smtp_* overrides, the
   // resolve is skipped (caller knows what they're doing) — otherwise we
@@ -220,10 +224,10 @@ export async function sendEmail(
     for (const att of params.attachments) {
       const attPath = resolve(cwd, att.path);
       assertPathAllowed(attPath, sandbox, "email_send");
-      if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
+      if (!(await _fs.exists(attPath))) throw new Error(`Attachment not found: ${att.path}`);
       attachments.push({
         filename: att.filename ?? basename(attPath),
-        content: readFileSync(attPath),
+        content: await readBytes(_fs, attPath),
       });
     }
   }
@@ -258,7 +262,7 @@ export async function sendEmail(
   };
 }
 
-function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailSendSchema> {
+function createEmailSendTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailSendSchema> {
   return {
     name: "email_send",
     label: "Send Email",
@@ -270,7 +274,7 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
       // chat approval-gate REST endpoint, and any other surface that
       // dispatches a send go through one code path (multi-mailbox
       // resolution, allowlist check, nodemailer, attachments).
-      const result = await sendEmail(params, cwd, sandbox, vault, emailAllowedDomains);
+      const result = await sendEmail(params, cwd, sandbox, vault, emailAllowedDomains, fs);
       const summary = `Email sent successfully!\nTo: ${params.to}\nSubject: ${params.subject}\nMessage ID: ${result.messageId}\nRecipients: ${result.recipients}${result.attachments ? `\nAttachments: ${result.attachments}` : ""}`;
       return {
         content: [{ type: "text", text: summary }],
@@ -280,7 +284,7 @@ function createEmailSendTool(cwd: string, sandbox: string[], vault?: ResolvedVau
   };
 }
 
-function createEmailDraftTool(cwd: string, sandbox: string[], vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailDraftSchema> {
+function createEmailDraftTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault, emailAllowedDomains?: string[]): AgentTool<typeof EmailDraftSchema> {
   return {
     name: "email_draft",
     label: "Save Draft Email",
@@ -305,10 +309,10 @@ function createEmailDraftTool(cwd: string, sandbox: string[], vault?: ResolvedVa
         for (const att of params.attachments) {
           const attPath = resolve(cwd, att.path);
           assertPathAllowed(attPath, sandbox, "email_draft");
-          if (!existsSync(attPath)) throw new Error(`Attachment not found: ${att.path}`);
+          if (!(await fs.exists(attPath))) throw new Error(`Attachment not found: ${att.path}`);
           attachments.push({
             filename: att.filename ?? basename(attPath),
-            content: readFileSync(attPath),
+            content: await readBytes(fs, attPath),
           });
         }
       }
@@ -606,7 +610,7 @@ const EmailReadSchema = Type.Object({
 /** email_read bodies above this are saved in full to a file; the model gets head + tail + path. */
 const MAX_EMAIL_BODY_CHARS = 10_000;
 
-function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?: string[], toolOutputDir: string = resolveToolOutputDir({ outputDir })): AgentTool<typeof EmailReadSchema> {
+function createEmailReadTool(fs: FileSystem, vault?: ResolvedVault, outputDir?: string, sandbox?: string[], toolOutputDir: string = resolveToolOutputDir({ outputDir })): AgentTool<typeof EmailReadSchema> {
   return {
     name: "email_read",
     label: "Read Email",
@@ -666,8 +670,7 @@ function createEmailReadTool(vault?: ResolvedVault, outputDir?: string, sandbox?
             }
             const buffer = Buffer.concat(chunks);
             const filePath = join(downloadDir, att.filename);
-            mkdirSync(dirname(filePath), { recursive: true });
-            writeFileSync(filePath, buffer);
+            await writeBytes(fs, filePath, buffer);
             downloadedFiles.push(filePath);
           }
         }
@@ -730,7 +733,7 @@ const EmailDownloadAttachmentSchema = Type.Object({
   output_path: Type.Optional(Type.String({ description: "Custom output path relative to working directory (default: output directory)" })),
 });
 
-function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, outputDir?: string, sandbox?: string[]): AgentTool<typeof EmailDownloadAttachmentSchema> {
+function createEmailDownloadAttachmentTool(fs: FileSystem, vault?: ResolvedVault, cwd?: string, outputDir?: string, sandbox?: string[]): AgentTool<typeof EmailDownloadAttachmentSchema> {
   return {
     name: "email_download_attachment",
     label: "Download Email Attachment",
@@ -781,8 +784,7 @@ function createEmailDownloadAttachmentTool(vault?: ResolvedVault, cwd?: string, 
           assertPathAllowed(filePath, sandbox, "email_download_attachment");
         }
 
-        mkdirSync(dirname(filePath), { recursive: true });
-        writeFileSync(filePath, buffer);
+        await writeBytes(fs, filePath, buffer);
 
         const contentType = meta?.contentType ?? "application/octet-stream";
         return {
@@ -996,19 +998,21 @@ export const ALL_EMAIL_TOOL_NAMES: EmailToolName[] = ["email_send", "email_draft
  * @param emailAllowedDomains - Allowed recipient email domains (omit for unrestricted)
  * @param outputDir - Per-task output directory for downloaded attachments
  * @param toolOutputDir - Where email bodies above 10,000 chars are saved in full (default: resolveToolOutputDir({ outputDir }))
+ * @param fs - Where attachments are read and saved (default: this machine's disk)
  */
-export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[], outputDir?: string, toolOutputDir?: string): AgentTool<any>[] {
+export function createEmailTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], vault?: ResolvedVault, emailAllowedDomains?: string[], outputDir?: string, toolOutputDir?: string, fs?: FileSystem): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   const factories: Record<EmailToolName, () => AgentTool<any>> = {
-    email_send: () => createEmailSendTool(cwd, sandbox, vault, emailAllowedDomains),
-    email_draft: () => createEmailDraftTool(cwd, sandbox, vault, emailAllowedDomains),
+    email_send: () => createEmailSendTool(cwd, sandbox, _fs, vault, emailAllowedDomains),
+    email_draft: () => createEmailDraftTool(cwd, sandbox, _fs, vault, emailAllowedDomains),
     email_verify: () => createEmailVerifyTool(vault),
     email_list: () => createEmailListTool(vault),
-    email_read: () => createEmailReadTool(vault, outputDir, sandbox, toolOutputDir ?? resolveToolOutputDir({ outputDir })),
+    email_read: () => createEmailReadTool(_fs, vault, outputDir, sandbox, toolOutputDir ?? resolveToolOutputDir({ outputDir })),
     email_search: () => createEmailSearchTool(vault),
     email_count: () => createEmailCountTool(vault),
-    email_download_attachment: () => createEmailDownloadAttachmentTool(vault, cwd, outputDir, sandbox),
+    email_download_attachment: () => createEmailDownloadAttachmentTool(_fs, vault, cwd, outputDir, sandbox),
     list_email_accounts: () => createListEmailAccountsTool(vault),
   };
 

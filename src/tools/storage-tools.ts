@@ -11,11 +11,14 @@ import { Type } from "@sinclair/typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { VaultStore } from "../core/vault-store.js";
 import { getStorageRuntime, type StorageEventEmitter } from "../storage/runtime.js";
 import { isPathAllowed, resolveAllowedPaths } from "./path-sandbox.js";
 import { resolveToolOutputDir } from "./tool-output.js";
+import { readBytes, withHostCopy, withHostTempDir, writeBytes } from "./tool-fs.js";
 
 const StorageParam = Type.String({ description: "Storage slug (or id) from storage_list without arguments" });
 
@@ -104,6 +107,11 @@ export interface StorageToolContext {
   cwd?: string;
   allowedPaths?: string[];
   outputDir?: string;
+  /**
+   * Where the agent's files live (a remote sandbox VM): storage_read saves there and
+   * storage_write reads `fromFile` from there. Default: this machine's disk, directly.
+   */
+  fs?: FileSystem;
 }
 
 export async function executeStorageTool(name: string, args: Record<string, unknown>, ctx: StorageToolContext): Promise<string> {
@@ -121,7 +129,18 @@ export async function executeStorageTool(name: string, args: Record<string, unkn
       }));
     }
     case "storage_read": {
-      const result = await runtime.readObject(agent, requireStorage(), String(args.path ?? ""), { saveDir, maxBytes: optionalNumber(args.maxBytes) });
+      const read = (dir: string) => runtime.readObject(agent, requireStorage(), String(args.path ?? ""), { saveDir: dir, maxBytes: optionalNumber(args.maxBytes) });
+      const fs = ctx.fs;
+      const result = fs
+        // the bucket is read here (keys stay here), the file goes where the agent's files are
+        ? await withHostTempDir(async (dir) => {
+          const r = await read(dir);
+          if (r.kind === "text") return r;
+          const savedTo = join(saveDir, "storage", basename(dirname(r.savedTo)), basename(r.savedTo));
+          await writeBytes(fs, savedTo, await readFile(r.savedTo));
+          return { ...r, savedTo };
+        })
+        : await read(saveDir);
       if (result.kind === "text") return result.text;
       return json({ ...result, note: "The file is larger than the inline limit or binary: it was saved locally, read it from savedTo." });
     }
@@ -129,18 +148,24 @@ export async function executeStorageTool(name: string, args: Record<string, unkn
       const content = typeof args.content === "string" ? args.content : undefined;
       const fromFile = optionalString(args.fromFile);
       if ((content === undefined) === (fromFile === undefined)) throw new Error("Pass either `content` or `fromFile`");
-      let source: { text: string } | { file: string };
+      let file: string | undefined;
       if (fromFile !== undefined) {
         const cwd = ctx.cwd ?? process.cwd();
-        const file = isAbsolute(fromFile) ? fromFile : resolve(cwd, fromFile);
+        file = isAbsolute(fromFile) ? fromFile : resolve(cwd, fromFile);
         const allowed = [...resolveAllowedPaths(cwd, ctx.allowedPaths), ...(ctx.outputDir ? [ctx.outputDir] : []), saveDir];
         if (!isPathAllowed(file, allowed)) throw new Error(`"${fromFile}" is outside your allowed folders`);
-        source = { file };
-      } else source = { text: content! };
+      }
       const entry = await runtime.entry(requireStorage());
       const before = entry && ctx.emitFileChanged ? runtime.hostPathOf(entry, String(args.path ?? "")) : undefined;
       const existed = before ? existsSync(before) : false;
-      const written = await runtime.writeObject(agent, storage, String(args.path ?? ""), source, optionalString(args.contentType));
+      const write = (source: { text: string } | { file: string }) =>
+        runtime.writeObject(agent, storage, String(args.path ?? ""), source, optionalString(args.contentType));
+      const written = file === undefined
+        ? await write({ text: content! })
+        : ctx.fs
+          // the file is read where the agent's files are, then uploaded from here (keys stay here)
+          ? await withHostCopy(await readBytes(ctx.fs, file), basename(file), (hostFile) => write({ file: hostFile }))
+          : await write({ file });
       if (entry) fileChanged(ctx, runtime.hostPathOf(entry, written.path), existed ? "modified" : "created");
       return json({ written: true, storage: entry?.slug ?? storage, ...written });
     }

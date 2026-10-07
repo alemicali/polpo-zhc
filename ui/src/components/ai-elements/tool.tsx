@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useChatSandbox } from "@/components/sandbox/sandbox-context";
 import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
+import { EnvFromVaultChips, envFromVaultRefs } from "@/components/ai-elements/env-from-vault-chips";
 
 // ── Types ──
 
@@ -147,23 +148,18 @@ function getStateBadge(state: ToolState) {
 
 // ── Components ──
 
-/** Where the tool ran: a small badge for sandboxed and bridged tools when the chat has a sandbox. */
+/** Where the tool ran: a small badge for sandboxed tools when the chat has a sandbox. */
 function SandboxBadge({ toolName }: { toolName: string }) {
   const sandbox = useChatSandbox();
   if (!sandbox || sandbox.provider === "local") return null;
   const placement = toolPlacement(toolName);
   if (placement === "host") return null;
-  const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
   const where = sandbox.provider === "bwrap" ? "bubblewrap" : sandbox.provider === "e2b" ? "E2B" : sandbox.provider === "daytona" ? "Daytona" : sandbox.provider;
-  const label = placement === "sandbox" ? `sandbox · ${where}` : remote ? `here · files ↔ ${where}` : null;
-  if (!label) return null;
+  const label = `sandbox · ${where}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={cn(
-          "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] leading-4",
-          placement === "sandbox" ? "border-teal-500/30 bg-teal-500/10 text-teal-400" : "border-border/50 bg-muted/30 text-muted-foreground",
-        )}>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-1.5 py-0 text-[10px] leading-4 text-teal-400">
           <Box className="h-2.5 w-2.5" />{label}
         </span>
       </TooltipTrigger>
@@ -188,6 +184,7 @@ export function ToolInvocation({
   const [movingToBackground, setMovingToBackground] = useState(false);
   const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
+  const vaultEnv = tool.name === "bash" ? envFromVaultRefs(tool.arguments) : [];
   const { previewState, openPreview, closePreview } = useFilePreview();
 
   useEffect(() => {
@@ -296,6 +293,7 @@ export function ToolInvocation({
                 <span className="truncate">{filePath.split("/").pop()}</span>
               </button>
             )}
+            <EnvFromVaultChips refs={vaultEnv} />
             <span className="flex-1" />
             <SandboxBadge toolName={tool.name} />
             {tool.name === "wait_for_task" && tool.state === "calling" && (

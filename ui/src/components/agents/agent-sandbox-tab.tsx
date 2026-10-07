@@ -84,6 +84,7 @@ export function AgentSandboxTab() {
                 available={overview.available}
                 readsExternalContent={external}
                 confineExternal={!!overview.settings?.confineExternalContent}
+                agentName={agent.name}
               />
               <div className="flex items-center gap-2 mt-5">
                 <Button size="sm" className="h-8 text-xs" disabled={!dirty || saving} onClick={() => void save()}>
@@ -103,11 +104,11 @@ export function AgentSandboxTab() {
   );
 }
 
-/** Where this agent's tools run: in the sandbox, here with files bridged, or here with the keys. */
+/** Where this agent's tools run: in the sandbox, or here with the keys. */
 function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]; provider?: string; chatProvider?: string }) {
   // no list = every core tool
   const names = tools ?? ["read", "write", "edit", "bash", "grep", "glob", "ls", "http_fetch", "http_download", "vault_get", "vault_list", "register_outcome"];
-  const groups: Record<ToolPlacement, string[]> = { sandbox: [], bridged: [], host: [] };
+  const groups: Record<ToolPlacement, string[]> = { sandbox: [], host: [] };
   for (const name of names) groups[toolPlacement(name)].push(name);
   const where = (p?: string) => p === "local" || !p ? "this machine, no isolation" : p === "bwrap" ? "bubblewrap" : p === "daytona" ? "Daytona VM" : p === "e2b" ? "E2B VM" : p;
   return (
@@ -117,8 +118,8 @@ function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Where the tools run</div>
           <div className="text-[10px] text-muted-foreground">tasks: {where(provider)} · chat: {where(chatProvider)}</div>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {(["sandbox", "bridged", "host"] as ToolPlacement[]).map((placement) => (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {(["sandbox", "host"] as ToolPlacement[]).map((placement) => (
             <div key={placement} className={cn(
               "rounded-lg border p-2.5",
               placement === "sandbox" ? "border-teal-500/25 bg-teal-500/5" : "border-border/40 bg-muted/10",

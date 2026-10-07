@@ -49,6 +49,8 @@ class DirDriver implements RemoteDriver {
 function singleAdapter(driver: DirDriver): RemoteAdapter {
   return {
     provider: "e2b",
+    fastSuspend: false,
+    suspendById: async () => { await driver.suspend(); },
     create: async () => driver,
     connect: async () => { await driver.resume(); return driver; },
     list: async () => [],
@@ -60,25 +62,37 @@ const tmp = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix));
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe("remote workspace", () => {
-  test("context goes over without ignored files; refuses to copy back paths outside the writable ones", async () => {
+  test("the working directory starts empty; read-only context goes over without ignored files; only the output directory comes back", async () => {
     const root = tmp("polpo-remote-root-");
-    writeFileSync(join(root, "keep.txt"), "keep");
-    writeFileSync(join(root, ".gitignore"), "secret.env\n");
-    writeFileSync(join(root, "secret.env"), "TOKEN=x");
-    mkdirSync(join(root, "node_modules", "dep"), { recursive: true });
-    writeFileSync(join(root, "node_modules", "dep", "index.js"), "x");
+    writeFileSync(join(root, "project.txt"), "stays here");
+    const skills = tmp("polpo-remote-skills-");
+    writeFileSync(join(skills, "keep.txt"), "keep");
+    writeFileSync(join(skills, ".gitignore"), "secret.env\n");
+    writeFileSync(join(skills, "secret.env"), "TOKEN=x");
+    mkdirSync(join(skills, "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(skills, "node_modules", "dep", "index.js"), "x");
+    execFileSync("git", ["init", "-q"], { cwd: skills }); // --exclude-vcs-ignores reads .gitignore in a repo
+    const out = tmp("polpo-remote-out-");
     const vm = tmp("polpo-remote-vm-");
-    execFileSync("git", ["init", "-q"], { cwd: root }); // --exclude-vcs-ignores reads .gitignore in a repo
     const driver = new DirDriver(vm);
     const warnings: string[] = [];
-    const ws = new RemoteWorkspace("e2b", { root, sandbox, adapter: singleAdapter(driver), onEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); } });
+    const ws = new RemoteWorkspace("e2b", { root, readable: [skills], writable: [out], sandbox, adapter: singleAdapter(driver), onEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); } });
 
-    const r = await ws.exec("ls -a");
+    expect((await ws.exec(`ls -a ${root}`)).stdout).not.toContain("project.txt");
+    const r = await ws.exec(`ls -a ${skills}`);
     expect(r.stdout).toContain("keep.txt");
     expect(r.stdout).not.toContain("secret.env");
     expect(r.stdout).not.toContain("node_modules");
 
-    // a malicious VM answers the sync-back with a tarball that writes outside the working directory
+    // the VM answers the sync-back with a deliverable in the output directory: it lands here
+    const staging = tmp("polpo-remote-staging-");
+    mkdirSync(join(staging, out.slice(1)), { recursive: true });
+    writeFileSync(join(staging, out.slice(1), "report.md"), "report");
+    driver.backTarball = new Uint8Array(execFileSync("tar", ["-czf", "-", "-C", staging, `${out.slice(1)}/report.md`]));
+    await ws.syncNow();
+    expect(readFileSync(join(out, "report.md"), "utf8")).toBe("report");
+
+    // a malicious VM answers with a tarball that writes outside the output directory
     const evil = tmp("polpo-remote-evil-");
     mkdirSync(join(evil, "etc"), { recursive: true });
     writeFileSync(join(evil, "etc", "evil"), "x");
@@ -86,6 +100,7 @@ describe("remote workspace", () => {
     await ws.dispose();
     expect(warnings.join(" ")).toMatch(/outside the writable paths/);
     expect(existsSync("/etc/evil")).toBe(false);
+    expect(existsSync(join(root, "project.txt"))).toBe(true);
     expect(driver.destroyed).toBe(true);
   });
 
