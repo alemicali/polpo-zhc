@@ -23,7 +23,7 @@ import { createWhatsAppTools } from "../tools/whatsapp-tools.js";
 /** In-memory FileSystem: what a remote VM looks like to the tools. */
 class MemoryFs implements FileSystem {
   files = new Map<string, Uint8Array>();
-  dirs = new Set<string>(["/"]);
+  dirs = new Set<string>(["/", "/tmp"]);
   async readFile(path: string) { return new TextDecoder().decode(await this.readFileBuffer(path)); }
   async writeFile(path: string, content: string) { await this.writeFileBuffer(path, new TextEncoder().encode(content)); }
   async readFileBuffer(path: string) {
@@ -101,6 +101,31 @@ describe("file tools through the given FileSystem", () => {
     expect(text(await tool(tools, "pdf_merge").execute("3", { inputs: ["a.pdf", "b.pdf"], output: "merged/ab.pdf" }))).toContain("2 pages");
     const { PDFDocument } = await import("pdf-lib");
     expect((await PDFDocument.load(fs.files.get("/vm/work/merged/ab.pdf")!)).getPageCount()).toBe(2);
+  });
+
+  test("pdf_create with a remote VM's shell renders in the VM (driver + params written through fs)", async () => {
+    const fs = new MemoryFs();
+    const commands: string[] = [];
+    const pdf = await onePagePdf("VM");
+    const shell = {
+      isRemote: async () => true,
+      execute: async (command: string) => {
+        commands.push(command);
+        if (command === "command -v agent-browser") return { stdout: "/usr/bin/agent-browser", stderr: "", exitCode: 0 };
+        // the driver: node <driver> <params> <out>
+        const [, , params, out] = command.split(" ").map((x) => x.replace(/^'|'$/g, ""));
+        const p = JSON.parse(await fs.readFile(params!));
+        expect(p).toMatchObject({ html: "<h1>x</h1>", waitUntil: "domcontentloaded", pdf: { format: "A4", landscape: true } });
+        await fs.writeFileBuffer(out!, pdf);
+        return { stdout: JSON.stringify({ success: true, bytes: pdf.byteLength }), stderr: "", exitCode: 0 };
+      },
+    };
+    const [create] = createPdfTools(CWD, undefined, ["pdf_create"], fs, shell);
+    const r = await create!.execute("1", { path: "out/r.pdf", html: "<h1>x</h1>", landscape: true, wait_for_network: false });
+    expect(text(r)).toContain("PDF created: /vm/work/out/r.pdf (1 pages");
+    expect(commands[1]).toMatch(/^node '\/tmp\/polpo-pdf-render-[0-9a-f]+\.mjs' '\/tmp\/polpo-pdf-[\w-]+\.json' '\/vm\/work\/out\/r\.pdf'$/);
+    // the driver stays for the next call, the params file is gone
+    expect([...fs.files.keys()].filter((f) => f.startsWith("/tmp/")).map((f) => f.replace(/[0-9a-f]{12}/, "H"))).toEqual(["/tmp/polpo-pdf-render-H.mjs"]);
   });
 
   test("docx: create then read in the sandbox's files", async () => {

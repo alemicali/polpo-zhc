@@ -664,7 +664,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // PDF tools — activated when any pdf_* tool is in allowedTools
   if (categoryRequested(ALL_PDF_TOOL_NAMES)) {
-    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools, options.fs));
+    tools.push(...createPdfTools(cwd, allowedPaths, allowedTools, options.fs, options.shell));
   }
 
   // Docx tools — activated when any docx_* tool is in allowedTools

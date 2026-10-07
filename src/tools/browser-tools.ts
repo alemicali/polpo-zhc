@@ -19,8 +19,8 @@
  */
 
 import { execFileSync, spawn as spawnChild } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { mkdir, readFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { withHostTempDir, writeBytes } from "./tool-fs.js";
@@ -235,7 +235,7 @@ const browserReady = new WeakMap<Shell, Promise<string | undefined>>();
  * agent-browser in the sandbox: present in the runner image; otherwise installed on first use
  * (once per shell). Resolves to an error message when it cannot be made available.
  */
-function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> {
+export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> {
   let ready = browserReady.get(shell);
   if (!ready) {
     ready = (async () => {
@@ -258,12 +258,14 @@ function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> {
 async function execSandboxBrowser(
   shell: Shell,
   args: string[],
-  options: { session?: string; profileName?: string; timeout?: number; cwd?: string },
+  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string },
 ): Promise<BrowserCallResult> {
   const missing = await ensureSandboxBrowser(shell);
   if (missing) return { success: false, error: missing, raw: missing };
   try {
-    const result = await shell.execute(sandboxBrowserCommand(args, options), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT });
+    // agent-browser does not create the folder of the file it saves
+    const mkdir = options.saves ? `mkdir -p ${shq(dirname(options.saves))} && ` : "";
+    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, options), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT });
     return parseShellBrowserResult(result);
   } catch (err: any) {
     const message = err?.message ?? String(err);
@@ -768,7 +770,7 @@ export function createBrowserTools(
   const exec: BrowserExec = async (args, options = {}) => {
     const withProfile = options.profile !== false;
     if (shell && await inSandbox()) {
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd });
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves });
     }
     const hostOptions = { session, profileDir: withProfile ? profileDir : undefined, signal: options.signal, timeout: options.timeout };
     // the browser runs here but the agent's files may not: save to a private file, then through fs
@@ -786,6 +788,7 @@ export function createBrowserTools(
         return { ...result, data: swap(result.data), raw: result.raw.split(hostPath).join(target) };
       });
     }
+    if (options.saves) await mkdir(dirname(options.saves), { recursive: true }).catch(() => undefined);
     return execAgentBrowser(args, hostOptions);
   };
   const factories: Record<BrowserToolName, () => AgentTool<any>> = {

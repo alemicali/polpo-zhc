@@ -88,7 +88,7 @@ describe("browser in a remote sandbox", () => {
     const shell = new FakeVmShell();
     const tools = createBrowserTools(CWD, "a", ["browser_screenshot"], undefined, "/vm/out", undefined, undefined, { shell });
     await tool(tools, "browser_screenshot").execute("1", { path: "shots/home.png", full_page: true });
-    expect(shell.commands.at(-1)).toBe("agent-browser --session 'a' 'screenshot' '/vm/work/shots/home.png' '--full' --json");
+    expect(shell.commands.at(-1)).toBe("mkdir -p '/vm/work/shots' && agent-browser --session 'a' 'screenshot' '/vm/work/shots/home.png' '--full' --json");
     await expect(tool(tools, "browser_screenshot").execute("2", { path: "/etc/evil.png" })).rejects.toThrow();
   });
 
