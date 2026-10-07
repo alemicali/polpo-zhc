@@ -18,9 +18,43 @@ export interface SandboxSettings {
   confineExternalContent?: boolean;
   allowLocal?: boolean;
   chatIdleMinutes?: number;
+  /** Opt-in "Cowork": chats may run their sandbox tools on a remote provider (Daytona, E2B). */
+  chatRemote?: boolean;
+  /** Remote VMs: reuse (same agent) or fresh, keep (pool) or delete at the end, idle suspend, expiry. */
+  lifecycle?: SandboxLifecycle;
+  /** Instance: remote VMs kept ready per provider (cost money while they exist). */
+  warm?: Partial<Record<"daytona" | "e2b", number>>;
   /** Per-provider options; for Daytona/E2B the vault entry with the key (a reference) and non-secret settings. */
   providers?: Partial<Record<SandboxProvider, Record<string, unknown>>>;
 }
+
+export interface SandboxLifecycle {
+  isolation?: "reuse" | "fresh";
+  onRelease?: "pool" | "destroy";
+  suspendAfterIdleSeconds?: number;
+  deleteAfterStopMinutes?: number;
+}
+
+export const DEFAULT_LIFECYCLE: Required<SandboxLifecycle> = {
+  isolation: "reuse", onRelease: "pool", suspendAfterIdleSeconds: 0, deleteAfterStopMinutes: 30,
+};
+
+/** Where each tool runs (same list as the server, TOOL_PLACEMENT in @polpo-ai/core/sandbox). */
+export type ToolPlacement = "sandbox" | "bridged" | "host";
+const SANDBOX_TOOLS = ["bash", "grep", "glob", "ls", "read", "write", "edit", "run_command"];
+const BRIDGED_TOOLS = ["pdf_*", "excel_*", "docx_*", "http_download", "image_generate", "video_generate", "audio_speak", "audio_transcribe",
+  "email_download_attachment", "whatsapp_send_file", "browser_screenshot", "storage_read", "storage_write", "register_outcome", "read_attachment"];
+const matches = (pattern: string, name: string) => pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name;
+export function toolPlacement(name: string): ToolPlacement {
+  if (SANDBOX_TOOLS.some((p) => matches(p, name))) return "sandbox";
+  if (BRIDGED_TOOLS.some((p) => matches(p, name))) return "bridged";
+  return "host";
+}
+export const PLACEMENT_INFO: Record<ToolPlacement, { label: string; description: string }> = {
+  sandbox: { label: "In the sandbox", description: "Commands and the working files: they run where the sandbox is (bubblewrap here, or the remote VM)." },
+  bridged: { label: "Here, files bridged", description: "Run on this machine (a library or a key) but use the working files: with a remote VM, input files are fetched from it and produced files are copied into it." },
+  host: { label: "Here, keys stay here", description: "Use keys or integrations (vault, email, messaging, storage, data sources…) that never reach the sandbox." },
+};
 
 export interface EffectiveSandbox {
   provider: SandboxProvider;
@@ -174,6 +208,15 @@ export function compactSandbox(s: SandboxSettings): SandboxSettings {
   if (s.allowLocal) out.allowLocal = true;
   if (s.confineExternalContent) out.confineExternalContent = true;
   if (s.chatIdleMinutes && s.chatIdleMinutes > 0) out.chatIdleMinutes = s.chatIdleMinutes;
+  if (s.chatRemote) out.chatRemote = true;
+  if (s.lifecycle) {
+    const lc = Object.fromEntries(Object.entries(s.lifecycle).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    if (Object.keys(lc).length) out.lifecycle = lc as SandboxLifecycle;
+  }
+  if (s.warm) {
+    const warm = Object.fromEntries(Object.entries(s.warm).filter(([, v]) => typeof v === "number" && v > 0));
+    if (Object.keys(warm).length) out.warm = warm;
+  }
   // provider options (remote providers' vault references) are edited elsewhere: keep them
   if (s.providers && Object.keys(s.providers).length) out.providers = s.providers;
   return out;

@@ -803,6 +803,13 @@ const agentSandboxParam = Type.Optional(Type.Object({
     memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
   }, { description: "Upper limits per command" })),
   allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
+  chatRemote: Type.Optional(Type.Boolean({ description: "Cowork: this agent's chats run their sandbox tools on the remote provider (Daytona/E2B) instead of this machine. Tools with keys stay here." })),
+  lifecycle: Type.Optional(Type.Object({
+    isolation: Type.Optional(Type.Union([Type.Literal("reuse"), Type.Literal("fresh")], { description: "reuse = take a suspended VM this agent used before (folder reset, dependencies kept); fresh = always new" })),
+    onRelease: Type.Optional(Type.Union([Type.Literal("pool"), Type.Literal("destroy")], { description: "pool = suspend and keep for the next run; destroy = delete at the end" })),
+    suspendAfterIdleSeconds: Type.Optional(Type.Number({ description: "Suspend the VM while no tool runs for this long (0 = never during a task)" })),
+    deleteAfterStopMinutes: Type.Optional(Type.Number({ description: "A kept VM nobody reuses is deleted after this long" })),
+  }, { description: "Remote VM lifecycle" })),
   inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
 }, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 

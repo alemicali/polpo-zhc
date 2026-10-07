@@ -11,7 +11,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SandboxEditor } from "@/components/sandbox/sandbox-editor";
 import { useSandboxOverview } from "@/components/sandbox/sandbox-settings";
-import { compactSandbox, describeSandbox, sandboxApi, type SandboxSettings } from "@/lib/sandbox-api";
+import { compactSandbox, describeSandbox, sandboxApi, PLACEMENT_INFO, toolPlacement, type SandboxSettings, type ToolPlacement } from "@/lib/sandbox-api";
+import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
@@ -96,7 +97,43 @@ export function AgentSandboxTab() {
             </CardContent>
           </Card>
         )}
+        <ToolPlacementCard tools={agent.allowedTools} provider={effective?.task.provider} chatProvider={effective?.chat.provider} />
       </div>
     </ScrollArea>
+  );
+}
+
+/** Where this agent's tools run: in the sandbox, here with files bridged, or here with the keys. */
+function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]; provider?: string; chatProvider?: string }) {
+  // no list = every core tool
+  const names = tools ?? ["read", "write", "edit", "bash", "grep", "glob", "ls", "http_fetch", "http_download", "vault_get", "vault_list", "register_outcome"];
+  const groups: Record<ToolPlacement, string[]> = { sandbox: [], bridged: [], host: [] };
+  for (const name of names) groups[toolPlacement(name)].push(name);
+  const where = (p?: string) => p === "local" || !p ? "this machine, no isolation" : p === "bwrap" ? "bubblewrap" : p === "daytona" ? "Daytona VM" : p === "e2b" ? "E2B VM" : p;
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+      <CardContent className="py-3 px-4 space-y-3 text-xs">
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Where the tools run</div>
+          <div className="text-[10px] text-muted-foreground">tasks: {where(provider)} · chat: {where(chatProvider)}</div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {(["sandbox", "bridged", "host"] as ToolPlacement[]).map((placement) => (
+            <div key={placement} className={cn(
+              "rounded-lg border p-2.5",
+              placement === "sandbox" ? "border-teal-500/25 bg-teal-500/5" : "border-border/40 bg-muted/10",
+            )}>
+              <div className={cn("text-[11px] font-medium", placement === "sandbox" ? "text-teal-400" : "text-foreground")}>{PLACEMENT_INFO[placement].label}</div>
+              <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{PLACEMENT_INFO[placement].description}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {groups[placement].length
+                  ? groups[placement].map((t) => <code key={t} className="rounded bg-muted/40 px-1 py-0.5 text-[10px]">{t}</code>)
+                  : <span className="text-[10px] text-muted-foreground/60">none</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

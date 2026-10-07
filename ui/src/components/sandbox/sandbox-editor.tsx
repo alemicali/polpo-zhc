@@ -186,6 +186,8 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
         Upper limits for each command. Missions and tasks can lower them, not raise them. Empty: no limit.
       </p>
 
+      <RemoteLifecycle level={level} value={value} set={set} available={available} />
+
       {level === "instance" && (
         <Field label="Close idle chat sandboxes after (minutes)" hint="Each person or agent chatting has its own workspace; it is closed after this idle time. Default 30.">
           <NumberInput value={value.chatIdleMinutes} onChange={(n) => set({ chatIdleMinutes: n })} placeholder="30" />
@@ -223,6 +225,89 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
               : "This agent reads content from outside (web, email or messages). It runs at least in bubblewrap unless you allow this — for example when it needs git push or the gh login."}
           </p>
           {value.allowLocal && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">unconfined</Badge>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Remote VMs (Daytona, E2B): Cowork chats, reuse, idle suspend, expiry, warm VMs. */
+function RemoteLifecycle({ level, value, set, available }: {
+  level: "instance" | "agent";
+  value: SandboxSettings;
+  set: (patch: Partial<SandboxSettings>) => void;
+  available: SandboxProvider[];
+}) {
+  const remote = available.filter((p) => p === "daytona" || p === "e2b") as Array<"daytona" | "e2b">;
+  if (!remote.length) return null;
+  const lc = value.lifecycle ?? {};
+  const setLc = (patch: Partial<NonNullable<SandboxSettings["lifecycle"]>>) => {
+    const next = { ...lc, ...patch };
+    for (const k of Object.keys(next) as Array<keyof typeof next>) if (next[k] === undefined) delete next[k];
+    set({ lifecycle: Object.keys(next).length ? next : undefined });
+  };
+  const inherit = level === "agent";
+  return (
+    <div className="space-y-4 rounded-xl border border-border/40 bg-muted/10 p-4">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Remote VMs (Daytona, E2B)</div>
+
+      <div className="space-y-1.5">
+        <Toggle
+          checked={!!value.chatRemote}
+          onChange={(next) => set({ chatRemote: next || undefined })}
+          label={level === "instance" ? "Chats can run on the remote VM (Cowork)" : "This agent's chats run on the remote VM (Cowork)"}
+        />
+        <p className="text-[10px] text-muted-foreground leading-tight">
+          Off: chats stay on this machine (bubblewrap at most) and remote VMs are for tasks. On: when the provider above is Daytona or E2B,
+          a chat gets its own VM; commands and file tools run there, files changed there come back after every command, tools with keys stay here.
+          The VM is suspended after a minute without tools and goes back to the pool when the chat is idle.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Reuse" hint="Reuse: a suspended VM this same agent used before (dependencies kept, working folder reset). Fresh: always a new VM.">
+          <Select value={lc.isolation ?? "__inherit"} onValueChange={(v) => setLc({ isolation: v === "__inherit" ? undefined : v as "reuse" | "fresh" })}>
+            <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__inherit" className="text-xs">{inherit ? "Inherit from instance" : "Reuse (default)"}</SelectItem>
+              <SelectItem value="reuse" className="text-xs">Reuse the agent's VM</SelectItem>
+              <SelectItem value="fresh" className="text-xs">Always a new VM</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="At the end" hint="Keep: suspended in the pool for the next run (costs storage only). Delete: gone when the run ends.">
+          <Select value={lc.onRelease ?? "__inherit"} onValueChange={(v) => setLc({ onRelease: v === "__inherit" ? undefined : v as "pool" | "destroy" })}>
+            <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__inherit" className="text-xs">{inherit ? "Inherit from instance" : "Keep suspended (default)"}</SelectItem>
+              <SelectItem value="pool" className="text-xs">Keep suspended for reuse</SelectItem>
+              <SelectItem value="destroy" className="text-xs">Delete</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Suspend tasks' VMs after (seconds idle)" hint="While the model thinks between tools. Resuming takes under a second. Empty: never during a task (chats: 60 s).">
+          <NumberInput value={lc.suspendAfterIdleSeconds || undefined} onChange={(n) => setLc({ suspendAfterIdleSeconds: n })} placeholder="—" />
+        </Field>
+        <Field label="Delete kept VMs after (minutes)" hint="A suspended VM nobody reuses is deleted after this time. Default 30.">
+          <NumberInput value={lc.deleteAfterStopMinutes} onChange={(n) => setLc({ deleteAfterStopMinutes: n })} placeholder="30" />
+        </Field>
+      </div>
+
+      {level === "instance" && (
+        <div className="grid grid-cols-2 gap-3">
+          {remote.map((p) => (
+            <Field key={p} label={`Warm ${p === "daytona" ? "Daytona" : "E2B"} VMs`} hint="Ready and suspended for the first run; they cost while they exist. 0: none.">
+              <NumberInput
+                value={value.warm?.[p] || undefined}
+                onChange={(n) => {
+                  const warm = { ...(value.warm ?? {}), [p]: n };
+                  if (!n) delete warm[p];
+                  set({ warm: Object.keys(warm).length ? warm : undefined });
+                }}
+                placeholder="0"
+              />
+            </Field>
+          ))}
         </div>
       )}
     </div>

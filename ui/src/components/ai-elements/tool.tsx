@@ -24,7 +24,10 @@ import {
   Wrench,
   FileText,
   PictureInPicture2,
+  Box,
 } from "lucide-react";
+import { useChatSandbox } from "@/components/sandbox/sandbox-context";
+import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
 
 // ── Types ──
 
@@ -143,6 +146,31 @@ function getStateBadge(state: ToolState) {
 }
 
 // ── Components ──
+
+/** Where the tool ran: a small badge for sandboxed and bridged tools when the chat has a sandbox. */
+function SandboxBadge({ toolName }: { toolName: string }) {
+  const sandbox = useChatSandbox();
+  if (!sandbox || sandbox.provider === "local") return null;
+  const placement = toolPlacement(toolName);
+  if (placement === "host") return null;
+  const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+  const where = sandbox.provider === "bwrap" ? "bubblewrap" : sandbox.provider === "e2b" ? "E2B" : sandbox.provider === "daytona" ? "Daytona" : sandbox.provider;
+  const label = placement === "sandbox" ? `sandbox · ${where}` : remote ? `here · files ↔ ${where}` : null;
+  if (!label) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn(
+          "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] leading-4",
+          placement === "sandbox" ? "border-teal-500/30 bg-teal-500/10 text-teal-400" : "border-border/50 bg-muted/30 text-muted-foreground",
+        )}>
+          <Box className="h-2.5 w-2.5" />{label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs">{PLACEMENT_INFO[placement].description}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export interface ToolInvocationProps extends HTMLAttributes<HTMLDivElement> {
   tool: ToolCallInfo;
@@ -269,6 +297,7 @@ export function ToolInvocation({
               </button>
             )}
             <span className="flex-1" />
+            <SandboxBadge toolName={tool.name} />
             {tool.name === "wait_for_task" && tool.state === "calling" && (
               <Tooltip>
                 <TooltipTrigger asChild>
