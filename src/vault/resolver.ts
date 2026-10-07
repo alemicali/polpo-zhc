@@ -82,7 +82,7 @@ export interface ResolvedVault {
   /** Check if a service exists in the vault */
   has(service: string): boolean;
   /** List all available services with their types and credential keys (values masked) */
-  list(): Array<{ service: string; type: string; keys: string[] }>;
+  list(): Array<{ service: string; type: string; keys: string[]; label?: string }>;
 }
 
 /**
@@ -194,6 +194,7 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
         service,
         type: entry.type,
         keys: Object.keys(entry.creds),
+        ...(entry.label ? { label: entry.label } : {}),
       }));
     },
   };
