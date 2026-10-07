@@ -172,6 +172,32 @@ export interface SandboxCascade {
   task?: SandboxSettings;
 }
 
+// ── Where each tool runs ─────────────────────────────────────────────────
+
+/**
+ * - "sandbox": runs in the agent's sandbox (commands and the working files).
+ * - "bridged": runs on this machine (a library or a key), but reads or writes files of the
+ *   working directory: with a remote sandbox, input files are fetched from the VM and the files
+ *   it produces are copied into the VM.
+ * - "host": runs on this machine because it uses keys or integrations that must not reach the
+ *   sandbox (vault, email, messaging, storage, data sources…), or manages the instance.
+ */
+export type ToolPlacement = "sandbox" | "bridged" | "host";
+
+export const TOOL_PLACEMENT: ReadonlyArray<{ pattern: string; placement: ToolPlacement }> = [
+  ...["bash", "grep", "glob", "ls", "read", "write", "edit", "run_command"].map((pattern) => ({ pattern, placement: "sandbox" as const })),
+  ...["pdf_*", "excel_*", "docx_*", "http_download", "image_generate", "video_generate", "audio_speak", "audio_transcribe",
+    "email_download_attachment", "whatsapp_send_file", "browser_screenshot", "storage_read", "storage_write", "register_outcome",
+    "read_attachment"].map((pattern) => ({ pattern, placement: "bridged" as const })),
+];
+
+export function toolPlacement(name: string): ToolPlacement {
+  for (const { pattern, placement } of TOOL_PLACEMENT) {
+    if (pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name) return placement;
+  }
+  return "host";
+}
+
 /** Tools that bring other people's content into the agent's context (prompt-injection risk). */
 export const EXTERNAL_CONTENT_TOOLS = [
   "browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*",

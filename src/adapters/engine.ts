@@ -23,6 +23,7 @@ import {
 import { effectiveCompactionSettings } from "../core/config.js";
 import { createWorkspace, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
+import { bridgeHostTools } from "../sandbox/tool-bridge.js";
 import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** Create a fresh AgentActivity object */
@@ -778,6 +779,14 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir }));
+      }
+      // Remote sandbox: tools that run here but use the agent's files follow the VM's files
+      if (isRemoteWorkspace(workspace)) {
+        allTools = bridgeHostTools(allTools, {
+          cwd, roots: [cwd, ...(outputDir ? [outputDir] : [])],
+          workspace: async () => workspace,
+          onWarning: (m) => console.warn(`[sandbox] ${agentConfig.name}: ${m}`),
+        });
       }
       agent.state.tools = allTools;
 

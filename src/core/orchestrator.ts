@@ -298,6 +298,13 @@ export class Orchestrator extends TypedEmitter {
     } as FileSystem;
   }
 
+  /** The chat's workspace when it is a remote VM (Cowork); undefined otherwise (nothing to bridge). */
+  async chatRemoteWorkspace(agent?: AgentConfig, session?: () => string | undefined): Promise<Workspace | undefined> {
+    const { sandbox } = await this.chatSandbox(agent);
+    if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") return undefined;
+    return this.acquireChatWorkspace(agent, session?.());
+  }
+
   private acquireChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
     const key = `${agent?.name ?? "polpo"}${sessionKey ? `:${sessionKey}` : ""}`;
     const idleMs = (normalizeSandboxSettings(this.config?.settings?.sandbox)?.chatIdleMinutes ?? 30) * 60_000;
