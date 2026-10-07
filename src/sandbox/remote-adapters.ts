@@ -182,8 +182,8 @@ class E2BAdapter implements RemoteAdapter {
   async create(spec: CreateSpec): Promise<RemoteDriver> {
     const { mod, conn, template: defaultTemplate } = await this.sdk();
     const { network } = spec.sandbox;
-    // autoPause: when the timeout hits, the sandbox pauses (files and memory kept) instead of dying
-    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { autoPause: true } : {}) };
+    // pooled VMs pause when their timeout hits (files kept) instead of dying; the reaper deletes them later
+    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { lifecycle: { onTimeout: "pause" } } : {}) };
     if (network.mode === "deny") opts.allowInternetAccess = false;
     if (network.mode === "allowlist") opts.network = { allowOut: allowHosts(spec.sandbox), denyOut: ["0.0.0.0/0"] };
     const template = (spec.sandbox.providerOptions.template as string | undefined) || defaultTemplate || undefined;
