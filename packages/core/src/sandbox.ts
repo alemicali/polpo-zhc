@@ -112,11 +112,48 @@ export interface SandboxSettings {
   allowLocal?: boolean;
   /** Chat workspaces close after this idle time (instance level). */
   chatIdleMinutes?: number;
+  /**
+   * Opt-in "Cowork" chats: a chat with this agent (or, on the instance, with every agent) may run
+   * its sandbox tools on a remote provider (Daytona, E2B). Without it chats stay on this machine.
+   */
+  chatRemote?: boolean;
+  /** How remote sandboxes are acquired, suspended and released. */
+  lifecycle?: SandboxLifecycleSettings;
+  /** Instance level: remote VMs kept ready per provider (default 0: none, they cost money). */
+  warm?: Partial<Record<RemoteSandboxProvider, number>>;
   /** Provider-specific options (image, template, region…); never secrets. */
   providers?: Partial<Record<SandboxProvider, Record<string, unknown>>>;
 }
 
 /** The settings a workspace is created with, after the cascade. */
+export type RemoteSandboxProvider = "daytona" | "e2b";
+export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["daytona", "e2b"];
+
+/**
+ * Lifecycle of remote sandboxes (local ones have nothing to keep warm).
+ *
+ * - isolation "reuse": take a suspended VM this agent used before (same image, network and
+ *   limits), its working directory reset; "fresh": always a new VM.
+ * - onRelease "pool": suspend the VM and keep it for the next run of the same agent;
+ *   "destroy": delete it at the end.
+ * - suspendAfterIdleSeconds: suspend the VM while no tool is running (the model is thinking);
+ *   0 = never during a run.
+ * - deleteAfterStopMinutes: a pooled VM not reused within this time is deleted.
+ */
+export interface SandboxLifecycleSettings {
+  isolation?: "reuse" | "fresh";
+  onRelease?: "pool" | "destroy";
+  suspendAfterIdleSeconds?: number;
+  deleteAfterStopMinutes?: number;
+}
+
+export const DEFAULT_LIFECYCLE: Required<SandboxLifecycleSettings> = {
+  isolation: "reuse",
+  onRelease: "pool",
+  suspendAfterIdleSeconds: 0,
+  deleteAfterStopMinutes: 30,
+};
+
 export interface EffectiveSandbox {
   provider: SandboxProvider;
   network: SandboxNetwork;
@@ -124,6 +161,8 @@ export interface EffectiveSandbox {
   providerOptions: Record<string, unknown>;
   /** Requests a lower level made that were not allowed (they became the stricter option). */
   denied: Array<{ level: "mission" | "task"; field: string; requested: unknown; applied: unknown }>;
+  /** Remote providers only; absent on older callers (treated as DEFAULT_LIFECYCLE). */
+  lifecycle?: Required<SandboxLifecycleSettings>;
 }
 
 export interface SandboxCascade {
@@ -193,6 +232,7 @@ export function resolveSandbox(
   let network: SandboxNetwork = agent.network ?? instance.network ?? { mode: "open" };
   const resources: SandboxResources = { ...(instance.resources ?? {}), ...(agent.resources ?? {}) };
   const ceiling: SandboxResources = { ...resources };
+  const lifecycle: Required<SandboxLifecycleSettings> = { ...DEFAULT_LIFECYCLE, ...(instance.lifecycle ?? {}), ...(agent.lifecycle ?? {}) };
 
   for (const level of ["mission", "task"] as const) {
     const s = cascade[level];
@@ -212,6 +252,18 @@ export function resolveSandbox(
         network = s.network;
       } else denied.push({ level, field: "network", requested: s.network, applied: network });
     }
+    // lifecycle: a fresh VM and destroying it at the end are always allowed (stricter);
+    // reuse/pool and longer lifetimes only up to what the upper levels set
+    const lc = s.lifecycle;
+    if (lc?.isolation === "fresh") lifecycle.isolation = "fresh";
+    else if (lc?.isolation === "reuse" && lifecycle.isolation !== "reuse") denied.push({ level, field: "lifecycle.isolation", requested: "reuse", applied: lifecycle.isolation });
+    if (lc?.onRelease === "destroy") lifecycle.onRelease = "destroy";
+    else if (lc?.onRelease === "pool" && lifecycle.onRelease !== "pool") denied.push({ level, field: "lifecycle.onRelease", requested: "pool", applied: lifecycle.onRelease });
+    if (typeof lc?.deleteAfterStopMinutes === "number") {
+      if (lc.deleteAfterStopMinutes <= lifecycle.deleteAfterStopMinutes) lifecycle.deleteAfterStopMinutes = lc.deleteAfterStopMinutes;
+      else denied.push({ level, field: "lifecycle.deleteAfterStopMinutes", requested: lc.deleteAfterStopMinutes, applied: lifecycle.deleteAfterStopMinutes });
+    }
+    if (typeof lc?.suspendAfterIdleSeconds === "number") lifecycle.suspendAfterIdleSeconds = lc.suspendAfterIdleSeconds;
     for (const key of ["cpus", "memoryMb", "diskMb", "timeoutMin"] as const) {
       const requested = s.resources?.[key];
       if (requested === undefined) continue;
@@ -225,8 +277,10 @@ export function resolveSandbox(
   if (provider === "local" && instance.confineExternalContent && readsExternalContent(context.agentTools) && !agent.allowLocal) {
     provider = "bwrap";
   }
-  // Chats stay on this machine: a remote provider falls back to the best local isolation.
-  if (context.scope === "chat" && !LOCAL_PROVIDERS.has(provider)) {
+  // Chats stay on this machine unless a person opted in to remote chats ("Cowork"): then a
+  // remote provider is kept; otherwise it falls back to the best local isolation.
+  const chatRemote = agent.chatRemote ?? instance.chatRemote ?? false;
+  if (context.scope === "chat" && !LOCAL_PROVIDERS.has(provider) && !chatRemote) {
     provider = context.available?.has("docker") ? "docker" : "bwrap";
   }
   // A provider this host cannot run falls back to the next stronger local one, never weaker.
@@ -241,6 +295,7 @@ export function resolveSandbox(
     resources,
     providerOptions: { ...(instance.providers?.[provider] ?? {}), ...(agent.providers?.[provider] ?? {}) },
     denied,
+    lifecycle,
   };
 }
 
@@ -310,6 +365,25 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
   if (typeof r.allowLocal === "boolean") out.allowLocal = r.allowLocal;
   if (typeof r.confineExternalContent === "boolean") out.confineExternalContent = r.confineExternalContent;
   if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
+  if (typeof r.chatRemote === "boolean") out.chatRemote = r.chatRemote;
+  if (r.lifecycle && typeof r.lifecycle === "object") {
+    const l: SandboxLifecycleSettings = {};
+    if (r.lifecycle.isolation === "reuse" || r.lifecycle.isolation === "fresh") l.isolation = r.lifecycle.isolation;
+    if (r.lifecycle.onRelease === "pool" || r.lifecycle.onRelease === "destroy") l.onRelease = r.lifecycle.onRelease;
+    for (const key of ["suspendAfterIdleSeconds", "deleteAfterStopMinutes"] as const) {
+      const v = r.lifecycle[key];
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 7 * 24 * 60 * 60) l[key] = Math.round(v);
+    }
+    if (Object.keys(l).length) out.lifecycle = l;
+  }
+  if (r.warm && typeof r.warm === "object") {
+    const w: Partial<Record<RemoteSandboxProvider, number>> = {};
+    for (const p of REMOTE_SANDBOX_PROVIDERS) {
+      const v = r.warm[p];
+      if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 20) w[p] = v;
+    }
+    if (Object.keys(w).length) out.warm = w;
+  }
   if (r.providers && typeof r.providers === "object") {
     const opts: SandboxSettings["providers"] = {};
     for (const p of providers) if (r.providers[p] && typeof r.providers[p] === "object") opts[p] = r.providers[p];

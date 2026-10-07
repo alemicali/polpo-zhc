@@ -16,6 +16,7 @@ import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { loadRemoteProviders } from "../sandbox/remote-providers.js";
+import { SandboxReaper } from "../sandbox/reaper.js";
 
 /**
  * Polpo HTTP Server.
@@ -44,6 +45,7 @@ export class PolpoServer {
   private shutdownHandlers: (() => void)[] = [];
   private supervisorRun: Promise<void> | null = null;
   private storage: StorageRuntime | null = null;
+  private sandboxReaper: SandboxReaper | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -83,6 +85,20 @@ export class PolpoServer {
     await loadRemoteProviders(o.getVaultStore()).catch((err) => {
       console.error("[PolpoServer] Remote sandbox providers failed to load:", err instanceof Error ? err.message : err);
     });
+
+    // Remote VM pool upkeep: expired and orphaned VMs, warm VMs (server process only)
+    this.sandboxReaper?.stop();
+    this.sandboxReaper = new SandboxReaper({
+      polpoDir,
+      settings: () => o.getConfig()?.settings?.sandbox,
+      onDeleted: (e) => o.emit("sandbox:destroyed", {
+        workspaceId: e.remoteId, provider: e.provider, durationMs: 0, reason: e.reason, remoteId: e.remoteId, outcome: "destroyed",
+        ...(e.owner && e.owner !== "-" ? { agentName: e.owner } : {}),
+      }),
+      onWarmCreated: (e) => o.emit("log", { level: "info", message: `[sandbox] warm ${e.provider} VM ${e.remoteId} ready` }),
+      onError: (message) => o.emit("log", { level: "warn", message: `[sandbox] ${message}` }),
+    });
+    this.sandboxReaper.start();
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -222,6 +238,7 @@ export class PolpoServer {
       await this.orchestrator.gracefulStop();
     }
     // Unmount buckets after the runners stopped using them.
+    this.sandboxReaper?.stop();
     await this.storage?.shutdown().catch((err) => {
       console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
     });

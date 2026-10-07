@@ -103,6 +103,10 @@ import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-st
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
 import { resolveToolOutputDir } from "../tools/tool-output.js";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
+import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
+import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { setProtectedPaths } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { normalizeSandboxSettings, type EffectiveSandbox, type StorageMountProvider, type StorageMountSpec, type Workspace } from "@polpo-ai/core/sandbox";
@@ -266,69 +270,116 @@ export class Orchestrator extends TypedEmitter {
 
   /**
    * The shell an interlocutor's chat commands run in (agent tools in chat, Polpo's run_command).
-   * Polpo talks with people on messaging channels, so it counts as reading external content:
-   * it gets at least bubblewrap unless the instance allows local explicitly.
+   * One workspace per conversation (per agent when the conversation is not known), opened on the
+   * first command and closed after the chat's idle time.
    */
-  chatShell(agent?: AgentConfig): Shell {
-    const key = agent?.name ?? "polpo";
-    const orchestrator = this;
-    const idleMs = (normalizeSandboxSettings(this.config?.settings?.sandbox)?.chatIdleMinutes ?? 30) * 60_000;
-    const acquire = (): Promise<Workspace> => {
-      const existing = this.chatWorkspaces.get(key);
-      const entry = existing ?? { workspace: this.openChatWorkspace(agent) };
-      if (!existing) this.chatWorkspaces.set(key, entry);
-      if (entry.timer) clearTimeout(entry.timer);
-      entry.timer = setTimeout(() => void orchestrator.closeChatWorkspace(key, "idle"), idleMs);
-      entry.timer.unref?.();
-      entry.workspace.catch(() => this.chatWorkspaces.delete(key));
-      return entry.workspace;
-    };
+  chatShell(agent?: AgentConfig, session?: () => string | undefined): Shell {
     return {
-      async execute(command, options = {}) {
-        const workspace = await acquire();
-        return new WorkspaceShell(workspace).execute(command, options);
-      },
+      execute: async (command, options = {}) => new WorkspaceShell(await this.acquireChatWorkspace(agent, session?.())).execute(command, options),
     };
+  }
+
+  /**
+   * The file tools' FileSystem in chat: inside the remote VM for "Cowork" chats (the files live
+   * there), on this machine otherwise. Resolved on each call, so nothing opens until a tool runs.
+   */
+  chatFileSystem(agent?: AgentConfig, session?: () => string | undefined): FileSystem {
+    const local = new NodeFileSystem();
+    const pick = async (): Promise<FileSystem> => {
+      const { sandbox } = await this.chatSandbox(agent);
+      if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") return local;
+      return new WorkspaceFileSystem(await this.acquireChatWorkspace(agent, session?.()));
+    };
+    const call = <K extends keyof FileSystem>(name: K) => async (...args: any[]) => ((await pick())[name] as any)(...args);
+    return {
+      readFile: call("readFile"), writeFile: call("writeFile"), exists: call("exists"), readdir: call("readdir"),
+      readdirWithTypes: call("readdirWithTypes"), mkdir: call("mkdir"), remove: call("remove"), stat: call("stat"),
+      rename: call("rename"), readFileBuffer: call("readFileBuffer"), writeFileBuffer: call("writeFileBuffer"),
+    } as FileSystem;
+  }
+
+  private acquireChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
+    const key = `${agent?.name ?? "polpo"}${sessionKey ? `:${sessionKey}` : ""}`;
+    const idleMs = (normalizeSandboxSettings(this.config?.settings?.sandbox)?.chatIdleMinutes ?? 30) * 60_000;
+    const existing = this.chatWorkspaces.get(key);
+    const entry = existing ?? { workspace: this.openChatWorkspace(agent, sessionKey) };
+    if (!existing) this.chatWorkspaces.set(key, entry);
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => void this.closeChatWorkspace(key, "idle"), idleMs);
+    entry.timer.unref?.();
+    entry.workspace.catch(() => this.chatWorkspaces.delete(key));
+    return entry.workspace;
   }
 
   /** The sandbox a chat with this agent (or with Polpo) runs its commands in, and the storage it sees. */
   async chatSandbox(agent?: AgentConfig): Promise<{ sandbox: EffectiveSandbox; mounts: StorageMountSpec[] }> {
     const instanceSandbox = normalizeSandboxSettings(this.config?.settings?.sandbox);
-    const sandbox = effectiveSandbox({
+    let sandbox = effectiveSandbox({
       scope: "chat",
       cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
       // Polpo reads messages from people on channels: treat it like an agent reading external content
       agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
     });
-    const mounts = (await this.storageMountProvider?.mountsFor(agent?.name, "host").catch(() => [])) ?? [];
+    // Polpo's own commands manage this instance: they never run in a remote VM
+    if (!agent && (sandbox.provider === "daytona" || sandbox.provider === "e2b")) sandbox = { ...sandbox, provider: "bwrap" };
+    const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+    const mounts = (await this.storageMountProvider?.mountsFor(agent?.name, remote ? "remote" : "host").catch(() => [])) ?? [];
     return { sandbox, mounts };
   }
 
-  private async openChatWorkspace(agent?: AgentConfig): Promise<Workspace> {
+  private async openChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
     const { sandbox, mounts } = await this.chatSandbox(agent);
     const root = this.getAgentWorkDir();
+    const agentName = agent?.name ?? "polpo";
+    const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
     let workspaceId: string | undefined;
     try {
-      const workspace = createWorkspace(sandbox, {
-        onNetworkDenied: (d) => this.reportNetworkDenied({ ...d, workspaceId, provider: sandbox.provider, scope: "chat", agentName: agent?.name ?? "polpo" }),
+      // Cowork chats suspend the VM while the person or the model thinks (default 60 s)
+      const chatSandbox = remote && sandbox.lifecycle && !sandbox.lifecycle.suspendAfterIdleSeconds
+        ? { ...sandbox, lifecycle: { ...sandbox.lifecycle, suspendAfterIdleSeconds: 60 } }
+        : sandbox;
+      const workspace = createWorkspace(chatSandbox, {
+        onNetworkDenied: (d) => this.reportNetworkDenied({ ...d, workspaceId, provider: sandbox.provider, scope: "chat", agentName }),
         root,
         readable: [
-          resolveToolOutputDir({ polpoDir: this.polpoDir, agentName: agent?.name ?? "polpo" }),
+          resolveToolOutputDir({ polpoDir: this.polpoDir, agentName }),
           join(this.polpoDir, "skills"),
           join(this.polpoDir, "playbooks"),
         ],
-        mounts: mounts.filter((m) => m.hostPath),
+        mounts: remote ? mounts.filter((m) => m.remote) : mounts.filter((m) => m.hostPath),
         // config, sessions, vault, control socket: never visible to commands
         hide: [this.polpoDir],
+        ...(remote ? {
+          pool: { polpoDir: this.polpoDir, owner: agentName, scope: "chat" as const, sessionKey },
+          syncEachExec: true,
+          onRemoteEvent: (e: RemoteWorkspaceEvent) => this.reportRemoteSandboxEvent(e, { workspaceId: workspaceId ?? "", provider: sandbox.provider, agentName, sessionId: sessionKey }),
+        } : {}),
       });
       workspaceId = workspace.id;
       this.emit("sandbox:created", {
-        workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName: agent?.name ?? "polpo", network: sandbox.network.mode,
+        workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName, network: sandbox.network.mode,
+        ...(sessionKey ? { sessionId: sessionKey } : {}),
       });
       return workspace;
     } catch (error) {
-      this.emit("sandbox:failed", { provider: sandbox.provider, scope: "chat", error: error instanceof Error ? error.message : String(error) });
+      this.emit("sandbox:failed", { provider: sandbox.provider, scope: "chat", sessionId: sessionKey, error: error instanceof Error ? error.message : String(error) });
       throw error;
+    }
+  }
+
+  /** Remote VM lifecycle steps (from chats here, from task runners over the notification socket). */
+  reportRemoteSandboxEvent(
+    e: RemoteWorkspaceEvent,
+    at: { workspaceId: string; provider: string; agentName?: string; taskId?: string; sessionId?: string },
+  ): void {
+    const base = { workspaceId: at.workspaceId, provider: at.provider, ...(at.agentName ? { agentName: at.agentName } : {}), ...(at.taskId ? { taskId: at.taskId } : {}), ...(at.sessionId ? { sessionId: at.sessionId } : {}) };
+    switch (e.kind) {
+      case "ready": this.emit("sandbox:ready", { ...base, durationMs: e.durationMs, steps: e.steps, remoteId: e.remoteId, source: e.source }); break;
+      case "suspended": this.emit("sandbox:suspended", { ...base, remoteId: e.remoteId, idleMs: e.idleMs }); break;
+      case "resumed": this.emit("sandbox:resumed", { ...base, remoteId: e.remoteId, durationMs: e.durationMs }); break;
+      case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
+      case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
+      default: break;
     }
   }
 
@@ -362,7 +413,10 @@ export class Orchestrator extends TypedEmitter {
     const workspace = await entry.workspace.catch(() => undefined);
     if (!workspace) return;
     await workspace.dispose().catch(() => undefined);
-    this.emit("sandbox:destroyed", { workspaceId: workspace.id, provider: workspace.provider, durationMs: 0, reason });
+    // remote VMs report their own release (pooled or deleted, running time)
+    if (workspace.provider !== "daytona" && workspace.provider !== "e2b") {
+      this.emit("sandbox:destroyed", { workspaceId: workspace.id, provider: workspace.provider, durationMs: 0, reason });
+    }
   }
 
   getContextCheckpointStore(): ContextCheckpointStore {
@@ -870,6 +924,7 @@ export class Orchestrator extends TypedEmitter {
         workspaceId: msg.runId, provider: msg.provider, scope: "task", taskId: msg.taskId, agentName: msg.agentName,
         host: msg.host, port: msg.port, reason: msg.reason,
       }),
+      (msg) => this.reportRemoteSandboxEvent(msg.event as any, { workspaceId: msg.runId, provider: msg.provider, taskId: msg.taskId, agentName: msg.agentName }),
     );
 
     // Initialize approval gates if configured

@@ -510,7 +510,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         // host mounts are bound by local workspaces, remote ones are mounted inside remote VMs
         mounts: (ctx.mounts ?? []).filter((m) => m.hostPath || m.remote),
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
-        onRemoteEvent: (e) => { if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`); },
+        onRemoteEvent: (e) => {
+          if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`);
+          ctx.onSandboxEvent?.(e);
+        },
+        pool: ctx.polpoDir ? { polpoDir: ctx.polpoDir, owner: agentConfig.name, scope: "task", runId: ctx.runId } : undefined,
         onNetworkDenied: ctx.onNetworkDenied,
       })
     : undefined;
