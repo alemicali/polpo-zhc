@@ -8,6 +8,8 @@
  *
  * Design: /home/alessio/dev/polpo/polpo-arch/SANDBOX.md
  */
+import { resolveRuntimeSandboxOptions, type RuntimeSandboxLifecycleOptions, type RuntimeSandboxOptions, type RuntimeSandboxVolumeSelection, type SandboxIsolation, type SandboxVolumeAccess, type SandboxVolumeWriteBack } from "./runtime-sandbox.js";
+import type { SandboxVolumeStrategy } from "./sandbox-provider.js";
 
 // ── Workspace ────────────────────────────────────────────────────────────
 
@@ -45,7 +47,7 @@ export interface WorkspaceEntry {
 /** A place where an agent's tools act. Paths are absolute inside the workspace. */
 export interface Workspace {
   readonly id: string;
-  readonly provider: SandboxProvider;
+  readonly provider: SandboxProviderId;
   /** The agent's working directory, as the agent sees it. */
   readonly root: string;
   /** Extra directories the agent can read (and maybe write), as the agent sees them. */
@@ -65,7 +67,7 @@ export interface Workspace {
 
 // ── Settings and the cascade ─────────────────────────────────────────────
 
-export type SandboxProvider = "local" | "bwrap" | "docker" | "daytona" | "e2b";
+export type SandboxProviderId = "local" | "bwrap" | "docker" | "daytona" | "e2b";
 /**
  * "unrestricted": the full network of this machine, local services included. "open": every
  * public destination, through the proxy (no loopback, private, Tailscale or metadata addresses).
@@ -74,10 +76,10 @@ export type SandboxProvider = "local" | "bwrap" | "docker" | "daytona" | "e2b";
 export type SandboxNetworkMode = "deny" | "allowlist" | "open" | "unrestricted";
 
 /** Providers that run on this machine (usable by chats). */
-export const LOCAL_PROVIDERS: ReadonlySet<SandboxProvider> = new Set(["local", "bwrap", "docker"]);
+export const LOCAL_PROVIDERS: ReadonlySet<SandboxProviderId> = new Set(["local", "bwrap", "docker"]);
 
 /** Isolation strength, weakest first: "tightening" means moving right. */
-export const PROVIDER_ISOLATION: Record<SandboxProvider, number> = { local: 0, bwrap: 1, docker: 2, daytona: 3, e2b: 3 };
+export const PROVIDER_ISOLATION: Record<SandboxProviderId, number> = { local: 0, bwrap: 1, docker: 2, daytona: 3, e2b: 3 };
 const NETWORK_STRICTNESS: Record<SandboxNetworkMode, number> = { unrestricted: 0, open: 1, allowlist: 2, deny: 3 };
 
 export interface SandboxNetwork {
@@ -95,9 +97,9 @@ export interface SandboxResources {
 
 /** One level of the cascade (instance, agent, mission, task). Every field is optional. */
 export interface SandboxSettings {
-  provider?: SandboxProvider;
+  provider?: SandboxProviderId;
   /** Instance and agent levels only: the providers lower levels may pick. */
-  allowedProviders?: SandboxProvider[];
+  allowedProviders?: SandboxProviderId[];
   network?: SandboxNetwork;
   resources?: SandboxResources;
   /**
@@ -134,50 +136,30 @@ export interface SandboxSettings {
   /** Instance level: remote VMs kept ready per provider (default 0: none, they cost money). */
   warm?: Partial<Record<RemoteSandboxProvider, number>>;
   /** Provider-specific options (image, template, region…); never secrets. */
-  providers?: Partial<Record<SandboxProvider, Record<string, unknown>>>;
+  providers?: Partial<Record<SandboxProviderId, Record<string, unknown>>>;
 }
 
 /** The settings a workspace is created with, after the cascade. */
 export type RemoteSandboxProvider = "daytona" | "e2b";
 export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["daytona", "e2b"];
 
-export type SandboxIsolation = "reuse" | "fresh" | "shared";
-export type SandboxReleasePolicy = "pool" | "destroy";
-export type SandboxVolumeAccess = "read-only" | "read-write";
-export type SandboxVolumeWriteBack = "auto" | "manual";
-export type SandboxVolumeStrategy = "mounted" | "hydrated";
+// Isolation, lifecycle and volume selection: open Polpo's runtime-sandbox.ts (copied as is) is
+// the source of truth for the names, the validation and how levels combine.
+export type {
+  SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack,
+  RuntimeSandboxOptions,
+} from "./runtime-sandbox.js";
+export { SANDBOX_VOLUME_NAME_PATTERN, SANDBOX_VOLUMES_MAX, SANDBOX_IDLE_TTL_MINUTES_MAX, SandboxVolumeGrantError, resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
+export type { SandboxVolumeStrategy } from "./sandbox-provider.js";
+/** What happens after a run releases its remote sandbox (open Polpo's lifecycle options). */
+export type SandboxLifecycleSettings = RuntimeSandboxLifecycleOptions;
+/** One selected volume (open Polpo's volume selection). */
+export type SandboxVolumeSelection = RuntimeSandboxVolumeSelection;
 
-export const SANDBOX_VOLUME_NAME_PATTERN = /^[a-z][a-z0-9_-]{1,62}$/;
-export const SANDBOX_VOLUMES_MAX = 32;
-export const SANDBOX_IDLE_TTL_MINUTES_MAX = 7 * 24 * 60;
 /** Where every volume appears inside a sandbox (and in bubblewrap jails on this machine). */
 export const SANDBOX_VOLUME_ROOT = "/volumes";
 
-/** What happens after a run releases its remote sandbox (open Polpo names). */
-export interface SandboxLifecycleSettings {
-  onRelease?: SandboxReleasePolicy;
-  /** Stop a pooled sandbox after this many minutes without activity. */
-  stopAfterIdleMinutes?: number;
-  /** Delete a stopped sandbox after this many minutes (0 = right after stopping). */
-  deleteAfterStopMinutes?: number;
-  /** @deprecated legacy single control: stop after this idle time and delete right away. */
-  idleTtlMinutes?: number;
-}
-
-export interface SandboxVolumeSelection {
-  name: string;
-  access?: SandboxVolumeAccess;
-  writeBack?: SandboxVolumeWriteBack;
-}
-
-export class SandboxVolumeGrantError extends Error {
-  readonly code = "sandbox_volume_not_granted";
-  constructor(readonly volumeName: string) {
-    super(`Sandbox volume is not granted by the parent policy: ${volumeName}`);
-    this.name = "SandboxVolumeGrantError";
-  }
-}
-
+// Defaults are the host's choice (open Polpo leaves them to the host).
 export const DEFAULT_ISOLATION: SandboxIsolation = "reuse";
 export const DEFAULT_LIFECYCLE: Required<Omit<SandboxLifecycleSettings, "idleTtlMinutes">> = {
   onRelease: "pool",
@@ -185,7 +167,10 @@ export const DEFAULT_LIFECYCLE: Required<Omit<SandboxLifecycleSettings, "idleTtl
   deleteAfterStopMinutes: 30,
 };
 
-/** Effective lifecycle (legacy idleTtlMinutes = stop after it, delete right away). */
+/**
+ * Effective lifecycle with this host's defaults. The deprecated idleTtlMinutes keeps its
+ * historical meaning here: stop after that idle time, delete right away.
+ */
 export function effectiveLifecycle(l: SandboxLifecycleSettings | undefined): Required<Omit<SandboxLifecycleSettings, "idleTtlMinutes">> {
   if (l?.idleTtlMinutes !== undefined && l.stopAfterIdleMinutes === undefined && l.deleteAfterStopMinutes === undefined) {
     return { onRelease: l.onRelease ?? DEFAULT_LIFECYCLE.onRelease, stopAfterIdleMinutes: l.idleTtlMinutes, deleteAfterStopMinutes: 0 };
@@ -193,36 +178,20 @@ export function effectiveLifecycle(l: SandboxLifecycleSettings | undefined): Req
   return { ...DEFAULT_LIFECYCLE, ...Object.fromEntries(Object.entries(l ?? {}).filter(([k, v]) => k !== "idleTtlMinutes" && v !== undefined)) };
 }
 
-function narrowVolumeSelection(inherited: SandboxVolumeSelection, requested: SandboxVolumeSelection): SandboxVolumeSelection {
-  const access: SandboxVolumeAccess | undefined =
-    inherited.access === "read-only" || requested.access === "read-only" ? "read-only" : requested.access ?? inherited.access;
-  const writeBack: SandboxVolumeWriteBack | undefined = access === "read-only"
-    ? undefined
-    : inherited.writeBack === "manual" || requested.writeBack === "manual" ? "manual" : requested.writeBack ?? inherited.writeBack;
-  return { name: inherited.name, ...(access === undefined ? {} : { access }), ...(writeBack === undefined ? {} : { writeBack }) };
-}
-
 /**
- * Volume selections through the cascade: the first level that sets them defines the list,
- * every later level may only select a subset and narrow access/write-back.
+ * Isolation, lifecycle and volumes through our four levels with open Polpo's resolver
+ * (settings → agent → request): instance → agent → mission, then the task on top.
+ * Throws SandboxVolumeGrantError when a lower level selects a volume not granted above.
  */
-export function narrowVolumeSelections(levels: Array<SandboxVolumeSelection[] | undefined>): SandboxVolumeSelection[] | undefined {
-  let merged: SandboxVolumeSelection[] | undefined;
-  for (const level of levels) {
-    if (level === undefined) continue;
-    if (merged === undefined) { merged = level.map((v) => ({ ...v })); continue; }
-    const grants = new Map(merged.map((v) => [v.name, v]));
-    merged = level.map((v) => {
-      const grant = grants.get(v.name);
-      if (!grant) throw new SandboxVolumeGrantError(v.name);
-      return narrowVolumeSelection(grant, v);
-    });
-  }
-  return merged;
+export function resolveRuntimeLevels(levels: { instance?: SandboxSettings; agent?: SandboxSettings; mission?: SandboxSettings; task?: SandboxSettings }): RuntimeSandboxOptions | undefined {
+  const pick = (s?: SandboxSettings): RuntimeSandboxOptions | undefined =>
+    s ? { ...(s.isolation ? { isolation: s.isolation } : {}), ...(s.lifecycle ? { lifecycle: s.lifecycle } : {}), ...(s.volumes ? { volumes: s.volumes } : {}) } : undefined;
+  const upper = resolveRuntimeSandboxOptions({ sandbox: pick(levels.instance) }, { sandbox: pick(levels.agent) }, { sandbox: pick(levels.mission) });
+  return resolveRuntimeSandboxOptions({ sandbox: upper }, undefined, { sandbox: pick(levels.task) });
 }
 
 export interface EffectiveSandbox {
-  provider: SandboxProvider;
+  provider: SandboxProviderId;
   network: SandboxNetwork;
   resources: SandboxResources;
   providerOptions: Record<string, unknown>;
@@ -315,37 +284,24 @@ function domainAllowed(requested: string, allow: string[]): boolean {
  */
 export function resolveSandbox(
   cascade: SandboxCascade,
-  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProvider> },
+  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProviderId> },
 ): EffectiveSandbox {
   const instance = cascade.instance ?? {};
   const agent = cascade.agent ?? {};
   const denied: EffectiveSandbox["denied"] = [];
 
-  const allowed = new Set<SandboxProvider>(agent.allowedProviders ?? instance.allowedProviders ?? ["local", "bwrap", "docker", "daytona", "e2b"]);
-  let provider: SandboxProvider = agent.provider ?? instance.provider ?? "local";
+  const allowed = new Set<SandboxProviderId>(agent.allowedProviders ?? instance.allowedProviders ?? ["local", "bwrap", "docker", "daytona", "e2b"]);
+  let provider: SandboxProviderId = agent.provider ?? instance.provider ?? "local";
   allowed.add(provider);
   let network: SandboxNetwork = agent.network ?? instance.network ?? { mode: "open" };
   const resources: SandboxResources = { ...(instance.resources ?? {}), ...(agent.resources ?? {}) };
   const ceiling: SandboxResources = { ...resources };
-  // isolation, lifecycle and volumes follow open Polpo's resolution: later levels override
-  // isolation and lifecycle fields; volumes can only be removed or narrowed
-  let isolation: SandboxIsolation = DEFAULT_ISOLATION;
-  let lifecycleRaw: SandboxLifecycleSettings = {};
-  for (const level of [cascade.instance, cascade.agent, cascade.mission, cascade.task]) {
-    if (level?.isolation) isolation = level.isolation;
-    if (level?.lifecycle) {
-      if (level.lifecycle.onRelease === "destroy") lifecycleRaw = { onRelease: "destroy" };
-      else {
-        if (level.lifecycle.onRelease) lifecycleRaw.onRelease = level.lifecycle.onRelease;
-        if (level.lifecycle.idleTtlMinutes !== undefined) { delete lifecycleRaw.stopAfterIdleMinutes; delete lifecycleRaw.deleteAfterStopMinutes; lifecycleRaw.idleTtlMinutes = level.lifecycle.idleTtlMinutes; }
-        for (const k of ["stopAfterIdleMinutes", "deleteAfterStopMinutes"] as const) {
-          if (level.lifecycle[k] !== undefined) { delete lifecycleRaw.idleTtlMinutes; lifecycleRaw[k] = level.lifecycle[k]; }
-        }
-      }
-    }
-  }
-  const lifecycle = effectiveLifecycle(lifecycleRaw);
-  const volumes = narrowVolumeSelections([cascade.instance?.volumes, cascade.agent?.volumes, cascade.mission?.volumes, cascade.task?.volumes]);
+  // isolation, lifecycle and volumes: open Polpo's resolver (later levels override isolation and
+  // lifecycle; volumes can only be removed or narrowed)
+  const runtime = resolveRuntimeLevels(cascade);
+  const isolation: SandboxIsolation = runtime?.isolation ?? DEFAULT_ISOLATION;
+  const lifecycle = effectiveLifecycle(runtime?.lifecycle);
+  const volumes = runtime?.volumes;
 
   for (const level of ["mission", "task"] as const) {
     const s = cascade[level];
@@ -386,7 +342,7 @@ export function resolveSandbox(
   }
   // A provider this host cannot run falls back to the next stronger local one, never weaker.
   if (context.available && !context.available.has(provider)) {
-    const fallback = (["bwrap", "docker"] as SandboxProvider[]).find((p) => context.available!.has(p) && PROVIDER_ISOLATION[p] >= Math.min(PROVIDER_ISOLATION[provider], 1));
+    const fallback = (["bwrap", "docker"] as SandboxProviderId[]).find((p) => context.available!.has(p) && PROVIDER_ISOLATION[p] >= Math.min(PROVIDER_ISOLATION[provider], 1));
     if (fallback) provider = fallback;
   }
 
@@ -480,8 +436,8 @@ export interface StorageMountProvider {
 export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const r = raw as Record<string, any>;
-  const providers: SandboxProvider[] = ["local", "bwrap", "docker", "daytona", "e2b"];
-  const isProvider = (v: unknown): v is SandboxProvider => typeof v === "string" && (providers as string[]).includes(v);
+  const providers: SandboxProviderId[] = ["local", "bwrap", "docker", "daytona", "e2b"];
+  const isProvider = (v: unknown): v is SandboxProviderId => typeof v === "string" && (providers as string[]).includes(v);
   const out: SandboxSettings = {};
   if (isProvider(r.provider)) out.provider = r.provider;
   if (Array.isArray(r.allowedProviders)) {
@@ -503,36 +459,13 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
   if (typeof r.confineExternalContent === "boolean") out.confineExternalContent = r.confineExternalContent;
   if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
   if (typeof r.chatRemote === "boolean") out.chatRemote = r.chatRemote;
-  if (r.isolation === "reuse" || r.isolation === "fresh" || r.isolation === "shared") out.isolation = r.isolation;
+  // isolation, lifecycle and volumes are validated by open Polpo's resolver
+  const runtime = resolveRuntimeSandboxOptions({ sandbox: r as RuntimeSandboxOptions });
+  if (runtime?.isolation) out.isolation = runtime.isolation;
   // settings saved before the names were aligned with open Polpo (lifecycle.isolation)
   else if (r.lifecycle?.isolation === "reuse" || r.lifecycle?.isolation === "fresh") out.isolation = r.lifecycle.isolation;
-  if (r.lifecycle && typeof r.lifecycle === "object") {
-    const l: SandboxLifecycleSettings = {};
-    if (r.lifecycle.onRelease === "pool" || r.lifecycle.onRelease === "destroy") l.onRelease = r.lifecycle.onRelease;
-    if (l.onRelease !== "destroy") {
-      const minutes = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= SANDBOX_IDLE_TTL_MINUTES_MAX;
-      if (minutes(r.lifecycle.idleTtlMinutes, 1)) l.idleTtlMinutes = r.lifecycle.idleTtlMinutes;
-      else {
-        if (minutes(r.lifecycle.stopAfterIdleMinutes, 1)) l.stopAfterIdleMinutes = r.lifecycle.stopAfterIdleMinutes;
-        if (minutes(r.lifecycle.deleteAfterStopMinutes, 0)) l.deleteAfterStopMinutes = r.lifecycle.deleteAfterStopMinutes;
-      }
-    }
-    if (Object.keys(l).length) out.lifecycle = l;
-  }
-  if (Array.isArray(r.volumes) && r.volumes.length <= SANDBOX_VOLUMES_MAX) {
-    const names = new Set<string>();
-    const vols: SandboxVolumeSelection[] = [];
-    let ok = true;
-    for (const v of r.volumes) {
-      if (!v || typeof v !== "object" || typeof v.name !== "string" || !SANDBOX_VOLUME_NAME_PATTERN.test(v.name) || names.has(v.name)) { ok = false; break; }
-      if (v.access !== undefined && v.access !== "read-only" && v.access !== "read-write") { ok = false; break; }
-      if (v.writeBack !== undefined && v.writeBack !== "auto" && v.writeBack !== "manual") { ok = false; break; }
-      if (v.access === "read-only" && v.writeBack !== undefined) { ok = false; break; }
-      names.add(v.name);
-      vols.push({ name: v.name, ...(v.access ? { access: v.access } : {}), ...(v.writeBack ? { writeBack: v.writeBack } : {}) });
-    }
-    if (ok) out.volumes = vols;
-  }
+  if (runtime?.lifecycle) out.lifecycle = runtime.lifecycle;
+  if (runtime?.volumes) out.volumes = runtime.volumes;
   if (r.warm && typeof r.warm === "object") {
     const w: Partial<Record<RemoteSandboxProvider, number>> = {};
     for (const p of REMOTE_SANDBOX_PROVIDERS) {
