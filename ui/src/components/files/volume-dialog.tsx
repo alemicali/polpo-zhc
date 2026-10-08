@@ -265,7 +265,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
                   (or only when the agent calls sandbox_volume_checkpoint); if someone else changed it meanwhile, the run's version goes to .conflicts/.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Mode">
                   <Select value={strategy} onValueChange={(value) => setStrategy(value as StorageVolume["strategy"])}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -291,7 +291,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
                     <Select value={driver} onValueChange={(value) => setDriver(value as StorageDriver)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="rclone">rclone (recommended)</SelectItem>
+                        <SelectItem value="rclone">rclone</SelectItem>
                         <SelectItem value="mountpoint-s3" disabled={!readOnly}>mountpoint-s3 (read-only)</SelectItem>
                       </SelectContent>
                     </Select>
