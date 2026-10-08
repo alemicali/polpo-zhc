@@ -77,6 +77,16 @@ export interface StorageImportJob {
   finishedAt?: string;
 }
 
+/** Volume settings of an entry (every entry is a volume; absent = mounted, access from readOnly). */
+export function effectiveVolume(entry: Pick<StorageEntry, "volume" | "readOnly" | "provider">): { strategy: "mounted" | "hydrated"; access: "read-only" | "read-write"; writeBack?: "auto" | "manual" } {
+  const v = entry.volume;
+  return {
+    strategy: entry.provider === "local" ? "mounted" : v?.strategy ?? "mounted",
+    access: entry.readOnly ? "read-only" : v?.access ?? "read-write",
+    ...(v?.writeBack ? { writeBack: v.writeBack } : {}),
+  };
+}
+
 export class StorageRuntime implements StorageMountProvider {
   readonly store: StorageRegistryStore;
   private readonly tempCache = new TemporaryCredentialCache();
@@ -123,14 +133,16 @@ export class StorageRuntime implements StorageMountProvider {
 
   /** Mount every enabled entry (server start). */
   async startMounts(): Promise<void> {
-    await this.mounts.sync(await this.store.list());
+    await this.mounts.sync((await this.store.list()).filter((e) => e.provider !== "local"));
   }
 
   async shutdown(): Promise<void> {
     await this.mountManager?.shutdown();
   }
 
-  mountStatus(entry: Pick<StorageEntry, "id" | "slug">): MountStatus {
+  mountStatus(entry: Pick<StorageEntry, "id" | "slug"> & { provider?: StorageEntry["provider"]; path?: string }): MountStatus {
+    // a local volume is always "mounted": it is the folder itself
+    if (entry.provider === "local") return { entryId: entry.id, slug: entry.slug, state: "mounted", path: entry.path ?? "", since: new Date(0).toISOString(), restarts: 0 };
     return this.mountManager?.status(entry) ?? {
       entryId: entry.id, slug: entry.slug, state: "unmounted",
       path: join(this.polpoDir, "mounts", entry.slug), since: new Date(0).toISOString(), restarts: 0,
@@ -150,17 +162,26 @@ export class StorageRuntime implements StorageMountProvider {
     const entries = await this.store.list();
     const out: ResolvedSandboxVolume[] = [];
     for (const selection of selections) {
-      const entry = entries.find((e) => e.slug === selection.name && e.volume?.enabled && e.enabled);
+      const entry = entries.find((e) => e.slug === selection.name && (e.provider === "local" || e.enabled));
       const grant = entry ? storageAccessFor(entry, agentName) : null;
       if (!entry || !grant) throw new SandboxVolumeGrantError(selection.name);
-      const volume = entry.volume!;
+      const volume = effectiveVolume(entry);
       const readOnly = volume.access === "read-only" || grant.access !== "write" || selection.access === "read-only";
       const grantWriteBack = agentName !== undefined ? storageGrantFor(entry, agentName)?.writeBack : undefined;
       const writeBack: SandboxVolumeWriteBack | undefined = readOnly ? undefined
         : [volume.writeBack, grantWriteBack, selection.writeBack].includes("manual") ? "manual" : "auto";
       const prefix = `${normalizeStoragePrefix(entry.prefix)}${grant.prefix}`;
+      if (entry.provider === "local") {
+        // a folder of this server: sandboxes on this machine see it in place; remote VMs never
+        const path = grant.prefix ? join(entry.path!, grant.prefix) : entry.path!;
+        out.push({
+          name: entry.slug, kind: "local", strategy: "mounted", mountPath: path, access: readOnly ? "read-only" : "read-write", driver: entry.driver,
+          ...(target === "host" ? { hostPath: path } : {}),
+        });
+        continue;
+      }
       const resolved: ResolvedSandboxVolume = {
-        name: entry.slug, strategy: volume.strategy, mountPath: `${SANDBOX_VOLUME_ROOT}/${entry.slug}`,
+        name: entry.slug, kind: "bucket", strategy: volume.strategy, mountPath: `${SANDBOX_VOLUME_ROOT}/${entry.slug}`,
         access: readOnly ? "read-only" : "read-write", ...(writeBack ? { writeBack } : {}), driver: entry.driver,
       };
       if (target === "host") {
@@ -190,6 +211,7 @@ export class StorageRuntime implements StorageMountProvider {
    */
   async importFolder(idOrSlug: string, sourceDir: string, targetPrefix = ""): Promise<StorageImportJob> {
     const entry = await this.require(idOrSlug);
+    if (entry.provider === "local") throw new Error("A local volume is already a folder of this server");
     if (entry.readOnly) throw new Error("This storage entry is read-only");
     const binary = findBinary("rclone");
     if (!binary) throw new Error("rclone is not installed on this server");
@@ -338,7 +360,7 @@ export class StorageRuntime implements StorageMountProvider {
 
   async create(input: CreateStorageEntry): Promise<PublicStorageEntry> {
     const entry = await this.store.create(prepareEntry(input) as CreateStorageEntry);
-    if (this.mountingActive && entry.enabled) await this.mounts.mount(entry);
+    if (this.mountingActive && entry.enabled && entry.provider !== "local") await this.mounts.mount(entry);
     return this.toPublic(entry);
   }
 
@@ -350,7 +372,7 @@ export class StorageRuntime implements StorageMountProvider {
     if (keysChanged) this.tempCache.clear(`${updated.id}|`);
     const mountChanged = MOUNT_FIELDS.some((field) => JSON.stringify(current[field]) !== JSON.stringify(updated[field]))
       || JSON.stringify(current.credentials) !== JSON.stringify(updated.credentials);
-    if (this.mountingActive && mountChanged) {
+    if (this.mountingActive && mountChanged && updated.provider !== "local") {
       if (current.slug !== updated.slug) await this.mounts.remove(current);
       if (updated.enabled) await this.mounts.mount(updated);
       else await this.mounts.unmount(updated);
@@ -379,6 +401,11 @@ export class StorageRuntime implements StorageMountProvider {
   async test(idOrSlug: string): Promise<{ ok: true; latencyMs: number; sampleKey?: string }> {
     const entry = await this.require(idOrSlug);
     const started = Date.now();
+    if (entry.provider === "local") {
+      const s = await stat(entry.path ?? "").catch(() => null);
+      if (!s?.isDirectory()) throw new Error(`The folder ${entry.path} does not exist on this server`);
+      return { ok: true, latencyMs: Date.now() - started };
+    }
     const listing = await (await this.client(entry)).list({ prefix: normalizeStoragePrefix(entry.prefix) || undefined, maxKeys: 1 });
     const sample = listing.objects[0]?.key ?? listing.prefixes[0];
     return { ok: true, latencyMs: Date.now() - started, ...(sample ? { sampleKey: sample } : {}) };
@@ -423,7 +450,7 @@ export class StorageRuntime implements StorageMountProvider {
   async accessibleEntries(agent: string | undefined): Promise<Array<{ name: string; slug: string; description?: string; access: StorageAccess; prefix?: string; mountPath?: string }>> {
     const result = [];
     for (const entry of await this.store.list()) {
-      if (!entry.enabled) continue;
+      if (!entry.enabled || entry.provider === "local") continue;
       const grant = storageAccessFor(entry, agent);
       if (!grant) continue;
       const status = this.mountStatus(entry);
@@ -552,6 +579,7 @@ export class StorageRuntime implements StorageMountProvider {
   }
 
   private async client(entry: StorageEntry): Promise<S3Client> {
+    if (entry.provider === "local") throw new Error(`"${entry.name}" is a folder on this server: use the file tools (read, write, ls) on ${entry.path}`);
     const credentials = await this.credentials(entry);
     if (!credentials) throw new Error(`Credentials for storage "${entry.name}" are not set`);
     return new S3Client(s3TargetFor(entry), credentials);

@@ -31,9 +31,9 @@ const GrantSchema = z.object({
   writeBack: z.enum(["auto", "manual"]).optional(),
 });
 
-/** Sandbox volume (open Polpo): the bucket appears at /volumes/<slug> in the sandboxes that select it. */
+/** How the volume is attached to sandboxes (every entry is a volume; buckets only for "hydrated"). */
 const VolumeSchema = z.object({
-  enabled: z.boolean(),
+  enabled: z.boolean().optional(),
   strategy: z.enum(["mounted", "hydrated"]).default("mounted"),
   access: z.enum(["read-only", "read-write"]).default("read-write"),
   writeBack: z.enum(["auto", "manual"]).optional(),
@@ -44,10 +44,13 @@ const EntrySchema = z.object({
   name: z.string().trim().min(1),
   slug: z.string().trim().min(1),
   description: z.string().trim().optional(),
-  provider: z.literal("s3").default("s3"),
+  /** "s3": a bucket; "local": a folder of this server inside the project (stays on the host). */
+  provider: z.enum(["s3", "local"]).default("s3"),
+  /** Local volumes: the folder, relative to the project's working directory (or absolute inside it). */
+  path: z.string().trim().optional(),
   endpoint: z.string().trim().optional(),
   region: z.string().trim().optional(),
-  bucket: z.string().trim().min(1),
+  bucket: z.string().trim().default(""),
   prefix: z.string().trim().optional(),
   pathStyle: z.boolean().optional(),
   driver: z.enum(["rclone", "mountpoint-s3"]).default("rclone"),
@@ -135,10 +138,19 @@ const statusRoute = createRoute({
 
 type EntryInput = z.infer<typeof EntrySchema>;
 
-function toEntry(input: EntryInput): Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> {
-  const { credentials, sandboxCredentials, temporaryCredentials, volume, ...rest } = input;
+function toEntry(input: EntryInput, workDir: string): Omit<StorageEntry, "id" | "createdAt" | "updatedAt"> {
+  const { credentials, sandboxCredentials, temporaryCredentials, volume, path, ...rest } = input;
+  let localPath: string | undefined;
+  if (rest.provider === "local") {
+    // a folder inside the project only: Files and the sandboxes on this machine already reach it
+    const root = resolvePath(workDir);
+    const dir = resolvePath(root, path ?? "");
+    if (!path || (dir !== root && !dir.startsWith(root + sep))) throw new Error("A local volume must be a folder inside the project's working directory");
+    localPath = dir;
+  }
   return {
     ...rest,
+    ...(localPath ? { path: localPath, driver: "rclone" as const, enabled: true } : {}),
     volume: volume ?? undefined,
     credentials: credentials ?? undefined,
     sandboxCredentials: sandboxCredentials ?? undefined,
@@ -181,7 +193,8 @@ export function storageRoutes(getRuntime: () => StorageRuntime, getWorkDir?: () 
 
   app.openapi(createEntryRoute, (async (c: any) => {
     const input = c.req.valid("json") as EntryInput;
-    const entry = toEntry(input);
+    let entry: ReturnType<typeof toEntry>;
+    try { entry = toEntry(input, getWorkDir?.() ?? process.cwd()); } catch (error) { return c.json({ ok: false, error: (error as Error).message }, 400); }
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {
@@ -197,7 +210,8 @@ export function storageRoutes(getRuntime: () => StorageRuntime, getWorkDir?: () 
 
   app.openapi(updateRoute, (async (c: any) => {
     const input = c.req.valid("json") as EntryInput;
-    const entry = toEntry(input);
+    let entry: ReturnType<typeof toEntry>;
+    try { entry = toEntry(input, getWorkDir?.() ?? process.cwd()); } catch (error) { return c.json({ ok: false, error: (error as Error).message }, 400); }
     const problem = validateStorageEntry(entry);
     if (problem) return c.json({ ok: false, error: problem }, 400);
     try {

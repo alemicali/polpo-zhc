@@ -35,6 +35,8 @@ import {
   Music,
   LayoutPanelLeft,
   X,
+  Plus,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +76,8 @@ import {
 } from "@/lib/upload-exclusions";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
+import { useStorage } from "@/hooks/use-storage";
+import { VolumeDialog } from "@/components/files/volume-dialog";
 
 // ── Types ──
 
@@ -94,8 +98,13 @@ interface RootDir {
   icon: string;
   totalFiles?: number;
   totalSize?: number;
-  /** "storage": a mounted bucket (Storage page). */
-  kind?: "storage";
+  /** "volume": a volume added in Files (a folder of this server or a bucket). */
+  kind?: "volume" | "storage";
+  volumeKind?: "local" | "bucket";
+  /** The volume's id (settings). */
+  volumeId?: string;
+  /** False for a bucket not mounted on this server (its files cannot be listed here). */
+  browsable?: boolean;
   readOnly?: boolean;
 }
 
@@ -757,28 +766,37 @@ function RootItem({
   root,
   active,
   onClick,
+  onSettings,
 }: {
   root: RootDir;
   active: boolean;
   onClick: () => void;
+  /** Volumes: open their settings. */
+  onSettings?: () => void;
 }) {
-  const Icon = root.kind === "storage" ? Cloud : root.id === "polpo" ? HardDrive : FolderOpen;
+  const Icon = root.kind === "storage" || root.volumeKind === "bucket" ? Cloud : root.id === "polpo" ? HardDrive : FolderOpen;
   return (
-    <button
-      onClick={onClick}
+    <div
       className={cn(
-        "flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors text-sm",
+        "group flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors text-sm",
         active
           ? "bg-primary/10 text-primary ring-1 ring-primary/20"
           : "hover:bg-accent/40 text-muted-foreground hover:text-foreground",
       )}
     >
-      <Icon className="h-4 w-4 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium truncate">{root.name}</div>
-        <div className="text-[10px] opacity-60 truncate">{root.description}</div>
-      </div>
-    </button>
+      <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <Icon className="h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium truncate">{root.name}</div>
+          <div className="text-[10px] opacity-60 truncate">{root.description}</div>
+        </div>
+      </button>
+      {onSettings && (
+        <button onClick={onSettings} aria-label={`Settings of ${root.name}`} className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 focus:opacity-100">
+          <Settings2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -939,6 +957,19 @@ export function FilesPage() {
   useEffect(() => {
     localStorage.setItem("polpo-files-view", viewMode);
   }, [viewMode]);
+
+  // Volumes (folders of this server and buckets): added and edited from the sidebar
+  const storage = useStorage();
+  const [volumeDialog, setVolumeDialog] = useState<{ open: boolean; id?: string }>({ open: false });
+  const volumeEntry = volumeDialog.id ? storage.entries.find((e) => e.id === volumeDialog.id) : undefined;
+  const projectRoot = roots.find((r) => r.id === "workspace")?.absolutePath;
+  const refreshRoots = useCallback(() => {
+    fetch(`${base}/api/v1/files/roots`)
+      .then(r => r.json())
+      .then(json => { if (json.ok) setRoots(json.data.roots); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { if (!storage.loading) refreshRoots(); }, [storage.entries, storage.loading, refreshRoots]);
 
   // Fetch roots on mount
   useEffect(() => {
@@ -1698,16 +1729,31 @@ export function FilesPage() {
           <div className="flex flex-col h-full">
             <div className="p-2 flex flex-col gap-1 flex-1">
               <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                Locations
+                Volumes
               </div>
               {roots.map(root => (
                 <RootItem
                   key={root.id}
                   root={root}
                   active={activeRoot?.id === root.id}
-                  onClick={() => navigateTo(root.path === "." ? "." : root.path)}
+                  onClick={() => {
+                    if (root.browsable === false) {
+                      toast.info(`${root.name} is not mounted on this server: turn on "Browse in Files" in its settings to see its files here`);
+                      if (root.volumeId) setVolumeDialog({ open: true, id: root.volumeId });
+                      return;
+                    }
+                    navigateTo(root.path === "." ? "." : root.path);
+                  }}
+                  onSettings={root.volumeId ? () => setVolumeDialog({ open: true, id: root.volumeId }) : undefined}
                 />
               ))}
+              <button
+                onClick={() => setVolumeDialog({ open: true })}
+                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                <span className="font-medium">Add volume</span>
+              </button>
             </div>
             {activeRoot && (activeRoot.totalFiles != null || activeRoot.totalSize != null) && (
               <div className="px-3 py-2 border-t border-border/30 text-[10px] text-muted-foreground/60 space-y-0.5">
@@ -1854,6 +1900,13 @@ export function FilesPage() {
 
       {/* File preview dialog */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />
+      <VolumeDialog
+        open={volumeDialog.open}
+        entry={volumeEntry}
+        projectRoot={projectRoot}
+        storage={storage}
+        onClose={() => { setVolumeDialog({ open: false }); refreshRoots(); }}
+      />
     </div>
   );
 }

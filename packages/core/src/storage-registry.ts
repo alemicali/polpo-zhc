@@ -10,7 +10,11 @@
 import type { VaultRef } from "./vault-ref.js";
 import { SANDBOX_VOLUME_NAME_PATTERN, type SandboxVolumeAccess, type SandboxVolumeStrategy, type SandboxVolumeWriteBack } from "./sandbox.js";
 
-export type StorageProvider = "s3";
+/**
+ * Where a volume lives: "s3" is a bucket (S3, R2, MinIO…), "local" a folder of this server inside
+ * the project (it stays on the host: sandboxes on this machine see it, remote ones cannot).
+ */
+export type StorageProvider = "s3" | "local";
 export type StorageDriver = "rclone" | "mountpoint-s3";
 export type StorageAccess = "read" | "write";
 
@@ -51,6 +55,8 @@ export interface StorageEntry {
   slug: string;
   description?: string;
   provider: StorageProvider;
+  /** Local volumes: the folder on this server (absolute, inside the project). */
+  path?: string;
   /** S3 endpoint URL; empty for AWS S3 (derived from the region). R2: https://<account>.r2.cloudflarestorage.com */
   endpoint?: string;
   /** Region ("auto" for R2, e.g. "eu-central-1" for AWS). */
@@ -70,9 +76,10 @@ export interface StorageEntry {
   /** Per-run temporary keys for remote sandboxes (default: the fixed sandbox key). */
   temporaryCredentials?: StorageTemporaryCredentials;
   /**
-   * Sandbox volume (open Polpo semantics): this bucket (prefix) appears at /volumes/<slug> in the
-   * sandboxes of agents that are granted it and select it (sandbox.volumes). Its revision lives
-   * in the bucket (.polpo-volume.json), so hydrated write-backs can detect conflicts.
+   * Every entry is a volume (open Polpo semantics): agents that are granted it and select it
+   * (sandbox.volumes) get it in their sandbox. Buckets: at /volumes/<slug> in remote VMs, mounted
+   * or hydrated, with the revision in .polpo-volume.json for conflict detection. Local folders:
+   * only in sandboxes on this machine. Absent = defaults (mounted, access from readOnly).
    */
   volume?: StorageVolumeSettings;
   /** Enabled entries are mounted on the host at server start. */
@@ -83,7 +90,8 @@ export interface StorageEntry {
 }
 
 export interface StorageVolumeSettings {
-  enabled: boolean;
+  /** @deprecated every entry is a volume; ignored. */
+  enabled?: boolean;
   /** "mounted": live in the sandbox (driver of the entry); "hydrated": copied in at start, written back. */
   strategy: SandboxVolumeStrategy;
   /** The most any run may get. */
@@ -215,9 +223,16 @@ export function scopeStorageListing(grantPrefix: string, requested: string | und
 }
 
 /** Validation shared by the API, the tools and the stores' callers. Returns the first problem. */
-export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants"> & { temporaryCredentials?: StorageTemporaryCredentials; volume?: StorageVolumeSettings }): string | undefined {
+export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket" | "driver" | "readOnly" | "endpoint" | "grants"> & { provider?: StorageProvider; path?: string; temporaryCredentials?: StorageTemporaryCredentials; volume?: StorageVolumeSettings }): string | undefined {
   if (!STORAGE_SLUG_PATTERN.test(entry.slug)) return "Slug must be lowercase letters, digits and dashes";
-  if (!entry.bucket.trim() || /[\s/]/.test(entry.bucket)) return "Bucket must be a bucket name (no spaces or slashes)";
+  if (!SANDBOX_VOLUME_NAME_PATTERN.test(entry.slug)) return "A volume name must start with a letter (2–63 chars: letters, digits, - and _)";
+  const volume = (entry as { volume?: StorageVolumeSettings }).volume;
+  if (entry.provider === "local") {
+    if (!entry.path || !entry.path.startsWith("/")) return "A local volume needs a folder of this server";
+    if (volume?.strategy === "hydrated") return "A local volume stays on this server: it cannot be hydrated";
+    return validateGrants(entry.grants);
+  }
+  if (!(entry.bucket ?? "").trim() || /[\s/]/.test(entry.bucket)) return "Bucket must be a bucket name (no spaces or slashes)";
   if (entry.driver === "mountpoint-s3" && !entry.readOnly) return 'The "mountpoint-s3" driver is allowed only for read-only storage';
   if (entry.endpoint) {
     try {
@@ -235,16 +250,18 @@ export function validateStorageEntry(entry: Pick<StorageEntry, "slug" | "bucket"
       }
     }
   }
-  const volume = (entry as { volume?: StorageVolumeSettings }).volume;
-  if (volume?.enabled) {
-    if (!SANDBOX_VOLUME_NAME_PATTERN.test(entry.slug)) return "As a sandbox volume, the slug must start with a letter (2–63 chars: letters, digits, - and _)";
+  if (volume) {
     if (volume.strategy !== "mounted" && volume.strategy !== "hydrated") return 'Volume strategy must be "mounted" or "hydrated"';
     if (volume.access !== "read-only" && volume.access !== "read-write") return 'Volume access must be "read-only" or "read-write"';
     if (volume.access === "read-write" && entry.readOnly) return "A read-only storage entry can only be a read-only volume";
     if (volume.strategy === "mounted" && volume.access === "read-write" && entry.driver === "mountpoint-s3") return 'A read-write mounted volume needs the "rclone" driver (mountpoint-s3 cannot edit files)';
   }
+  return validateGrants(entry.grants);
+}
+
+function validateGrants(grants: StorageGrant[]): string | undefined {
   const agents = new Set<string>();
-  for (const grant of entry.grants) {
+  for (const grant of grants) {
     if (grant.writeBack !== undefined && grant.writeBack !== "auto" && grant.writeBack !== "manual") return 'Grant write-back must be "auto" or "manual"';
     if (!grant.agent.trim()) return "Every grant needs an agent";
     if (agents.has(grant.agent)) return `Agent "${grant.agent}" has more than one grant`;
