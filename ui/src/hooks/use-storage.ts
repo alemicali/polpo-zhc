@@ -7,7 +7,7 @@ export type StorageAccess = "read" | "write";
 export type StorageDriver = "rclone" | "mountpoint-s3";
 export type StorageGrant = { id?: string; agent: string; access: StorageAccess; prefix?: string; writeBack?: "auto" | "manual" };
 /** Sandbox volume (open Polpo): the bucket at /volumes/<slug> in the sandboxes that select it. */
-export type StorageVolume = { enabled: boolean; strategy: "mounted" | "hydrated"; access: "read-only" | "read-write"; writeBack?: "auto" | "manual"; label?: string };
+export type StorageVolume = { enabled?: boolean; strategy: "mounted" | "hydrated"; access: "read-only" | "read-write"; writeBack?: "auto" | "manual"; label?: string };
 export type StorageImportJob = { id: string; entry: string; source: string; target: string; state: "running" | "done" | "failed"; files?: number; error?: string; startedAt: string; finishedAt?: string };
 export type MountState = "unmounted" | "mounting" | "mounted" | "error";
 export type MountStatus = { entryId: string; slug: string; state: MountState; path: string; error?: string; since: string; restarts: number; pid?: number };
@@ -23,7 +23,11 @@ export type StorageTemporarySettings =
  * (owner + service); `keys` says whether each reference resolves, never the values.
  */
 export type StorageEntry = {
-  id: string; name: string; slug: string; description?: string; provider: "s3";
+  id: string; name: string; slug: string; description?: string;
+  /** "s3": a bucket (S3, R2…); "local": a folder of this server inside the project. */
+  provider: "s3" | "local";
+  /** Local volumes: the folder on this server (absolute). */
+  path?: string;
   endpoint?: string; region?: string; bucket: string; prefix?: string; pathStyle?: boolean;
   driver: StorageDriver; readOnly: boolean; enabled: boolean;
   cache?: { mode?: "writes" | "full"; maxSizeMb?: number; maxAgeHours?: number };
@@ -41,7 +45,7 @@ export type StorageEntry = {
 
 /** Create/update body (PUT replaces the entry: references left out or null are cleared). */
 export type StorageEntryInput = Omit<StorageEntry, "id" | "credentials" | "sandboxCredentials" | "temporaryCredentials" | "volume" | "keys" | "mount" | "createdAt" | "updatedAt" | "provider"> & {
-  provider?: "s3";
+  provider?: "s3" | "local";
   credentials?: VaultRef | null;
   sandboxCredentials?: VaultRef | null;
   /** null = the fixed sandbox key. */
@@ -113,7 +117,7 @@ export function useStorage() {
 /** The editable fields of an entry, for PUT (which replaces them, vault references included). */
 export function storageEntryInput(entry: StorageEntry, override?: Partial<StorageEntryInput>): StorageEntryInput {
   return {
-    name: entry.name, slug: entry.slug, description: entry.description, endpoint: entry.endpoint, region: entry.region,
+    name: entry.name, slug: entry.slug, description: entry.description, provider: entry.provider, path: entry.path, endpoint: entry.endpoint, region: entry.region,
     bucket: entry.bucket, prefix: entry.prefix, pathStyle: entry.pathStyle, driver: entry.driver, readOnly: entry.readOnly,
     enabled: entry.enabled, cache: entry.cache, grants: entry.grants,
     credentials: entry.credentials ?? null, sandboxCredentials: entry.sandboxCredentials ?? null,

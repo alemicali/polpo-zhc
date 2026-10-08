@@ -402,6 +402,8 @@ export const VOLUME_REVISION_OBJECT = ".polpo-volume.json";
  */
 export interface ResolvedSandboxVolume {
   name: string;
+  /** "local": a folder of this server (never attached to remote VMs); "bucket": S3/R2. */
+  kind?: "local" | "bucket";
   strategy: SandboxVolumeStrategy;
   /** Where the run sees it: /volumes/<name> in remote VMs, the host mount directory on this machine. */
   mountPath: string;

@@ -322,11 +322,11 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
 
   it("resolves selected volumes: granted entries only, narrowed by the volume, the grant and the run", async () => {
     const { runtime, entry } = await setup([{ id: "a", agent: "alice", access: "write", prefix: "clients/acme/" }, { id: "b", agent: "bob", access: "read" }], { prefix: "team" });
-    // not a volume yet: a grant error, as in open Polpo
-    await expect(runtime.volumesFor("alice", [{ name: "docs" }], "remote")).rejects.toBeInstanceOf(SandboxVolumeGrantError);
+    // a name that is not a volume: a grant error, as in open Polpo
+    await expect(runtime.volumesFor("alice", [{ name: "nope" }], "remote")).rejects.toBeInstanceOf(SandboxVolumeGrantError);
     await runtime.update(entry.id, { volume: { enabled: true, strategy: "hydrated", access: "read-write" }, sandboxCredentials: SANDBOX });
     expect(await runtime.volumesFor("alice", [{ name: "docs" }], "remote")).toEqual([{
-      name: "docs", strategy: "hydrated", mountPath: "/volumes/docs", access: "read-write", writeBack: "auto", driver: "rclone",
+      name: "docs", kind: "bucket", strategy: "hydrated", mountPath: "/volumes/docs", access: "read-write", writeBack: "auto", driver: "rclone",
       remote: { endpoint, region: "us-east-1", bucket: "bucket1", prefix: "team/clients/acme/", pathStyle: true, credentials: { accessKeyId: "sbx", secretAccessKey: "sbx-secret" } },
     }]);
     // a read grant makes it read-only; the run can ask for manual write-back or read-only
@@ -345,11 +345,40 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
 
   it("validates volume settings", () => {
     const base = { slug: "docs", bucket: "b", driver: "rclone" as const, readOnly: false, grants: [] };
+    expect(validateStorageEntry({ ...base, provider: "local", bucket: "", path: "/srv/project/dev" })).toBeUndefined();
+    expect(validateStorageEntry({ ...base, provider: "local", bucket: "" })).toMatch(/folder of this server/);
+    expect(validateStorageEntry({ ...base, provider: "local", bucket: "", path: "/srv/x", volume: { strategy: "hydrated", access: "read-write" } })).toMatch(/cannot be hydrated/);
     expect(validateStorageEntry({ ...base, volume: { enabled: true, strategy: "mounted", access: "read-write" } })).toBeUndefined();
     expect(validateStorageEntry({ ...base, readOnly: true, volume: { enabled: true, strategy: "mounted", access: "read-write" } })).toMatch(/read-only/);
     expect(validateStorageEntry({ ...base, readOnly: true, driver: "mountpoint-s3", volume: { enabled: true, strategy: "mounted", access: "read-only" } })).toBeUndefined();
     expect(validateStorageEntry({ ...base, slug: "1docs", volume: { enabled: true, strategy: "mounted", access: "read-only" } })).toMatch(/start with a letter/);
     expect(validateStorageEntry({ ...base, grants: [{ id: "x", agent: "a", access: "write", writeBack: "later" as any }] })).toMatch(/write-back/);
+  });
+
+  it("local volumes: a folder of this server, seen in place on this machine, never attached to remote sandboxes", async () => {
+    const { runtime } = await setup([]);
+    const folder = join(polpoDir, "project", "dev");
+    await mkdir(folder, { recursive: true });
+    const local = await runtime.create(entryInput({ name: "Dev", slug: "dev", provider: "local", path: folder, bucket: "", grants: [{ id: "g", agent: "alice", access: "write" }] }));
+    expect(local.mount).toMatchObject({ state: "mounted", path: folder });
+    expect(await runtime.test("dev")).toMatchObject({ ok: true });
+    expect(await runtime.volumesFor("alice", [{ name: "dev" }], "host")).toEqual([
+      { name: "dev", kind: "local", strategy: "mounted", mountPath: folder, hostPath: folder, access: "read-write", driver: "rclone" },
+    ]);
+    const [remote] = await runtime.volumesFor("alice", [{ name: "dev" }], "remote");
+    expect(remote).toMatchObject({ name: "dev", kind: "local" });
+    expect(remote!.remote).toBeUndefined();
+    expect(remote!.hostPath).toBeUndefined();
+    // bucket operations do not apply to a folder
+    await expect(runtime.listObjects("alice", "dev")).rejects.toThrow(/folder on this server/);
+    await expect(runtime.importFolder("dev", folder)).rejects.toThrow(/already a folder/);
+    await expect(runtime.volumesFor("bob", [{ name: "dev" }], "host")).rejects.toThrow(/not granted/);
+  });
+
+  it("every entry is a volume (defaults when no volume settings are given)", async () => {
+    const { runtime, entry } = await setup([{ id: "a", agent: "alice", access: "write" }]);
+    await runtime.update(entry.id, { sandboxCredentials: SANDBOX });
+    expect((await runtime.volumesFor("alice", [{ name: "docs" }], "remote"))[0]).toMatchObject({ kind: "bucket", strategy: "mounted", access: "read-write", mountPath: "/volumes/docs" });
   });
 
   it("gives remote mounts only to entries with sandbox credentials, and host mounts only when mounted", async () => {
@@ -395,19 +424,19 @@ describe.skipIf(!RCLONE)("storage against a local S3 server", () => {
     expect(await test.json()).toMatchObject({ ok: true, data: { ok: true } });
     const invalid = await app.request("/", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "X", slug: "x", bucket: "b", driver: "mountpoint-s3", readOnly: false }),
+      body: JSON.stringify({ name: "X", slug: "xx", bucket: "b", driver: "mountpoint-s3", readOnly: false }),
     });
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error).toMatch(/read-only/);
     // keys are never sent: a key-shaped body is not a reference
     const keysInBody = await app.request("/", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Y", slug: "y", bucket: "b", credentials: { accessKeyId: AK, secretAccessKey: SK } }),
+      body: JSON.stringify({ name: "Y", slug: "yy", bucket: "b", credentials: { accessKeyId: AK, secretAccessKey: SK } }),
     });
     expect(keysInBody.status).toBe(400);
     const systemOwner = await app.request("/", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Y", slug: "y", bucket: "b", credentials: { owner: "$storage", service: "storage:x" } }),
+      body: JSON.stringify({ name: "Y", slug: "yy", bucket: "b", credentials: { owner: "$storage", service: "storage:x" } }),
     });
     expect(systemOwner.status).toBe(400);
     // updates go through the entry: null clears the sandbox reference
@@ -542,10 +571,10 @@ describe("Files roots for mounted buckets", () => {
     await writeFile(join(workDir, "readme.md"), "hi");
     const app = fileRoutes(() => ({
       polpoDir, workDir, agentWorkDir: workDir, fs: new NodeFileSystem(), emit: () => {},
-      storageRoots: async () => [{ slug: "docs", name: "Docs", path: mount, readOnly: true }],
+      storageRoots: async () => [{ id: "e1", slug: "docs", name: "Docs", path: mount, readOnly: true, kind: "bucket" as const, mounted: true }],
     }));
     const roots = (await (await app.request("/roots")).json()).data.roots;
-    expect(roots.find((r: any) => r.id === "storage:docs")).toMatchObject({ name: "Docs", path: ".polpo/mounts/docs", absolutePath: mount, kind: "storage", readOnly: true });
+    expect(roots.find((r: any) => r.id === "storage:docs")).toMatchObject({ name: "Docs", path: ".polpo/mounts/docs", absolutePath: mount, kind: "volume", volumeKind: "bucket", volumeId: "e1", browsable: true, readOnly: true });
     // The mount's files are not counted in the project or .polpo stats.
     expect(roots.find((r: any) => r.id === "polpo").totalSize).toBe(0);
     const list = await (await app.request("/list?path=.polpo/mounts/docs/reports")).json();

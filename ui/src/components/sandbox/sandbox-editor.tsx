@@ -239,8 +239,9 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
 }
 
 /**
- * Volumes (open Polpo): Storage entries enabled as volumes and granted to the agent, attached at
- * /volumes/<name>. The instance can preselect; an agent (and its missions and tasks) only narrow.
+ * Volumes (open Polpo): the volumes granted to the agent (added in Files). Buckets appear at
+ * /volumes/<name> in every sandbox; folders of this server only in sandboxes on this machine.
+ * The instance can preselect; an agent (and its missions and tasks) only narrow.
  */
 function VolumesField({ level, value, set, agentName }: {
   level: "instance" | "agent";
@@ -249,13 +250,14 @@ function VolumesField({ level, value, set, agentName }: {
   agentName?: string;
 }) {
   const storage = useStorage();
-  const candidates = storage.entries.filter((e) => e.volume?.enabled && (level === "instance" || e.grants.some((g) => g.agent === agentName || g.agent === "*")));
+  const candidates = storage.entries.filter((e) => level === "instance" || e.grants.some((g) => g.agent === agentName || g.agent === "*"));
+  const remote = value.provider === "daytona" || value.provider === "e2b";
   const selected = value.volumes ?? [];
   if (!candidates.length && !selected.length) {
     return (
-      <Field label="Volumes" hint="Persistent files in R2/S3, attached at /volumes/<name>.">
+      <Field label="Volumes" hint="Folders of this server or buckets the agent can work on.">
         <p className="text-[10px] text-muted-foreground leading-tight">
-          No volume {level === "agent" ? "granted to this agent" : "yet"}: enable one on a bucket in <Link to="/storage" className="underline">Storage</Link> (Volume tab) and grant it.
+          No volume {level === "agent" ? "granted to this agent" : "yet"}: add one in <Link to="/files" className="underline">Files</Link> (Volumes → Add volume) and give it to this agent.
         </p>
       </Field>
     );
@@ -267,17 +269,20 @@ function VolumesField({ level, value, set, agentName }: {
   const update = (name: string, patch: Partial<SandboxVolumeSelection>) =>
     set({ volumes: selected.map((v) => v.name === name ? Object.fromEntries(Object.entries({ ...v, ...patch }).filter(([, x]) => x !== undefined)) as unknown as SandboxVolumeSelection : v) });
   return (
-    <Field label="Volumes" hint="Attached at /volumes/<name> in this sandbox. Missions and tasks can only narrow the list. Nothing selected: inherit.">
+    <Field label="Volumes" hint="Buckets: at /volumes/<name> in every sandbox. Folders of this server: only when the agent runs on this machine. Missions and tasks can only narrow the list. Nothing selected: inherit.">
       <div className="space-y-1.5">
         {candidates.map((e) => {
           const sel = selected.find((v) => v.name === e.slug);
-          const rw = e.volume!.access === "read-write" && !e.readOnly;
+          const local = e.provider === "local";
+          const strategy = local ? "mounted" : e.volume?.strategy ?? "mounted";
+          const rw = (e.volume?.access ?? "read-write") === "read-write" && !e.readOnly;
           return (
             <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs">
               <label className="flex min-w-0 flex-1 items-center gap-2">
                 <input type="checkbox" checked={!!sel} onChange={(ev) => toggle(e.slug, ev.target.checked)} />
-                <span className="font-mono truncate">/volumes/{e.slug}</span>
-                <Badge variant="outline" className="text-[9px]">{e.volume!.strategy}</Badge>
+                <span className="font-mono truncate">{local ? e.name : `/volumes/${e.slug}`}</span>
+                <Badge variant="outline" className="text-[9px]">{local ? "this server only" : strategy === "hydrated" ? "copy" : "live"}</Badge>
+                {sel && local && remote && <span className="text-[10px] text-amber-500">not attached in remote sandboxes</span>}
               </label>
               {sel && rw && (
                 <Select value={sel.access ?? "__max"} onValueChange={(v) => update(e.slug, { access: v === "__max" ? undefined : v as "read-only" | "read-write", ...(v === "read-only" ? { writeBack: undefined } : {}) })}>
@@ -288,7 +293,7 @@ function VolumesField({ level, value, set, agentName }: {
                   </SelectContent>
                 </Select>
               )}
-              {sel && rw && e.volume!.strategy === "hydrated" && sel.access !== "read-only" && (
+              {sel && rw && strategy === "hydrated" && sel.access !== "read-only" && (
                 <Select value={sel.writeBack ?? "__default"} onValueChange={(v) => update(e.slug, { writeBack: v === "__default" ? undefined : v as "auto" | "manual" })}>
                   <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>

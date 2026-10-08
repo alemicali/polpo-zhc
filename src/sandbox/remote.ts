@@ -332,7 +332,9 @@ export class RemoteVmSession implements SandboxSession {
   private async prepareVolumes(driver: RemoteDriver): Promise<void> {
     const volumes = this.remoteVolumes();
     for (const v of (this.vm.opts.volumes ?? []).filter((x) => !x.remote)) {
-      this.vm.emit({ kind: "warning", message: `Volume "${v.name}" is not attached: its storage entry has no keys for sandboxes` });
+      this.vm.emit({ kind: "warning", message: v.kind === "local"
+        ? `Volume "${v.name}" is a folder on this server: it stays here and is not attached to remote sandboxes`
+        : `Volume "${v.name}" is not attached: its bucket has no keys for sandboxes` });
     }
     if (!volumes.length) return;
     if (this.vm.opts.sandbox.network.mode === "deny") {

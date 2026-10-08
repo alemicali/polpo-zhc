@@ -69,7 +69,7 @@ export function ChatNavigationEffects() {
       case "apps":           route = "/apps"; break;
       case "app":            route = id ? `/apps/${encodeURIComponent(id)}` : "/apps"; break;
       case "data":           route = "/data"; break;
-      case "storage":        route = "/storage"; break;
+      case "storage":        route = "/files"; break;
       case "views":          route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
       case "view":           route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
       case "brain":          route = id ? `/brain?entity=${encodeURIComponent(id)}` : "/brain"; break;

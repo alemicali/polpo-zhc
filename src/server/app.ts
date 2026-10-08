@@ -888,9 +888,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
     // Mounted buckets appear as extra roots (their files are browsed through the mount).
+    // every volume (local folders and buckets); buckets are browsable once mounted here
     storageRoots: async () => (await activeStorage().list())
-      .filter((entry) => entry.mount.state === "mounted")
-      .map((entry) => ({ slug: entry.slug, name: entry.name, path: entry.mount.path, readOnly: entry.readOnly })),
+      .map((entry) => ({ id: entry.id, slug: entry.slug, name: entry.name, path: entry.mount.path, readOnly: entry.readOnly, kind: entry.provider === "local" ? "local" as const : "bucket" as const, mounted: entry.mount.state === "mounted" })),
   })));
 
   authed.route("/audio", audioRoutes());

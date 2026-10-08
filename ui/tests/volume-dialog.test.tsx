@@ -6,10 +6,11 @@ vi.mock("@polpo-ai/react", () => ({
   useEvents: () => ({ events: [] }),
   useAgents: () => ({ agents: [{ name: "alice" }], isLoading: false }),
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() } }));
 
 import { MemoryRouter } from "react-router-dom";
-import { StoragePage } from "../src/pages/storage";
+import { VolumeDialog } from "../src/components/files/volume-dialog";
+import { useStorage } from "../src/hooks/use-storage";
 import { TooltipProvider } from "../src/components/ui/tooltip";
 import { resetVaultCatalogCache } from "../src/components/vault/vault-ref-picker";
 
@@ -56,8 +57,16 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render() {
-  await act(async () => root.render(<MemoryRouter><TooltipProvider><StoragePage /></TooltipProvider></MemoryRouter>));
+/** The Files page's dialog for a new volume, or for the stored one. */
+function Harness({ edit }: { edit?: boolean }) {
+  const storage = useStorage();
+  const entry = edit ? storage.entries[0] : undefined;
+  if (edit && !entry) return null;
+  return <VolumeDialog open entry={entry as any} projectRoot="/srv/project" storage={storage} onClose={() => {}} />;
+}
+
+async function render(edit = false) {
+  await act(async () => root.render(<MemoryRouter><TooltipProvider><Harness edit={edit} /></TooltipProvider></MemoryRouter>));
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
@@ -82,86 +91,92 @@ async function pick(dialog: HTMLElement, label: string, ref: string) {
   await act(async () => option.click());
 }
 
-test("lists buckets with their mount state and which vault entries hold the keys, never values", async () => {
-  await render();
-  expect(container.textContent).toContain("Shared docs");
-  expect(container.textContent).toContain("Mounted");
-  expect(container.textContent).toContain("acct.r2.cloudflarestorage.com/docs/team/");
-  expect(container.textContent).toContain("Set");
-  expect(container.textContent).toContain("alice · r2-main");
-  expect(container.textContent).toContain("Not set");
-  expect(button("Unmount", container)).toBeTruthy();
-  expect(button("Browse in Files", container)).toBeTruthy();
-});
+const dialog = () => document.querySelector("[role=dialog]") as HTMLElement;
+const inputs = () => [...dialog().querySelectorAll("input")] as HTMLInputElement[];
+const byPlaceholder = (text: string) => inputs().find((i) => i.placeholder === text)!;
+const posted = () => requests.find((r) => r.method === "POST" && r.url.endsWith("/api/v1/storage"))?.body as Record<string, any> | undefined;
 
-test("adds an R2 bucket from the preset: endpoint from the account id, keys referenced from the vault", async () => {
+test("adds an R2 bucket volume: endpoint from the account id, keys referenced from the vault, never typed", async () => {
   await render();
-  await act(async () => button("Add bucket", container).click());
-  const dialog = document.querySelector("[role=dialog]") as HTMLElement;
-  expect(dialog.textContent).toContain("Cloudflare R2");
-  expect(dialog.textContent).toContain("Sandbox key (optional)");
-  // no key input fields: only vault entries are chosen
-  expect([...dialog.querySelectorAll("input")].some((i) => (i as HTMLInputElement).type === "password")).toBe(false);
-  const inputs = () => [...dialog.querySelectorAll("input")] as HTMLInputElement[];
-  const byPlaceholder = (text: string) => inputs().find((i) => i.placeholder === text)!;
+  expect(dialog().textContent).toContain("Add a volume");
+  expect(inputs().some((i) => i.type === "password")).toBe(false);
   await act(async () => {
-    type(byPlaceholder("Shared documents"), "Media");
-    type(byPlaceholder("my-bucket"), "media-bucket");
+    type(byPlaceholder("listini"), "Media");
+    type(byPlaceholder("polpo-listini"), "media-bucket");
     type(byPlaceholder("0123456789abcdef0123456789abcdef"), "abc123");
   });
-  expect(dialog.textContent).toContain("https://abc123.r2.cloudflarestorage.com");
-  expect(button("Add bucket", dialog).disabled).toBe(true); // the main keys' entry is required
-  await pick(dialog, "Access key vault entry", "alice/r2-main");
-  await pick(dialog, "Sandbox key vault entry", "alice/r2-limited");
-  expect(dialog.textContent).toContain("alice · r2-limited");
-  await act(async () => button("Add bucket", dialog).click());
+  expect(dialog().textContent).toContain("https://abc123.r2.cloudflarestorage.com");
+  expect(dialog().textContent).toContain("In sandboxes: /volumes/media");
+  expect(button("Add volume", dialog()).disabled).toBe(true); // the access key's entry is required
+  await pick(dialog(), "Access key vault entry", "alice/r2-main");
+  await pick(dialog(), "Sandbox key vault entry", "alice/r2-limited");
+  await act(async () => button("Add volume", dialog()).click());
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-  const post = requests.find((r) => r.method === "POST" && r.url.endsWith("/api/v1/storage"));
-  expect(post?.body).toMatchObject({
-    name: "Media", slug: "media", bucket: "media-bucket", endpoint: "https://abc123.r2.cloudflarestorage.com", region: "auto",
+  expect(posted()).toMatchObject({
+    name: "Media", slug: "media", provider: "s3", bucket: "media-bucket", endpoint: "https://abc123.r2.cloudflarestorage.com", region: "auto",
     pathStyle: true, driver: "rclone", readOnly: false, enabled: true,
     credentials: { owner: "alice", service: "r2-main" }, sandboxCredentials: { owner: "alice", service: "r2-limited" }, temporaryCredentials: null,
+    volume: { strategy: "mounted", access: "read-write" },
   });
+  expect(posted()!.prefix).toBeUndefined();
+});
+
+test("bucket volumes are live by default; write-back is asked only for copies", async () => {
+  await render();
+  const modeTrigger = [...dialog().querySelectorAll("label")].find((l) => l.textContent?.startsWith("Mode"))!.querySelector("button")!;
+  expect(modeTrigger.textContent).toContain("Live");
+  expect(dialog().textContent).not.toContain("Write back");
+});
+
+test("adds a folder of this server: no bucket, no keys, stays on the host", async () => {
+  await render();
+  await act(async () => button("Folder on this server", dialog()).click());
+  expect(dialog().textContent).not.toContain("Access key (vault entry)");
+  expect(dialog().textContent).not.toContain("In sandboxes");
+  await act(async () => {
+    type(byPlaceholder("listini"), "Progetto X");
+    type(byPlaceholder("dev/progetto-x"), "dev/progetto-x");
+  });
+  await act(async () => button("Add volume", dialog()).click());
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  expect(posted()).toMatchObject({ name: "Progetto X", slug: "progetto-x", provider: "local", path: "dev/progetto-x", readOnly: false, volume: { strategy: "mounted", access: "read-write" } });
+  expect(posted()!.credentials).toBeUndefined();
 });
 
 test("editing keeps the references; temporary R2 keys reference the API token entry", async () => {
-  await render();
-  await act(async () => button("Settings", container).click());
-  const dialog = document.querySelector("[role=dialog]") as HTMLElement;
-  expect(dialog.textContent).toContain("alice · r2-main");
-  await act(async () => button("Temporary keys per run", dialog).click());
-  const parent = [...dialog.querySelectorAll("input")].find((i) => i.closest("label")?.textContent?.includes("Parent access key ID")) as HTMLInputElement;
+  await render(true);
+  expect(dialog().textContent).toContain("Volume Shared docs");
+  expect(dialog().textContent).toContain("alice · r2-main");
+  await act(async () => button("Temporary keys per run", dialog()).click());
+  const parent = inputs().find((i) => i.closest("label")?.textContent?.includes("Parent access key ID"))!;
   await act(async () => type(parent, "PARENT"));
-  expect(button("Save changes", dialog).disabled).toBe(true); // the token entry is required
-  await pick(dialog, "Cloudflare API token vault entry", "ops/cloudflare");
-  await act(async () => button("Save changes", dialog).click());
+  expect(button("Save changes", dialog()).disabled).toBe(true); // the token entry is required
+  await pick(dialog(), "Cloudflare API token vault entry", "ops/cloudflare");
+  await act(async () => button("Save changes", dialog()).click());
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   const put = requests.find((r) => r.method === "PUT" && r.url.endsWith("/api/v1/storage/e1"));
   expect(put?.body).toMatchObject({
     credentials: { owner: "alice", service: "r2-main" }, sandboxCredentials: null,
+    // an existing prefix is kept as it is
+    prefix: "team/",
     temporaryCredentials: { kind: "r2", accountId: "acct", parentAccessKeyId: "PARENT", token: { owner: "ops", service: "cloudflare" } },
   });
 });
 
 test("switching to AWS S3 clears the endpoint and uses virtual-hosted addressing", async () => {
   await render();
-  await act(async () => button("Add bucket", container).click());
-  const dialog = document.querySelector("[role=dialog]") as HTMLElement;
-  await act(async () => button("AWS S3", dialog).click());
-  const region = [...dialog.querySelectorAll("input")].find((i) => (i as HTMLInputElement).placeholder === "us-east-1") as HTMLInputElement;
-  expect(region.value).toBe("us-east-1");
-  expect(dialog.textContent).not.toContain("Cloudflare account ID");
-  const pathStyle = [...dialog.querySelectorAll("label")].find((l) => l.textContent?.includes("Path-style URLs"))!.querySelector("input") as HTMLInputElement;
+  await act(async () => button("AWS S3", dialog()).click());
+  expect(byPlaceholder("us-east-1").value).toBe("us-east-1");
+  expect(dialog().textContent).not.toContain("Cloudflare account ID");
+  const pathStyle = [...dialog().querySelectorAll("label")].find((l) => l.textContent?.includes("Path-style URLs"))!.querySelector("input") as HTMLInputElement;
   expect(pathStyle.checked).toBe(false);
 });
 
-test("removing a bucket asks for confirmation first", async () => {
-  await render();
-  await act(async () => button("Remove bucket", container).click());
+test("removing a volume asks for confirmation first, and never touches the bucket", async () => {
+  await render(true);
+  await act(async () => button("Remove", dialog()).click());
   expect(requests.some((r) => r.method === "DELETE")).toBe(false);
-  const dialog = document.querySelector("[role=dialog]") as HTMLElement;
-  expect(dialog.textContent).toContain("Remove Shared docs?");
-  await act(async () => button("Remove bucket", dialog).click());
+  await act(async () => button("Confirm remove", dialog()).click());
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   expect(requests.some((r) => r.method === "DELETE" && r.url.endsWith("/api/v1/storage/e1"))).toBe(true);
 });

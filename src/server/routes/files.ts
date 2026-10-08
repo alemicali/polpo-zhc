@@ -156,8 +156,8 @@ export interface FileRouteDeps {
   agentWorkDir: string;
   fs: FileSystem;
   emit: (event: string, data: any) => void;
-  /** Mounted storage buckets, shown as extra roots (they live under <polpoDir>/mounts). */
-  storageRoots?: () => Promise<Array<{ slug: string; name: string; path: string; readOnly: boolean }>>;
+  /** Volumes, shown as extra roots: local folders, and buckets (browsable once mounted under <polpoDir>/mounts). */
+  storageRoots?: () => Promise<Array<{ id?: string; slug: string; name: string; path: string; readOnly: boolean; kind?: "local" | "bucket"; mounted?: boolean }>>;
 }
 
 // ── Route factory ────────────────────────────────────────────────────────────
@@ -235,14 +235,18 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
 
     for (const storage of await deps.storageRoots?.().catch(() => []) ?? []) {
       const rel = toApiPath(relative(workDir, storage.path));
+      const local = storage.kind === "local";
       roots.push({
         id: `storage:${storage.slug}`,
         name: storage.name,
         path: rel.startsWith("..") ? toApiPath(storage.path) : rel,
         absolutePath: storage.path,
-        description: storage.readOnly ? "Storage bucket (read-only)" : "Storage bucket",
-        icon: "cloud",
-        kind: "storage",
+        description: `${local ? "Folder on this server" : storage.mounted === false ? "Bucket (not mounted here)" : "Bucket"}${storage.readOnly ? " · read-only" : ""}`,
+        icon: local ? "folder" : "cloud",
+        kind: "volume",
+        volumeKind: local ? "local" : "bucket",
+        volumeId: storage.id,
+        browsable: storage.mounted !== false,
         readOnly: storage.readOnly,
       });
     }
