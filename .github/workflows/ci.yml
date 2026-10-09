@@ -54,6 +54,15 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The sandbox tests run commands in bubblewrap. Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor
+      # by default: an AppArmor profile gives bwrap alone the permission, the way Ubuntu does for the programs that need it.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+          printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+            'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' | sudo tee /etc/apparmor.d/bwrap >/dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          bwrap --ro-bind / / true
       # Tests import the workspace packages (@polpo-ai/core, drizzle, server, sdk…) from their dist.
       - run: pnpm run build:packages && pnpm --filter @polpo-ai/sdk build
       - run: pnpm run test run
