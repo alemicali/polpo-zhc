@@ -289,7 +289,7 @@ describe.skipIf(!bwrapAvailable())("network rules inside a real jail", () => {
     expect(denied).toContainEqual({ host: "127.0.0.1", port: otherPort, reason: "not-allowed" });
 
     const ssh = await ws.exec("echo $GIT_SSH_COMMAND; echo $ALL_PROXY");
-    expect(ssh.stdout).toMatch(/ProxyCommand='(\/usr\/bin\/)?node \/run\/polpo-net\/connect\.cjs %h %p'/);
+    expect(ssh.stdout).toMatch(/ProxyCommand='\S*node \/run\/polpo-net\/connect\.cjs %h %p'/);
     expect(ssh.stdout).toContain("socks5h://127.0.0.1:3128");
     await ws.dispose();
   });

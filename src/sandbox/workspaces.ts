@@ -231,7 +231,10 @@ export class BwrapWorkspace extends HostFsWorkspace {
     if (network.mode === "allowlist" || network.mode === "open") {
       const proxy = await this.networkProxy();
       args.push("--ro-bind", proxy.dir, "/run/polpo-net");
-      const bridge = networkBridge(command, this.bridgePort, "/usr/bin/node");
+      // the bridge runs on the server's own node (nvm, /usr/local, /opt…), bound read-only when the jail does not see it
+      const nodeBin = process.execPath;
+      if (!insideAny(nodeBin, SYSTEM_RO) && !insideAny(nodeBin, toolDirs)) args.push("--ro-bind", nodeBin, nodeBin);
+      const bridge = networkBridge(command, this.bridgePort, nodeBin);
       Object.assign(env, bridge.env);
       script = bridge.script;
     }
