@@ -12,7 +12,7 @@ import { MemoryRouter } from "react-router-dom";
 import { VolumeDialog } from "../src/components/files/volume-dialog";
 import { useStorage } from "../src/hooks/use-storage";
 import { TooltipProvider } from "../src/components/ui/tooltip";
-import { resetVaultCatalogCache } from "../src/components/vault/vault-ref-picker";
+import { resetVaultCatalogCache } from "../src/hooks/use-vault-catalog";
 
 const CATALOG = [
   { owner: "alice", service: "r2-main", type: "custom", label: "R2 main key", keys: ["accessKeyId", "secretAccessKey"], allowedAgents: [] },
@@ -62,7 +62,7 @@ function Harness({ edit }: { edit?: boolean }) {
   const storage = useStorage();
   const entry = edit ? storage.entries[0] : undefined;
   if (edit && !entry) return null;
-  return <VolumeDialog open entry={entry as any} projectRoot="/srv/project" storage={storage} onClose={() => {}} />;
+  return <VolumeDialog open entry={entry} projectRoot="/srv/project" storage={storage} onClose={() => {}} />;
 }
 
 async function render(edit = false) {
@@ -94,7 +94,7 @@ async function pick(dialog: HTMLElement, label: string, ref: string) {
 const dialog = () => document.querySelector("[role=dialog]") as HTMLElement;
 const inputs = () => [...dialog().querySelectorAll("input")] as HTMLInputElement[];
 const byPlaceholder = (text: string) => inputs().find((i) => i.placeholder === text)!;
-const posted = () => requests.find((r) => r.method === "POST" && r.url.endsWith("/api/v1/storage"))?.body as Record<string, any> | undefined;
+const posted = () => requests.find((r) => r.method === "POST" && r.url.endsWith("/api/v1/storage"))?.body as Record<string, unknown> | undefined;
 
 test("adds an R2 bucket volume: endpoint from the account id, keys referenced from the vault, never typed", async () => {
   await render();

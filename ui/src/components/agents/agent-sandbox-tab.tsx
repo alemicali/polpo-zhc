@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SandboxEditor } from "@/components/sandbox/sandbox-editor";
-import { useSandboxOverview } from "@/components/sandbox/sandbox-settings";
+import { useSandboxOverview } from "@/hooks/use-sandbox-overview";
 import { compactSandbox, describeSandbox, sandboxApi, PLACEMENT_INFO, toolPlacement, type SandboxSettings, type ToolPlacement } from "@/lib/sandbox-api";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";

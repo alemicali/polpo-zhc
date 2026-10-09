@@ -1,7 +1,7 @@
 /**
  * Config → Sandbox: instance defaults and the sandbox every agent ends up with.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Box, Loader2, RotateCcw, Save, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -10,30 +10,15 @@ import { Badge } from "@/components/ui/badge";
 import { SandboxEditor } from "./sandbox-editor";
 import { NetworkDeniedCard } from "./network-denied-card";
 import { RemoteProvidersCard } from "./remote-providers-card";
+import { useSandboxOverview } from "@/hooks/use-sandbox-overview";
 import {
   compactSandbox,
   describeSandbox,
   providerLabel,
   sandboxApi,
   SANDBOX_PROVIDERS,
-  type SandboxOverview,
   type SandboxSettings,
 } from "@/lib/sandbox-api";
-
-export function useSandboxOverview() {
-  const [overview, setOverview] = useState<SandboxOverview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      setOverview(await sandboxApi.overview());
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  return { overview, error, reload: load };
-}
 
 export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
   const { overview, error, reload } = useSandboxOverview();

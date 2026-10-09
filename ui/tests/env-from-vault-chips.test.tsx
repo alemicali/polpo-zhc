@@ -1,7 +1,8 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { EnvFromVaultChips, envFromVaultRefs } from "../src/components/ai-elements/env-from-vault-chips";
+import { EnvFromVaultChips } from "../src/components/ai-elements/env-from-vault-chips";
+import { envFromVaultRefs } from "../src/components/ai-elements/env-from-vault";
 
 let root: Root;
 let container: HTMLDivElement;

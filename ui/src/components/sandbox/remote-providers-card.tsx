@@ -214,14 +214,11 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
 export function RemoteProvidersCard({ onChanged }: { onChanged?: () => void }) {
   const [providers, setProviders] = useState<RemoteProviderStatus[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      setProviders(await sandboxApi.providers());
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
+  // state is only updated in the promise callbacks (never synchronously), so the effect can load
+  const load = useCallback(() => sandboxApi.providers().then(
+    (next) => { setProviders(next); setError(null); },
+    (e: Error) => setError(e.message),
+  ), []);
   useEffect(() => { void load(); }, [load]);
 
   return (
