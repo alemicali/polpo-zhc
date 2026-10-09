@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-09 — Sandbox, Rooms, Events
+
+Covers everything since 0.3.4 (#44–#97).
+
+### Added
+- **Sandbox**: commands can run in bubblewrap, Docker or a remote VM (Daytona, E2B). Includes network allowlists through a proxy, CPU and memory limits, lease, pool and warm VMs, and tool placement (sandbox or host). Opt-in: without configuration commands run on this machine (#83, #84, #87, #90–#94)
+- **Volumes in Files**: a volume is a folder of this server or an S3/R2 bucket (FUSE mounts, temporary bucket keys). The Storage page is gone (#83, #95, #96)
+- **Rooms**: group conversations as rooms, with one transcript for people and agents. Group chats on the web, and agents answering each other (#64, #65)
+- **Telegram**: agents, pairing, sessions, inbound webhook. Agents in groups answer by intent, know who is in the room and answer each other (#48, #53, #61–#63, #66)
+- **Events**: Activity and Logs become Events (Live / History) with filters by type, agent, outcome and period. A typed event bus with a complete catalog and the origin of every event (#70–#72, #74, #77)
+- **Chat**: steering, a server-side queue and conversation branches. Groups inside the chat (#57, #68)
+- **Context compaction**: one two-stage compactor for chats and task runs, `/compact`, a cheaper summary model by default (#81, #82)
+- **Custom AI gateways**: OpenAI- and Anthropic-compatible providers, with a UI wizard, vault keys and a network guard (#58)
+- **Vault**: multi-mailbox email tools, shared credentials across agents, and vault references (features point to vault entries instead of keeping keys) (#45, #46, #89)
+- **API**: counts, slim lists, segments, incremental sync, active turns (#44)
+- **Loops**: deterministic loop contract (#47)
+- **Ink**: self-hosted hub on Node, configurable hub and registry (#67)
+- **What's new**: a top bar that opens a drawer with the changelog (#68, #69, #73)
+- **Tools**: large outputs are offloaded to files instead of being lost (#80)
+- **Log retention** for orchestrator event logs (#52)
+- New channel cards in Settings → Channels (#86)
+
+### Changed
+- Complete, optimized PostgreSQL support (#51)
+- pi-ai and pi-agent-core 0.85.1 → 1.0.4 (#49)
+- Data layer: relative paths, read-only SQL enforced by the database, query timeout (#78)
+- Fewer full reads in the supervisor and background waits; Postgres task search (#75)
+- CI runs on Linux only and builds in parallel. Bubblewrap tests now run on the runners (#60, #97)
+
+### Fixed
+- Security: command injection in Ink/skills, provider key redirect, config secret leak, .env injection, reserved vault owners (#59)
+- Shutdown no longer hangs with PostgreSQL (#54)
+- A crashing agent runner no longer leaves its task stuck (#88)
+- Task runners actually use Daytona/E2B (#91); `update_agent` exposes the sandbox parameter (#85)
+- The sandbox network bridge runs on the server's own node, so it works with nvm, `/usr/local` or `/opt` installs (#97)
+- Mission notification rules and rule actions after reload (#76)
+- UI: data-page refresh loop and chat list update loop (React #185); error boundaries (#79)
+- UI lint passes with 0 errors (#56, #97)
+
+### Removed
+- The unused `@polpo-ai/tools` fork and dead server code (#50)
+
 ## [0.3.4] — 2026-03-19 — Desktop Sidecar Fix
 
 ### Fixed
