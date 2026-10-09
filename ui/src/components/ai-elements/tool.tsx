@@ -28,7 +28,8 @@ import {
 } from "lucide-react";
 import { useChatSandbox } from "@/components/sandbox/sandbox-context";
 import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
-import { EnvFromVaultChips, envFromVaultRefs } from "@/components/ai-elements/env-from-vault-chips";
+import { EnvFromVaultChips } from "@/components/ai-elements/env-from-vault-chips";
+import { envFromVaultRefs } from "@/components/ai-elements/env-from-vault";
 
 // ── Types ──
 

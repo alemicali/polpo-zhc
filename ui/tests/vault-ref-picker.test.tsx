@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 import { MemoryRouter } from "react-router-dom";
-import { VaultRefPicker, resetVaultCatalogCache } from "../src/components/vault/vault-ref-picker";
+import { VaultRefPicker } from "../src/components/vault/vault-ref-picker";
+import { resetVaultCatalogCache } from "../src/hooks/use-vault-catalog";
 import { RemoteProvidersCard } from "../src/components/sandbox/remote-providers-card";
 import { hasCredential, missingCredentials, CREDENTIAL_NAMES } from "../src/lib/vault-ref";
 import { withRemoteProvider, compactSandbox } from "../src/lib/sandbox-api";
@@ -19,7 +20,7 @@ const CATALOG = [
 
 let root: Root;
 let container: HTMLDivElement;
-let requests: Array<{ url: string; method: string; body?: any }>;
+let requests: Array<{ url: string; method: string; body?: unknown }>;
 let catalog: typeof CATALOG;
 let instanceSandbox: Record<string, unknown> | null;
 let providers: unknown[];

@@ -10,6 +10,7 @@ import {
   configureRemoteProviders, configuredRemoteProviders, remoteProviderCredentials, remoteProviderStatus,
 } from "../sandbox/remote-providers.js";
 import { availableProviders, createWorkspace, isRemoteWorkspace } from "../sandbox/manager.js";
+import { bwrapAvailable } from "../sandbox/workspaces.js";
 
 const sandbox = { provider: "e2b" as const, network: { mode: "open" as const }, resources: {}, providerOptions: {}, denied: [] };
 
@@ -185,7 +186,7 @@ describe("task runner processes", () => {
     expect(isRemoteWorkspace(ws)).toBe(true);
   });
 
-  test("a remote provider that is not configured falls back to bubblewrap and says so", () => {
+  test.skipIf(!bwrapAvailable())("a remote provider that is not configured falls back to bubblewrap and says so", () => {
     configureRemoteProviders(undefined, () => undefined);
     const warnings: string[] = [];
     const ws = createWorkspace({ provider: "daytona", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] }, {

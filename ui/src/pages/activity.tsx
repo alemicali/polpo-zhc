@@ -916,12 +916,23 @@ function HistoryView() {
   const [period, setPeriod] = useState<Period>("24h");
   const [sessionId, setSessionId] = useState<string>(ALL);
   const [rows, setRows] = useState<EventRowData[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!sessionsLoading);
   const [error, setError] = useState<string | null>(null);
   const [capped, setCapped] = useState(false);
   const [tick, setTick] = useState(0);
 
   const ordered = useMemo(() => [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)), [sessions]);
+
+  // a new request: show it loading during render, the effect below only updates state when results arrive
+  const [request, setRequest] = useState({ ordered, sessionsLoading, period, sessionId, getLogEntries, tick });
+  if (request.ordered !== ordered || request.sessionsLoading !== sessionsLoading || request.period !== period
+    || request.sessionId !== sessionId || request.getLogEntries !== getLogEntries || request.tick !== tick) {
+    setRequest({ ordered, sessionsLoading, period, sessionId, getLogEntries, tick });
+    if (!sessionsLoading) {
+      setLoading(true);
+      setError(null);
+    }
+  }
 
   useEffect(() => {
     if (sessionsLoading) return;
@@ -935,9 +946,6 @@ function HistoryView() {
           return end >= since && s.entries > 0;
         });
     const picked = wanted.slice(0, MAX_SESSIONS);
-    setCapped(wanted.length > picked.length);
-    setLoading(true);
-    setError(null);
     void Promise.all(picked.map((s) => getLogEntries(s.sessionId).then((entries) => ({ s, entries })).catch(() => ({ s, entries: [] as LogEntry[] }))))
       .then((lists) => {
         if (!alive) return;
@@ -951,6 +959,7 @@ function HistoryView() {
         }
         out.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
         setRows(out);
+        setCapped(wanted.length > picked.length);
       })
       .catch((err) => alive && setError(err instanceof Error ? err.message : "Could not read the history"))
       .finally(() => alive && setLoading(false));

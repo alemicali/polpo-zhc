@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
   allowEntryFor, allowlistCovers, alreadyAllowed, approvalBlocker, describeSandbox, NETWORK_MODES, planAllowForAgent, planAllowForEveryone,
-  type NetworkDeniedEntry, type SandboxOverview,
+  type NetworkDeniedEntry, type SandboxNetworkMode, type SandboxOverview, type SandboxSettings,
 } from "../src/lib/sandbox-api";
 
-const sb = (mode: any, allow?: string[]) => ({ provider: "bwrap" as const, network: { mode, allow }, resources: {} });
-const overview = (instance: any, agentSettings: any = null): SandboxOverview => ({
+const sb = (mode: SandboxNetworkMode, allow?: string[]) => ({ provider: "bwrap" as const, network: { mode, allow }, resources: {} });
+const overview = (instance: SandboxSettings["network"] | null, agentSettings: SandboxSettings | null = null): SandboxOverview => ({
   available: ["local", "bwrap"], settings: instance ? { network: instance } : null, polpo: sb("open"),
   agents: [{ name: "dev", settings: agentSettings, task: sb(agentSettings?.network?.mode ?? instance?.mode ?? "open", agentSettings?.network?.allow ?? instance?.allow), chat: sb("open") }],
 });
