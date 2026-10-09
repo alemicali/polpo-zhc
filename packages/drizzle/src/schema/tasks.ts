@@ -33,11 +33,14 @@ export const tasksSqlite = sqliteTable("tasks", {
   revisionCount: integer("revision_count"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
+  version: integer("version").notNull().default(0),
 }, (table) => [
   index("idx_tasks_status").on(table.status),
   index("idx_tasks_group").on(table.group),
   index("idx_tasks_assign_to").on(table.assignTo),
   index("idx_tasks_mission_id").on(table.missionId),
+  index("idx_tasks_updated_at").on(table.updatedAt),
 ]);
 
 export const missionsSqlite = sqliteTable("missions", {
@@ -70,7 +73,10 @@ export const processesSqlite = sqliteTable("processes", {
   startedAt: text("started_at").notNull(),
   alive: integer("alive").notNull().default(1),
   activity: text("activity").notNull().default("{}"),
-});
+}, (table) => [
+  index("idx_processes_task_id").on(table.taskId),
+  index("idx_processes_agent_name").on(table.agentName),
+]);
 
 // ── PostgreSQL schema ──────────────────────────────────────────────────
 
@@ -104,11 +110,14 @@ export const tasksPg = pgTable("tasks", {
   revisionCount: pgInteger("revision_count"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
+  /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
+  version: pgInteger("version").notNull().default(0),
 }, (table) => [
   pgIndex("idx_pg_tasks_status").on(table.status),
   pgIndex("idx_pg_tasks_group").on(table.group),
   pgIndex("idx_pg_tasks_assign_to").on(table.assignTo),
   pgIndex("idx_pg_tasks_mission_id").on(table.missionId),
+  pgIndex("idx_pg_tasks_updated_at").on(table.updatedAt.desc()),
 ]);
 
 export const missionsPg = pgTable("missions", {
@@ -141,4 +150,7 @@ export const processesPg = pgTable("processes", {
   startedAt: pgText("started_at").notNull(),
   alive: pgInteger("alive").notNull().default(1),
   activity: jsonb("activity").notNull().default({}),
-});
+}, (table) => [
+  pgIndex("idx_pg_processes_task_id").on(table.taskId),
+  pgIndex("idx_pg_processes_agent_name").on(table.agentName),
+]);

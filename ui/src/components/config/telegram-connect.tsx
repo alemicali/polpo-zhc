@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, Copy, ExternalLink, Link2, Loader2, MessageCircle, RefreshCw, ShieldCheck, UserCheck, UserX, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, MessageCircle, RefreshCw, ShieldCheck, UserCheck, Users, UserX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface ApiResult { ok: boolean; data?: unknown; error?: string }
@@ -339,6 +339,9 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
   };
 
   if (unavailable) return null;
+  // Enabled groups share the allowlist ("<channel>:group:<chatId>"): shown apart from people.
+  const groups = allowed.filter((id) => id.startsWith(`${channel}:group:`));
+  const people = allowed.filter((id) => !id.startsWith(`${channel}:group:`));
 
   return (
     <div className="pt-1.5 mt-1.5 border-t border-border/20 space-y-1.5">
@@ -362,8 +365,8 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
       )}
       <div className="flex flex-wrap items-center gap-1">
         <span className="text-[10.5px] text-muted-foreground mr-1">Authorized</span>
-        {allowed.length === 0 && <span className="text-[10.5px] text-muted-foreground/70">nobody yet</span>}
-        {allowed.map((id) => (
+        {people.length === 0 && <span className="text-[10.5px] text-muted-foreground/70">nobody yet</span>}
+        {people.map((id) => (
           <Badge key={id} variant="secondary" className={cn("text-[10px] gap-1 pr-0.5 h-5")}>
             {peers[id]?.displayName ?? id.split(":")[1]}
             <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Revoke ${id}`} disabled={busy === id}
@@ -373,6 +376,21 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
           </Badge>
         ))}
       </div>
+      {groups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10.5px] text-muted-foreground mr-1">Groups</span>
+          {groups.map((id) => (
+            <Badge key={id} variant="secondary" className={cn("text-[10px] gap-1 pr-0.5 h-5")} title="Everyone in this group can talk to the agents">
+              <Users className="h-2.5 w-2.5" />
+              {peers[id]?.displayName ?? id.split(":").pop()}
+              <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Disable ${id}`} disabled={busy === id}
+                onClick={() => act(id, `/peers/allowlist/${encodeURIComponent(id)}`, "DELETE")}>
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

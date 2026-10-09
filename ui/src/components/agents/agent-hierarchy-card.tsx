@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { SectionHeader } from "@/components/shared/section-header";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 
 export function AgentHierarchyCard() {
   const { state: { agent, manager, subordinates } } = useAgentDetail();

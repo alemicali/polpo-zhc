@@ -10,14 +10,17 @@
  * Enforces output size limits and timeout controls.
  */
 
-import { writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { assertUrlAllowed } from "./ssrf-guard.js";
+import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
+import { toolFs, writeBytes } from "./tool-fs.js";
 
-const MAX_RESPONSE_BYTES = 100_000;
+/** Text bodies above this are saved in full to a file; the model gets head + tail + path. */
+const MAX_RESPONSE_BYTES = 30_000;
 const DEFAULT_TIMEOUT = 30_000;
 
 // ─── Tool: http_fetch ───
@@ -38,7 +41,7 @@ const HttpFetchSchema = Type.Object({
   timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds (default: 30000)" })),
 });
 
-function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
+function createHttpFetchTool(toolOutputDir: string, fs?: FileSystem): AgentTool<typeof HttpFetchSchema> {
   return {
     name: "http_fetch",
     label: "HTTP Fetch",
@@ -92,11 +95,12 @@ function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
           contentType.includes("svg");
 
         let body: string;
+        let offloaded: { path?: string; totalBytes: number; totalLines: number } | undefined;
         if (isText) {
           const text = await response.text();
-          body = text.length > MAX_RESPONSE_BYTES
-            ? text.slice(0, MAX_RESPONSE_BYTES) + `\n[truncated — ${text.length} total bytes]`
-            : text;
+          const off = await offloadToolOutput(text, { tool: "http_fetch", dir: toolOutputDir, maxChars: MAX_RESPONSE_BYTES, fs });
+          body = off.text;
+          if (off.offloaded) offloaded = { path: off.path, totalBytes: off.totalBytes, totalLines: off.totalLines };
         } else {
           const buffer = await response.arrayBuffer();
           body = `[Binary response: ${buffer.byteLength} bytes, content-type: ${contentType}]`;
@@ -127,6 +131,7 @@ function createHttpFetchTool(): AgentTool<typeof HttpFetchSchema> {
             statusText: response.statusText,
             headers: responseHeaders,
             bodyLength: body.length,
+            ...(offloaded ? { outputPath: offloaded.path, outputBytes: offloaded.totalBytes, outputLines: offloaded.totalLines } : {}),
           },
         };
       } catch (err: any) {
@@ -148,7 +153,7 @@ const HttpDownloadSchema = Type.Object({
   headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Optional request headers" })),
 });
 
-function createHttpDownloadTool(cwd: string, sandbox: string[]): AgentTool<typeof HttpDownloadSchema> {
+function createHttpDownloadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof HttpDownloadSchema> {
   return {
     name: "http_download",
     label: "HTTP Download",
@@ -199,8 +204,7 @@ function createHttpDownloadTool(cwd: string, sandbox: string[]): AgentTool<typeo
         }
 
         const buffer = Buffer.from(await response.arrayBuffer());
-        mkdirSync(dirname(filePath), { recursive: true });
-        writeFileSync(filePath, buffer);
+        await writeBytes(fs, filePath, buffer);
 
         return {
           content: [{ type: "text", text: `Downloaded ${buffer.byteLength} bytes to ${filePath}` }],
@@ -229,17 +233,21 @@ export const ALL_HTTP_TOOL_NAMES: HttpToolName[] = ["http_fetch", "http_download
  * @param cwd - Working directory for resolving download paths
  * @param allowedPaths - Sandbox paths for download destination validation
  * @param allowedTools - Optional filter
+ * @param toolOutputDir - Where large response bodies are saved (default: resolveToolOutputDir())
+ * @param fs - Where downloads are saved (default: this machine's disk)
  */
 export function createHttpTools(
   cwd: string,
   allowedPaths?: string[],
   allowedTools?: string[],
+  toolOutputDir: string = resolveToolOutputDir(),
+  fs?: FileSystem,
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
 
   const factories: Record<HttpToolName, () => AgentTool<any>> = {
-    http_fetch: () => createHttpFetchTool(),
-    http_download: () => createHttpDownloadTool(cwd, sandbox),
+    http_fetch: () => createHttpFetchTool(toolOutputDir, fs),
+    http_download: () => createHttpDownloadTool(cwd, sandbox, toolFs(fs)),
   };
 
   const names = allowedTools

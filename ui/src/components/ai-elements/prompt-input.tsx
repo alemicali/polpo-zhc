@@ -4,7 +4,8 @@
 //   import { ... } from "@/components/ai-elements/prompt-input"
 //
 // The implementation is split into:
-//   prompt-input-provider.tsx  — contexts, hooks, PromptInputProvider
+//   prompt-input-context.ts    — contexts, hooks, helpers
+//   prompt-input-provider.tsx  — PromptInputProvider
 //   prompt-input-core.tsx      — PromptInput, PromptInputTextarea, PromptInputSubmit, action menu
 //   prompt-input-parts.tsx     — thin UI wrapper components (layout, select, hovercard, tabs, command)
 
@@ -15,17 +16,18 @@ export {
   usePromptInputAttachments,
   usePromptInputReferencedSources,
   LocalReferencedSourcesContext,
-  // Provider
-  PromptInputProvider,
-} from "./prompt-input-provider";
+} from "./prompt-input-context";
+
+// Provider
+export { PromptInputProvider } from "./prompt-input-provider";
 
 export type {
   AttachmentsContext,
   TextInputContext,
   PromptInputControllerProps,
   ReferencedSourcesContext,
-  PromptInputProviderProps,
-} from "./prompt-input-provider";
+} from "./prompt-input-context";
+export type { PromptInputProviderProps } from "./prompt-input-provider";
 
 export {
   // Core components

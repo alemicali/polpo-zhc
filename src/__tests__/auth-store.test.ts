@@ -183,7 +183,8 @@ describe("Auth Store", () => {
   });
 
   describe("file permissions", () => {
-    it("creates files with restrictive permissions", () => {
+    // POSIX permission bits do not exist on Windows.
+    it.skipIf(process.platform === "win32")("creates files with restrictive permissions", () => {
       saveProfile("anthropic:default", makeProfile("anthropic"));
 
       const filePath = getProfilesPath();
@@ -193,7 +194,7 @@ describe("Auth Store", () => {
       expect(mode).toBe(0o600);
     });
 
-    it("creates directory with restrictive permissions", () => {
+    it.skipIf(process.platform === "win32")("creates directory with restrictive permissions", () => {
       saveProfile("anthropic:default", makeProfile("anthropic"));
 
       const stats = statSync(TEST_DIR);

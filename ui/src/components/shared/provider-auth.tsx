@@ -55,8 +55,24 @@ interface OAuthPromptOption {
   description?: string;
 }
 
+/** Status payload returned by GET /providers/oauth/status/:flowId */
+interface OAuthFlowStatus {
+  status?: string;
+  authUrl?: string;
+  instructions?: string;
+  progressMessage?: string;
+  deviceCode?: string;
+  deviceVerificationUri?: string;
+  deviceCodeExpiresAt?: number;
+  promptMessage?: string;
+  promptPlaceholder?: string;
+  promptType?: OAuthPromptType;
+  promptOptions?: OAuthPromptOption[];
+  error?: string;
+}
+
 /** Generic API fetch function — returns { ok, data?, error? } */
-export type ApiFetch = (path: string, init?: RequestInit) => Promise<{ ok: boolean; data?: any; error?: string }>;
+export type ApiFetch = (path: string, init?: RequestInit) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
 
 // ── AuthStep ──
 // Top-level auth management: shows connected providers, disconnect, and routes
@@ -101,7 +117,7 @@ export function AuthStep({
 
   useEffect(() => {
     apiFetch("/providers/oauth").then((r) => {
-      if (r.ok) setOauthProviders(r.data);
+      if (r.ok) setOauthProviders(r.data as OAuthProvider[]);
     });
   }, [apiFetch]);
 
@@ -430,7 +446,7 @@ export function OAuthFlow({
       return;
     }
 
-    const id = res.data.flowId;
+    const id = (res.data as { flowId: string }).flowId;
     setFlowId(id);
 
     // Device authorization can remain valid for up to 15 minutes.
@@ -444,7 +460,7 @@ export function OAuthFlow({
     pollRef.current = setInterval(async () => {
       const r = await apiFetch(`/providers/oauth/status/${id}`);
       if (!r.ok) return;
-      const d = r.data;
+      const d = r.data as OAuthFlowStatus;
 
       if (d.authUrl) {
         setAuthUrl(d.authUrl);

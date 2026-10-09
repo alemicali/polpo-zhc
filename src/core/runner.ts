@@ -20,11 +20,11 @@ import { spawnEngine } from "../adapters/engine.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
-import { notifyRunComplete } from "./notification.js";
+import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
 
 const ACTIVITY_POLL_MS = 1500;
@@ -63,7 +63,7 @@ async function readConfigFromDb(): Promise<RunnerConfig> {
   const { createPgStores } = await import("@polpo-ai/drizzle");
   const postgres = (await import("postgres")).default;
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const sql = postgres(dbUrl);
+  const sql = postgres(dbUrl, { max: 1, onnotice: () => {} });
   const db = drizzle(sql);
   const store = createPgStores(db).runStore;
 
@@ -90,10 +90,11 @@ function buildWaMediaContent(
   caption?: string,
   mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
   viewOnce?: boolean,
+  data?: Uint8Array,
 ): any {
   const mime = mimeType ?? guessMime(path);
   const kind = resolveMediaKind(mediaKind, mime);
-  const file = { url: path };
+  const file = data ? Buffer.from(data) : { url: path };
   const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
   if (kind === "image") return { image: file, ...base };
   if (kind === "video") return { video: file, ...base };
@@ -164,34 +165,25 @@ interface RunnerStores {
   taskControlStore: TaskControlStore;
   logStore?: LogStore;
   vaultStore?: VaultStore;
+  whatsappStore?: WhatsAppMessageStore;
 }
 
 async function createStores(config: RunnerConfig): Promise<RunnerStores> {
-  if (config.storage === "postgres" && config.databaseUrl) {
-    const { createPgStores } = await import("@polpo-ai/drizzle");
-    const postgres = (await import("postgres")).default;
-    const { drizzle } = await import("drizzle-orm/postgres-js");
-    const sql = postgres(config.databaseUrl);
-    const db = drizzle(sql);
-    const stores = createPgStores(db);
-    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
-  }
-  if (config.storage === "sqlite") {
-    const { createSqliteStores } = await import("@polpo-ai/drizzle");
-    const { createRequire } = await import("node:module");
-    const req = createRequire(import.meta.url);
-    const Database = req("better-sqlite3");
-    const dbPath = join(config.polpoDir, "state.db");
-    const sqlite = new Database(dbPath);
-    sqlite.exec("PRAGMA journal_mode = WAL");
-    sqlite.exec("PRAGMA synchronous = NORMAL");
-    sqlite.exec("PRAGMA foreign_keys = ON");
-    const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
-    ensureSqliteSchema(sqlite);
-    const { drizzle } = await import("drizzle-orm/better-sqlite3");
-    const db = drizzle(sqlite);
-    const stores = createSqliteStores(db);
-    return { runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore, vaultStore: stores.vaultStore };
+  if (config.storage === "postgres" || config.storage === "sqlite") {
+    const { openStorage } = await import("./storage.js");
+    const opened = await openStorage({
+      storage: config.storage,
+      polpoDir: config.polpoDir,
+      databaseUrl: config.databaseUrl,
+      role: "runner",
+    });
+    if (opened.kind !== "file") {
+      const stores = opened.stores;
+      return {
+        runStore: stores.runStore, taskControlStore: stores.taskControlStore, logStore: stores.logStore,
+        vaultStore: stores.vaultStore, whatsappStore: stores.whatsappStore,
+      };
+    }
   }
   return {
     runStore: new FileRunStore(config.polpoDir),
@@ -202,7 +194,7 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
-  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore } = await createStores(config);
+  const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore, whatsappStore: dbWhatsAppStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 
   // When LogStore is available (postgres/sqlite), persist transcript to DB.
@@ -232,17 +224,21 @@ async function main(): Promise<void> {
   let initialDirections: TaskDirection[] = [];
   let checkpointWrites: Promise<void> = Promise.resolve();
   try {
-    // Vault is intentionally FILE-BASED for every storage mode — matches the
-    // orchestrator (src/core/orchestrator.ts:initVaultStore). Crypto round-trip
-    // to DB is sensitive and not wired automatically; the explicit
-    // `polpo vault migrate` command would do it on user request. The
-    // `drizzleVaultStore` returned by createStores is ignored on purpose.
-    void drizzleVaultStore;
-    let vaultStore: VaultStore | undefined;
-    try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+    // Same vault as the server: the database's vault table, or .polpo/vault.enc in file mode.
+    let vaultStore: VaultStore | undefined = drizzleVaultStore;
+    if (!vaultStore) try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+
+    // Remote sandbox (Daytona, E2B): this process creates the VM, so it needs the provider's
+    // settings (they travel with the resolved sandbox: the key's vault reference, region…) and
+    // the vault to read the key from. Without this the run silently fell back to bubblewrap.
+    const remoteProvider = config.sandbox?.provider;
+    if (remoteProvider === "daytona" || remoteProvider === "e2b") {
+      const { configureRemoteProviders } = await import("../sandbox/remote-providers.js");
+      configureRemoteProviders(vaultStore, () => ({ [remoteProvider]: config.sandbox!.providerOptions }));
+    }
 
     // WhatsApp store + send function (if configured)
-    let waStore: WhatsAppStore | undefined;
+    let waStore: WhatsAppMessageStore | undefined;
     let waSendMessage: ((jid: string, text: string) => Promise<string | undefined>) | undefined;
     let waSendMedia: ((jid: string, opts: {
       path: string;
@@ -251,12 +247,17 @@ async function main(): Promise<void> {
       fileName?: string;
       mediaKind?: "auto" | "image" | "video" | "audio" | "document";
       viewOnce?: boolean;
+      data?: Uint8Array;
     }) => Promise<string | undefined>) | undefined;
     let waMarkRead: ((keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>) | undefined;
     if (config.whatsappDbPath && config.whatsappProfilePath) {
       try {
-        const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
-        waStore = new WAStore(config.whatsappDbPath);
+        if (dbWhatsAppStore) {
+          waStore = dbWhatsAppStore;
+        } else {
+          const { WhatsAppStore: WAStore } = await import("../stores/whatsapp-store.js");
+          waStore = new WAStore(config.whatsappDbPath);
+        }
 
         // Lazy Baileys connection for sending — only connects when first send is called
         let waSock: any;
@@ -297,14 +298,14 @@ async function main(): Promise<void> {
         };
         waSendMedia = async (jid, opts) => {
           const sock = await ensureWaSock();
-          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+          const content = buildWaMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce, opts.data);
           const result = await sock.sendMessage(jid, content);
           return result?.key?.id ?? undefined;
         };
         waMarkRead = async (keys) => {
           const sock = await ensureWaSock();
           await sock.readMessages(keys);
-          waStore?.markRead(keys.map(k => k.id));
+          await waStore?.markRead(keys.map(k => k.id));
         };
       } catch { /* WhatsApp unavailable in runner — tools will be skipped */ }
     }
@@ -326,6 +327,20 @@ async function main(): Promise<void> {
       outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
       reasoning: config.reasoning,
+      compaction: config.compaction,
+      sandbox: config.sandbox,
+      volumes: config.volumes,
+      onNetworkDenied: config.notifySocket
+        ? (d: { host: string; port?: number; reason: "not-allowed" | "private-address" }) => notifyNetworkDenied(config.notifySocket!, {
+            runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", ...d,
+          })
+        : undefined,
+      onSandboxEvent: config.notifySocket
+        ? (event: unknown) => notifySandboxEvent(config.notifySocket!, {
+            runId: config.runId, taskId: config.taskId, agentName: config.agent.name, provider: config.sandbox?.provider ?? "local", event: event as any,
+          })
+        : undefined,
+      runId: config.runId,
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
@@ -417,6 +432,29 @@ async function main(): Promise<void> {
   for (const direction of initialDirections) {
     if (direction.mode !== "continue") await deliverDirection(direction);
   }
+
+  // Unexpected errors (an unhandled "error" event or rejection in a library) would otherwise end
+  // the process silently, leaving the run "running" until the stale check kills it. Close the
+  // run as failed with the reason instead.
+  let crashing = false;
+  const crash = async (kind: string, err: unknown) => {
+    if (crashing) return;
+    crashing = true;
+    const message = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    process.stderr.write(`[runner] ${kind}: ${message}\n`);
+    try { actLog.logEvent("error", { message: `${kind}: ${err instanceof Error ? err.message : String(err)}` }); } catch { /* best effort */ }
+    try { await runStore.updateActivity(config.runId, handle.activity); } catch { /* best effort */ }
+    try {
+      await runStore.completeRun(config.runId, "failed", {
+        exitCode: 1, stdout: "", stderr: `Runner crashed (${kind}): ${err instanceof Error ? err.message : String(err)}`, duration: 0,
+      } as any);
+      if (config.notifySocket) notifyRunComplete(config.notifySocket, config.runId, config.taskId, "failed");
+    } catch { /* best effort */ }
+    try { await runStore.close(); } catch { /* best effort */ }
+    process.exit(1);
+  };
+  process.on("uncaughtException", (err) => { void crash("uncaught exception", err); });
+  process.on("unhandledRejection", (reason) => { void crash("unhandled rejection", reason); });
 
   // SIGTERM handler: graceful kill
   let sigterm = false;

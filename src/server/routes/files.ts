@@ -1,5 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { resolve, relative, extname, basename, dirname } from "node:path";
+import { resolve, relative, extname, basename, dirname, isAbsolute, sep } from "node:path";
+
+/** Paths in API responses always use "/", whatever the server OS (the UI builds mentions and URLs from them). */
+const toApiPath = (p: string): string => (sep === "/" ? p : p.split(sep).join("/"));
 import { POLPO_DIR_NAME } from "../../core/constants.js";
 import type { FileSystem } from "@polpo-ai/core";
 import { uploadExclusionReason } from "../upload-exclusions.js";
@@ -153,6 +156,8 @@ export interface FileRouteDeps {
   agentWorkDir: string;
   fs: FileSystem;
   emit: (event: string, data: any) => void;
+  /** Volumes, shown as extra roots: local folders, and buckets (browsable once mounted under <polpoDir>/mounts). */
+  storageRoots?: () => Promise<Array<{ id?: string; slug: string; name: string; path: string; readOnly: boolean; kind?: "local" | "bucket"; mounted?: boolean }>>;
 }
 
 // ── Route factory ────────────────────────────────────────────────────────────
@@ -173,8 +178,10 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     const { workDir, polpoDir, agentWorkDir, fs } = deps;
 
     const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache"]);
+    // Mounted buckets and their caches are never walked for stats (remote listings are slow and billed).
+    const noStats = new Set([resolve(polpoDir, "mounts"), resolve(polpoDir, "cache", "storage")]);
     async function dirStats(dir: string, depth = 0): Promise<{ files: number; bytes: number }> {
-      if (depth > 8) return { files: 0, bytes: 0 };
+      if (depth > 8 || noStats.has(resolve(dir))) return { files: 0, bytes: 0 };
       let files = 0, bytes = 0;
       try {
         const entries = fs.readdirWithTypes
@@ -226,6 +233,24 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
       totalSize: polpoStats.bytes,
     });
 
+    for (const storage of await deps.storageRoots?.().catch(() => []) ?? []) {
+      const rel = toApiPath(relative(workDir, storage.path));
+      const local = storage.kind === "local";
+      roots.push({
+        id: `storage:${storage.slug}`,
+        name: storage.name,
+        path: rel.startsWith("..") ? toApiPath(storage.path) : rel,
+        absolutePath: storage.path,
+        description: `${local ? "Folder on this server" : storage.mounted === false ? "Bucket (not mounted here)" : "Bucket"}${storage.readOnly ? " · read-only" : ""}`,
+        icon: local ? "folder" : "cloud",
+        kind: "volume",
+        volumeKind: local ? "local" : "bucket",
+        volumeId: storage.id,
+        browsable: storage.mounted !== false,
+        readOnly: storage.readOnly,
+      });
+    }
+
     return c.json({ ok: true, data: { roots } }, 200);
   }) as any);
 
@@ -270,7 +295,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
     });
 
     const displayPath = roots.reduce((p: string, root: string) => {
-      const rel = relative(root, resolved);
+      const rel = toApiPath(relative(root, resolved));
       return !rel.startsWith("..") ? rel || "." : p;
     }, reqPath);
 
@@ -422,7 +447,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
 
       const filePath = resolve(resolvedDir, relativePath);
       const rel = relative(resolvedDir, filePath);
-      if (rel.startsWith("..") || rel.startsWith("/") || rel === "") {
+      if (rel.startsWith("..") || isAbsolute(rel) || rel === "") {
         return c.json({ ok: false, error: "Invalid relative upload path" }, 400);
       }
       seenPaths.add(relativePath);
@@ -584,9 +609,13 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
 
     const SKIP = new Set(["node_modules", ".git", ".next", "dist", "__pycache__", ".cache", POLPO_DIR_NAME]);
     const results: { name: string; path: string; type: "file" | "directory" }[] = [];
+    // Searching from a project folder never descends into mounted buckets (only from inside one).
+    const mountsDir = resolve(deps.polpoDir, "mounts");
+    const startsInMount = resolved === mountsDir || resolved.startsWith(`${mountsDir}${sep}`);
 
     async function walk(dir: string, depth: number) {
       if (depth > 10 || results.length >= limit) return;
+      if (!startsInMount && resolve(dir) === mountsDir) return;
       try {
         const entries = fs.readdirWithTypes
           ? await fs.readdirWithTypes(dir)
@@ -594,7 +623,7 @@ export function fileRoutes(getDeps: () => FileRouteDeps): OpenAPIHono {
         for (const e of entries) {
           if (results.length >= limit) return;
           if (SKIP.has(e.name)) continue;
-          const relPath = relative(resolved!, resolve(dir, e.name));
+          const relPath = toApiPath(relative(resolved!, resolve(dir, e.name)));
           if (e.isFile) {
             if (!query || e.name.toLowerCase().includes(query) || relPath.toLowerCase().includes(query)) {
               results.push({ name: e.name, path: relPath, type: "file" });

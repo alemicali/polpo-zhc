@@ -1,7 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import type { DataRegistryStore } from "../../core/data-registry.js";
+import type { DataRegistryStore } from "@polpo-ai/core/data-registry";
 
 const FilterSchema = z.object({
   field: z.string().min(1),

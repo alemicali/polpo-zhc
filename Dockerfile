@@ -14,17 +14,15 @@ COPY packages/drizzle/package.json packages/drizzle/
 COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
 COPY packages/server/package.json packages/server/
-COPY packages/tools/package.json packages/tools/
 COPY packages/vault-crypto/package.json packages/vault-crypto/
 COPY ui/package.json ui/
 COPY website/package.json website/
 RUN pnpm install --frozen-lockfile
 
-# Build the packages used by the CLI/server plus the extended tools package.
+# Build the packages used by the CLI/server.
 COPY packages/core/ packages/core/
 COPY packages/drizzle/ packages/drizzle/
 COPY packages/server/ packages/server/
-COPY packages/tools/ packages/tools/
 COPY packages/vault-crypto/ packages/vault-crypto/
 COPY tsconfig.json ./
 COPY src/ src/
@@ -32,7 +30,6 @@ RUN pnpm --filter @polpo-ai/vault-crypto build \
     && pnpm --filter @polpo-ai/core build \
     && pnpm --filter @polpo-ai/drizzle build \
     && pnpm --filter @polpo-ai/server build \
-    && pnpm --filter @polpo-ai/tools build \
     && ./node_modules/.bin/tsc
 
 # ── code-server runtime bits ─────────────────────────────────────────────────
@@ -93,7 +90,6 @@ COPY packages/drizzle/package.json packages/drizzle/
 COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
 COPY packages/server/package.json packages/server/
-COPY packages/tools/package.json packages/tools/
 COPY packages/vault-crypto/package.json packages/vault-crypto/
 COPY ui/package.json ui/
 COPY website/package.json website/
@@ -103,8 +99,8 @@ RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist/ dist/
 COPY --from=builder /app/packages/core/dist/ packages/core/dist/
 COPY --from=builder /app/packages/drizzle/dist/ packages/drizzle/dist/
+COPY --from=builder /app/packages/drizzle/migrations/ packages/drizzle/migrations/
 COPY --from=builder /app/packages/server/dist/ packages/server/dist/
-COPY --from=builder /app/packages/tools/dist/ packages/tools/dist/
 COPY --from=builder /app/packages/vault-crypto/dist/ packages/vault-crypto/dist/
 COPY docker/server-entrypoint.sh /usr/local/bin/polpo-server-entrypoint
 RUN chmod +x /usr/local/bin/polpo-server-entrypoint

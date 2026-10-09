@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import type { VaultStore } from "../core/vault-store.js";
 import type {
@@ -12,11 +13,16 @@ import type {
   DataQuery,
   DataSource,
   DataCapability,
-} from "../core/data-registry.js";
-import { FileDataRegistryStore, type DataRegistryChangeEmitter } from "../stores/file-data-registry-store.js";
+} from "@polpo-ai/core/data-registry";
+import { FileDataRegistryStore } from "../stores/file-data-registry-store.js";
+import type { DataRegistryChangeEmitter, DataRegistryStore } from "@polpo-ai/core/data-registry";
+import { databaseStoresFor } from "../core/storage.js";
+import { loadPolpoConfig } from "../core/config.js";
 
 const require = createRequire(import.meta.url);
 const MAX_ROWS = 1_000;
+/** Longest a single statement may run on a PostgreSQL source. */
+const PG_STATEMENT_TIMEOUT_MS = 30_000;
 const DEFAULT_ROWS = 100;
 
 export interface DataPrincipal {
@@ -34,14 +40,16 @@ export interface DataMutation {
 }
 
 export class DataRuntime {
-  readonly store: FileDataRegistryStore;
+  readonly store: DataRegistryStore;
 
   constructor(
     readonly polpoDir: string,
     private vaultStore?: VaultStore,
     emitChange?: DataRegistryChangeEmitter,
   ) {
-    this.store = new FileDataRegistryStore(polpoDir, emitChange);
+    // The database when the project has one, the data.json file otherwise.
+    this.store = databaseStoresFor(polpoDir)?.dataRegistryStore ?? new FileDataRegistryStore(polpoDir, emitChange);
+    this.store.setEmitter?.(emitChange);
   }
 
   setVaultStore(store?: VaultStore): void {
@@ -49,7 +57,7 @@ export class DataRuntime {
   }
 
   setEmitter(emitChange?: DataRegistryChangeEmitter): void {
-    this.store.setEmitter(emitChange);
+    this.store.setEmitter?.(emitChange);
   }
 
   async listSources(principal: DataPrincipal = { admin: true }): Promise<DataSource[]> {
@@ -225,9 +233,14 @@ export class DataRuntime {
     return this.queryFile(source, query);
   }
 
+  /**
+   * Raw SQL, enforced read-only by the database itself (the text check before it is only a
+   * first filter): a read-only SQLite handle, a READ ONLY PostgreSQL transaction.
+   */
   private async executeRaw(source: DataSource, query: string): Promise<Record<string, unknown>[]> {
-    if (source.kind === "sqlite") return this.withSqlite(source, (db) => db.prepare(query).all() as Record<string, unknown>[]);
-    return this.withPostgres(source, async (sql) => (await sql.unsafe(query)) as unknown as Record<string, unknown>[]);
+    if (source.kind === "sqlite") return this.withSqlite(source, (db) => db.prepare(query).all() as Record<string, unknown>[], { readonly: true });
+    return this.withPostgres(source, async (sql) =>
+      (await sql.begin("read only", (tx: any) => tx.unsafe(query))) as unknown as Record<string, unknown>[]);
   }
 
   private async executeMutation(source: DataSource, mutation: DataMutation): Promise<number> {
@@ -235,9 +248,23 @@ export class DataRuntime {
     return this.withPostgres(source, (sql) => executePostgresMutation(sql, mutation));
   }
 
-  private async withSqlite<T>(source: DataSource, action: (db: any) => T | Promise<T>): Promise<T> {
+  /**
+   * A file location as agents wrote it: absolute, or relative to the agents' working directory
+   * (where they create files), then to the project directory. Never the server's own cwd.
+   */
+  resolveLocation(location: string): string {
+    if (isAbsolute(location)) return location;
+    const projectDir = dirname(this.polpoDir);
+    const workDir = loadPolpoConfig(this.polpoDir)?.settings?.workDir;
+    const agentDir = workDir && workDir !== "." ? resolve(projectDir, workDir) : projectDir;
+    const candidates = [resolve(agentDir, location), resolve(projectDir, location)];
+    return candidates.find((path) => existsSync(path)) ?? candidates[0]!;
+  }
+
+  private async withSqlite<T>(source: DataSource, action: (db: any) => T | Promise<T>, opts?: { readonly?: boolean }): Promise<T> {
     const Database = require("better-sqlite3") as new (path: string, options?: Record<string, unknown>) => any;
-    const db = new Database(resolve(source.config.location));
+    // Never create an empty database by opening a wrong path; raw SQL opens it read-only
+    const db = new Database(this.resolveLocation(source.config.location), { fileMustExist: true, readonly: !!opts?.readonly });
     db.pragma("busy_timeout = 5000");
     try { return await action(db); } finally { db.close(); }
   }
@@ -253,6 +280,8 @@ export class DataRuntime {
       password: credentials.password,
       ssl: source.config.ssl ? "require" : false,
       max: 1,
+      // A runaway query is cancelled by the server instead of hanging the agent
+      connection: { statement_timeout: PG_STATEMENT_TIMEOUT_MS, application_name: "polpo-data" },
       connect_timeout: 8,
       idle_timeout: 2,
     });
@@ -276,7 +305,7 @@ export class DataRuntime {
   }
 
   private async queryFile(source: DataSource, query: DataQuery): Promise<Record<string, unknown>[]> {
-    const text = await readFile(resolve(source.config.location), "utf8");
+    const text = await readFile(this.resolveLocation(source.config.location), "utf8");
     const rows = source.kind === "csv" ? parseCsv(text) : normalizeRows(JSON.parse(text));
     return applyInMemoryQuery(rows, query);
   }
@@ -297,6 +326,8 @@ const runtimes = new Map<string, DataRuntime>();
 
 export function getDataRegistryRuntime(polpoDir: string, vaultStore?: VaultStore, emitChange?: DataRegistryChangeEmitter): DataRuntime {
   let runtime = runtimes.get(polpoDir);
+  // Rebuilt if the project's database was opened (or closed) after the runtime was created.
+  if (runtime && (runtime.store === databaseStoresFor(polpoDir)?.dataRegistryStore) !== !!databaseStoresFor(polpoDir)) runtime = undefined;
   if (!runtime) {
     runtime = new DataRuntime(polpoDir, vaultStore, emitChange);
     runtimes.set(polpoDir, runtime);

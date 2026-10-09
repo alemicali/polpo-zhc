@@ -78,7 +78,7 @@ describe("redactPolpoState", () => {
 // ── redactPolpoConfig ──
 
 describe("redactPolpoConfig", () => {
-  it("returns config as-is — providers no longer contain secrets", () => {
+  it("keeps non-secret provider config visible (deep copy, never mutates)", () => {
     const config = {
       version: "1",
       project: "test",
@@ -96,8 +96,8 @@ describe("redactPolpoConfig", () => {
 
     const result = redactPolpoConfig(config);
 
-    // Same reference — pass-through
-    expect(result).toBe(config);
+    expect(result).not.toBe(config);
+    expect(result).toEqual(config);
     expect(result.providers!.ollama.baseUrl).toBe("http://localhost:11434");
     expect(result.providers!.custom.baseUrl).toBe("https://my-vllm.example.com/v1");
   });
@@ -112,7 +112,7 @@ describe("redactPolpoConfig", () => {
     } as PolpoConfig;
 
     const result = redactPolpoConfig(config);
-    expect(result).toBe(config);
+    expect(result).toEqual(config);
     expect(result.providers).toBeUndefined();
   });
 });

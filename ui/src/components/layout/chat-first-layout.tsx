@@ -9,6 +9,7 @@
  * work seamlessly. Tab icons call navigate() for top-level sections.
  */
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -36,7 +37,6 @@ import {
   History,
   ChevronsLeft,
   Menu,
-  Plus,
   Palette as PaletteIcon,
   Check,
   ChevronDown,
@@ -48,6 +48,8 @@ import {
   Database,
   ChartNoAxesCombined,
   BrainCircuit,
+  Megaphone,
+  Radio,
 } from "lucide-react";
 import {
   ResizablePanelGroup,
@@ -88,6 +90,11 @@ import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { ChatTabs } from "./chat-tabs";
+import { ChatRoomRouteSync } from "./chat-room-route-sync";
+import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
+import { applyChatLinkParams, requestNewGroup, setActiveChatRoom } from "@/hooks/use-chat-room";
+import { openWhatsNew, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((module) => ({ default: module.ChatPage })),
@@ -115,6 +122,7 @@ type TabGroup = {
 
 const pinnedTabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/events", icon: Radio, label: "Events" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
@@ -161,6 +169,7 @@ const secondaryTabs = secondaryGroups.flatMap(group => group.tabs);
 const defaultMorePath = secondaryTabs[0]?.path ?? "/approvals";
 const tabs: TabDef[] = [
   { path: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { path: "/events", icon: Radio, label: "Events" },
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
@@ -242,19 +251,15 @@ function ChatPanelHeader() {
             {sessionsOpen ? "Hide threads" : "Threads"}
           </TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50"
-              onClick={() => chatActions.newSession()}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-        </Tooltip>
+        <NewChatMenu
+          className="h-8 w-8 rounded-lg hover:bg-accent/50"
+          align="end"
+          onNewChat={() => {
+            setActiveChatRoom(null);
+            chatActions.newSession();
+          }}
+          onNewGroup={() => requestNewGroup()}
+        />
       </div>
     </header>
   );
@@ -401,6 +406,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
 
 const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { pathname } = useLocation();
+  const whatsNewOpen = useWhatsNewOpen();
   const navigate = useNavigate();
   const { theme, resolved, setTheme } = useTheme();
   const { palette, setPalette } = usePalette();
@@ -444,6 +450,26 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
       {/* Right actions — Phone/GitHub/Theme are desktop-only; mobile uses
           the MobileNavSheet drawer for these. */}
       <div className="flex items-center gap-1 shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "relative h-8 w-8 rounded-lg transition-all",
+                whatsNewOpen
+                  ? "text-primary bg-primary/10 hover:bg-primary/15"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+              )}
+              onClick={openWhatsNew}
+              aria-label="Novità"
+            >
+              <Megaphone className="h-4 w-4" />
+              <WhatsNewDot className="absolute right-1 top-1" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">Novità</TooltipContent>
+        </Tooltip>
         <NavigationModeMenu mode={navMode} />
         <div className="hidden lg:block">
           <PwaInstallQrButton />
@@ -581,16 +607,18 @@ function MoreNavigation({ pathname }: { pathname: string }) {
 }
 
 function RightPanelContent() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const navMode = useChatFirstNavMode();
 
-  // /chat route → redirect to dashboard (chat is in the left panel)
+  // /chat route → redirect to dashboard (chat is in the left panel). Chat links
+  // (?room=<id>, ?newGroup=1) are applied to the chat panel before redirecting.
   useEffect(() => {
     if (pathname === "/chat") {
+      applyChatLinkParams(search);
       navigate("/dashboard", { replace: true });
     }
-  }, [pathname, navigate]);
+  }, [pathname, search, navigate]);
 
   // Resolve a page title from current path
   const title = resolvePageTitle(pathname);
@@ -645,20 +673,29 @@ export function ChatFirstLayout() {
   }, []);
 
   if (mobile) {
-    if (pathname === "/chat") {
-      return (
-        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
-          <ChatPanelHeader />
-          <ChatTabs />
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <Suspense fallback={<ChatLoader />}>
-              <ChatPage embedded />
-            </Suspense>
+    // /chat is a real route on mobile: mirror the open group to ?room=.
+    return (
+      <>
+        <ChatRoomRouteSync />
+        {pathname === "/chat" ? (
+          <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+            <ChatPanelHeader />
+            <ChatTabs />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ErrorBoundary area="la chat">
+                <Suspense fallback={<ChatLoader />}>
+                  <ChatPage embedded />
+                </Suspense>
+              </ErrorBoundary>
+            </div>
           </div>
-        </div>
-      );
-    }
-    return <RightPanelContent />;
+        ) : (
+          <ErrorBoundary area="questa pagina" resetKey={pathname}>
+            <RightPanelContent />
+          </ErrorBoundary>
+        )}
+      </>
+    );
   }
 
   return (
@@ -669,9 +706,11 @@ export function ChatFirstLayout() {
           <ChatPanelHeader />
           <ChatTabs />
           <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-            <Suspense fallback={<ChatLoader />}>
-              <ChatPage embedded />
-            </Suspense>
+            <ErrorBoundary area="la chat">
+              <Suspense fallback={<ChatLoader />}>
+                <ChatPage embedded />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </ResizablePanel>
@@ -680,7 +719,9 @@ export function ChatFirstLayout() {
 
       {/* Right: Pages via Outlet (supports detail routes) */}
       <ResizablePanel defaultSize={60} minSize={20} id="nav-panel">
-        <RightPanelContent />
+        <ErrorBoundary area="questa pagina" resetKey={pathname}>
+          <RightPanelContent />
+        </ErrorBoundary>
       </ResizablePanel>
     </ResizablePanelGroup>
   );
@@ -695,6 +736,7 @@ function resolvePageTitle(pathname: string): string {
     "/skills": "Skills",
     "/memory": "Memory",
     "/notifications": "Notifications",
+    "/events": "Events",
     "/schedules": "Schedules",
     "/approvals": "Approvals",
     "/playbooks": "Playbooks",
@@ -708,6 +750,7 @@ function resolvePageTitle(pathname: string): string {
     "/brain": "Company Brain",
     "/agent-live": "Browser Automation",
     "/config": "Configuration",
+    "/changelog": "Novità",
   };
   if (titles[pathname]) return titles[pathname];
   if (pathname.startsWith("/missions/")) return "Mission Detail";

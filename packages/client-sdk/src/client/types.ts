@@ -570,6 +570,10 @@ export interface ChannelGatewayConfig {
   agent?: string;
   /** Conversation pipe: deliver chat replies through another channel (e.g. in from a webhook, out on Telegram). */
   replyTo?: { channel: string; chatId?: string; echoInbound?: boolean };
+  /** "mentions" (default) or "intent": also answer group messages a classifier judges are for this agent. */
+  groupReplies?: "mentions" | "intent";
+  /** groupReplies "intent": how sure the classifier must be (0–1). Default 0.7. */
+  intentThreshold?: number;
 }
 
 export interface NotificationChannelConfig {
@@ -794,6 +798,8 @@ export interface CustomModelDef {
   contextWindow?: number;
   /** Max output tokens. Default: 8192 */
   maxTokens?: number;
+  /** Per-model compatibility flags (custom providers). */
+  compat?: Record<string, unknown>;
 }
 
 export interface BrandingConfig {
@@ -837,12 +843,49 @@ export interface PolpoSettings {
   mcpToolAllowlist?: Record<string, string[]>;
 }
 
+export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages" | "azure-openai-responses";
+
+export interface ProviderAuthConfig {
+  type: "none" | "bearer" | "x-api-key" | "header";
+  headerName?: string;
+  prefix?: string;
+  envVar?: string;
+}
+
 export interface ProviderConfig {
+  /** Display name (custom providers). */
+  label?: string;
+  /** Wizard preset the provider was created from. */
+  preset?: string;
+  /** Built-in provider proxied by this endpoint. */
+  proxyFor?: string;
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */
-  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  api?: ProviderApi;
+  /** How the key is sent (key itself lives in the vault). */
+  auth?: ProviderAuthConfig;
+  /** Static, non-secret headers. */
+  headers?: Record<string, string>;
+  compat?: Record<string, unknown>;
+  allowPrivateNetwork?: boolean;
+  timeoutMs?: number;
+  maxRetries?: number;
   /** Custom model definitions for this provider. */
   models?: CustomModelDef[];
+}
+
+/** Custom provider as returned by /providers/custom (no secrets). */
+export interface CustomProviderInfo extends ProviderConfig {
+  id: string;
+  hasKey: boolean;
+  /** Last 4 chars of the stored key (long keys only). */
+  keyHint?: string;
+  secretHeaderNames: string[];
+  envVar?: string;
+  envKeyPresent: boolean;
+  keySource?: "vault" | "env" | "none";
+  configured: boolean;
+  warnings?: string[];
 }
 
 export interface PolpoConfig {
@@ -1113,6 +1156,10 @@ export interface UpdateAgentRequest {
 }
 
 export interface UpdateSettingsRequest {
+  /** Sandbox settings (see GET /sandbox); null removes them. */
+  sandbox?: Record<string, unknown> | null;
+  /** Context compaction settings; null removes them. */
+  compaction?: Record<string, unknown> | null;
   orchestratorModel?: string | ModelConfig;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
@@ -1285,6 +1332,50 @@ export interface ChatSession {
   agent?: string;
   /** True when the user starred this session — surfaced in the sidebar "Starred" section. */
   starred?: boolean;
+  /** Channel conversation the session belongs to (e.g. a Telegram group). */
+  scope?: string;
+  /** Set on a branch: the session it was forked from. */
+  parentSessionId?: string;
+  /** Set on a branch: the parent's message the branch starts after. */
+  forkMessageId?: string;
+}
+
+/** A prompt waiting in a session's server-side queue. */
+export interface ChatQueueItem {
+  id: string;
+  sessionId: string;
+  content: string;
+  createdAt: string;
+  /** Set on a message that goes out next whatever auto-send says (a steer that missed its turn…). */
+  steerId?: string;
+}
+
+export interface ChatQueueState {
+  items: ChatQueueItem[];
+  autoSend: boolean;
+  /** Auto-send is held: the last turn errored, was stopped or waits for the user. */
+  hold?: string;
+}
+
+/** Result of "send now" on a queued prompt. */
+export type ChatQueueSendResult =
+  | { mode: "steer"; turnId: string; steerId: string }
+  | { mode: "turn"; turnId: string }
+  | { mode: "scheduled" };
+
+/** Result of steering a running turn. */
+export interface SteerResult {
+  id: string;
+  turnId: string;
+  /** pending: joins the turn at its next safe point; scheduled: the turn was over, it becomes the next message. */
+  status: "pending" | "scheduled";
+}
+
+export interface ForkSessionResult {
+  session: ChatSession;
+  /** The turn answering the branch's last message, when it could start. */
+  turnId: string | null;
+  turnError?: string;
 }
 
 export interface ChatMessage {
@@ -1554,6 +1645,14 @@ export interface ProviderAuthInfo {
   oauthAvailable: boolean;
   oauthProviderName?: string;
   oauthFlow?: string;
+  /** Custom provider / gateway (polpo.json `providers`, non built-in id). */
+  custom?: boolean;
+  /** Custom providers: usable (key in vault / env, or keyless). */
+  configured?: boolean;
+  label?: string;
+  keySource?: "vault" | "env" | "none";
+  hasVaultKey?: boolean;
+  keyHint?: string;
 }
 
 /** Full auth status response — all providers. */

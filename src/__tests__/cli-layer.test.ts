@@ -33,7 +33,8 @@ const TEAM: Team = {
 const BASE_CONFIG: PolpoFileConfig = {
   project: "cli-test",
   teams: [TEAM],
-  settings: { maxRetries: 2, workDir: ".", logLevel: "normal" },
+  // The helpers below seed teams/agents as JSON files: say so (Orchestrator.init() defaults to SQLite).
+  settings: { maxRetries: 2, workDir: ".", logLevel: "normal", storage: "file" },
 };
 
 /** Create a temp dir with a valid .polpo/polpo.json + teams.json/agents.json ready for CLI commands. */

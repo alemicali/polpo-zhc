@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Globe } from "lucide-react";
 import { SectionHeader } from "@/components/shared/section-header";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 
 export function AgentSocialsCard() {
   const { state: { agent } } = useAgentDetail();

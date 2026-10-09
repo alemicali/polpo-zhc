@@ -1,9 +1,11 @@
+import { readFile, unlink } from "node:fs/promises";
+import { join as joinPath } from "node:path";
 import { interpretChannelCompletion } from "./channel-chat-result.js";
 import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
-import { streamSimpleWithAuth } from "../llm/pi-client.js";
-import { buildSystemPrompt } from "../adapters/engine.js";
+import { streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
+import { buildSystemPrompt, sandboxPromptNote } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { SSEBridge } from "./sse-bridge.js";
@@ -33,11 +35,15 @@ import {
   attachmentRoutes,
   countsRoutes,
   streamRegistry,
+  createTurnScheduler,
+  sessionLeases,
+  internalCallHeaders,
 } from "@polpo-ai/server";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
 import { providerRoutes } from "./routes/providers.js";
+import { customProviderRoutes } from "./routes/custom-providers.js";
 import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
@@ -51,6 +57,7 @@ import { expoPushRoutes } from "./routes/expo-push.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
+import { roomRoutes } from "./routes/rooms.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -59,10 +66,13 @@ import { tokenUsageRoutes } from "./routes/token-usage.js";
 import { appsRoutes } from "./routes/apps.js";
 import { dataRoutes } from "./routes/data.js";
 import { dataViewRoutes } from "./routes/data-views.js";
+import { storageRoutes } from "./routes/storage.js";
+import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
+import { databaseStoresFor } from "../core/storage.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
 import { getAppRegistryRuntime } from "./app-runtime-manager.js";
 import { getDataRegistryRuntime } from "./data-runtime.js";
@@ -70,6 +80,7 @@ import { getCompanyBrainRuntime } from "./company-brain-runtime.js";
 import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
+import { withEventOrigin, currentEventOrigin } from "../core/events.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -109,8 +120,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       orchestrator.emit("data-view:changed", payload);
     }
   });
+  const activeStorage = () => getStorageRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (payload) => {
+    orchestrator.emit("storage:changed", payload);
+  });
   const activeCompanyBrain = () => getCompanyBrainRuntime(activePolpoDir(), activeDataRegistry(), (event) => {
-    orchestrator.emit("brain:changed" as any, event);
+    orchestrator.emit("brain:changed", event);
   });
 
   // Global middleware
@@ -183,6 +197,38 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Filesystem browsing — always available during setup (used by path picker)
   app.route("/api/v1/filesystem", filesystemRoutes());
 
+  // Custom providers / AI gateways (CRUD, test, discovery). Mounted before the generic
+  // provider routes so "/custom/*" never matches "/:name/*". Requires an initialized
+  // instance, so it is always behind the instance auth gate above.
+  if (opts?.workDir) {
+    app.route("/api/v1/providers/custom", customProviderRoutes(() => ({
+      isInitialized: () => !!orchestrator?.isInitialized,
+      getPolpoDir: () => orchestrator.getPolpoDir(),
+      getVaultStore: () => orchestrator.getVaultStore(),
+      applyProviders: async () => {
+        const { loadPolpoConfig, parseProviders } = await import("../core/config.js");
+        const { setProviderOverrides } = await import("../llm/pi-client.js");
+        const { refreshCustomProviderSecretStatus } = await import("../llm/custom-providers.js");
+        const raw = loadPolpoConfig(orchestrator.getPolpoDir());
+        const parsed = raw?.providers ? parseProviders(raw.providers as Record<string, unknown>) : {};
+        const config = orchestrator.getConfig();
+        if (config) config.providers = Object.keys(parsed).length > 0 ? parsed : undefined;
+        setProviderOverrides(parsed);
+        await refreshCustomProviderSecretStatus();
+      },
+      getModelUsage: async () => {
+        const specs: string[] = [];
+        const settings = orchestrator.getConfig()?.settings;
+        const om = settings?.orchestratorModel;
+        if (typeof om === "string") specs.push(om);
+        else if (om) specs.push(...[om.primary, ...(om.fallbacks ?? [])].filter((x): x is string => !!x));
+        if (settings?.imageModel) specs.push(settings.imageModel);
+        for (const agent of await orchestrator.getAgents()) if (agent.model) specs.push(agent.model);
+        return specs;
+      },
+    })));
+  }
+
   // Provider management — always available (API key CRUD, OAuth flows, model listing)
   if (opts?.workDir) {
     app.route("/api/v1/providers", providerRoutes(activePolpoDir));
@@ -192,8 +238,31 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     app.use("/v1/*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
+  // Server-side turns: queued prompts, steers that missed their turn, a branch's answer.
+  const CHAT_ATTACHMENT_PATH = /^workspace\/attachments\/[\w-]+\/[^/\\]+$/;
+  const turnScheduler = createTurnScheduler({
+    getSessionStore: () => o.getSessionStore(),
+    getAttachmentStore: () => o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
+    getQueueStore: () => o.getChatQueueStore(),
+    readAttachment: (path) => {
+      // Only chat attachments, never anything else under the project.
+      if (!CHAT_ATTACHMENT_PATH.test(path)) return Promise.reject(new Error("Not a chat attachment"));
+      return readFile(joinPath(o.getWorkDir(), path));
+    },
+    emit: (event, data) => o.emit(event as any, data as any),
+    request: (req) => completionApp.request(req),
+    apiKey: opts?.apiKeys?.[0],
+  });
+  // After a restart, queues that were waiting to auto-send get their chance.
+  if (orchestrator) {
+    const resumeTimer = setTimeout(() => {
+      if (orchestrator.isInitialized) void turnScheduler.resumePending().catch(() => undefined);
+    }, 3000);
+    resumeTimer.unref?.();
+  }
   const completionApp = completionRoutes(() => ({
-    contextCheckpoints: new FileContextCheckpointStore(o.getPolpoDir()),
+    turnScheduler,
+    contextCheckpoints: o.getContextCheckpointStore(),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
     saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
       o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
@@ -204,7 +273,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
     recordTokenUsage: async (usage) => {
-      await new FileTokenUsageStore(activePolpoDir()).record(usage);
+      await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
     },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
@@ -219,17 +288,22 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // here degrade gracefully: prompt is rendered without the section.
       let mailboxes: any[] | undefined;
       try {
-        const entries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
-        const { resolveAgentVault } = await import("../vault/index.js");
+        const { resolveAgentVault, loadAgentVaultEntries } = await import("../vault/index.js");
+        const entries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
         mailboxes = resolveAgentVault(entries).listMailboxes();
       } catch { /* ignore — keep prompt without mailboxes section */ }
-      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes);
+      const { sandbox, volumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] }));
+      const remote = sandbox?.provider === "daytona" || sandbox?.provider === "e2b";
+      return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
+        + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
+          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
     },
-    resolveAgentTools: async (agentConfig: any) => {
+    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
       const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
+      const { createStorageAgentTools } = await import("../tools/storage-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
       const {
         CLIENT_SIDE_CHAT_TOOLS,
@@ -242,7 +316,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       } = await import("../llm/orchestrator-tools.js");
       const { nanoid } = await import("nanoid");
       const { join } = await import("node:path");
-      const vaultEntries = await o.getVaultStore()?.getAllForAgent(agentConfig.name);
+      // System vault namespaces ("$data", ...) are never exposed to an agent.
+      const { loadAgentVaultEntries } = await import("../vault/index.js");
+      const vaultEntries = await loadAgentVaultEntries(o.getVaultStore(), agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
       // Mirror del path task (src/adapters/engine.ts) — se l'agent dichiara
       // tool estesi (browser_*, email_*, image_*, video_*, audio_*, excel_*,
@@ -269,27 +345,40 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ? (jid: string, text: string) => waBridge.sendMessage(jid, text)
         : undefined;
       const whatsappSendMedia = waBridge
-        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean }) =>
+        ? (jid: string, opts: { path: string; caption?: string; mimeType?: string; fileName?: string; mediaKind?: "auto" | "image" | "video" | "audio" | "document"; viewOnce?: boolean; data?: Uint8Array }) =>
             waBridge.sendMediaMessage(jid, opts)
         : undefined;
       const whatsappMarkRead = waBridge
         ? (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) =>
             waBridge.markRead(keys)
         : undefined;
+      // The chat's sandbox provider: anything but "local" keeps secret values away from the model
+      // (vault_get → bash env_from_vault). If it cannot be resolved, fail closed.
+      const chatSandboxProvider = await o.chatSandbox(agentConfig).then((c) => c.sandbox.provider, () => "bwrap");
+      // commands (bash, grep, glob, the browser in Cowork chats) run in this agent's chat sandbox;
+      // Cowork chats keep their files in the remote VM: every tool that touches files goes there too
+      const chatShell = o.chatShell(agentConfig, context?.sessionId);
+      const chatFs = o.chatFileSystem(agentConfig, context?.sessionId);
       const tools: any[] = await createAllTools({
         cwd: o.getAgentWorkDir(),
         allowedTools: agentConfig.allowedTools,
         allowedPaths: undefined,
         browserSession: agentConfig.name,
         browserProfileDir,
+        browserNetwork: await o.chatBrowserNetwork(agentConfig),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
+        // Large tool outputs go to <polpoDir>/tmp/tool-output/<agent>/ (no task output dir in chat).
+        agentName: agentConfig.name,
         whatsappStore: o.getWhatsAppStore?.(),
         whatsappSendMessage,
         whatsappSendMedia,
         whatsappMarkRead,
         polpoDir,
+        shell: chatShell,
+        fs: chatFs,
+        sandboxProvider: chatSandboxProvider,
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -303,8 +392,24 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         }
       }));
       tools.push(...createCompanyBrainAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, o.getVaultStore(), (event) => {
-        o.emit("brain:changed" as any, event);
+        o.emit("brain:changed", event);
       }));
+      // Buckets through host-side tools: credentials stay on the host.
+      tools.push(...createStorageAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, {
+        vaultStore: o.getVaultStore(),
+        cwd: o.getAgentWorkDir(),
+        emit: (payload) => o.emit("storage:changed", payload),
+        emitFileChanged: (payload) => o.emit("file:changed", payload),
+        fs: chatFs,
+      }));
+      // Cowork chats with hydrated read-write volumes: persist them on demand
+      {
+        const { sandbox: chatSbx, volumes: chatVolumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] as any[] }));
+        if ((chatSbx?.provider === "daytona" || chatSbx?.provider === "e2b") && chatVolumes.some((v: any) => v.remote && v.strategy === "hydrated" && v.access === "read-write")) {
+          const { createSandboxVolumeCheckpointTool } = await import("../tools/sandbox-volume-tools.js");
+          tools.push(createSandboxVolumeCheckpointTool((name) => o.checkpointChatVolume(agentConfig, context?.sessionId?.(), name)));
+        }
+      }
       const existingToolNames = new Set(tools.map((tool: any) => tool.name));
       for (const tool of CLIENT_SIDE_CHAT_TOOLS) {
         if (!existingToolNames.has(tool.name)) tools.push(tool);
@@ -374,9 +479,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // pre-authorised by the user when they're queued. See
       // SIDE_EFFECT_GATED_TOOLS in src/llm/orchestrator-tools.ts.
       const isInteractive = (name: string) => name === "ask_user" || isClientSideChatTool(name) || isSideEffectGated(name);
-      return { tools, executor, isInteractive };
+      // Whatever the agent's tools change is attributed to the agent
+      const attributed = (name: string, args: Record<string, unknown>) =>
+        withEventOrigin({ source: "agent", by: agentConfig.name }, () => executor(name, args));
+      return { tools, executor: attributed, isInteractive };
     },
     streamLLM: streamSimpleWithAuth as any,
+    completeLLM: completeSimpleWithAuth as any,
+    resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
+      resolveSummaryModel(conversation, configured, promptTokens),
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
@@ -391,11 +502,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
         tools: ALL_ORCHESTRATOR_TOOLS,
-        executor: (name: string, args: Record<string, unknown>, context) => executeOrchestratorTool(name, args, o, context),
+        executor: (name: string, args: Record<string, unknown>, context) =>
+          withEventOrigin({ source: "polpo" }, () => executeOrchestratorTool(name, args, o, context)),
         isInteractive,
       };
     },
   }), opts?.apiKeys);
+  // Chat turns from outside (web UI, API clients) are "api"; internal channel turns keep their origin
+  app.use("/v1/chat/completions", (c, next) => currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next()));
   app.route("/v1/chat/completions", completionApp);
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
@@ -407,6 +521,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   if (opts?.workDir) {
     authed.use("*", instanceAuthMiddleware(getPolpoDir(opts.workDir), opts.apiKeys ?? []));
   }
+
+  // Events caused by an API call carry source "api" and, with instance auth, the person's email
+  authed.use("*", (c, next) => {
+    if (currentEventOrigin()) return next();
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return withEventOrigin({ source: "api", ...(email ? { by: email } : {}) }, () => next());
+  });
 
   // Gate: orchestrator must be initialized for these routes
   authed.use("*", async (c, next) => {
@@ -429,7 +550,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const o = orchestrator; // short alias
 
   o?.setBackgroundWaitContinuation(async (wait, task, signal) => {
-    if (streamRegistry.getActiveTurnForSession(wait.sessionId)) return "deferred";
+    // One turn per session: wait for whatever runs there now.
+    if (sessionLeases.isHeld(wait.sessionId)) return "deferred";
     const session = await o.getSessionStore()?.getSession(wait.sessionId);
     if (!session) throw new Error(`Chat session "${wait.sessionId}" no longer exists`);
 
@@ -437,9 +559,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       "content-type": "application/json",
       "x-session-id": wait.sessionId,
       "x-polpo-internal-continuation": "background-wait",
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
-    const history = await o.getSessionStore()?.getRecentMessages(wait.sessionId, 40) ?? [];
+    // the whole conversation: compaction keeps it within the window
+    const history = await o.getSessionStore()?.getMessages(wait.sessionId) ?? [];
     const response = await completionApp.request(new Request("http://polpo.internal/", {
       method: "POST",
       headers,
@@ -459,6 +583,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ],
       }),
     }));
+    if (response.status === 409) return "deferred";
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as any;
       throw new Error(payload?.error?.message ?? payload?.error ?? `Continuation failed (${response.status})`);
@@ -473,6 +598,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-session-id": sessionId,
+      // One turn per session: a channel message waits for the running answer instead of failing.
+      "x-polpo-lease-wait": String(10 * 60 * 1000),
+      ...internalCallHeaders(),
     };
     if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
     const response = await completionApp.request(new Request("http://polpo.internal/", {
@@ -486,6 +614,79 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     }
     // Only the agents' workspace is shareable — never the project root (.polpo holds config and tokens).
     return interpretChannelCompletion(payload?.choices?.[0], [o.getAgentWorkDir()]);
+  });
+
+  // /compact from a messaging channel: the same completion route, asked to compact instead of answering
+  o?.setChannelCompactRunner(async ({ agent, sessionId, messages, focus }) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": sessionId,
+      "x-polpo-lease-wait": String(10 * 60 * 1000),
+      ...internalCallHeaders(),
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages, compact: focus ? { focus } : {} }),
+    }));
+    const payload = await response.json().catch(() => null) as any;
+    if (!response.ok) throw new Error(payload?.error?.message ?? `Compaction failed (${response.status})`);
+    return payload?.data?.compaction ?? null;
+  });
+
+  // Sandbox status for the UI: what this machine can run, and the resolved defaults
+  authed.get("/sandbox", async (c) => {
+    const { availableProviders, effectiveSandbox } = await import("../sandbox/manager.js");
+    const { normalizeSandboxSettings } = await import("@polpo-ai/core/sandbox");
+    const instance = normalizeSandboxSettings(o.getConfig()?.settings?.sandbox);
+    const agents = await o.getAgents();
+    return c.json({ ok: true, data: {
+      available: [...availableProviders()],
+      settings: instance ?? null,
+      polpo: effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : ["http_fetch"] }),
+      agents: agents.map((agent) => {
+        const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
+        return {
+          name: agent.name,
+          settings: cascade.agent ?? null,
+          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }),
+          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }),
+        };
+      }),
+    } });
+  });
+
+  // Destinations the sandbox network rule refused recently (last ~100, in memory): the "approve a new domain" list
+  authed.get("/sandbox/network-denied", (c) => c.json({ ok: true, data: o.getNetworkDenied() }));
+
+  // Remote sandbox providers (Daytona, E2B): settings are edited with the other sandbox settings
+  // (PATCH /config/settings), keys stay in the vault entry each provider references.
+  // Vault entries a feature can reference (owner + service): every agent's own entries, names and
+  // key names only — never values, never the system "$" owners.
+  authed.get("/vault-catalog", async (c) => {
+    const store = o.getVaultStore();
+    if (!store) return c.json({ ok: true, data: [] });
+    const agents = await o.getAgents();
+    const rows = (await Promise.all(agents.map(async (agent) => {
+      const entries = await store.list(agent.name).catch(() => []);
+      return entries.filter((e: any) => !e.sharedFrom).map((e: any) => ({
+        owner: agent.name, service: e.service, type: e.type, label: e.label, keys: e.keys, allowedAgents: e.allowedAgents ?? [],
+      }));
+    }))).flat();
+    return c.json({ ok: true, data: rows });
+  });
+
+  authed.get("/sandbox/providers", async (c) => {
+    const { remoteProviderStatus } = await import("../sandbox/remote-providers.js");
+    return c.json({ ok: true, data: await remoteProviderStatus() });
+  });
+  authed.post("/sandbox/providers/:id/test", async (c) => {
+    const { isRemoteProvider, testRemoteProvider, remoteProviderCredentials } = await import("../sandbox/remote-providers.js");
+    const id = c.req.param("id");
+    if (!isRemoteProvider(id)) return c.json({ ok: false, error: `Unknown provider "${id}"` }, 404);
+    if (!(await remoteProviderCredentials(id))) return c.json({ ok: false, error: "Choose a vault entry with the API key first" }, 400);
+    return c.json({ ok: true, data: await testRemoteProvider(id) });
   });
 
   authed.route("/counts", countsRoutes(() => ({
@@ -562,10 +763,25 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/events", eventRoutes(sseBridge));
 
+  authed.route("/rooms", roomRoutes(() => ({
+    rooms: o.getRoomStore(),
+    engine: o.getRoomEngine(),
+    agentNames: async () => (await o.getAgents()).map(a => a.name),
+    emit: (event, payload) => o.emit(event, payload),
+    emitDeleted: (roomId) => o.emit("room:deleted", { roomId }),
+  })));
+
   authed.route("/chat", chatRoutes(() => ({
     attachmentStore: o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()),
     sessionStore: o.getSessionStore(),
     emit: (event: string, data: unknown) => o.emit(event as any, data),
+    chatQueueStore: o.getChatQueueStore(),
+    turnScheduler,
+    removeAttachmentFile: async (path: string) => {
+      // Only chat attachments, never anything else under the project.
+      if (!CHAT_ATTACHMENT_PATH.test(path)) return;
+      await unlink(joinPath(o.getWorkDir(), path)).catch(() => undefined);
+    },
   })));
 
   authed.route("/skills", skillRoutes(() => ({
@@ -591,12 +807,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
   // Backward-compat: keep /templates as alias
   authed.route("/templates", playbookRoutes(() => ({
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
 
   authed.route("/config", configRoutes(() => ({
@@ -604,8 +822,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     reloadConfig: () => o.reloadConfig(),
     getPolpoDir: () => o.getPolpoDir(),
     saveConfig: async (config: any) => {
-      const { savePolpoConfig } = await import("../core/config.js");
-      savePolpoConfig(o.getPolpoDir(), config);
+      // Config routes only mutate `settings`; merge them into the file so provider
+      // definitions (and anything else the parsed in-memory config drops) survive.
+      const { savePolpoSettings } = await import("../core/config.js");
+      savePolpoSettings(o.getPolpoDir(), config?.settings ?? {});
     },
     getNotificationRouter: () => o.getNotificationRouter(),
   })));
@@ -650,6 +870,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return { runtime, store: runtime.store, vaultStore: o.getVaultStore() };
   }));
   authed.route("/views", dataViewRoutes(() => activeDataRegistry().store));
+  authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
 
   authed.route("/vault", vaultRoutes(() => ({
@@ -666,6 +887,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     agentWorkDir: o.getAgentWorkDir(),
     fs: new NodeFileSystem(),
     emit: (event: string, data: any) => o.emit(event as any, data),
+    // Mounted buckets appear as extra roots (their files are browsed through the mount).
+    // every volume (local folders and buckets); buckets are browsable once mounted here
+    storageRoots: async () => (await activeStorage().list())
+      .map((entry) => ({ id: entry.id, slug: entry.slug, name: entry.name, path: entry.mount.path, readOnly: entry.readOnly, kind: entry.provider === "local" ? "local" as const : "bucket" as const, mounted: entry.mount.state === "mounted" })),
   })));
 
   authed.route("/audio", audioRoutes());

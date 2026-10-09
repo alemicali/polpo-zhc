@@ -3,6 +3,17 @@ import type { NotificationChannel, Notification, OutcomeAttachment } from "../ty
 import type { NotificationChannelConfig } from "../../core/types.js";
 import { basename } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
+import {
+  botJoined,
+  groupAddressing,
+  isGroupChat,
+  mediaLabel,
+  topicOf,
+  type InboundGroup,
+  type TelegramChatType,
+  type TelegramGroupEvent,
+  type TelegramIdentity,
+} from "../telegram-groups.js";
 
 /**
  * Telegram notification channel — sends messages via Bot API.
@@ -273,6 +284,12 @@ export class TelegramCallbackPoller {
   private resolver?: ApprovalCallbackResolver;
   private gateway?: TelegramGatewayHandler;
   private menuCommands?: { command: string; description: string }[];
+  private groupMenuCommands?: { command: string; description: string }[];
+  private identity?: TelegramIdentity;
+  private identityCheckedAt = 0;
+  private polling = false;
+  /** Updates of one chat run in order; different chats do not wait for each other. */
+  private chatQueues = new Map<string, Promise<void>>();
 
   constructor(botToken: string, chatId: string) {
     this.botToken = botToken;
@@ -289,25 +306,66 @@ export class TelegramCallbackPoller {
     this.gateway = handler;
   }
 
-  /** Commands shown in the bot's menu; registered with setMyCommands when polling starts. */
-  setMenuCommands(commands: { command: string; description: string }[]): void {
+  /**
+   * Commands shown in the bot's menu; registered with setMyCommands when polling starts.
+   * Groups get their own list when given (commands that make sense in a shared chat).
+   */
+  setMenuCommands(commands: { command: string; description: string }[], groupCommands?: { command: string; description: string }[]): void {
     this.menuCommands = commands;
+    this.groupMenuCommands = groupCommands;
     if (this.timer) void this.registerMenuCommands(); // already polling: register now
   }
 
   private async registerMenuCommands(): Promise<void> {
     if (!this.menuCommands) return;
-    const res = await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ commands: this.menuCommands }),
-    }).catch((err) => { console.error(`[polpo/telegram] setMyCommands failed: ${err}`); return undefined; });
-    if (res && !res.ok) console.error(`[polpo/telegram] setMyCommands failed (${res.status})`);
+    const lists: { commands: { command: string; description: string }[]; scope?: { type: string } }[] = [{ commands: this.menuCommands }];
+    if (this.groupMenuCommands) lists.push({ commands: this.groupMenuCommands, scope: { type: "all_group_chats" } });
+    for (const body of lists) {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch((err) => { console.error(`[polpo/telegram] setMyCommands failed: ${err}`); return undefined; });
+      if (res && !res.ok) console.error(`[polpo/telegram] setMyCommands failed (${res.status})`);
+    }
+  }
+
+  /** Member counts of groups (getChatMemberCount), kept for a while: who is in the room matters for intent. */
+  private memberCounts = new Map<string, { n: number; at: number }>();
+
+  /** How many members a group has, bots included; undefined when Telegram does not say. */
+  async memberCount(chatId: string): Promise<number | undefined> {
+    const hit = this.memberCounts.get(chatId);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.n;
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getChatMemberCount?chat_id=${encodeURIComponent(chatId)}`);
+      const body = await res.json() as { ok?: boolean; result?: number };
+      if (body.ok && typeof body.result === "number") {
+        this.memberCounts.set(chatId, { n: body.result, at: Date.now() });
+        return body.result;
+      }
+    } catch { /* unknown: the classifier does without */ }
+    return hit?.n;
+  }
+
+  /** The bot's own id and username (getMe): needed to tell which group messages are for it. */
+  async getIdentity(): Promise<TelegramIdentity | undefined> {
+    if (this.identity || Date.now() - this.identityCheckedAt < 30_000) return this.identity;
+    this.identityCheckedAt = Date.now();
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`);
+      const body = await res.json() as { ok?: boolean; result?: { id: number; username?: string; can_read_all_group_messages?: boolean } };
+      if (body.ok && body.result) {
+        this.identity = { id: body.result.id, username: body.result.username, canReadAllGroupMessages: body.result.can_read_all_group_messages };
+      }
+    } catch { /* retried on a later group message */ }
+    return this.identity;
   }
 
   start(intervalMs = 2000): void {
     if (this.timer) return;
     void this.registerMenuCommands();
+    void this.getIdentity();
     this.timer = setInterval(() => this.poll(), intervalMs);
   }
 
@@ -319,6 +377,9 @@ export class TelegramCallbackPoller {
   }
 
   private async poll(): Promise<void> {
+    // A slow request must not let the next tick fetch the same updates again.
+    if (this.polling) return;
+    this.polling = true;
     try {
       const url = `https://api.telegram.org/bot${this.botToken}/getUpdates`;
       const response = await fetch(url, {
@@ -339,20 +400,31 @@ export class TelegramCallbackPoller {
       for (const update of data.result) {
         this.offset = Math.max(this.offset, update.update_id + 1);
 
-        if (update.callback_query) {
-          await this.handleCallback(update.callback_query);
-        } else if (update.message) {
-          const msg = update.message;
-          const msgKeys = Object.keys(msg).filter(k => !["message_id", "chat", "from", "date"].includes(k));
-          console.error(`[polpo/telegram] update ${update.update_id}: keys=[${msgKeys.join(",")}]` +
-            (msg.document ? ` document=${msg.document.mime_type} file_name=${(msg.document as any).file_name}` : "") +
-            (msg.text ? ` text="${msg.text.slice(0, 40)}"` : ""));
-          await this.handleMessage(update.message);
+        const query = update.callback_query;
+        const msg = update.message;
+        if (query) {
+          this.enqueue(String(query.message?.chat?.id ?? this.chatId), () => this.handleCallback(query));
+        } else if (msg) {
+          // Message text is not logged: in groups it is other people's conversation.
+          const msgKeys = Object.keys(msg).filter(k => !["message_id", "chat", "from", "date", "text", "entities"].includes(k));
+          console.error(`[polpo/telegram] update ${update.update_id}: ${msg.chat.type ?? "chat"}${msgKeys.length ? ` keys=[${msgKeys.join(",")}]` : ""}`);
+          this.enqueue(String(msg.chat.id), () => this.handleMessage(msg));
         }
       }
     } catch (err) {
       console.error(`[polpo/telegram] Poll error: ${err instanceof Error ? err.stack : String(err)}`);
+    } finally {
+      this.polling = false;
     }
+  }
+
+  /** Run `work` after the earlier updates of the same chat. */
+  private enqueue(chatKey: string, work: () => Promise<void>): void {
+    const next = (this.chatQueues.get(chatKey) ?? Promise.resolve())
+      .then(work)
+      .catch((err) => console.error(`[polpo/telegram] Update error: ${err instanceof Error ? err.stack : String(err)}`));
+    this.chatQueues.set(chatKey, next);
+    void next.finally(() => { if (this.chatQueues.get(chatKey) === next) this.chatQueues.delete(chatKey); });
   }
 
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
@@ -367,20 +439,25 @@ export class TelegramCallbackPoller {
     const chatId = String(query.message?.chat?.id ?? this.chatId);
     const senderId = String(query.from?.id ?? query.message?.chat?.id ?? this.chatId);
     const senderName = query.from?.first_name;
+    const group: InboundGroup | undefined = query.message && isGroupChat(query.message.chat)
+      ? { title: query.message.chat.title, threadId: topicOf(query.message), addressed: true }
+      : undefined;
+    const target: TelegramSendTarget | undefined = group ? { threadId: group.threadId } : undefined;
 
     // Menu buttons (e.g. agent picker) are not approvals
     if (action === "agent") {
-      const reply = await this.gateway?.handleMenuCallback?.(action, requestId, chatId, senderId, senderName);
-      if (reply) await this.sendMarkdown(chatId, reply);
+      const reply = await this.gateway?.handleMenuCallback?.(action, requestId, chatId, senderId, senderName, group);
+      if (reply) await this.sendMarkdown(chatId, reply, undefined, undefined, target);
       return;
     }
 
     // If gateway is available, route through it for identity tracking
     if (this.gateway) {
+      // The configured chat is the owner's: buttons pressed there are trusted without pairing.
       const response = await this.gateway.handleApprovalCallback(
-        action, requestId, chatId, senderId, senderName,
+        action, requestId, chatId, senderId, senderName, { trusted: senderId === this.chatId, group },
       );
-      if (response) await this.sendMarkdown(chatId, response);
+      if (response) await this.sendMarkdown(chatId, response, undefined, undefined, target);
       return;
     }
 
@@ -410,34 +487,10 @@ export class TelegramCallbackPoller {
 
     // ── Gateway mode: route ALL messages (text and media) through the ChannelGateway ──
     if (this.gateway) {
+      if (isGroupChat(message.chat)) return this.handleGroupMessage(message);
       const media = inboundMediaOf(message);
       if (!text && media.length === 0) return; // stickers, locations, … carry nothing usable
-
-      // Send typing immediately and keep refreshing every 4s until we respond
-      await this.sendChatAction(chatId, "typing");
-      const typingInterval = setInterval(() => {
-        this.sendChatAction(chatId, "typing").catch(() => {});
-      }, 4000);
-
-      try {
-        const { attachments, skipped } = await this.downloadMedia(media);
-        if (media.length > 0 && attachments.length === 0) {
-          await this.sendReply(chatId, escapeHtml(skipped[0] ?? "Could not download the attachment."));
-          return;
-        }
-        const response = await this.gateway.handleInboundMessage(
-          senderId, chatId, text ?? "", senderName, String(message.message_id), attachments,
-        );
-        if (typeof response === "string") await this.sendMarkdown(chatId, response);
-        else if (response) {
-          if (response.text.trim() || response.buttons || response.forceReply) {
-            await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply);
-          }
-          for (const file of response.files ?? []) await this.sendDocument(chatId, file.path, file.filename);
-        }
-      } finally {
-        clearInterval(typingInterval);
-      }
+      await this.respond(chatId, undefined, text ?? "", media, senderId, senderName, String(message.message_id));
       return;
     }
 
@@ -454,6 +507,97 @@ export class TelegramCallbackPoller {
       ? `❌ Rejected — task will retry with your feedback:\n<i>${escapeHtml(text)}</i>`
       : `❌ Error: ${result.error}`;
     await this.sendReply(chatId, msg);
+  }
+
+  /**
+   * A message in a group or supergroup. Only messages addressed to the bot get an answer;
+   * the rest reaches the gateway as context (text only, nothing is downloaded).
+   */
+  private async handleGroupMessage(message: TelegramMessage): Promise<void> {
+    const gateway = this.gateway!;
+    const chatId = String(message.chat.id);
+    const title = message.chat.title;
+    const threadId = topicOf(message);
+
+    // A group upgraded to supergroup gets a new id: carry its activation over.
+    if (message.migrate_from_chat_id) {
+      await gateway.handleGroupEvent?.({ kind: "migrated", chatId, fromChatId: String(message.migrate_from_chat_id), title });
+      return;
+    }
+
+    // Other bots and the group's linked channel are not part of the conversation; anonymous admins are.
+    const anonymousAdmin = !!message.sender_chat && message.sender_chat.id === message.chat.id;
+    if (!anonymousAdmin && (message.sender_chat || message.from?.is_bot)) return;
+    const senderId = anonymousAdmin ? `admin${chatId}` : String(message.from?.id ?? "");
+    if (!senderId) return;
+    const senderName = anonymousAdmin
+      ? "Group admin"
+      : [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ") || message.from?.username;
+
+    const me = await this.getIdentity();
+    if (botJoined(message, me)) {
+      const reply = await gateway.handleGroupEvent?.({ kind: "joined", chatId, title, senderId, senderName });
+      if (reply) await this.sendMarkdown(chatId, reply, undefined, undefined, { threadId });
+      return;
+    }
+
+    const { addressed, forOtherBot, text } = groupAddressing(message, me);
+    if (forOtherBot) return;
+    const group: InboundGroup = { title, threadId, addressed };
+    if (!addressed) {
+      const line = [mediaLabel(message), text].filter(Boolean).join(" ").trim();
+      if (!line) return;
+      // groupReplies "intent": the agent may join in, then it answers as if it had been called
+      if (text.trim() && gateway.joinsByIntent
+        && await gateway.joinsByIntent(senderId, chatId, text, senderName, String(message.message_id), { ...group, members: await this.memberCount(chatId) })) {
+        await this.respond(chatId, { threadId, replyTo: message.message_id }, text, inboundMediaOf(message), senderId, senderName, String(message.message_id), { ...group, addressed: true });
+        return;
+      }
+      await gateway.handleInboundMessage(senderId, chatId, line, senderName, String(message.message_id), [], group);
+      return;
+    }
+    const media = inboundMediaOf(message);
+    // A bare mention ("@bot") is still a call: pass it on as written.
+    const body = text.trim() || (media.length === 0 ? (message.text ?? message.caption ?? "") : "");
+    if (!body && media.length === 0) return;
+    await this.respond(chatId, { threadId, replyTo: message.message_id }, body, media, senderId, senderName, String(message.message_id), group);
+  }
+
+  /** Typing while the gateway works, then the reply (text, buttons, files) in the right chat and topic. */
+  private async respond(
+    chatId: string,
+    target: TelegramSendTarget | undefined,
+    text: string,
+    media: InboundMediaRef[],
+    senderId: string,
+    senderName: string | undefined,
+    messageId: string,
+    group?: InboundGroup,
+  ): Promise<void> {
+    const gateway = this.gateway!;
+    // Send typing immediately and keep refreshing every 4s until we respond
+    await this.sendChatAction(chatId, "typing", target?.threadId);
+    const typingInterval = setInterval(() => {
+      this.sendChatAction(chatId, "typing", target?.threadId).catch(() => {});
+    }, 4000);
+
+    try {
+      const { attachments, skipped } = await this.downloadMedia(media);
+      if (media.length > 0 && attachments.length === 0) {
+        await this.sendReply(chatId, escapeHtml(skipped[0] ?? "Could not download the attachment."), undefined, undefined, true, target);
+        return;
+      }
+      const response = await gateway.handleInboundMessage(senderId, chatId, text, senderName, messageId, attachments, group);
+      if (typeof response === "string") await this.sendMarkdown(chatId, response, undefined, undefined, target);
+      else if (response) {
+        if (response.text.trim() || response.buttons || response.forceReply) {
+          await this.sendMarkdown(chatId, response.text, response.buttons, response.forceReply, target);
+        }
+        for (const file of response.files ?? []) await this.sendDocument(chatId, file.path, file.filename, target);
+      }
+    } finally {
+      clearInterval(typingInterval);
+    }
   }
 
   /** Download inbound media via getFile. Oversized or failed files are reported, not thrown. */
@@ -489,27 +633,28 @@ export class TelegramCallbackPoller {
     }).catch(() => {});
   }
 
-  /** Send typing indicator to a chat. */
-  async sendTyping(chatId: string): Promise<void> {
-    await this.sendChatAction(chatId, "typing");
+  /** Send typing indicator to a chat (and topic). */
+  async sendTyping(chatId: string, target?: TelegramSendTarget): Promise<void> {
+    await this.sendChatAction(chatId, "typing", target?.threadId);
   }
 
   /** Send a partial response as a separate message (for multi-turn tool loops). */
-  async sendPartial(chatId: string, text: string): Promise<void> {
-    await this.sendMarkdown(chatId, text);
+  async sendPartial(chatId: string, text: string, target?: TelegramSendTarget): Promise<void> {
+    await this.sendMarkdown(chatId, text, undefined, undefined, target);
   }
 
   /** Upload a local file as a document; failures are reported to the chat instead of being lost. */
-  async sendDocument(chatId: string, path: string, filename: string): Promise<boolean> {
+  async sendDocument(chatId: string, path: string, filename: string, target?: TelegramSendTarget): Promise<boolean> {
     try {
       const { readFile, stat } = await import("node:fs/promises");
       const size = (await stat(path)).size;
       if (size > TELEGRAM_MAX_UPLOAD_BYTES) {
-        await this.sendReply(chatId, `${escapeHtml(filename)} is too large to send on Telegram (max 50 MB).`);
+        await this.sendReply(chatId, `${escapeHtml(filename)} is too large to send on Telegram (max 50 MB).`, undefined, undefined, true, target);
         return false;
       }
       const form = new FormData();
       form.append("chat_id", chatId);
+      if (target?.threadId !== undefined) form.append("message_thread_id", String(target.threadId));
       form.append("document", new Blob([new Uint8Array(await readFile(path))]), filename);
       const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendDocument`, { method: "POST", body: form });
       if (res.ok) return true;
@@ -518,7 +663,7 @@ export class TelegramCallbackPoller {
     } catch (err) {
       console.error(`[polpo/telegram] sendDocument failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await this.sendReply(chatId, `Could not send ${escapeHtml(filename)}.`);
+    await this.sendReply(chatId, `Could not send ${escapeHtml(filename)}.`, undefined, undefined, true, target);
     return false;
   }
 
@@ -526,29 +671,32 @@ export class TelegramCallbackPoller {
    * Send Markdown as one or more HTML messages (Telegram's 4096-char limit).
    * Markup (buttons / reply prompt) goes on the last message. If Telegram
    * rejects the HTML, the chunk is resent as plain text instead of being lost.
+   * In a group the first message quotes the one it answers (target.replyTo), in its topic.
    */
   async sendMarkdown(
     chatId: string,
     markdown: string,
     buttons?: { text: string; data: string }[][],
     forceReply?: { placeholder?: string },
+    target?: TelegramSendTarget,
   ): Promise<void> {
     const chunks = splitMarkdown(markdown);
     for (let i = 0; i < chunks.length; i++) {
       const last = i === chunks.length - 1;
-      const sent = await this.sendReply(chatId, markdownToTelegramHtml(chunks[i]), last ? buttons : undefined, last ? forceReply : undefined);
+      const where = i === 0 ? target : target && { threadId: target.threadId };
+      const sent = await this.sendReply(chatId, markdownToTelegramHtml(chunks[i]), last ? buttons : undefined, last ? forceReply : undefined, true, where);
       if (!sent) {
-        await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false);
+        await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false, where);
       }
     }
   }
 
-  private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing"): Promise<void> {
+  private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing", threadId?: number): Promise<void> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendChatAction`;
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, action }),
+      body: JSON.stringify({ chat_id: chatId, action, ...(threadId !== undefined ? { message_thread_id: threadId } : {}) }),
     }).catch(() => {});
   }
 
@@ -559,6 +707,7 @@ export class TelegramCallbackPoller {
     buttons?: { text: string; data: string }[][],
     forceReply?: { placeholder?: string },
     html = true,
+    target?: TelegramSendTarget,
   ): Promise<boolean> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
     const res = await fetch(url, {
@@ -568,8 +717,11 @@ export class TelegramCallbackPoller {
         chat_id: chatId,
         text,
         ...(html ? { parse_mode: "HTML" } : {}),
+        ...(target?.threadId !== undefined ? { message_thread_id: target.threadId } : {}),
+        ...(target?.replyTo !== undefined ? { reply_parameters: { message_id: target.replyTo, allow_sending_without_reply: true } } : {}),
         ...(buttons ? { reply_markup: { inline_keyboard: buttons.map(row => row.map(b => ({ text: b.text, callback_data: b.data }))) } } : {}),
-        ...(forceReply ? { reply_markup: { force_reply: true, ...(forceReply.placeholder ? { input_field_placeholder: forceReply.placeholder } : {}) } } : {}),
+        // selective: in a group, only the person being answered gets the reply prompt.
+        ...(forceReply ? { reply_markup: { force_reply: true, ...(target?.replyTo !== undefined ? { selective: true } : {}), ...(forceReply.placeholder ? { input_field_placeholder: forceReply.placeholder } : {}) } } : {}),
       }),
     }).catch((err) => {
       console.error(`[polpo/telegram] sendMessage failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -616,10 +768,18 @@ export interface TelegramGatewayHandler {
     senderName?: string,
     messageId?: string,
     attachments?: InboundAttachment[],
+    /** Set for group messages; unaddressed ones are context only. */
+    group?: InboundGroup,
   ): Promise<string | TelegramReply | undefined>;
 
+  /**
+   * A group message nobody addressed: should this bot answer it anyway (groupReplies "intent")?
+   * Asked before the message is kept as context.
+   */
+  joinsByIntent?(senderId: string, chatId: string, text: string, senderName: string | undefined, messageId: string, group: InboundGroup): Promise<boolean>;
+
   /** Non-approval inline buttons (e.g. "agent:<name>"). */
-  handleMenuCallback?(action: string, value: string, chatId: string, senderId: string, senderName?: string): Promise<string | undefined>;
+  handleMenuCallback?(action: string, value: string, chatId: string, senderId: string, senderName?: string, group?: InboundGroup): Promise<string | undefined>;
 
   handleApprovalCallback(
     action: string,
@@ -627,7 +787,18 @@ export interface TelegramGatewayHandler {
     chatId: string,
     senderId: string,
     senderName?: string,
+    /** trusted: pressed in the channel's own (owner) chat. */
+    opts?: { trusted?: boolean; group?: InboundGroup },
   ): Promise<string | undefined>;
+
+  /** The bot joined a group, or a group became a supergroup. Returns a message for the group. */
+  handleGroupEvent?(event: TelegramGroupEvent): Promise<string | undefined>;
+}
+
+/** Where a message goes inside a chat: a forum topic, as a reply to a message. */
+export interface TelegramSendTarget {
+  threadId?: number;
+  replyTo?: number;
 }
 
 // ─── Types for callback resolver ───────────
@@ -655,7 +826,7 @@ interface TelegramUpdate {
   message?: TelegramMessage;
 }
 
-interface TelegramUser {
+export interface TelegramUser {
   id: number;
   is_bot: boolean;
   first_name: string;
@@ -678,11 +849,34 @@ export interface TelegramFile {
   mime_type?: string;
 }
 
+export interface TelegramEntity {
+  type: string;
+  offset: number;
+  length: number;
+  user?: TelegramUser;
+}
+
 export interface TelegramMessage {
   message_id: number;
-  chat: { id: number };
+  chat: { id: number; type?: TelegramChatType; title?: string };
   from?: TelegramUser;
+  /** Anonymous group admin (the group itself) or a linked channel. */
+  sender_chat?: { id: number; title?: string };
+  /** Forum topic, when is_topic_message is set. */
+  message_thread_id?: number;
+  is_topic_message?: boolean;
   text?: string;
+  entities?: TelegramEntity[];
+  caption_entities?: TelegramEntity[];
+  reply_to_message?: TelegramMessage;
+  /** Service message opening a forum topic. */
+  forum_topic_created?: unknown;
+  new_chat_members?: TelegramUser[];
+  group_chat_created?: boolean;
+  supergroup_chat_created?: boolean;
+  /** In the new supergroup: the id the group had before. */
+  migrate_from_chat_id?: number;
+  sticker?: { emoji?: string };
   /** File attachment (document). */
   document?: TelegramFile & { file_name?: string };
   /** Photo sizes, smallest first. */

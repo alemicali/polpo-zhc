@@ -12,11 +12,20 @@
  * All file operations enforce path sandboxing.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { resolve, dirname, extname } from "node:path";
+import { resolve, extname } from "node:path";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { readBytes, toolFs, writeBytes, writeText } from "./tool-fs.js";
+
+/** An exceljs workbook loaded from the bytes of an .xlsx file (read through the tools' FileSystem). */
+async function loadWorkbook(fs: FileSystem, filePath: string) {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.default.Workbook();
+  await workbook.xlsx.load(await readBytes(fs, filePath) as any);
+  return workbook;
+}
 
 const MAX_ROWS_OUTPUT = 200;
 const MAX_CELL_LENGTH = 500;
@@ -34,7 +43,7 @@ const ExcelReadSchema = Type.Object({
   max_rows: Type.Optional(Type.Number({ description: "Max rows to return (default: 200)" })),
 });
 
-function createExcelReadTool(cwd: string, sandbox: string[]): AgentTool<typeof ExcelReadSchema> {
+function createExcelReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ExcelReadSchema> {
   return {
     name: "excel_read",
     label: "Read Spreadsheet",
@@ -50,13 +59,11 @@ function createExcelReadTool(cwd: string, sandbox: string[]): AgentTool<typeof E
 
       try {
         if (ext === ".csv" || ext === ".tsv") {
-          return readCsvFile(filePath, ext === ".tsv" ? "\t" : ",", params.headers ?? true, maxRows);
+          return readCsvFile(await fs.readFile(filePath), ext === ".tsv" ? "\t" : ",", params.headers ?? true, maxRows);
         }
 
         // Use exceljs for xlsx
-        const ExcelJS = await import("exceljs");
-        const workbook = new ExcelJS.default.Workbook();
-        await workbook.xlsx.readFile(filePath);
+        const workbook = await loadWorkbook(fs, filePath);
 
         // Select sheet
         let worksheet;
@@ -124,12 +131,11 @@ function createExcelReadTool(cwd: string, sandbox: string[]): AgentTool<typeof E
 }
 
 function readCsvFile(
-  filePath: string,
+  raw: string,
   delimiter: string,
   hasHeaders: boolean,
   maxRows: number,
 ): AgentToolResult<any> {
-  const raw = readFileSync(filePath, "utf-8");
   const lines = raw.split("\n").filter(l => l.trim());
 
   const rows: string[][] = lines.slice(0, maxRows + (hasHeaders ? 1 : 0))
@@ -188,7 +194,7 @@ const ExcelWriteSchema = Type.Object({
   sheet_name: Type.Optional(Type.String({ description: "Sheet name (default: 'Sheet1')" })),
 });
 
-function createExcelWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof ExcelWriteSchema> {
+function createExcelWriteTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ExcelWriteSchema> {
   return {
     name: "excel_write",
     label: "Write Spreadsheet",
@@ -198,7 +204,6 @@ function createExcelWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof 
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "excel_write");
-      mkdirSync(dirname(filePath), { recursive: true });
 
       const ext = extname(filePath).toLowerCase();
 
@@ -211,7 +216,7 @@ function createExcelWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof 
               row.map(v => csvEscape(String(v ?? ""), delimiter)).join(delimiter),
             ),
           ];
-          writeFileSync(filePath, lines.join("\n"), "utf-8");
+          await writeText(fs, filePath, lines.join("\n"));
           return {
             content: [{ type: "text", text: `CSV written: ${filePath} (${params.rows.length} rows, ${params.headers.length} columns)` }],
             details: { path: filePath, rows: params.rows.length, format: "csv" },
@@ -238,7 +243,7 @@ function createExcelWriteTool(cwd: string, sandbox: string[]): AgentTool<typeof 
           col.width = maxLen + 2;
         });
 
-        await workbook.xlsx.writeFile(filePath);
+        await writeBytes(fs, filePath, new Uint8Array(await workbook.xlsx.writeBuffer() as ArrayBuffer));
         return {
           content: [{ type: "text", text: `Excel written: ${filePath} (${params.rows.length} rows, ${params.headers.length} columns)` }],
           details: { path: filePath, rows: params.rows.length, format: "xlsx" },
@@ -273,7 +278,7 @@ const ExcelQuerySchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max rows to return" })),
 });
 
-function createExcelQueryTool(cwd: string, sandbox: string[]): AgentTool<typeof ExcelQuerySchema> {
+function createExcelQueryTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ExcelQuerySchema> {
   return {
     name: "excel_query",
     label: "Query Spreadsheet",
@@ -290,7 +295,7 @@ function createExcelQueryTool(cwd: string, sandbox: string[]): AgentTool<typeof 
         let data: Record<string, string>[] = [];
 
         if (ext === ".csv" || ext === ".tsv") {
-          const raw = readFileSync(filePath, "utf-8");
+          const raw = await fs.readFile(filePath);
           const lines = raw.split("\n").filter(l => l.trim());
           const delimiter = ext === ".tsv" ? "\t" : ",";
           if (lines.length === 0) {
@@ -304,9 +309,7 @@ function createExcelQueryTool(cwd: string, sandbox: string[]): AgentTool<typeof 
             data.push(row);
           }
         } else {
-          const ExcelJS = await import("exceljs");
-          const workbook = new ExcelJS.default.Workbook();
-          await workbook.xlsx.readFile(filePath);
+          const workbook = await loadWorkbook(fs, filePath);
           let ws;
           if (typeof params.sheet === "number") ws = workbook.worksheets[params.sheet];
           else if (typeof params.sheet === "string") ws = workbook.getWorksheet(params.sheet);
@@ -389,7 +392,7 @@ const ExcelInfoSchema = Type.Object({
   path: Type.String({ description: "Path to .xlsx file" }),
 });
 
-function createExcelInfoTool(cwd: string, sandbox: string[]): AgentTool<typeof ExcelInfoSchema> {
+function createExcelInfoTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof ExcelInfoSchema> {
   return {
     name: "excel_info",
     label: "Spreadsheet Info",
@@ -400,9 +403,7 @@ function createExcelInfoTool(cwd: string, sandbox: string[]): AgentTool<typeof E
       assertPathAllowed(filePath, sandbox, "excel_info");
 
       try {
-        const ExcelJS = await import("exceljs");
-        const workbook = new ExcelJS.default.Workbook();
-        await workbook.xlsx.readFile(filePath);
+        const workbook = await loadWorkbook(fs, filePath);
 
         const sheets = workbook.worksheets.map(ws => ({
           name: ws.name,
@@ -441,15 +442,17 @@ export const ALL_EXCEL_TOOL_NAMES: ExcelToolName[] = ["excel_read", "excel_write
  * @param cwd - Working directory
  * @param allowedPaths - Sandbox paths
  * @param allowedTools - Optional filter
+ * @param fs - Where the files are read and written (default: this machine's disk)
  */
-export function createExcelTools(cwd: string, allowedPaths?: string[], allowedTools?: string[]): AgentTool<any>[] {
+export function createExcelTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], fs?: FileSystem): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
+  const _fs = toolFs(fs);
 
   const factories: Record<ExcelToolName, () => AgentTool<any>> = {
-    excel_read: () => createExcelReadTool(cwd, sandbox),
-    excel_write: () => createExcelWriteTool(cwd, sandbox),
-    excel_query: () => createExcelQueryTool(cwd, sandbox),
-    excel_info: () => createExcelInfoTool(cwd, sandbox),
+    excel_read: () => createExcelReadTool(cwd, sandbox, _fs),
+    excel_write: () => createExcelWriteTool(cwd, sandbox, _fs),
+    excel_query: () => createExcelQueryTool(cwd, sandbox, _fs),
+    excel_info: () => createExcelInfoTool(cwd, sandbox, _fs),
   };
 
   const names = allowedTools

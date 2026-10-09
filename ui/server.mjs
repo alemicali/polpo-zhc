@@ -18,6 +18,8 @@ const host = option("host", process.env.HOST ?? "127.0.0.1");
 const port = Number(option("port", process.env.PORT ?? "4173"));
 const apiUrl = process.env.POLPO_API_URL ?? process.env.VITE_POLPO_API_URL ?? "";
 const apiKey = process.env.POLPO_API_KEY ?? process.env.VITE_POLPO_API_KEY;
+// The Ink Hub the sidebar links to (a self-hosted hub; default polpo.sh)
+const inkHubUrl = process.env.POLPO_INK_HUB_URL || undefined;
 
 const MIME = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -41,7 +43,7 @@ const compressed = new Map();
 const compressible = /^(text\/|application\/(javascript|json|manifest\+json))/;
 
 function runtimeConfig() {
-  return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify({ baseUrl: apiUrl, apiKey })};`;
+  return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify({ baseUrl: apiUrl, apiKey, inkHubUrl })};`;
 }
 
 function safePath(pathname) {

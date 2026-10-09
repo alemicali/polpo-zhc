@@ -1,11 +1,8 @@
-// Web Push subscription routes. The subscription store is always file-based
-// (`.polpo/push.json`) regardless of the `storage` setting — same policy as
-// the vault. The Drizzle equivalent in @polpo-ai/drizzle is unused at runtime
-// (kept only so the schema stays in sync with what other stores look like).
-// Single source of truth = the file; no migration runs for these rows.
+// Web Push subscription routes. Subscriptions live in the project's database, or in
+// .polpo/push.json when the project runs on files.
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "zod";
-import { FilePushSubscriptionStore } from "../../stores/file-push-subscription-store.js";
+import { pushSubscriptionStoreFor } from "../../stores/notification-device-stores.js";
 
 const PushSubscriptionSchema = z.object({
   endpoint: z.string().url(),
@@ -23,21 +20,21 @@ const UnsubscribeSchema = z.object({
 export function pushRoutes(getDeps: () => { polpoDir: string }): OpenAPIHono {
   const app = new OpenAPIHono();
 
-  app.get("/public-key", (c) => {
-    const store = new FilePushSubscriptionStore(getDeps().polpoDir);
-    const vapid = store.ensureVapid();
+  app.get("/public-key", async (c) => {
+    const store = pushSubscriptionStoreFor(getDeps().polpoDir);
+    const vapid = await store.ensureVapid();
     return c.json({ ok: true, data: { publicKey: vapid.publicKey } });
   });
 
-  app.get("/status", (c) => {
-    const store = new FilePushSubscriptionStore(getDeps().polpoDir);
-    const vapid = store.ensureVapid();
+  app.get("/status", async (c) => {
+    const store = pushSubscriptionStoreFor(getDeps().polpoDir);
+    const vapid = await store.ensureVapid();
     return c.json({
       ok: true,
       data: {
         supported: true,
         publicKey: vapid.publicKey,
-        subscriptions: store.count(),
+        subscriptions: await store.count(),
       },
     });
   });
@@ -47,14 +44,14 @@ export function pushRoutes(getDeps: () => { polpoDir: string }): OpenAPIHono {
     if (!parsed.success) {
       return c.json({ ok: false, error: "Invalid push subscription" }, 400);
     }
-    const store = new FilePushSubscriptionStore(getDeps().polpoDir);
-    store.ensureVapid();
-    const record = store.upsert(parsed.data, c.req.header("user-agent") ?? undefined);
+    const store = pushSubscriptionStoreFor(getDeps().polpoDir);
+    await store.ensureVapid();
+    const record = await store.upsert(parsed.data, c.req.header("user-agent") ?? undefined);
     return c.json({
       ok: true,
       data: {
         endpoint: record.endpoint,
-        subscriptions: store.count(),
+        subscriptions: await store.count(),
       },
     });
   });
@@ -64,9 +61,9 @@ export function pushRoutes(getDeps: () => { polpoDir: string }): OpenAPIHono {
     if (!parsed.success) {
       return c.json({ ok: false, error: "Invalid push unsubscribe request" }, 400);
     }
-    const store = new FilePushSubscriptionStore(getDeps().polpoDir);
-    const removed = store.remove(parsed.data.endpoint);
-    return c.json({ ok: true, data: { removed, subscriptions: store.count() } });
+    const store = pushSubscriptionStoreFor(getDeps().polpoDir);
+    const removed = await store.remove(parsed.data.endpoint);
+    return c.json({ ok: true, data: { removed, subscriptions: await store.count() } });
   });
 
   return app;

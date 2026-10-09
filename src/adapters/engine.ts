@@ -6,17 +6,26 @@
  * Works with any LLM provider (Anthropic, OpenAI, Google, Groq, etc.)
  */
 
+import type { EffectiveSandbox, ResolvedSandboxVolume } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
-import { resolveAgentVault } from "../vault/index.js";
+import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
 import {
   buildAgentSystemPrompt,
-  compactContextMessages,
+  buildSummaryPrompt,
+  ContextCompactor,
   contextBudgetForModel,
   estimateContextTokens,
-  selectCompactionCut,
-  summarizeContextMessages,
+  isContextOverflowError,
+  parseSummary,
+  type CompactionInfo,
 } from "@polpo-ai/core";
+import { effectiveCompactionSettings } from "../core/config.js";
+import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
+import { RemoteWorkspace } from "../sandbox/remote.js";
+import { createSandboxVolumeCheckpointTool } from "../tools/sandbox-volume-tools.js";
+import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
+import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** Create a fresh AgentActivity object */
 export function createActivity(): AgentActivity {
@@ -31,13 +40,15 @@ export function createActivity(): AgentActivity {
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
-import { resolveModel, streamSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
+import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 import { createDataAgentTools } from "../tools/data-tools.js";
+import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { inkRegistry } from "../core/ink-config.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -59,7 +70,7 @@ function describeToolsForAgent(agent: AgentConfig): string {
     "- `read` — read file contents (supports offset/limit for large files)",
     "- `write` — create or overwrite files",
     "- `edit` — surgical string replacement in files (preferred over rewriting entire files)",
-    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands)",
+    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output",
     "- `glob` — find files by pattern (e.g. `**/*.ts`)",
     "- `grep` — search file contents by regex",
     "- `ls` — list directory contents",
@@ -239,11 +250,11 @@ function describeToolsForAgent(agent: AgentConfig): string {
     "**Ink Hub (package registry — always available):**",
     "- `ink_search` — search the Ink Hub for available packages (playbooks, agents, companies)",
     "- `ink_browse` — list packages currently installed in this project",
-    "- `ink_add` — install packages from a GitHub source (e.g. 'lumea-labs/ink-registry')",
+    `- \`ink_add\` — install packages from a GitHub source (e.g. '${inkRegistry()}')`,
     "- `ink_remove` — remove an installed registry source and uninstall its packages",
     "- `ink_update` — update installed registries by pulling the latest from git",
     "Use ink tools to find and install reusable playbooks, agent configs, and company setups.",
-    "The official registry is 'lumea-labs/ink-registry'.",
+    `The official registry is '${inkRegistry()}'.`,
   );
 
   // --- Guidance ---
@@ -416,6 +427,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const activity = createActivity();
   const start = Date.now();
   let alive = true;
+  let browserNetwork: BrowserNetworkGuard | undefined;
 
   // Enforce model allowlist (throws if model not allowed)
   if (agentConfig.model) {
@@ -483,9 +495,50 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
   }
 
+  // Volumes mounted on this machine: visible to file tools and commands at the same path
+  const remoteRun = ctx?.sandbox?.provider === "daytona" || ctx?.sandbox?.provider === "e2b";
+  const hostMounts = remoteRun ? [] : hostVolumeMounts(ctx?.volumes);
+  if (hostMounts.length > 0) {
+    effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), ...hostMounts.map((m) => m.hostPath!)];
+  }
+
+  // Where commands run (bash, grep, glob): the sandbox the orchestrator resolved for this run.
+  // Without one (older orchestrator, CLI) commands run as before, on the host.
+  const workspace = ctx?.sandbox
+    ? createWorkspace(ctx.sandbox, {
+        root: cwd,
+        // remote VMs (open Polpo): an empty scratch working directory, deliverables in the
+        // output directory (copied back); here: the allowed paths as before
+        writable: [...(outputDir ? [outputDir] : []), ...(remoteRun ? [] : (effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p)))],
+        // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
+        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
+        // bound at their host directory by local workspaces, attached at /volumes/<name> in remote VMs
+        volumes: ctx.volumes ?? [],
+        hide: ctx.polpoDir ? [ctx.polpoDir] : [],
+        onRemoteEvent: (e) => {
+          if (e.kind === "warning") console.warn(`[sandbox] ${agentConfig.name}: ${e.message}`);
+          ctx.onSandboxEvent?.(e);
+        },
+        pool: ctx.polpoDir ? { polpoDir: ctx.polpoDir, owner: agentConfig.name, scope: "task", runId: ctx.runId } : undefined,
+        onNetworkDenied: ctx.onNetworkDenied,
+      })
+    : undefined;
+  const shell = workspace ? new WorkspaceShell(workspace) : undefined;
+  // The provider commands really run in (a missing remote provider falls back to bwrap): anything
+  // but "local" keeps secret values away from the model (vault_get → env_from_vault).
+  const sandboxProvider = workspace?.provider ?? "local";
+  // Remote sandboxes keep the agent's files in the VM: every tool that touches the agent's files
+  // (read/write/edit, pdf, excel, docx, images, audio, downloads, outcomes…) reads and writes there.
+  const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
+
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
-  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined);
+  const codingTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, undefined, remoteFs, shell, { sandboxProvider });
+
+  // Hydrated read-write volumes in a remote VM: the agent can persist them before the end
+  if (workspace instanceof RemoteWorkspace && (ctx?.volumes ?? []).some((v) => v.remote && v.strategy === "hydrated" && v.access === "read-write")) {
+    codingTools.push(createSandboxVolumeCheckpointTool((name) => workspace.checkpointVolume(name)) as any);
+  }
 
   // Ink tools (always available — search, browse, install from Ink Hub)
   if (ctx?.polpoDir) {
@@ -498,40 +551,41 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
 
   // Create the pi-agent-core Agent (starts with coding tools only; extended tools added before prompt)
   // Pass model.maxTokens to override pi-ai's 32K default cap, so each model uses its full output capacity.
-  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths);
-  const contextBudget = contextBudgetForModel(model);
+  const initialSystemPrompt = buildSystemPrompt(agentConfig, cwd, ctx?.polpoDir, outputDir, effectiveAllowedPaths)
+    + sandboxPromptNote(workspace?.provider === "local" ? undefined : ctx?.sandbox,
+      isRemoteWorkspace(workspace) ? (ctx?.volumes ?? []).filter((v) => v.remote) : (ctx?.volumes ?? []).filter((v) => v.hostPath),
+      isRemoteWorkspace(workspace) ? { outputDir } : {});
+  // ── Context compaction (packages/core/src/context-compactor.ts) ──
+  // One compactor per run: it remembers its checkpoint so the prompt prefix stays stable
+  // between calls (the prompt cache survives), and recompacts only when the window fills again.
+  const compactionSettings = effectiveCompactionSettings(ctx?.compaction, agentConfig.compaction);
+  const contextBudget = contextBudgetForModel(model, compactionSettings);
+  let compactor: ContextCompactor;
+  /** Messages sent in the last model call (to pair the provider's usage with them). */
+  let lastProjectedCount = 0;
+  /** Set after a "context too long" error: the next call compacts harder. */
+  let forceNextCompaction: "overflow" | undefined;
+  const recordCompaction = (info: CompactionInfo, durableFacts?: string[]) => {
+    activity.compactions = (activity.compactions ?? 0) + 1;
+    activity.lastCompaction = { ...info, at: new Date().toISOString(), ...(durableFacts?.length ? { durableFacts } : {}) };
+    handle.onTranscript?.({ type: "compaction", ...info, ...(durableFacts?.length ? { durableFacts: durableFacts.length } : {}) });
+  };
+  let pendingFacts: string[] | undefined;
   const agent = new Agent({
-    streamFn: streamSimpleWithAuth,
-    transformContext: async (messages) => {
-      const estimate = estimateContextTokens({
-        systemPrompt: initialSystemPrompt,
-        messages: messages as any[],
-        tools: codingTools,
-      });
-      if (estimate <= contextBudget.softLimit) return messages;
-      if (messages.length < 2) {
-        return [{
-          role: "user",
-          content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
-          timestamp: Date.now(),
-        }];
+    // The task id keys provider-side caching/affinity; the long retention keeps the cached prefix
+    // across tool calls that take minutes (builds, browsing), which the 5-minute default loses.
+    streamFn: (streamModel, context, options) =>
+      streamSimpleWithAuth(streamModel, context, { ...options, sessionId: task.id, cacheRetention: "long" }),
+    transformContext: async (messages, signal) => {
+      const force = forceNextCompaction;
+      forceNextCompaction = undefined;
+      const { messages: projected, info } = await compactor.prepare(messages as any[], { force, signal });
+      if (info) {
+        recordCompaction(info, pendingFacts);
+        pendingFacts = undefined;
       }
-      const cut = selectCompactionCut(messages as any[], contextBudget.keepRecentTokens);
-      const summary = summarizeContextMessages((messages as any[]).slice(0, cut));
-      const compacted = compactContextMessages(messages as any[], cut, summary);
-      const compactedEstimate = estimateContextTokens({
-        systemPrompt: initialSystemPrompt,
-        messages: compacted,
-        tools: codingTools,
-      });
-      if (compactedEstimate <= contextBudget.softLimit) {
-        return compacted as unknown as AgentMessage[];
-      }
-      return [{
-        role: "user",
-        content: [{ type: "text", text: `[Context checkpoint: oversized context compacted]\n\n${summarizeContextMessages(messages as any[])}` }],
-        timestamp: Date.now(),
-      }];
+      lastProjectedCount = projected.length;
+      return projected as unknown as AgentMessage[];
     },
     initialState: {
       // Mailboxes section is added later (handle.done) after vault is async-resolved.
@@ -545,6 +599,33 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       streamMessage: null,
       pendingToolCalls: new Set(),
     } as any,
+  });
+
+  compactor = new ContextCompactor({
+    budget: contextBudget,
+    settings: compactionSettings,
+    // what goes with every call besides the messages: the tools the agent has now
+    baseTokens: () => {
+      const state = agent.state as unknown as { tools: unknown[]; systemPrompt?: string; messages: Array<{ role: string }> };
+      // the system prompt counts once: from the transcript when it is there, from the state otherwise
+      const inTranscript = state.messages[0]?.role === "system";
+      return estimateContextTokens({ systemPrompt: inTranscript ? undefined : state.systemPrompt, messages: [], tools: state.tools });
+    },
+    summarize: async ({ messages, previousSummary, focus, signal }) => {
+      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus });
+      // a cheaper sibling of the agent's model unless one is configured (see resolveSummaryModel)
+      const summaryModel = resolveSummaryModel(model, compactionSettings.model, Math.ceil((systemPrompt.length + prompt.length) / 3));
+      const response = await completeSimpleWithAuth(summaryModel, {
+        systemPrompt,
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
+      }, { signal, maxTokens: 8_000 } as any);
+      if ((response as any).stopReason === "error") throw new Error((response as any).errorMessage ?? "summary failed");
+      const text = (response.content ?? []).filter((block: any) => block.type === "text").map((block: any) => block.text).join("\n");
+      const parsed = parseSummary(text);
+      return { summary: parsed.summary, durableFacts: parsed.durableFacts, model: `${summaryModel.provider}:${summaryModel.id}` };
+    },
+    // the facts travel with the compaction record; the orchestrator saves them to the agent's memory
+    onDurableFacts: (facts) => { pendingFacts = facts; },
   });
   const directionAcks = new WeakMap<object, string[]>();
 
@@ -603,8 +684,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         if (msg && "content" in msg && msg.role === "assistant") {
           // Accumulate token usage
           if ("usage" in msg && msg.usage && typeof msg.usage === "object") {
-            const u = msg.usage as { totalTokens?: number };
+            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number };
             if (u.totalTokens) activity.totalTokens += u.totalTokens;
+            // the real size of what was sent: next compaction decisions start from it
+            compactor.noteUsage((u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0), lastProjectedCount);
           }
           for (const block of msg.content) {
             if (block.type === "text") {
@@ -674,22 +757,26 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   handle.done = (async (): Promise<TaskResult> => {
     try {
       // Resolve vault credentials (async) — then rebuild tools with vault included
-      const vaultEntries = await ctx?.vaultStore?.getAllForAgent(agentConfig.name);
+      // Never hand system vault namespaces ("$data", ...) to an agent.
+      const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
       const vault = resolveAgentVault(vaultEntries);
 
       // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault);
+      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
       if (ctx?.polpoDir) {
         allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
       }
 
       if (hasExtendedTools) {
+        // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
+        browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
         allTools = await createAllTools({
           cwd,
           allowedTools: agentConfig.allowedTools,
           allowedPaths: effectiveAllowedPaths,
           browserSession: agentConfig.name,
           browserProfileDir,
+          browserNetwork,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,
@@ -698,11 +785,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           whatsappSendMedia: ctx?.whatsappSendMedia,
           whatsappMarkRead: ctx?.whatsappMarkRead,
           polpoDir: ctx?.polpoDir,
+          shell,
+          fs: remoteFs,
+          sandboxProvider,
         });
       }
       if (ctx?.polpoDir) {
         allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
       }
       agent.state.tools = allTools;
 
@@ -735,6 +826,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         await agent.prompt(continuationMessage);
       } else {
         await agent.prompt(buildPrompt(task));
+      }
+
+      // "Context too long" from the provider: compact harder and continue once.
+      const last = agent.state.messages[agent.state.messages.length - 1] as any;
+      if (last?.role === "assistant" && last.stopReason === "error" && isContextOverflowError(String(last.errorMessage ?? ""))) {
+        agent.state.messages = agent.state.messages.slice(0, -1);
+        forceNextCompaction = "overflow";
+        handle.onTranscript?.({ type: "error", message: `Context overflow: compacting and retrying (${String(last.errorMessage).slice(0, 200)})` });
+        await agent.continue();
       }
 
       // Extract final text from the last assistant message
@@ -771,11 +871,14 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         duration: Date.now() - start,
       };
     } finally {
-      // Close agent-browser session (profile data auto-persisted by --profile)
+      // Close agent-browser session (profile data auto-persisted by --profile); a browser in a
+      // remote sandbox is closed there, before the VM goes away
       if (hasExtendedTools) {
         const { cleanupAgentBrowserSession } = await import("../tools/browser-tools.js");
-        await cleanupAgentBrowserSession(agentConfig.name).catch(() => {});
+        await cleanupAgentBrowserSession(agentConfig.name, shell).catch(() => {});
       }
+      await workspace?.dispose().catch(() => undefined);
+      await browserNetwork?.close().catch(() => undefined);
     }
   })();
 
@@ -835,4 +938,39 @@ function collectOutcome(toolName: string, details: Record<string, unknown>): Tas
   if (details.outcomeData !== undefined) outcome.data = details.outcomeData;
   if (details.outcomeTags) outcome.tags = details.outcomeTags as string[];
   return outcome;
+}
+
+/** What an agent needs to know about the sandbox its commands run in (empty when unconfined). */
+export function sandboxPromptNote(sandbox: EffectiveSandbox | undefined, volumes: ResolvedSandboxVolume[], opts: { outputDir?: string } = {}): string {
+  if (!sandbox || sandbox.provider === "local") return "";
+  const through = "through a proxy that speaks HTTP and SOCKS5: curl, git over https, npm, pip and ssh (git over ssh is preconfigured) work; programs that ignore proxy settings cannot connect";
+  const network = sandbox.network.mode === "unrestricted" ? "unrestricted (the whole network of this machine)"
+    : sandbox.network.mode === "open" ? `every public destination, ${through}; this machine's own services, private networks and Tailscale are refused`
+    : sandbox.network.mode === "deny" ? "disabled (no connections at all)"
+    : `limited to: ${(sandbox.network.allow ?? []).join(", ") || "nothing"} ("host" or "host:port"; other hosts are refused), ${through}`;
+  const limits = [
+    sandbox.resources.memoryMb ? `${sandbox.resources.memoryMb} MB memory` : "",
+    sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min per command` : "",
+  ].filter(Boolean).join(", ");
+  const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+  const describe = (v: ResolvedSandboxVolume) => {
+    const how = v.strategy === "mounted" ? "live" : v.access === "read-only" ? "a copy" : v.writeBack === "manual" ? "a copy, saved only when you call sandbox_volume_checkpoint" : "a copy, saved at the end (or earlier with sandbox_volume_checkpoint)";
+    return `- volume "${v.name}": ${v.mountPath} (${v.access}, ${remote ? how : "live"})`;
+  };
+  return [
+    "",
+    "",
+    "## Sandbox",
+    `Your shell commands run in an isolated sandbox (${sandbox.provider}). They see only your working directory, the allowed paths${volumes.length ? " and the volumes below" : ""}; there is no home directory (no ~/.ssh, ~/.gitconfig or gh login) and no access to the rest of the server. Network: ${network}.${limits ? ` Limits: ${limits}.` : ""}`,
+    ...(remote
+      ? [`This sandbox is a remote VM. Your working directory there starts empty and is scratch space: it is not copied back. Put what you deliver in ${opts.outputDir ?? "your output directory"} — it comes back here. Files that must persist across runs live on volumes. Install what you need in the VM.`]
+      : []),
+    ...(volumes.length ? ["Volumes:", ...volumes.map(describe)] : []),
+    "Secrets: vault_get shows an entry's type, label, key names and non-secret fields (host, port, user…), not secret values. "
+      + "To use a secret in a command, pass it with bash's env_from_vault, a map of variable names to \"service.key\" references to your vault entries, "
+      + "e.g. { \"command\": \"gh repo list\", \"env_from_vault\": { \"GH_TOKEN\": \"github.token\" } }, and use $GH_TOKEN in the command. "
+      + "The value exists only in that command's environment and appears as *** in its output. Do not write secrets to files; "
+      + "set them again with env_from_vault in every command that needs them.",
+    "If a command fails because of these limits, do not try to work around them: say what you needed in your result so a person can grant it.",
+  ].join("\n");
 }

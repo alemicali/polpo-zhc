@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { type Dialect } from "../utils.js";
+import { type Dialect, affectedRows } from "../utils.js";
 
 export interface ExpoTokenRecord {
   token: string;
@@ -74,13 +74,13 @@ export class DrizzleExpoTokenStore {
   async removeToken(token: string): Promise<boolean> {
     const result: any = await this.db.delete(this.tokens).where(eq(this.tokens.token, token));
     // SQLite returns { changes: N }; PG returns { count: N }.
-    const changes = result?.changes ?? result?.rowCount ?? 0;
+    const changes = affectedRows(result);
     return changes > 0;
   }
 
   async removeByDevice(deviceId: string): Promise<number> {
     const result: any = await this.db.delete(this.tokens).where(eq(this.tokens.deviceId, deviceId));
-    return result?.changes ?? result?.rowCount ?? 0;
+    return affectedRows(result);
   }
 
   async listAll(): Promise<ExpoTokenRecord[]> {
@@ -115,5 +115,20 @@ export class DrizzleExpoTokenStore {
     await this.db.update(this.tokens)
       .set({ failureCount: 0, disabled: false, lastSeenAt: new Date().toISOString() })
       .where(eq(this.tokens.token, token));
+  }
+
+  /** Copy existing records as they are (used when moving expo-tokens.json into the database). */
+  async importRecords(records: ExpoTokenRecord[]): Promise<void> {
+    for (const r of records) {
+      await this.db.insert(this.tokens).values({
+        token: r.token,
+        platform: r.platform,
+        deviceId: r.deviceId,
+        createdAt: r.createdAt,
+        lastSeenAt: r.lastSeenAt,
+        failureCount: r.failureCount ?? 0,
+        disabled: !!r.disabled,
+      }).onConflictDoNothing({ target: this.tokens.token });
+    }
   }
 }

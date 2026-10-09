@@ -82,7 +82,7 @@ export interface ResolvedVault {
   /** Check if a service exists in the vault */
   has(service: string): boolean;
   /** List all available services with their types and credential keys (values masked) */
-  list(): Array<{ service: string; type: string; keys: string[] }>;
+  list(): Array<{ service: string; type: string; keys: string[]; label?: string }>;
 }
 
 /**
@@ -194,7 +194,24 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
         service,
         type: entry.type,
         keys: Object.keys(entry.creds),
+        ...(entry.label ? { label: entry.label } : {}),
       }));
     },
   };
+}
+
+// ─── Agent vault loading ─────────────────────────────
+
+/**
+ * Load the vault entries an agent may use. Returns undefined for reserved
+ * "$"-prefixed names ("$data", "$providers", ...): those are system
+ * namespaces and must never be exposed to an agent, even one (wrongly)
+ * named like them.
+ */
+export async function loadAgentVaultEntries(
+  vaultStore: { getAllForAgent(agent: string): Promise<Record<string, VaultEntry>> } | undefined | null,
+  agentName: string,
+): Promise<Record<string, VaultEntry> | undefined> {
+  if (!vaultStore || typeof agentName !== "string" || agentName.trim().startsWith("$")) return undefined;
+  return vaultStore.getAllForAgent(agentName);
 }

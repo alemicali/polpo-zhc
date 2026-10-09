@@ -20,6 +20,10 @@ export interface CatalogModel {
   provider: string;
   reasoning: boolean;
   cost: { input: number; output: number };
+  /** Model of a custom provider / gateway. */
+  custom?: boolean;
+  /** Custom providers: credentials available (key stored / env / keyless). */
+  configured?: boolean;
 }
 
 export interface ModelPickerProps {
@@ -84,7 +88,8 @@ export function ModelPicker({
 
         const seen = new Set<string>();
         const filtered = data
-          .filter((m) => configuredProviders.includes(m.provider))
+          // Custom-provider models are selectable whenever that provider is usable.
+          .filter((m) => configuredProviders.includes(m.provider) || (m.custom === true && m.configured !== false))
           .filter((m) => {
             const key = `${m.provider}:${m.id}`;
             if (seen.has(key)) return false;
@@ -178,7 +183,7 @@ export function ModelPicker({
                         providerFilter === prov ? "bg-primary-foreground/20 text-primary-foreground" : "",
                       )}
                     >
-                      {source === "oauth" ? "sub" : "key"}
+                      {source === "oauth" ? "sub" : source === "custom" ? "custom" : "key"}
                     </Badge>
                   )}
                 </button>
@@ -221,6 +226,9 @@ export function ModelPicker({
                     <ProviderIcon name={m.provider} size={16} />
                     <span className="font-medium truncate">{m.name}</span>
                     <span className="text-xs text-muted-foreground shrink-0">{m.provider}</span>
+                    {m.custom && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">custom</Badge>
+                    )}
                     {m.reasoning && (
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
                         <Zap className="h-2.5 w-2.5 mr-0.5" />reasoning

@@ -42,6 +42,7 @@ import {
 import { useMissions, useTasks, useAgents } from "@polpo-ai/react";
 import type { Mission, MissionStatus } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
+import { useNow } from "@/hooks/use-now";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -155,7 +156,8 @@ export interface MissionStats {
 
 function DeadlineBadge({ deadline }: { deadline: string }) {
   const deadlineDate = new Date(deadline);
-  const isOverdue = deadlineDate.getTime() < Date.now();
+  const now = useNow();
+  const isOverdue = deadlineDate.getTime() < now;
   return (
     <Badge variant="outline" className={cn("text-[10px] gap-1", isOverdue ? "text-red-400 border-red-500/30" : "text-amber-400")}>
       <Timer className="h-2.5 w-2.5" />

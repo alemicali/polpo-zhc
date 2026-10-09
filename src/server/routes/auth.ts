@@ -8,7 +8,14 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { PROVIDER_ENV_MAP } from "../../llm/pi-client.js";
+import { PROVIDER_ENV_MAP, hasAmbientCredentials, customProviderEnvVar } from "../../llm/pi-client.js";
+import {
+  customProviderHasCredentials,
+  getCustomProviderConfig,
+  getCustomProviderSecretStatus,
+  isBuiltinProvider,
+  listCustomProviderIds,
+} from "../../llm/custom-providers.js";
 
 export function authRoutes(getDeps: () => {
   getConfig: () => any;
@@ -56,6 +63,12 @@ export function authRoutes(getDeps: () => {
                     oauthAvailable: z.boolean(),
                     oauthProviderName: z.string().optional(),
                     oauthFlow: z.string().optional(),
+                    custom: z.boolean().optional(),
+                    configured: z.boolean().optional(),
+                    label: z.string().optional(),
+                    keySource: z.enum(["vault", "env", "none"]).optional(),
+                    hasVaultKey: z.boolean().optional(),
+                    keyHint: z.string().optional(),
                   }),
                 ),
               }),
@@ -99,9 +112,9 @@ export function authRoutes(getDeps: () => {
       profilesByProvider.set(provider, list);
     }
 
-    // Collect all relevant provider names
+    // Collect all relevant provider names (custom providers are reported separately below)
     const allProviderNames = new Set<string>();
-    for (const name of Object.keys(configProviders)) allProviderNames.add(name);
+    for (const name of Object.keys(configProviders)) if (isBuiltinProvider(name)) allProviderNames.add(name);
     for (const name of Object.keys(PROVIDER_ENV_MAP)) allProviderNames.add(name);
     for (const name of profilesByProvider.keys()) allProviderNames.add(name);
     for (const provider of OAUTH_PROVIDERS) allProviderNames.add(provider.id);
@@ -133,6 +146,12 @@ export function authRoutes(getDeps: () => {
       oauthAvailable: boolean;
       oauthProviderName?: string;
       oauthFlow?: string;
+      custom?: boolean;
+      configured?: boolean;
+      label?: string;
+      keySource?: "vault" | "env" | "none";
+      hasVaultKey?: boolean;
+      keyHint?: string;
     }
 
     // Build status per provider
@@ -140,7 +159,8 @@ export function authRoutes(getDeps: () => {
 
     for (const name of allProviderNames) {
       const envVar = PROVIDER_ENV_MAP[name];
-      const hasEnvKey = envVar ? !!process.env[envVar] : false;
+      // Includes ambient credentials (AWS profile/role, Vertex ADC) and Cloudflare ids.
+      const hasEnvKey = hasAmbientCredentials(name);
       const providerProfiles = profilesByProvider.get(name) ?? [];
       const oauthInfo = OAUTH_PROVIDERS.find((p) => p.id === name);
 
@@ -185,6 +205,27 @@ export function authRoutes(getDeps: () => {
           oauthFlow: oauthInfo?.flow,
         };
       }
+    }
+
+    // Custom providers / gateways — key presence only, never values.
+    for (const name of listCustomProviderIds()) {
+      const cfg = getCustomProviderConfig(name)!;
+      const envVar = customProviderEnvVar(name, cfg);
+      const hasEnvKey = envVar ? !!process.env[envVar] : false;
+      const status = getCustomProviderSecretStatus(name);
+      const keyless = !envVar;
+      providers[name] = {
+        hasEnvKey,
+        envVar,
+        profiles: [],
+        oauthAvailable: false,
+        custom: true,
+        configured: customProviderHasCredentials(name),
+        label: cfg.label,
+        keySource: keyless ? "none" : status?.hasKey ? "vault" : hasEnvKey ? "env" : undefined,
+        hasVaultKey: !!status?.hasKey,
+        keyHint: status?.keyHint,
+      };
     }
 
     return c.json({ ok: true, data: { providers } }, 200);

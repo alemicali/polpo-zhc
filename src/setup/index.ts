@@ -7,6 +7,14 @@ export {
 export {
   persistToEnvFile,
   removeFromEnvFile,
+  moveEnvEntries,
+  recordApiWrittenEnvKey,
+  forgetApiWrittenEnvKey,
+  takeApiWrittenEnvKeys,
+  readEnvFileValue,
+  type ApiWrittenEnvKey,
+  assertValidEnvEntry,
+  isValidEnvKey,
 } from "./env-persistence.js";
 
 export {

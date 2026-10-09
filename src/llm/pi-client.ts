@@ -28,11 +28,31 @@ import {
 } from "@earendil-works/pi-ai/providers/all";
 import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 import {
+  complete,
   completeSimple,
   getEnvApiKey,
   streamSimple,
 } from "@earendil-works/pi-ai/compat";
 import type { ProviderConfig, ModelConfig, ModelAllowlistEntry, ReasoningLevel } from "../core/types.js";
+import {
+  allowedProviderEnvVar,
+  buildCustomModel,
+  completeCustomProviderRaw,
+  customProviderHasCredentials,
+  getCustomProviderConfig,
+  isBuiltinProvider,
+  isCustomProvider,
+  listCustomProviderIds,
+  resolveCustomProviderAuth,
+  streamCustomProvider,
+  syncCustomProviders,
+} from "./custom-providers.js";
+export { isBuiltinProvider, isCustomProvider };
+
+/** Env var used as key fallback for a custom provider (undefined when keyless or not allowed). */
+export function customProviderEnvVar(id: string, cfg: ProviderConfig): string | undefined {
+  return allowedProviderEnvVar(id, cfg);
+}
 
 // ─── Constants ──────────────────────────────────────
 
@@ -91,8 +111,10 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "openai": "OPENAI_API_KEY",
   "anthropic": "ANTHROPIC_API_KEY",
   "google": "GEMINI_API_KEY",
-  "google-vertex": "GOOGLE_CLOUD_PROJECT",
-  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  // Vertex also works with ADC + GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (ambient, see hasAmbientCredentials)
+  "google-vertex": "GOOGLE_CLOUD_API_KEY",
+  // pi-ai provider id is "azure" (endpoint via AZURE_OPENAI_BASE_URL / AZURE_OPENAI_RESOURCE_NAME)
+  "azure": "AZURE_OPENAI_API_KEY",
   "nvidia": "NVIDIA_API_KEY",
   "deepseek": "DEEPSEEK_API_KEY",
   "groq": "GROQ_API_KEY",
@@ -123,16 +145,67 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
   "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
   "github-copilot": "COPILOT_GITHUB_TOKEN",
-  "amazon-bedrock": "AWS_ACCESS_KEY_ID",
+  "meta": "META_API_KEY",
+  "typesafe": "TYPESAFE_API_KEY",
+  "radius": "RADIUS_API_KEY",
+  // Bedrock API key; access-key/profile/role credentials are detected as ambient auth.
+  "amazon-bedrock": "AWS_BEARER_TOKEN_BEDROCK",
 };
+
+/**
+ * Provider-scoped env values pi-ai needs at request time (endpoint placeholders, regions).
+ * Cloudflare base URLs contain {CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID} that are only
+ * filled when `env` is passed in the request options.
+ */
+const PROVIDER_REQUEST_ENV: Record<string, string[]> = {
+  "cloudflare-workers-ai": ["CLOUDFLARE_ACCOUNT_ID"],
+  "cloudflare-ai-gateway": ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_GATEWAY_ID"],
+  "azure": ["AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME", "AZURE_OPENAI_API_VERSION", "AZURE_OPENAI_DEPLOYMENT_NAME_MAP"],
+  "google-vertex": ["GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS"],
+  "amazon-bedrock": ["AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"],
+};
+
+/** Env subset passed to pi-ai for built-in providers that need it. */
+export function builtinRequestEnv(provider: string): Record<string, string> | undefined {
+  const names = PROVIDER_REQUEST_ENV[provider];
+  if (!names) return undefined;
+  const env: Record<string, string> = {};
+  for (const name of names) {
+    const v = process.env[name];
+    if (v) env[name] = v;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+/**
+ * Credentials available from the environment for a built-in provider, including ambient
+ * sources (AWS profile/role, Vertex ADC). Cloudflare also needs its account / gateway ids.
+ */
+export function hasAmbientCredentials(provider: string): boolean {
+  if (provider === "cloudflare-ai-gateway") {
+    return !!(process.env.CLOUDFLARE_API_KEY && process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_GATEWAY_ID);
+  }
+  if (provider === "cloudflare-workers-ai") {
+    return !!(process.env.CLOUDFLARE_API_KEY && process.env.CLOUDFLARE_ACCOUNT_ID);
+  }
+  const envVar = PROVIDER_ENV_MAP[provider];
+  if (envVar && process.env[envVar]) return true;
+  try {
+    return !!getEnvApiKey(provider as KnownProvider);
+  } catch {
+    return false;
+  }
+}
 
 // ─── Provider override management ───────────────────
 
 /** Provider overrides from polpo.json — set by the orchestrator at init time. */
 let providerOverrides: Record<string, ProviderConfig> = {};
 
-export function setProviderOverrides(overrides: Record<string, ProviderConfig>): void {
-  providerOverrides = overrides;
+export function setProviderOverrides(overrides: Record<string, ProviderConfig> | undefined): void {
+  providerOverrides = overrides ?? {};
+  // Non-built-in entries are custom providers / gateways: (re)register them.
+  syncCustomProviders(providerOverrides);
 }
 
 export function getProviderOverrides(): Record<string, ProviderConfig> {
@@ -186,7 +259,17 @@ export function enforceModelAllowlist(spec: string): void {
  * for the full resolution chain including OAuth.
  */
 export function resolveApiKey(provider: string): string | undefined {
+  if (isCustomProvider(provider)) return undefined; // vault/keyless — see hasProviderCredentials
   return getEnvApiKey(provider as KnownProvider);
+}
+
+/**
+ * Synchronous "can this provider be called" check: env / ambient credentials for built-ins,
+ * vault key cache / env / keyless for custom providers. OAuth profiles are checked separately.
+ */
+export function hasProviderCredentials(provider: string): boolean {
+  if (isCustomProvider(provider)) return customProviderHasCredentials(provider);
+  return !!resolveApiKey(provider) || hasAmbientCredentials(provider);
 }
 
 /**
@@ -212,6 +295,18 @@ export async function resolveApiKeyAsync(provider: string): Promise<string | und
 
 /** Resolve the complete request auth required by pi-ai 0.84 providers. */
 export async function resolveModelAuthAsync(provider: string): Promise<ModelAuth | undefined> {
+  const custom = getCustomProviderConfig(provider);
+  if (custom) {
+    const resolved = await resolveCustomProviderAuth(provider, custom);
+    return resolved ? { apiKey: resolved.apiKey, headers: resolved.headers } : undefined;
+  }
+  if (provider === "cloudflare-ai-gateway") {
+    // Gateway auth travels in cf-aig-authorization; the provider key stays in Cloudflare (BYOK).
+    const key = process.env.CLOUDFLARE_API_KEY;
+    return key && hasAmbientCredentials(provider)
+      ? { headers: { "cf-aig-authorization": `Bearer ${key}`, Authorization: null, "x-api-key": null } }
+      : undefined;
+  }
   const apiKey = resolveApiKey(provider);
   if (apiKey) return { apiKey };
 
@@ -230,15 +325,19 @@ function modelWithAuth<TApi extends Api>(model: Model<TApi>, auth?: ModelAuth): 
 function optionsWithAuth(
   options: SimpleStreamOptions | undefined,
   auth: ModelAuth | undefined,
+  provider?: string,
 ): SimpleStreamOptions | undefined {
-  if (!auth) return options;
-  return {
-    ...options,
-    apiKey: options?.apiKey ?? auth.apiKey,
-    headers: auth.headers || options?.headers
+  const env = provider ? builtinRequestEnv(provider) : undefined;
+  if (!auth && !env) return options;
+  const next: SimpleStreamOptions = { ...options };
+  if (auth) {
+    next.apiKey = options?.apiKey ?? auth.apiKey;
+    next.headers = auth.headers || options?.headers
       ? { ...auth.headers, ...options?.headers }
-      : undefined,
-  };
+      : undefined;
+  }
+  if (env) next.env = { ...env, ...options?.env };
+  return next;
 }
 
 /** Auth-aware stream function suitable for pi-agent-core's required streamFn. */
@@ -247,8 +346,9 @@ export async function streamSimpleWithAuth(
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<AssistantMessageEventStream> {
+  if (isCustomProvider(model.provider)) return streamCustomProvider(model, context, options);
   const auth = await resolveModelAuthAsync(model.provider);
-  return streamSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth));
+  return streamSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth, model.provider));
 }
 
 /** Auth-aware completion for callers outside the Agent loop. */
@@ -257,8 +357,24 @@ export async function completeSimpleWithAuth(
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<AssistantMessage> {
+  if (isCustomProvider(model.provider)) return streamCustomProvider(model, context, options).result();
   const auth = await resolveModelAuthAsync(model.provider);
-  return completeSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth));
+  return completeSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth, model.provider));
+}
+
+/**
+ * Auth-aware full (non-simple) completion for callers that need provider-specific options
+ * such as `toolChoice`. Custom providers go through the custom-provider registry.
+ */
+export async function completeWithAuth(
+  model: Model<Api>,
+  context: Context,
+  options?: Record<string, unknown>,
+): Promise<AssistantMessage> {
+  if (isCustomProvider(model.provider)) return completeCustomProviderRaw(model, context, options);
+  const auth = await resolveModelAuthAsync(model.provider);
+  const merged = optionsWithAuth(options as SimpleStreamOptions | undefined, auth, model.provider) as Record<string, unknown> | undefined;
+  return complete(modelWithAuth(model, auth), context, merged as never);
 }
 
 // ─── Model Spec Parsing ─────────────────────────────
@@ -282,6 +398,7 @@ const API_MODE_MAP: Record<string, Api> = {
   "openai-completions": "openai-completions" as Api,
   "openai-responses": "openai-responses" as Api,
   "anthropic-messages": "anthropic-messages" as Api,
+  "azure-openai-responses": "azure-openai-responses" as Api,
 };
 
 /**
@@ -297,6 +414,10 @@ const API_MODE_MAP: Record<string, Api> = {
 export function resolveModel(spec?: string): Model<Api> {
   const { provider, modelId } = parseModelSpec(spec);
   const override = providerOverrides[provider];
+
+  // Custom provider / gateway (non built-in id): models come from the custom registry.
+  const custom = getCustomProviderConfig(provider);
+  if (custom) return buildCustomModel(provider, custom, modelId);
 
   // 1. Try pi-ai built-in catalog first
   try {
@@ -373,6 +494,10 @@ export interface ModelInfo {
   contextWindow: number;
   maxTokens: number;
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** True for models of a custom provider / gateway (polpo.json `providers`). */
+  custom?: boolean;
+  /** Custom providers only: credentials available (key stored / env / keyless). */
+  configured?: boolean;
 }
 
 /**
@@ -385,10 +510,72 @@ export function listProviders(): string[] {
 /**
  * List all models for a given provider (or all providers if none specified).
  */
+/**
+ * Cheaper models that summarize well, per provider, in order of preference. A compaction
+ * summary is a bounded, well-specified writing task: it does not need the conversation's
+ * (often large) model.
+ */
+const SUMMARY_MODEL_PREFERENCES: Record<string, string[]> = {
+  "anthropic": ["claude-haiku-4-5", "claude-haiku-4-5-20251001"],
+  "openai-codex": ["gpt-6-luna", "gpt-5.6-luna"],
+  "openai": ["gpt-5.4-mini", "gpt-5-mini", "gpt-4.1-mini"],
+  "google": ["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"],
+  "openrouter": ["~anthropic/claude-haiku-latest", "anthropic/claude-haiku-4.5"],
+};
+
+/**
+ * The model that writes a compaction summary of `promptTokens` tokens: the configured one when
+ * set; otherwise a cheaper model of the conversation's own provider (same credentials) when it
+ * fits the prompt with room to answer; otherwise the conversation's model.
+ */
+export function resolveSummaryModel(conversationModel: Model<Api>, configuredSpec: string | undefined, promptTokens: number): Model<Api> {
+  const fits = (model: Model<Api>) => !model.contextWindow || promptTokens + 8_000 <= model.contextWindow * 0.9;
+  if (configuredSpec) {
+    try {
+      const configured = resolveModel(configuredSpec);
+      if (fits(configured)) return configured;
+    } catch { /* unknown spec: fall through */ }
+  }
+  const provider = conversationModel?.provider;
+  for (const id of SUMMARY_MODEL_PREFERENCES[provider] ?? []) {
+    if (id === conversationModel.id) break;
+    try {
+      if (!getModels(provider as BuiltinProvider).some((model) => model.id === id)) continue;
+      // resolveModel applies the same provider overrides (base URL, auth) as the conversation
+      const candidate = resolveModel(`${provider}:${id}`);
+      if (fits(candidate)) return candidate;
+    } catch { /* provider not in the builtin registry */ }
+  }
+  return conversationModel;
+}
+
 export function listModels(provider?: string): ModelInfo[] {
-  const providers = provider ? [provider] : getProviders();
   const models: ModelInfo[] = [];
 
+  // Custom providers / gateways
+  for (const id of listCustomProviderIds()) {
+    if (provider && provider !== id) continue;
+    const cfg = getCustomProviderConfig(id)!;
+    const configured = customProviderHasCredentials(id);
+    for (const def of cfg.models ?? []) {
+      const m = buildCustomModel(id, cfg, def.id, def);
+      models.push({
+        id: m.id,
+        name: m.name,
+        provider: id,
+        reasoning: m.reasoning,
+        input: m.input,
+        contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+        cost: m.cost,
+        custom: true,
+        configured,
+      });
+    }
+  }
+  if (provider && isCustomProvider(provider)) return models;
+
+  const providers = provider ? [provider] : getProviders();
   for (const p of providers) {
     try {
       const pModels = getModels(p as BuiltinProvider);
@@ -484,7 +671,7 @@ export function validateProviderKeys(
     if (seen.has(provider)) continue;
     seen.add(provider);
 
-    if (!resolveApiKey(provider) && !hasOAuthProfiles(provider)) {
+    if (!hasProviderCredentials(provider) && !hasOAuthProfiles(provider)) {
       missing.push({ provider, modelSpec: spec });
     }
   }
@@ -527,11 +714,12 @@ export function validateProviderKeysDetailed(
     if (seen.has(provider)) continue;
     seen.add(provider);
 
+    const custom = getCustomProviderConfig(provider);
     results.push({
       provider,
       modelSpec: spec,
-      hasKey: !!resolveApiKey(provider),
-      envVar: PROVIDER_ENV_MAP[provider],
+      hasKey: hasProviderCredentials(provider),
+      envVar: custom ? customProviderEnvVar(provider, custom) : PROVIDER_ENV_MAP[provider],
     });
   }
   return results;
@@ -612,7 +800,7 @@ export function resolveModelWithFallback(config: ModelConfig): { model: Model<Ap
     throw new Error("No primary model configured. Run 'polpo setup' or set POLPO_MODEL env var.");
   }
   const { provider: primaryProvider } = parseModelSpec(primary);
-  if (resolveApiKey(primaryProvider)) {
+  if (hasProviderCredentials(primaryProvider)) {
     try {
       return { model: resolveModel(primary), spec: primary };
     } catch {
@@ -624,7 +812,7 @@ export function resolveModelWithFallback(config: ModelConfig): { model: Model<Ap
   if (config.fallbacks) {
     for (const fallback of config.fallbacks) {
       const { provider: fbProvider } = parseModelSpec(fallback);
-      if (resolveApiKey(fbProvider)) {
+      if (hasProviderCredentials(fbProvider)) {
         try {
           return { model: resolveModel(fallback), spec: fallback };
         } catch {

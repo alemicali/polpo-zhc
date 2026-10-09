@@ -7,6 +7,7 @@
  * chat is already visible). State is shared via ChatProvider context.
  */
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import {
   lazy,
   Suspense,
@@ -164,9 +165,11 @@ export function ChatSidebar() {
         <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
       </button>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        <Suspense fallback={<SidebarSkeleton />}>
-          <ChatPage compact />
-        </Suspense>
+        <ErrorBoundary area="la chat">
+          <Suspense fallback={<SidebarSkeleton />}>
+            <ChatPage compact />
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </div>
   );

@@ -55,6 +55,10 @@ export interface OrchestratorContext {
   readonly runStore: RunStore;
   readonly taskControlStore?: TaskControlStore;
   readonly memoryStore: MemoryStore;
+  /** Sandbox providers this host can run (shell layer); the cascade falls back from the rest. */
+  readonly sandboxProviders?: () => ReadonlySet<import("./sandbox.js").SandboxProviderId>;
+  /** The volumes a run selected, checked against the agent's grants (storage feature, optional). */
+  readonly sandboxVolumes?: (agentName: string | undefined, selections: import("./sandbox.js").SandboxVolumeSelection[], target: "host" | "remote", options?: import("./sandbox.js").StorageMountOptions) => Promise<import("./sandbox.js").ResolvedSandboxVolume[]>;
   readonly logStore: LogStore;
   readonly sessionStore: SessionStore;
   readonly teamStore: TeamStore;

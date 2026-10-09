@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { TeamStore } from "@polpo-ai/core/team-store";
 import type { Team, AgentConfig } from "@polpo-ai/core/types";
-import { type Dialect, deserializeJson } from "../utils.js";
+import { type Dialect, deserializeJson, isUniqueViolation } from "../utils.js";
 
 type AnyTable = any;
 
@@ -52,7 +52,7 @@ export class DrizzleTeamStore implements TeamStore {
         updatedAt: now,
       });
     } catch (err: any) {
-      if (err?.message?.includes("unique") || err?.message?.includes("UNIQUE") || err?.code === "23505") {
+      if (isUniqueViolation(err)) {
         throw new Error(`Team "${team.name}" already exists`);
       }
       throw err;

@@ -13,10 +13,10 @@ import { nanoid } from "nanoid";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ApprovalStatus, VaultEntry, AgentIdentity, AgentResponsibility, AgentConfig, PolpoFileConfig, Team, Task, TaskStatus } from "../core/types.js";
-import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "../core/app-registry.js";
+import { normalizeAppTags, type AppDeployment, type AppDomain, type AppEnvironment, type AppService } from "@polpo-ai/core/app-registry";
 import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, cpSync } from "fs";
 import { basename, extname, join, resolve, relative, isAbsolute, dirname } from "path";
-import { execSync } from "child_process";
+import { execSync, execFileSync, spawnSync } from "child_process";
 import { assertUrlAllowed } from "../tools/ssrf-guard.js";
 import {
   discoverOrchestratorSkills, createOrchestratorSkill, updateOrchestratorSkill,
@@ -37,8 +37,10 @@ import {
   stripInkMetadata,
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
+import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
+import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { createCliStores } from "../cli/stores.js";
-import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
 import {
@@ -52,7 +54,10 @@ import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../s
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
+import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
+import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
+import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 
 export interface OrchestratorToolProgress {
   message: string;
@@ -787,6 +792,32 @@ const removeAgentTool: Tool = {
   }),
 };
 
+/** An agent's sandbox, as Polpo may set it. "Without isolation" (allowLocal) stays a person's choice in the UI. */
+const agentSandboxParam = Type.Optional(Type.Object({
+  provider: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("local"), Type.Literal("bwrap"), Type.Literal("docker"), Type.Literal("daytona"), Type.Literal("e2b")], { description: "Where the agent's commands run. 'inherit' = instance default. local = this machine without isolation; bwrap = bubblewrap jail on this machine; docker = a container here; daytona/e2b = a remote VM (needs the vault entry with the provider key chosen in Settings → Sandbox; it starts with an empty working directory, deliverables come back from the output directory, persistent files live on volumes). Unavailable providers fall back to bwrap." })),
+  network: Type.Optional(Type.Object({
+    mode: Type.Union([Type.Literal("open"), Type.Literal("allowlist"), Type.Literal("deny"), Type.Literal("unrestricted")], { description: "open = every public destination through a proxy (never this machine's own services or private networks; the default); allowlist = only the listed hosts; deny = none; unrestricted = the whole network of this machine incl. local services (risky: ask the person first)" }),
+    allow: Type.Optional(Type.Array(Type.String(), { description: "Hosts for allowlist mode: example.com, *.example.com (also covers example.com), optionally with a port (github.com:22)" })),
+  })),
+  resources: Type.Optional(Type.Object({
+    memoryMb: Type.Optional(Type.Number()), cpus: Type.Optional(Type.Number()), timeoutMin: Type.Optional(Type.Number()), diskMb: Type.Optional(Type.Number()),
+  }, { description: "Upper limits per command" })),
+  allowedProviders: Type.Optional(Type.Array(Type.String(), { description: "Providers this agent's missions and tasks may pick (they can only go stricter)" })),
+  chatRemote: Type.Optional(Type.Boolean({ description: "Cowork: this agent's chats run their sandbox tools on the remote provider (Daytona/E2B) instead of this machine. Tools with keys stay here." })),
+  isolation: Type.Optional(Type.Union([Type.Literal("reuse"), Type.Literal("fresh"), Type.Literal("shared")], { description: "Remote VMs. reuse = a VM this agent released (working directory reset, installed dependencies kept; the default); fresh = a clean VM for each run; shared = one VM concurrent runs use together" })),
+  lifecycle: Type.Optional(Type.Object({
+    onRelease: Type.Optional(Type.Union([Type.Literal("pool"), Type.Literal("destroy")], { description: "pool = keep the VM for the next run (default); destroy = delete it at the end" })),
+    stopAfterIdleMinutes: Type.Optional(Type.Number({ description: "A pooled VM nobody uses is stopped after this many minutes (default 5)" })),
+    deleteAfterStopMinutes: Type.Optional(Type.Number({ description: "…and deleted this many minutes after stopping (default 30; 0 = right away)" })),
+  }, { description: "Remote VM lifecycle (open Polpo names)" })),
+  volumes: Type.Optional(Type.Array(Type.Object({
+    name: Type.String({ description: "Storage entry slug enabled as a volume and granted to the agent (Storage page)" }),
+    access: Type.Optional(Type.Union([Type.Literal("read-only"), Type.Literal("read-write")], { description: "Narrow access (never wider than the grant)" })),
+    writeBack: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("manual")], { description: "Hydrated read-write volumes: auto = saved at the end; manual = only on sandbox_volume_checkpoint" })),
+  }), { description: "Volumes this agent's sandboxes attach at /volumes/<name> (replaces the list). Missions and tasks can only narrow it." })),
+  inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
+}, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
+
 const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team. Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
@@ -802,7 +833,7 @@ const updateAgentTool: Tool = {
       description: Type.Optional(Type.String({ description: "Short helper text shown below the title" })),
     })]), { description: "Starter prompts shown when opening a new chat with this agent (replaces existing). Items can be strings or objects." })),
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
-    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', or 'phone_*' to grant those categories. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
+    allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'storage_*' or 'phone_*' to grant those categories. storage_* gives the storage tools for the buckets granted to the agent on the Storage page. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
@@ -810,7 +841,14 @@ const updateAgentTool: Tool = {
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
+    sandbox: agentSandboxParam,
   }),
+};
+
+const sandboxStatusTool: Tool = {
+  name: "sandbox_status",
+  description: "Show where commands run: the sandbox providers available on this server, the instance defaults, and the effective sandbox (provider, network, limits) of Polpo and of each agent for tasks and chats. Use it to explain why a command cannot reach a file, the network, ~/.ssh or git credentials.",
+  parameters: Type.Object({ agent: Type.Optional(Type.String({ description: "Only this agent" })) }),
 };
 
 const listTeamsTool: Tool = {
@@ -1558,9 +1596,9 @@ const inkBrowseTool: Tool = {
 
 const inkAddTool: Tool = {
   name: "ink_add",
-  description: "Install packages from an Ink registry source (GitHub repo). Clones the repo, discovers packages by convention (playbooks, agents, companies), validates them, and installs into the project config. The official registry is 'lumea-labs/ink-registry'.",
+  description: `Install packages from an Ink registry source (GitHub repo). Clones the repo, discovers packages by convention (playbooks, agents, companies), validates them, and installs into the project config. The official registry is '${inkRegistry()}'.`,
   parameters: Type.Object({
-    source: Type.String({ description: "Package source — GitHub owner/repo (e.g. 'lumea-labs/ink-registry') or a full GitHub URL" }),
+    source: Type.String({ description: `Package source — GitHub owner/repo (e.g. '${inkRegistry()}') or a full GitHub URL` }),
     name: Type.Optional(Type.String({ description: "Install a specific package by name (e.g. 'devops-engineer'). If omitted, all packages from the source are installed." })),
   }),
 };
@@ -1569,7 +1607,7 @@ const inkRemoveTool: Tool = {
   name: "ink_remove",
   description: "Remove an installed Ink registry source and its packages from the project. Playbooks are deleted, agents are removed from polpo.json. Use ink_browse to see what's installed.",
   parameters: Type.Object({
-    source: Type.String({ description: "Package source to remove — GitHub owner/repo (e.g. 'lumea-labs/ink-registry')" }),
+    source: Type.String({ description: `Package source to remove — GitHub owner/repo (e.g. '${inkRegistry()}')` }),
   }),
 };
 
@@ -1577,7 +1615,7 @@ const inkUpdateTool: Tool = {
   name: "ink_update",
   description: "Update installed Ink packages by pulling the latest from their git repos. Re-discovers and re-installs packages, updating the lock file with new commit hashes. If no source is specified, all installed sources are updated.",
   parameters: Type.Object({
-    source: Type.Optional(Type.String({ description: "Specific source to update (e.g. 'lumea-labs/ink-registry'). If omitted, all installed sources are updated." })),
+    source: Type.Optional(Type.String({ description: `Specific source to update (e.g. '${inkRegistry()}'). If omitted, all installed sources are updated.` })),
   }),
 };
 
@@ -1695,6 +1733,7 @@ Available targets:
 - "app" — Specific registered app (requires id)
 - "app_preview" — App Preview page (optional url selects a running app/service)
 - "data" — Data sources and query explorer
+- "storage" — Storage buckets (S3/R2) and their mount status
 - "views" / "view" — Generated view registry or a specific view (id)
 
 Examples:
@@ -1706,7 +1745,7 @@ Examples:
 - navigate_to({ target: "view", id: "view-id" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, storage, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
@@ -1886,6 +1925,8 @@ export const READ_TOOLS = new Set([
   "data_list_sources", "data_test_source", "data_describe", "data_query", "data_sql", "data_list_views", "data_get_view",
   // Company Brain
   "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
+  // Storage (buckets)
+  "storage_list_entries", "storage_list", "storage_read", "storage_presign",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -1934,6 +1975,8 @@ export const WRITE_TOOLS = new Set([
   // Company Brain
   "brain_upsert_entity", "brain_upsert_relation", "brain_upsert_claim", "brain_ingest_data_source",
   "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
+  // Storage (buckets)
+  "storage_mount", "storage_unmount", "storage_write", "storage_delete",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -2014,7 +2057,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   addMissionTeamMemberTool, updateMissionTeamMemberTool, removeMissionTeamMemberTool,
   updateMissionNotificationsTool,
   // Team (7)
-  listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool,
+  listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool, sandboxStatusTool,
   // Vault (5)
   setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
   // Identity (2)
@@ -2055,6 +2098,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   ...DATA_ORCHESTRATOR_TOOLS,
   // Evidence-grounded semantic company graph
   ...BRAIN_ORCHESTRATOR_TOOLS,
+  // Storage: S3/R2 buckets (host-side; admin + object tools)
+  ...STORAGE_ORCHESTRATOR_TOOLS,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2105,6 +2150,14 @@ const TOOL_LABELS: Record<string, string> = {
   data_create_view: "Create Data View",
   data_update_view: "Update Data View",
   data_delete_view: "Delete Data View",
+  storage_list_entries: "List Storage",
+  storage_mount: "Mount Storage",
+  storage_unmount: "Unmount Storage",
+  storage_list: "List Storage Files",
+  storage_read: "Read Storage File",
+  storage_write: "Write Storage File",
+  storage_delete: "Delete Storage File",
+  storage_presign: "Create Download Link",
   brain_stats: "Inspect Company Brain",
   brain_search: "Search Company Brain",
   brain_get_entity: "Get Brain Entity",
@@ -2323,7 +2376,18 @@ export async function executeOrchestratorTool(
       case "brain_upsert_entity": case "brain_upsert_relation": case "brain_upsert_claim": case "brain_ingest_data_source":
       case "brain_enrich_text": case "brain_merge_entities": case "brain_set_grant":
         return executeCompanyBrainTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), (event) => {
-          polpo.emit("brain:changed" as any, event);
+          polpo.emit("brain:changed", event);
+        });
+
+      // ── Storage ──
+      case "storage_list_entries": case "storage_mount": case "storage_unmount":
+      case "storage_list": case "storage_read": case "storage_write": case "storage_delete": case "storage_presign":
+        return executeStorageTool(toolName, args, {
+          polpoDir: polpo.getPolpoDir(),
+          vaultStore: polpo.getVaultStore(),
+          cwd: polpo.getWorkDir(),
+          emit: (payload) => polpo.emit("storage:changed", payload),
+          emitFileChanged: (payload) => polpo.emit("file:changed", { ...payload, source: "chat" }),
         });
 
       // ── Task ──
@@ -2366,6 +2430,7 @@ export async function executeOrchestratorTool(
 
       // ── Team ──
       case "list_teams":       return execListTeams(polpo);
+      case "sandbox_status":   return execSandboxStatus(polpo, args);
       case "add_agent":        return execAddAgent(polpo, args);
       case "remove_agent":     return execRemoveAgent(polpo, args);
       case "update_agent":     return execUpdateAgent(polpo, args);
@@ -2623,6 +2688,7 @@ export async function formatToolDetails(
       main.push(["Agent", String(args.name)]);
       if (args.model) main.push(["New model", String(args.model)]);
       if (args.role) main.push(["New role", trunc(args.role)]);
+      if (args.sandbox) main.push(["Sandbox", trunc(JSON.stringify(args.sandbox), 200)]);
       break;
     case "delete_task":
     case "retry_task":
@@ -3214,7 +3280,8 @@ async function execGetMemory(polpo: Orchestrator, args: Record<string, unknown>)
 function execGetConfig(polpo: Orchestrator): string {
   const config = polpo.getConfig();
   if (!config) return "No configuration loaded.";
-  return JSON.stringify(config, null, 2);
+  // Never put bot tokens, API keys, webhook secrets or DB passwords in the LLM context.
+  return JSON.stringify(redactSecrets(config), null, 2);
 }
 
 async function execListApprovals(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3706,10 +3773,54 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
   if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
   if (args.team !== undefined) updates.team = args.team as string;
+  let sandboxNote = "";
+  if (args.sandbox !== undefined) {
+    const requested = (args.sandbox ?? {}) as Record<string, any>;
+    if (requested.inherit) {
+      // keep only a person's "without isolation" choice
+      updates.sandbox = existing.sandbox?.allowLocal ? { allowLocal: true } : undefined;
+    } else {
+      const { allowLocal: _ignored, inherit: _i, ...rest } = requested;
+      const inheritProvider = rest.provider === "inherit";
+      if (inheritProvider) delete rest.provider;
+      const merged = normalizeSandboxSettings({ ...(existing.sandbox ?? {}), ...rest, allowLocal: existing.sandbox?.allowLocal });
+      if (merged && inheritProvider) delete merged.provider;
+      updates.sandbox = merged && Object.keys(merged).length ? merged : undefined;
+      if ("allowLocal" in requested) sandboxNote = " (running without isolation can only be allowed by a person, in the agent's Sandbox tab)";
+    }
+  }
 
   await polpo.updateAgent(name, updates as any);
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
-  return `Agent "${name}" updated: ${changes}`;
+  return `Agent "${name}" updated: ${changes}${sandboxNote}`;
+}
+
+async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const { availableProviders, effectiveSandbox } = await import("../sandbox/manager.js");
+  const instance = normalizeSandboxSettings(polpo.getConfig()?.settings?.sandbox);
+  const describe = (s: EffectiveSandbox) => {
+    const limits = Object.entries(s.resources).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ");
+    const hint = s.provider === "local" ? " (not enforced: no isolation)"
+      : s.network.mode === "open" ? " (public destinations only, via proxy)"
+      : s.network.mode === "unrestricted" ? " (whole machine network, local services included)" : "";
+    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
+  };
+  const lines = [
+    `Available on this server: ${[...availableProviders()].join(", ")}`,
+    `Instance defaults: ${instance ? JSON.stringify(instance) : "none (this machine, network open)"}`,
+    `Polpo (run_command): ${describe(effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : undefined }))}`,
+  ];
+  const wanted = typeof args.agent === "string" ? args.agent : undefined;
+  for (const agent of await polpo.getAgents()) {
+    if (wanted && agent.name !== wanted) continue;
+    const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
+    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
+  }
+  const refused = polpo.getNetworkDenied?.() ?? [];
+  if (refused.length) lines.push(`Refused recently: ${refused.slice(0, 8).map((r) => `${r.host}${r.port ? `:${r.port}` : ""} (${r.agentName ?? "?"}, ${r.reason}, x${r.count})`).join("; ")}. A person can approve them in Settings → Sandbox.`);
+  lines.push("Network: the proxy speaks HTTP and SOCKS5 (ssh/git over ssh via GIT_SSH_COMMAND); open and allowlist never reach this machine's own services or private addresses.");
+  lines.push("In bwrap commands see only the working directory, granted paths and granted storage mounts: no home (~/.ssh, ~/.gitconfig, gh login), no .polpo, no other projects.");
+  return lines.join("\n");
 }
 
 async function execListTeams(polpo: Orchestrator): Promise<string> {
@@ -3851,8 +3962,7 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
       schedule: args.expression as string,
       status: newStatus,
     });
-    scheduler.unregisterMission(missionId);
-    scheduler.registerMission(updated);
+    scheduler.rescheduleMission(updated);
     changes.push(`expression: ${args.expression}`);
     if (args.recurring !== undefined) changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
@@ -3864,13 +3974,12 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
     // Re-register to pick up the new recurring flag
     const mission = await polpo.getMission(missionId);
     if (mission) {
-      scheduler.unregisterMission(missionId);
-      scheduler.registerMission(mission);
+      scheduler.rescheduleMission(mission);
     }
     changes.push(`mode: ${isRecurring ? "recurring" : "one-shot"}`);
   }
   if (args.enabled !== undefined) {
-    existing.enabled = args.enabled as boolean;
+    scheduler.setEnabled(missionId, args.enabled as boolean);
     changes.push(`enabled: ${args.enabled}`);
   }
   if (args.endDate !== undefined) {
@@ -4328,11 +4437,15 @@ function execAppendSystemContext(polpo: Orchestrator, args: Record<string, unkno
 //  VAULT IMPLEMENTATIONS
 // ═══════════════════════════════════════════════════════
 
+/** "$"-prefixed owners ("$data", "$providers") are system namespaces — never reachable from tools. */
+const RESERVED_VAULT_OWNER_ERROR = 'Error: vault owners starting with "$" are reserved for system use.';
+
 async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
@@ -4340,6 +4453,7 @@ async function execSetVaultEntry(polpo: Orchestrator, args: Record<string, unkno
   const service = args.service as string;
   // Filter allowedAgents: drop owner (implicit), de-dupe.
   const rawAllowed = Array.isArray(args.allowedAgents) ? (args.allowedAgents as string[]) : undefined;
+  if (rawAllowed?.some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
   const allowedAgents = rawAllowed
     ? Array.from(new Set(rawAllowed.filter(n => typeof n === "string" && n.length > 0 && n !== agentName)))
     : undefined;
@@ -4364,6 +4478,7 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available. Check POLPO_VAULT_KEY or ~/.polpo/vault.key.`;
@@ -4376,6 +4491,7 @@ async function execUpdateVaultCredentials(polpo: Orchestrator, args: Record<stri
   // allowedAgents semantics: present → REPLACES. omitted → preserved.
   const rawAllowed = args.allowedAgents;
   let allowedAgents: string[] | undefined;
+  if (Array.isArray(rawAllowed) && (rawAllowed as unknown[]).some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
   if (Array.isArray(rawAllowed)) {
     allowedAgents = Array.from(new Set((rawAllowed as string[]).filter(n => typeof n === "string" && n.length > 0 && n !== agentName)));
   }
@@ -4397,6 +4513,7 @@ async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unk
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -4404,6 +4521,7 @@ async function execShareVaultEntry(polpo: Orchestrator, args: Record<string, unk
   const service = args.service as string;
   const action = args.action as "add" | "remove" | "replace";
   const withAgents = Array.isArray(args.withAgents) ? (args.withAgents as string[]) : [];
+  if (withAgents.some(isReservedVaultOwner)) return RESERVED_VAULT_OWNER_ERROR;
 
   // Validate target agents exist (defensive — orchestrator may resolve aliases).
   const known = new Set(agents.map(a => a.name));
@@ -4441,6 +4559,7 @@ async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, un
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -4457,6 +4576,7 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
   const resolved = resolveAgentName(agents, args.agent as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
 
   const vaultStore = polpo.getVaultStore();
   if (!vaultStore) return `Error: Vault store not available.`;
@@ -5082,20 +5202,64 @@ function execEditFile(polpo: Orchestrator, args: Record<string, unknown>): strin
   return `Edited ${relative(polpo.getAgentWorkDir(), filePath)}`;
 }
 
+/** Convert a `find -path` style glob to a RegExp (`*`/`?` match any char incl. "/", `[...]` classes). */
+function findPathGlobToRegExp(pattern: string): RegExp {
+  let re = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else if (ch === "[") {
+      const end = pattern.indexOf("]", i + 2);
+      if (end === -1) { re += "\\["; continue; }
+      let cls = pattern.slice(i + 1, end).replace(/\\/g, "\\\\");
+      if (cls.startsWith("!")) cls = `^${cls.slice(1)}`;
+      re += `[${cls}]`;
+      i = end;
+    } else re += ch.replace(/[.+^${}()|\\/\]]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/** Walk `root` (no symlink following) and return "./rel/path" entries matching `pattern`. */
+function globWorkDir(root: string, pattern: string, limit: number): string[] {
+  const re = findPathGlobToRegExp(pattern.replace(/\\/g, "/"));
+  const results: string[] = [];
+  if (re.test(".")) results.push(".");
+  const queue: string[] = ["."];
+  let visited = 0;
+  while (queue.length > 0 && results.length < limit && visited < 200_000) {
+    const rel = queue.shift()!;
+    let entries: import("fs").Dirent[];
+    try {
+      entries = readdirSync(join(root, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      visited++;
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const childRel = `${rel}/${entry.name}`;
+      if (re.test(childRel)) {
+        results.push(childRel);
+        if (results.length >= limit) break;
+      }
+      if (entry.isDirectory()) queue.push(childRel);
+    }
+  }
+  return results;
+}
+
 function execListDirectory(polpo: Orchestrator, args: Record<string, unknown>): string {
   const pathArg = (args.path as string | undefined) ?? ".";
 
-  // Check if it looks like a glob pattern
+  // Glob pattern: matched in-process (no shell, no external `find`, works on
+  // Windows too). Semantics of `find . -path PATTERN`: paths look like
+  // "./dir/file", `*` and `?` also match "/", node_modules/.git are skipped.
   if (pathArg.includes("*") || pathArg.includes("?")) {
-    // Use find/glob via shell — more reliable for glob patterns
     try {
-      const cwd = polpo.getAgentWorkDir();
-      const result = execSync(`find . -path '${pathArg}' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200`, {
-        cwd,
-        encoding: "utf-8",
-        timeout: 10000,
-      }).trim();
-      return result || "(no matches)";
+      const matches = globWorkDir(polpo.getAgentWorkDir(), pathArg, 200);
+      return matches.length > 0 ? matches.join("\n") : "(no matches)";
     } catch {
       return "(no matches)";
     }
@@ -5125,20 +5289,24 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
   const searchPath = resolveFilePath(polpo, (args.path as string | undefined) ?? ".");
   const include = args.include as string | undefined;
 
-  // Build grep command
-  let cmd = `grep -rn --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.md' --include='*.yaml' --include='*.yml' --include='*.toml' --include='*.css' --include='*.html'`;
-  if (include) {
-    // Override with user-specified include
-    cmd = `grep -rn --include='${include}'`;
-  }
-  cmd += ` -E '${pattern.replace(/'/g, "'\\''")}' '${searchPath}' 2>/dev/null | head -100`;
+  // Build grep argv (no shell — pattern, include and path are passed verbatim)
+  const includes = include
+    ? [`--include=${include}`]
+    : ["*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "*.md", "*.yaml", "*.yml", "*.toml", "*.css", "*.html"].map((g) => `--include=${g}`);
+  const argv = ["-rn", ...includes, "--exclude-dir=node_modules", "--exclude-dir=.git", "-E", "-e", pattern, "--", searchPath];
 
   try {
-    const result = execSync(cmd, {
+    // spawnSync keeps whatever grep printed even when it exits 2 (an
+    // unreadable file), times out, or overflows maxBuffer.
+    const proc = spawnSync("grep", argv, {
       cwd: polpo.getAgentWorkDir(),
       encoding: "utf-8",
       timeout: 15000,
-    }).trim();
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const raw = typeof proc.stdout === "string" ? proc.stdout : "";
+    const result = raw.split("\n").filter(Boolean).slice(0, 100).join("\n").trim();
     if (!result) return "(no matches)";
 
     // Make paths relative
@@ -5154,7 +5322,7 @@ function execGrepFiles(polpo: Orchestrator, args: Record<string, unknown>): stri
   }
 }
 
-function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): string {
+async function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const command = args.command as string;
   const cwdArg = args.cwd as string | undefined;
   const cwd = cwdArg ? resolveFilePath(polpo, cwdArg) : polpo.getAgentWorkDir();
@@ -5167,21 +5335,14 @@ function execRunCommand(polpo: Orchestrator, args: Record<string, unknown>): str
     }
   }
 
+  // Polpo's commands run in its chat sandbox (never with the server's environment)
   try {
-    const result = execSync(command, {
-      cwd,
-      encoding: "utf-8",
-      timeout: 30000,
-      maxBuffer: 1024 * 1024, // 1MB
-    });
-    return result.trim() || "(command completed with no output)";
+    const result = await polpo.chatShell().execute(command, { cwd, timeout: 30_000 });
+    const output = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ""}`.trim().slice(0, 1024 * 1024);
+    if (result.exitCode !== 0) return `Error: exit code ${result.exitCode}\n${output}`.trim();
+    return output || "(command completed with no output)";
   } catch (err: unknown) {
-    const e = err as { status?: number; stdout?: string; stderr?: string; message?: string };
-    const parts: string[] = [];
-    if (e.stdout) parts.push(e.stdout.trim());
-    if (e.stderr) parts.push(e.stderr.trim());
-    if (parts.length === 0) parts.push(e.message ?? "Command failed");
-    return `Exit code ${e.status ?? 1}:\n${parts.join("\n")}`;
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 
@@ -5399,7 +5560,7 @@ async function execWhatsAppSend(polpo: Orchestrator, args: Record<string, unknow
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const text = args.text as string;
-  const jidOrError = resolveWhatsAppJid(to, store);
+  const jidOrError = await resolveWhatsAppJid(to, store);
   if (jidOrError.startsWith("Error:")) return jidOrError;
 
   const jid = jidOrError;
@@ -5421,7 +5582,7 @@ async function execWhatsAppSendFile(polpo: Orchestrator, args: Record<string, un
   const store = polpo.getWhatsAppStore();
   const to = args.to as string;
   const path = args.path as string;
-  const jidOrError = resolveWhatsAppJid(to, store);
+  const jidOrError = await resolveWhatsAppJid(to, store);
   if (jidOrError.startsWith("Error:")) return jidOrError;
 
   const baseDir = polpo.getAgentWorkDir();
@@ -5457,7 +5618,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
 
   switch (action) {
     case "list_chats": {
-      const chats = store.listChats(limit);
+      const chats = await store.listChats(limit);
       if (chats.length === 0) return "No WhatsApp chats found.";
       const lines = chats.map(c => {
         const name = c.name ? `${c.name} (${c.phone})` : c.phone;
@@ -5480,12 +5641,12 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
         const clean = chatId.replace(/[+\s-]/g, "");
         jid = `${clean}@s.whatsapp.net`;
       } else {
-        const contact = store.resolveContact(chatId);
+        const contact = await store.resolveContact(chatId);
         if (!contact) return `Error: Contact "${chatId}" not found. Use a phone number or JID.`;
         jid = contact.jid;
       }
 
-      const messages = store.listMessages(jid, limit);
+      const messages = await store.listMessages(jid, limit);
       if (messages.length === 0) return `No messages found for ${chatId}.`;
 
       const markRead = args.markRead === true;
@@ -5514,7 +5675,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
       const query = args.query as string;
       if (!query) return "Error: 'query' is required for search.";
 
-      const results = store.searchMessages(query, limit);
+      const results = await store.searchMessages(query, limit);
       if (results.length === 0) return `No messages matching "${query}".`;
 
       const lines = results.map(m => {
@@ -5527,7 +5688,7 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
     }
 
     case "contacts": {
-      const contacts = store.listContacts(limit);
+      const contacts = await store.listContacts(limit);
       if (contacts.length === 0) return "No WhatsApp contacts found.";
       const lines = contacts.map(c => {
         const lastSeen = new Date(c.lastSeen * 1000).toLocaleString();
@@ -5541,11 +5702,11 @@ async function execWhatsAppRead(polpo: Orchestrator, args: Record<string, unknow
   }
 }
 
-function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): string {
+async function resolveWhatsAppJid(to: string, store: ReturnType<Orchestrator["getWhatsAppStore"]>): Promise<string> {
   if (to.includes("@")) return to;
   if (/^\d+$/.test(to.replace(/[+\s-]/g, ""))) return `${to.replace(/[+\s-]/g, "")}@s.whatsapp.net`;
   if (store) {
-    const contact = store.resolveContact(to);
+    const contact = await store.resolveContact(to);
     if (contact) return contact.jid;
     return `Error: Contact "${to}" not found. Use a phone number (with country code, no +) or a name that matches a known contact.`;
   }
@@ -5909,11 +6070,10 @@ async function execPhoneDisableInbound(polpo: Orchestrator): Promise<string> {
 //  INK HUB EXECUTORS
 // ═══════════════════════════════════════════════════════
 
-const INK_API_URL = "https://polpo.sh/api";
 
 async function execInkSearch(args: Record<string, unknown>): Promise<string> {
   try {
-    const res = await fetch(`${INK_API_URL}/packages`, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(`${inkApiUrl()}/packages`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return `Error: Ink Hub API returned HTTP ${res.status}`;
 
     const data = await res.json() as { packages: Array<{
@@ -5980,10 +6140,15 @@ function execInkBrowse(polpo: Orchestrator, args: Record<string, unknown>): stri
 
 async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const source = args.source as string;
-  if (!source) return "Error: 'source' is required (e.g. 'lumea-labs/ink-registry').";
+  if (!source) return `Error: 'source' is required (e.g. '${inkRegistry()}').`;
 
   const polpoDir = polpo.getPolpoDir();
-  const parsed = parseInkSource(source);
+  let parsed: ReturnType<typeof parseInkSource>;
+  try {
+    parsed = parseInkSource(source);
+  } catch (e: any) {
+    return `Error: ${e.message}`;
+  }
   const sourceLabel = parsed.ownerRepo ?? source;
 
   // Check if already installed
@@ -5995,16 +6160,17 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
   // Clone to temp dir
   const cacheDir = join(polpoDir, "ink-cache");
   mkdirSync(cacheDir, { recursive: true });
-  const repoDir = join(cacheDir, sourceLabel.replace(/\//g, "--"));
+  const repoDir = join(cacheDir, sourceCacheKey(sourceLabel));
   if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
 
   try {
-    execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+    // Validated URL/path + argument array: no shell interpretation.
+    gitClone(parsed.url, repoDir, { timeout: 30000 });
   } catch (e: any) {
     return `Error cloning "${parsed.url}": ${e.message}`;
   }
 
-  const commitHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+  const commitHash = gitHeadCommit(repoDir);
 
   // Discover packages
   let { packages, errors } = discoverInkPackages(repoDir);
@@ -6095,7 +6261,8 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
         // Append memory.md if present (via MemoryStore)
         const srcMemory = join(srcDir, "memory.md");
         if (existsSync(srcMemory)) {
-          const memStore = new FileMemoryStore(polpoDir);
+          // The instance's own memory store (file, sqlite or postgres), not always the file one.
+          const memStore = polpo.getMemoryStore();
           const existingMem = await memStore.get();
           const memContent = readFileSync(srcMemory, "utf-8");
           const separator = `\n\n<!-- Imported from ink: ${pkg.name} -->\n`;
@@ -6133,7 +6300,7 @@ async function execInkAdd(polpo: Orchestrator, args: Record<string, unknown>): P
 
   // Fire telemetry (fire-and-forget)
   try {
-    fetch(`${INK_API_URL}/installs`, {
+    fetch(`${inkApiUrl()}/installs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -6173,7 +6340,7 @@ async function execInkRemove(polpo: Orchestrator, args: Record<string, unknown>)
   writeInkLock(polpoDir, removeInkLockEntry(lock, source));
 
   // Clean cache
-  const cacheDir = join(polpoDir, "ink-cache", source.replace(/\//g, "--"));
+  const cacheDir = join(polpoDir, "ink-cache", sourceCacheKey(source));
   if (existsSync(cacheDir)) {
     try { rmSync(cacheDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
@@ -6212,28 +6379,34 @@ async function execInkUpdate(polpo: Orchestrator, args: Record<string, unknown>)
   let updatedLock = { ...lock, registries: [...lock.registries] };
 
   for (const entry of entries) {
-    const parsed = parseInkSource(entry.source);
+    let parsed: ReturnType<typeof parseInkSource>;
+    try {
+      parsed = parseInkSource(entry.source);
+    } catch (e: any) {
+      results.push(`${entry.source}: ${e.message}`);
+      continue;
+    }
     const cacheDir = join(polpoDir, "ink-cache");
     mkdirSync(cacheDir, { recursive: true });
-    const repoDir = join(cacheDir, entry.source.replace(/\//g, "--"));
+    const repoDir = join(cacheDir, sourceCacheKey(entry.source));
 
     try {
       if (existsSync(repoDir)) {
         try {
-          execSync("git pull --ff-only", { cwd: repoDir, stdio: "pipe", timeout: 30000 });
+          gitPullFastForward(repoDir, { timeout: 30000 });
         } catch {
           rmSync(repoDir, { recursive: true, force: true });
-          execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+          gitClone(parsed.url, repoDir, { timeout: 30000 });
         }
       } else {
-        execSync(`git clone --depth 1 "${parsed.url}" "${repoDir}"`, { stdio: "pipe", timeout: 30000 });
+        gitClone(parsed.url, repoDir, { timeout: 30000 });
       }
     } catch (e: any) {
       results.push(`${entry.source}: git error — ${e.message}`);
       continue;
     }
 
-    const newHash = execSync("git rev-parse HEAD", { cwd: repoDir, encoding: "utf-8" }).trim();
+    const newHash = gitHeadCommit(repoDir);
 
     if (newHash === entry.commitHash) {
       results.push(`${entry.source}: already up to date (${newHash.slice(0, 7)})`);
@@ -6437,6 +6610,7 @@ async function execRunPlaybook(polpo: Orchestrator, args: Record<string, unknown
       name: instance.name,
     });
 
+    polpo.emit("playbook:run", { name, missionId: mission.id, params: Object.keys(params) });
     const result = await polpo.executeMission(mission.id);
     const warns = validation.warnings.length > 0 ? `\nWarnings:\n  - ${validation.warnings.join("\n  - ")}` : "";
     return `Playbook "${name}" executed — mission "${mission.name}" (ID: ${mission.id}), ${result.tasks.length} task(s), group: ${result.group}.${warns}`;

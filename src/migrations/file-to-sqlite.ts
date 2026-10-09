@@ -180,10 +180,17 @@ async function migrateTasksAndMissions(ctx: Ctx): Promise<PerStoreResult> {
       if (!task?.id) continue;
       await ctx.db.insert(ctx.schema.tasks).values(taskToRow(task)).onConflictDoNothing();
     }
+    // Mission names are unique in the database but were not in files: a repeated name gets a
+    // suffix instead of the mission being dropped.
+    const usedNames = new Set<string>();
     for (const f of missionFiles) {
       const mission = readJson<any>(join(missionsDir, f), null);
       if (!mission?.id) continue;
-      await ctx.db.insert(ctx.schema.missions).values(missionToRow(mission)).onConflictDoNothing();
+      let name = String(mission.name ?? mission.id);
+      for (let n = 2; usedNames.has(name); n++) name = `${mission.name} (${n})`;
+      if (name !== mission.name) ctx.log(`  [missions] "${mission.name}" appears more than once: ${mission.id} saved as "${name}".`);
+      usedNames.add(name);
+      await ctx.db.insert(ctx.schema.missions).values(missionToRow({ ...mission, name })).onConflictDoNothing();
     }
     // Meta keys → metadata table
     for (const key of ["project", "teams", "startedAt", "completedAt"] as const) {
@@ -211,7 +218,10 @@ async function migrateTasksAndMissions(ctx: Ctx): Promise<PerStoreResult> {
     store: "tasks",
     status: "migrated",
     fileCount: taskFiles.length + missionFiles.length,
-    dbCount: taskFiles.length + missionFiles.length,
+    // What actually landed in the database, so a dropped row shows up in the report.
+    dbCount: ctx.dryRun ? taskFiles.length + missionFiles.length
+      : Number((await ctx.db.select({ n: sql<number>`count(*)` }).from(ctx.schema.tasks))[0]?.n ?? 0)
+        + Number((await ctx.db.select({ n: sql<number>`count(*)` }).from(ctx.schema.missions))[0]?.n ?? 0),
     durationMs: t.ms(),
   };
 }
@@ -336,6 +346,7 @@ async function migrateSessionsAndMessages(ctx: Ctx): Promise<PerStoreResult> {
         createdAt,
         updatedAt,
         starred: header.starred === true ? 1 : header.starred === false ? 0 : null,
+        scope: header.scope ?? null,
       }).onConflictDoNothing();
       inserted++;
       for (const msg of lines) {

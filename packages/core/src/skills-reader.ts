@@ -45,6 +45,15 @@ export interface SkillWithAssignment extends SkillInfo {
  * Parse SKILL.md YAML frontmatter.
  * Inlined minimal YAML parser for the simple key:value frontmatter format.
  */
+/** Strip YAML quoting from a flat scalar ("..." JSON-style, or '...'). */
+function unquoteScalar(val: string): string {
+  if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
+    try { return String(JSON.parse(val)); } catch { return val.slice(1, -1); }
+  }
+  if (val.length >= 2 && val.startsWith("'") && val.endsWith("'")) return val.slice(1, -1).replace(/''/g, "'");
+  return val;
+}
+
 export function parseSkillFrontmatter(content: string): { name?: string; description: string; allowedTools?: string[] } | null {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
@@ -59,7 +68,7 @@ export function parseSkillFrontmatter(content: string): { name?: string; descrip
       const arrayItemMatch = line.match(/^\s+-\s+(.+)/);
       if (arrayItemMatch && currentKey) {
         if (!currentArray) currentArray = [];
-        currentArray.push(arrayItemMatch[1].trim());
+        currentArray.push(unquoteScalar(arrayItemMatch[1].trim()));
         fm[currentKey] = currentArray;
         continue;
       }
@@ -74,7 +83,7 @@ export function parseSkillFrontmatter(content: string): { name?: string; descrip
         currentKey = kvMatch[1] === "allowed-tools" ? "allowedTools" : kvMatch[1];
         const val = kvMatch[2]?.trim();
         if (val) {
-          fm[currentKey] = val;
+          fm[currentKey] = unquoteScalar(val);
         }
       }
     }
@@ -86,6 +95,34 @@ export function parseSkillFrontmatter(content: string): { name?: string; descrip
       allowedTools: fm.allowedTools as string[] | undefined,
     };
   } catch { return null; }
+}
+
+/**
+ * Collapse a value to a single frontmatter line: newlines and other control
+ * characters become spaces, so a description/tool name can never inject
+ * extra frontmatter keys (e.g. `allowed-tools`) or close the block early.
+ */
+export function sanitizeFrontmatterValue(value: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  return String(value ?? "").replace(/\s*[\u0000-\u001f\u007f\u2028\u2029]+\s*/g, " ").trim();
+}
+
+/** Render a single-line YAML scalar, double-quoting (JSON-style) when YAML would misread it. */
+function yamlScalar(value: unknown): string {
+  const v = sanitizeFrontmatterValue(value);
+  return v === "" || /[:#[\]{},&*!|>'"%@`\\]|^[-?\s]|\s$/.test(v) ? JSON.stringify(v) : v;
+}
+
+/** Build a SKILL.md frontmatter block (ends with "---\n"), single-line values only. */
+export function buildSkillFrontmatter(name: string, description: string, allowedTools?: string[]): string {
+  const lines = ["---", `name: ${yamlScalar(name)}`, `description: ${yamlScalar(description)}`];
+  const tools = (allowedTools ?? []).map(sanitizeFrontmatterValue).filter(Boolean);
+  if (tools.length > 0) {
+    lines.push("allowed-tools:");
+    for (const t of tools) lines.push(`  - ${yamlScalar(t)}`);
+  }
+  lines.push("---", "");
+  return lines.join("\n");
 }
 
 /** Extract the markdown body (everything after the frontmatter block). */

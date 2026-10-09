@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { CANONICAL_HOOK_EVENT_NAMES } from "@polpo-ai/core";
+import { POLPO_EVENT_NAMES, HIGH_FREQUENCY_EVENTS } from "@polpo-ai/core";
 import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js";
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -13,7 +13,7 @@ import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
 import { PushChannel } from "./channels/push.js";
 import { ExpoPushChannel } from "./channels/expo-push.js";
-import { FileExpoTokenStore } from "../stores/file-expo-token-store.js";
+import { expoTokenStoreFor } from "../stores/notification-device-stores.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "../core/notification-store.js";
@@ -46,8 +46,8 @@ export class NotificationRouter {
   /** Optional callback to execute notification actions (create_task, execute_plan, etc.) */
   private actionExecutor?: (action: NotificationAction) => Promise<string>;
   /** Optional callback to resolve scoped notification rules from event payload.
-   *  Returns task-level and plan-level notifications for scope resolution. */
-  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>;
+   *  Returns task-level and mission-level notifications for scope resolution. */
+  private scopeResolver?: (data: unknown) => { taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined>;
 
   private polpoDir?: string;
 
@@ -61,7 +61,7 @@ export class NotificationRouter {
 
   /** Set a callback that resolves scoped notification rules from event data.
    *  Used to look up task.notifications / plan.notifications for scope resolution. */
-  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; planNotifications?: ScopedNotificationRules } | undefined>): void {
+  setScopeResolver(resolver: (data: unknown) => { taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined | Promise<{ taskNotifications?: ScopedNotificationRules; missionNotifications?: ScopedNotificationRules } | undefined>): void {
     this.scopeResolver = resolver;
   }
 
@@ -139,7 +139,7 @@ export class NotificationRouter {
 
     for (const pattern of patterns) {
       for (const event of allEvents) {
-        if (matchGlob(pattern, event) && !this.subscribedEvents.has(event)) {
+        if (ruleMatches(pattern, event) && !this.subscribedEvents.has(event)) {
           this.subscribedEvents.add(event);
           const fn = (data: unknown) => this.handleEvent(event, data);
           this.emitter.on(event as PolpoEvent, fn as (payload: PolpoEventMap[PolpoEvent]) => void);
@@ -163,7 +163,7 @@ export class NotificationRouter {
       try {
         const scope = await this.scopeResolver(data);
         taskNotifications = scope?.taskNotifications;
-        planNotifications = scope?.planNotifications;
+        planNotifications = scope?.missionNotifications;
       } catch {
         // Scope resolution failed — fall back to global rules only
       }
@@ -550,13 +550,13 @@ export class NotificationRouter {
     planNotifications?: ScopedNotificationRules,
   ): NotificationRule[] {
     const globalMatching = this.rules.filter(r =>
-      r.events.some(p => matchGlob(p, event))
+      r.events.some(p => ruleMatches(p, event))
     );
 
     // Check task scope
     if (taskNotifications?.rules?.length) {
       const taskMatching = taskNotifications.rules.filter(r =>
-        r.events.some(p => matchGlob(p, event))
+        r.events.some(p => ruleMatches(p, event))
       );
       if (taskMatching.length > 0) {
         if (taskNotifications.inherit) {
@@ -586,7 +586,7 @@ export class NotificationRouter {
     globalMatching: NotificationRule[],
   ): NotificationRule[] {
     const planMatching = planNotifications.rules.filter(r =>
-      r.events.some(p => matchGlob(p, event))
+      r.events.some(p => ruleMatches(p, event))
     );
     if (planMatching.length > 0) {
       return planNotifications.inherit
@@ -741,7 +741,7 @@ export class NotificationRouter {
         return new PushChannel(config, this.polpoDir);
       case "expo-push":
         if (!this.polpoDir) throw new Error("Expo push channel requires polpoDir (pass it via init())");
-        return new ExpoPushChannel(new FileExpoTokenStore(this.polpoDir));
+        return new ExpoPushChannel(expoTokenStoreFor(this.polpoDir));
       default:
         throw new Error(`Unknown channel type: ${config.type}`);
     }
@@ -778,15 +778,17 @@ function matchGlob(pattern: string, event: string): boolean {
 }
 
 /**
- * Get all known event names from the PolpoEventMap.
+ * Every event of the bus (PolpoEventMap, via the catalog in `@polpo-ai/core/hook-events`).
  * Used to subscribe to concrete events matching glob patterns.
- *
- * The canonical list lives in `@polpo-ai/core/hook-events`
- * (CANONICAL_HOOK_EVENT_NAMES). We just append the "log" channel,
- * which the router also wants to dispatch on.
  */
 function getAllEventNames(): string[] {
-  return [...CANONICAL_HOOK_EVENT_NAMES, "log"];
+  return POLPO_EVENT_NAMES;
+}
+
+/** A rule pattern matches an event: exactly, or by glob unless the event fires many times a minute. */
+function ruleMatches(pattern: string, event: string): boolean {
+  if (pattern === event) return true;
+  return !HIGH_FREQUENCY_EVENTS.has(event) && matchGlob(pattern, event);
 }
 
 /**

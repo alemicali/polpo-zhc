@@ -1,11 +1,11 @@
-import { eq, desc, asc, lt, and, sql, type SQL } from "drizzle-orm";
+import { inArray, eq, desc, asc, lt, and, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { TaskStore } from "@polpo-ai/core/task-store";
 import type {
   Task, TaskStatus, Mission, PolpoState, AgentProcess,
 } from "@polpo-ai/core/types";
 import { assertValidTransition } from "@polpo-ai/core/state-machine";
-import { type Dialect, serializeJson, deserializeJson } from "../utils.js";
+import { type Dialect, serializeJson, deserializeJson, affectedRows } from "../utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTable = any;
@@ -41,6 +41,22 @@ function sanitizeFtsQuery(raw: string): string {
     .join(" ");
 }
 
+/**
+ * The same tokens as sanitizeFtsQuery(), as a PostgreSQL tsquery for the `search` column
+ * (`to_tsvector('simple', title/description)`): every token must match, the last one as a prefix.
+ * Tokens are letters, digits and `_` only, so they cannot carry tsquery operators.
+ */
+function toPgTsQuery(raw: string): string {
+  const cleaned = raw
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}_\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  const tokens = cleaned.split(" ").filter(Boolean);
+  return tokens.map((tok, i) => i === tokens.length - 1 ? `'${tok}':*` : `'${tok}'`).join(" & ");
+}
+
 export interface TaskStoreSchema {
   tasks: AnyTable;
   missions: AnyTable;
@@ -49,6 +65,18 @@ export interface TaskStoreSchema {
 }
 
 export class DrizzleTaskStore implements TaskStore {
+  /**
+   * Decoded tasks by id, with the updated_at they were read at. getAllTasks() runs every
+   * supervisor tick and every chat turn; decoding all rows (results, outcomes) dominated its cost.
+   * Now only (id, updated_at) is read each time and only changed rows are fetched. Writes through
+   * this store drop their entry, so two writes within the same millisecond are never missed;
+   * writes by other processes are caught by updated_at. Callers get copies.
+   */
+  /** Decoded tasks by id, valid while the row's version and updated_at are unchanged. */
+  private cache = new Map<string, { stamp: string; task: Task }>();
+  /** Last process list written: the supervisor saves it every tick, usually unchanged. */
+  private lastProcesses?: string;
+
   constructor(
     private db: any,
     private schema: TaskStoreSchema,
@@ -175,13 +203,13 @@ export class DrizzleTaskStore implements TaskStore {
       teams = [deserializeJson(meta.team, { name: "default", agents: [] }, this.dialect)];
     }
 
-    const taskRows: any[] = await this.db.select().from(tasks).orderBy(asc(tasks.createdAt));
+    const allTasks = await this.getAllTasks();
     const procRows: any[] = await this.db.select().from(processes);
 
     return {
       project: meta.project ?? "",
       teams,
-      tasks: taskRows.map((r) => this.rowToTask(r)),
+      tasks: allTasks,
       processes: procRows.map((r) => this.rowToProcess(r)),
       startedAt: meta.startedAt,
       completedAt: meta.completedAt,
@@ -193,7 +221,7 @@ export class DrizzleTaskStore implements TaskStore {
     const d = this.dialect;
 
     // SQLite transactions require synchronous callbacks — execute directly.
-    const upsertMeta = (db: any, key: string, value: string) =>
+    const upsertMeta = (db: any, key: string, value: unknown) =>
       db.insert(metadata).values({ key, value })
         .onConflictDoUpdate({ target: metadata.key, set: { value } });
 
@@ -202,7 +230,7 @@ export class DrizzleTaskStore implements TaskStore {
         await upsertMeta(db, "project", partial.project);
       }
       if (partial.teams !== undefined) {
-        const val = JSON.stringify(partial.teams);
+        const val = serializeJson(partial.teams, this.dialect);
         await upsertMeta(db, "teams", val);
       }
       if (partial.startedAt !== undefined) {
@@ -211,7 +239,9 @@ export class DrizzleTaskStore implements TaskStore {
       if (partial.completedAt !== undefined) {
         await upsertMeta(db, "completedAt", partial.completedAt);
       }
-      if (partial.processes !== undefined) {
+      const processesJson = partial.processes !== undefined ? JSON.stringify(partial.processes) : undefined;
+      if (partial.processes !== undefined && processesJson !== this.lastProcesses) {
+        this.lastProcesses = processesJson;
         await db.delete(processes);
         for (const p of partial.processes) {
           await db.insert(processes).values({
@@ -225,6 +255,7 @@ export class DrizzleTaskStore implements TaskStore {
         }
       }
       if (partial.tasks !== undefined) {
+        this.cache.clear();
         await db.delete(tasks);
         for (const t of partial.tasks) {
           await db.insert(tasks).values(this.taskToValues(t));
@@ -261,25 +292,43 @@ export class DrizzleTaskStore implements TaskStore {
     return rows.length > 0 ? this.rowToTask(rows[0]) : undefined;
   }
 
+  /** SQL for "version + 1": every writer (any process) bumps it, so cached copies notice. */
+  private nextVersion(): SQL {
+    return sql`${this.schema.tasks.version} + 1`;
+  }
+
   async getAllTasks(): Promise<Task[]> {
-    const rows: any[] = await this.db.select().from(this.schema.tasks)
-      .orderBy(asc(this.schema.tasks.createdAt));
-    return rows.map((r) => this.rowToTask(r));
+    const t = this.schema.tasks;
+    const heads: Array<{ id: string; updatedAt: string; version: number }> = await this.db
+      .select({ id: t.id, updatedAt: t.updatedAt, version: t.version }).from(t).orderBy(asc(t.createdAt));
+    const stale = heads.filter((h) => this.cache.get(h.id)?.stamp !== stampOf(h)).map((h) => h.id);
+    for (let i = 0; i < stale.length; i += 500) {
+      const rows: any[] = await this.db.select().from(t).where(inArray(t.id, stale.slice(i, i + 500)));
+      for (const row of rows) this.cache.set(row.id, { stamp: stampOf(row), task: this.rowToTask(row) });
+    }
+    if (this.cache.size > heads.length) {
+      const present = new Set(heads.map((h) => h.id));
+      for (const id of this.cache.keys()) if (!present.has(id)) this.cache.delete(id);
+    }
+    return heads.flatMap((h) => {
+      const entry = this.cache.get(h.id);
+      return entry ? [copyJson(entry.task)] : [];
+    });
   }
 
   /**
    * Cursor-paginated task list, optionally filtered + full-text searched.
    *
-   * - When `q` is set, results come from the FTS5 virtual table
-   *   `tasks_fts` (ranked by relevance). Cursor is ignored because rank
-   *   ordering and updated_at ordering are incompatible.
+   * - When `q` is set, results come from full-text search ranked by
+   *   relevance: the FTS5 virtual table `tasks_fts` on SQLite, the generated
+   *   `search` tsvector column (GIN index) on PostgreSQL. Cursor is ignored
+   *   because rank ordering and updated_at ordering are incompatible.
    * - When `q` is empty, results are ordered by `updated_at DESC` and the
    *   cursor is the `updated_at` of the last item from the previous page.
    * - status / group / assignTo filters are AND-combined with both modes.
    * - `hasMore` is determined by fetching `limit + 1` rows.
-   *
-   * Only implemented for SQLite — Postgres falls back to `getAllTasks()`
-   * + in-memory filtering at the route level.
+   * - If full-text search is unavailable (or `q` has no searchable token),
+   *   a case-insensitive substring match on title/description is used.
    */
   async getTasksPage(opts: {
     limit?: number;
@@ -347,6 +396,8 @@ export class DrizzleTaskStore implements TaskStore {
         void like;
         void err;
       }
+    } else if (opts.q && opts.q.trim().length > 0 && this.dialect === "pg") {
+      rows = await this.searchTasksPg(opts.q, filters, fetchLimit);
     } else {
       // Cursor path.
       const where = [...filters];
@@ -366,6 +417,35 @@ export class DrizzleTaskStore implements TaskStore {
     const tasks = data.map((r) => this.rowToTask(r));
     const nextCursor = hasMore && tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : null;
     return { tasks, nextCursor, hasMore };
+  }
+
+  /**
+   * PostgreSQL full-text search for getTasksPage(): `search @@ tsquery` (GIN index), ranked by
+   * ts_rank with the newest first on ties. Falls back to ILIKE on title/description when the
+   * query has no searchable token or the `search` column is missing (database not migrated).
+   */
+  private async searchTasksPg(q: string, filters: SQL[], fetchLimit: number): Promise<any[]> {
+    const t = this.schema.tasks;
+    const tsQuery = toPgTsQuery(q);
+    if (tsQuery) {
+      const query = sql`to_tsquery('simple', ${tsQuery})`;
+      const search = sql`${t}.${sql.identifier("search")}`;
+      try {
+        return await this.db.select().from(t)
+          .where(and(sql`${search} @@ ${query}`, ...filters))
+          .orderBy(sql`ts_rank(${search}, ${query}) DESC`, desc(t.updatedAt))
+          .limit(fetchLimit);
+      } catch (err) {
+        // 42703 undefined_column: no `search` column (not migrated), use the substring match.
+        const e = err as { code?: string; cause?: { code?: string } };
+        if ((e.code ?? e.cause?.code) !== "42703") throw err;
+      }
+    }
+    const like = `%${q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    return this.db.select().from(t)
+      .where(and(sql`(${t.title} ILIKE ${like} OR ${t.description} ILIKE ${like})`, ...filters))
+      .orderBy(desc(t.updatedAt))
+      .limit(fetchLimit);
   }
 
   /**
@@ -415,15 +495,17 @@ export class DrizzleTaskStore implements TaskStore {
     const merged = { ...existing, ...updates, updatedAt: now };
     const values = this.taskToValues(merged);
     delete values.id;
-    await this.db.update(this.schema.tasks).set(values)
+    this.cache.delete(taskId);
+    await this.db.update(this.schema.tasks).set({ ...values, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
     return merged;
   }
 
   async removeTask(taskId: string): Promise<boolean> {
+    this.cache.delete(taskId);
     const result = await this.db.delete(this.schema.tasks)
       .where(eq(this.schema.tasks.id, taskId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async removeTasks(filter: (task: Task) => boolean): Promise<number> {
@@ -431,6 +513,7 @@ export class DrizzleTaskStore implements TaskStore {
     const toRemove = all.filter(filter);
     if (toRemove.length === 0) return 0;
     for (const t of toRemove) {
+      this.cache.delete(t.id);
       await this.db.delete(this.schema.tasks)
         .where(eq(this.schema.tasks.id, t.id));
     }
@@ -453,7 +536,8 @@ export class DrizzleTaskStore implements TaskStore {
       updates.retries = task.retries + 1;
     }
 
-    await this.db.update(this.schema.tasks).set(updates)
+    this.cache.delete(taskId);
+    await this.db.update(this.schema.tasks).set({ ...updates, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
 
     return { ...task, status: newStatus, updatedAt: now, retries: (updates.retries as number) ?? task.retries };
@@ -464,8 +548,9 @@ export class DrizzleTaskStore implements TaskStore {
     if (!task) throw new Error(`Task "${taskId}" not found`);
 
     const now = new Date().toISOString();
+    this.cache.delete(taskId);
     await this.db.update(this.schema.tasks)
-      .set({ status: newStatus, updatedAt: now })
+      .set({ status: newStatus, updatedAt: now, version: this.nextVersion() })
       .where(eq(this.schema.tasks.id, taskId));
 
     return { ...task, status: newStatus, updatedAt: now };
@@ -546,7 +631,7 @@ export class DrizzleTaskStore implements TaskStore {
   async deleteMission(missionId: string): Promise<boolean> {
     const result = await this.db.delete(this.schema.missions)
       .where(eq(this.schema.missions.id, missionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async nextMissionName(): Promise<string> {
@@ -563,4 +648,20 @@ export class DrizzleTaskStore implements TaskStore {
   async close(): Promise<void> {
     // Connection lifecycle managed externally
   }
+}
+
+/** Copy of plain data: objects and arrays are new, strings (immutable) are shared, not duplicated. */
+function copyJson<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copyJson) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) out[key] = copyJson((value as Record<string, unknown>)[key]);
+    return out as T;
+  }
+  return value;
+}
+
+/** Cache key of a task row. */
+function stampOf(row: { version?: number | null; updatedAt: string }): string {
+  return `${Number(row.version ?? 0)}:${row.updatedAt}`;
 }

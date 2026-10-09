@@ -5,7 +5,7 @@
 
 import { Users, Bot } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { useAgentsPage } from "./agents-page-provider";
+import { useAgentsPage } from "./agents-page-context";
 
 export function SummaryHeader() {
   const { state } = useAgentsPage();

@@ -18,10 +18,15 @@ export class NodeShell implements Shell {
         timeout: options?.timeout,
         reject: false,
       });
+      // execa leaves exitCode undefined when the process never exited normally
+      // (timeout, killed by a signal, canceled, spawn error). That is a failure,
+      // never a success: report exit code 1 and surface the reason.
+      const abnormal = result.exitCode === undefined
+        && (result.failed || result.timedOut || result.isTerminated || result.isCanceled);
       return {
         stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exitCode ?? 0,
+        stderr: abnormal ? (result.stderr || result.shortMessage || "Command failed") : result.stderr,
+        exitCode: result.exitCode ?? (abnormal ? 1 : 0),
       };
     } catch (err: any) {
       return {

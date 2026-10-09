@@ -19,6 +19,7 @@
  */
 
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { isRedactedValue } from "@polpo-ai/core/secret-redaction";
 
 /* ── Shared error schema ───────────────────────────────────────────── */
 const ErrorResponse = z.object({ ok: z.boolean(), error: z.string() });
@@ -252,7 +253,13 @@ export interface PeerRouteDeps {
   fetch?: typeof fetch;
 }
 
-interface TelegramBot { id: number; username: string; name: string }
+interface TelegramBot {
+  id: number;
+  username: string;
+  name: string;
+  /** False while privacy mode is on: in groups the bot only sees commands and replies to it. */
+  canReadAllGroupMessages?: boolean;
+}
 
 /** A chat that wrote to the bot, as reported by detect-chat. */
 export interface DetectedChat {
@@ -270,7 +277,12 @@ async function telegramGetMe(botToken: string, fetchImpl: typeof fetch): Promise
     const res = await fetchImpl(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/getMe`);
     const body = await res.json().catch(() => null) as any;
     if (!body?.ok) return { error: body?.description ?? `Telegram rejected the token (${res.status})` };
-    return { id: body.result.id, username: body.result.username, name: body.result.first_name };
+    return {
+      id: body.result.id,
+      username: body.result.username,
+      name: body.result.first_name,
+      canReadAllGroupMessages: body.result.can_read_all_group_messages,
+    };
   } catch (err) {
     return { error: `Telegram unreachable: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -387,7 +399,10 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
   // ── Verify Telegram bot token ──
   app.openapi(verifyTelegramRoute, async (c) => {
     const { getTelegramBotToken, fetch: fetchImpl = fetch } = getDeps();
-    const botToken = c.req.valid("json").botToken?.trim() || getTelegramBotToken?.(c.req.valid("query").channel);
+    // A redacted token ("••••1234", as returned by GET /config) means "the saved one".
+    const bodyToken = c.req.valid("json").botToken?.trim();
+    const botToken = (bodyToken && !isRedactedValue(bodyToken) ? bodyToken : undefined)
+      || getTelegramBotToken?.(c.req.valid("query").channel);
     if (!botToken) return c.json({ ok: false, error: "botToken is required" }, 400);
     const me = await telegramGetMe(botToken, fetchImpl);
     if ("error" in me) return c.json({ ok: false, error: me.error }, 400);
@@ -399,6 +414,13 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
     const { getConfiguredTelegramTokens, fetch: fetchImpl = fetch } = getDeps();
     const { botToken: rawToken, offset, timeout = 25 } = c.req.valid("json");
     const botToken = rawToken.trim();
+    if (isRedactedValue(botToken)) {
+      // The UI got this token from GET /config (masked): we can't long-poll with it.
+      return c.json({
+        ok: false,
+        error: "This is the saved (hidden) bot token. Use \"Connect my Telegram\" on the saved channel, or paste the token again to detect the chat.",
+      }, 400);
+    }
     if (getConfiguredTelegramTokens?.().includes(botToken)) {
       return c.json({ ok: false, error: "This bot is already active on a saved channel. Use \"Connect my Telegram\" on that channel instead." }, 409);
     }

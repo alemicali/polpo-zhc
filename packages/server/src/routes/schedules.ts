@@ -172,8 +172,7 @@ export function scheduleRoutes(getDeps: () => {
         schedule: body.expression,
         status: newStatus,
       });
-      scheduler.unregisterMission(missionId);
-      scheduler.registerMission(updated);
+      scheduler.rescheduleMission(updated);
     }
 
     if (body.recurring !== undefined && body.expression === undefined) {
@@ -183,13 +182,12 @@ export function scheduleRoutes(getDeps: () => {
       await deps.updateMission(missionId, { status: newStatus });
       const mission = await deps.getMission(missionId);
       if (mission) {
-        scheduler.unregisterMission(missionId);
-        scheduler.registerMission(mission);
+        scheduler.rescheduleMission(mission);
       }
     }
 
     if (body.enabled !== undefined) {
-      existing.enabled = body.enabled;
+      scheduler.setEnabled(missionId, body.enabled);
     }
 
     if (body.endDate !== undefined) {

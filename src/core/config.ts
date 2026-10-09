@@ -1,7 +1,9 @@
+import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
+import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -45,12 +47,68 @@ export function savePolpoConfig(polpoDir: string, config: PolpoFileConfig): void
   writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify(config, null, 2), "utf-8");
 }
 
+/**
+ * Persist only `settings` into polpo.json, preserving everything else in the file as-is
+ * (providers with all their fields, project, legacy keys). Used by the settings API, which
+ * edits an in-memory config whose `providers` / `teams` are parsed views, not file content.
+ */
+export function savePolpoSettings(polpoDir: string, settings: Record<string, unknown>): void {
+  const filePath = join(polpoDir, "polpo.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(filePath)) {
+    try {
+      raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    } catch {
+      throw new Error("polpo.json is not valid JSON — refusing to overwrite it");
+    }
+  }
+  const rawSettings = (raw.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...settings };
+  // Never write values that only came from the environment (e.g. DATABASE_URL) into the file.
+  if (rawSettings.databaseUrl === undefined && next.databaseUrl !== undefined && next.databaseUrl === process.env.DATABASE_URL) {
+    delete next.databaseUrl;
+  }
+  for (const [k, v] of Object.entries(next)) if (v === undefined) delete next[k];
+  if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
+  writeFileSync(filePath, JSON.stringify({ ...raw, settings: next }, null, 2), "utf-8");
+}
+
+/**
+ * Read-modify-write the raw `providers` map of polpo.json (nothing else in the file changes).
+ * Returns the new raw providers map.
+ */
+export function mutatePolpoProviders(
+  polpoDir: string,
+  mutate: (providers: Record<string, unknown>) => void,
+): Record<string, unknown> {
+  const filePath = join(polpoDir, "polpo.json");
+  if (!existsSync(filePath)) throw new Error("polpo.json not found");
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    throw new Error("polpo.json is not valid JSON — refusing to overwrite it");
+  }
+  const providers = (raw.providers && typeof raw.providers === "object" && !Array.isArray(raw.providers)
+    ? { ...(raw.providers as Record<string, unknown>) }
+    : {}) as Record<string, unknown>;
+  mutate(providers);
+  const next = { ...raw };
+  if (Object.keys(providers).length > 0) next.providers = providers;
+  else delete next.providers;
+  writeFileSync(filePath, JSON.stringify(next, null, 2), "utf-8");
+  return providers;
+}
+
 // --- Validation helpers ---
 
 export function validateAgents(agents: any[]): void {
   for (const agent of agents) {
     if (!agent.name || typeof agent.name !== "string") {
       throw new Error("Each agent must have a name");
+    }
+    if (agent.name.trim().startsWith("$")) {
+      throw new Error(`Invalid agent name "${agent.name}": names starting with "$" are reserved`);
     }
     // Validate allowedPaths
     if (agent.allowedPaths !== undefined) {
@@ -265,19 +323,21 @@ function validatePipelineStep(step: unknown, path: string, loopNames: Set<string
   }
 }
 
+/**
+ * Parse the polpo.json `providers` map. Keeps every known field (custom providers /
+ * gateways: label, preset, auth, headers, compat, allowPrivateNetwork, timeouts, models…)
+ * and drops unknown keys and invalid values. Ids are kept as written (legacy hand-written
+ * ids may not match the slug rule enforced by the API for new providers); only prototype
+ * keys are skipped.
+ */
 export function parseProviders(raw: Record<string, unknown>): Record<string, ProviderConfig> {
   const providers: Record<string, ProviderConfig> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return providers;
   for (const [name, cfg] of Object.entries(raw)) {
-    if (!cfg || typeof cfg !== "object") continue;
-    const c = cfg as Record<string, unknown>;
-    const pc: ProviderConfig = {};
-    if (typeof c.baseUrl === "string") pc.baseUrl = c.baseUrl;
-    if (typeof c.api === "string") pc.api = c.api as ProviderConfig["api"];
-    if (Array.isArray(c.models)) pc.models = c.models;
-    // Only include if there's actual custom config (not just an empty object)
-    if (pc.baseUrl || pc.api || pc.models) {
-      providers[name] = pc;
-    }
+    if (!name || name === "__proto__" || name === "constructor" || name === "prototype") continue;
+    const pc = parseStoredProvider(cfg);
+    // Only include if there's actual config (not just an empty object)
+    if (pc) providers[name] = pc;
   }
   return providers;
 }
@@ -326,6 +386,11 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.defaultRetryPolicy) settings.defaultRetryPolicy = raw.defaultRetryPolicy;
   if (raw?.maxAssessmentRetries != null) settings.maxAssessmentRetries = raw.maxAssessmentRetries;
   if (raw?.maxConcurrency != null) settings.maxConcurrency = raw.maxConcurrency;
+  if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
+  const compaction = normalizeCompactionSettings(raw?.compaction);
+  if (compaction) settings.compaction = compaction;
+  const sandbox = normalizeSandboxSettings(raw?.sandbox);
+  if (sandbox) settings.sandbox = sandbox;
 
   // Extended settings: notifications, approval gates, escalation, SLA, scheduling, quality
   if (raw?.approvalGates) settings.approvalGates = raw.approvalGates;
@@ -452,4 +517,28 @@ export function generatePolpoConfigDefault(
     config.providers = options.providers;
   }
   return config;
+}
+
+/** Keep only well-formed compaction settings (unknown keys and wrong types are dropped). */
+export function normalizeCompactionSettings(raw: unknown): import("@polpo-ai/core").CompactionSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: import("@polpo-ai/core").CompactionSettings = {};
+  if (typeof r.auto === "boolean") out.auto = r.auto;
+  if (typeof r.prune === "boolean") out.prune = r.prune;
+  if (typeof r.memoryFlush === "boolean") out.memoryFlush = r.memoryFlush;
+  if (typeof r.thresholdPct === "number" && r.thresholdPct > 0.2 && r.thresholdPct < 1) out.thresholdPct = r.thresholdPct;
+  if (typeof r.reserveTokens === "number" && r.reserveTokens > 0) out.reserveTokens = Math.floor(r.reserveTokens);
+  if (typeof r.keepRecentTokens === "number" && r.keepRecentTokens > 0) out.keepRecentTokens = Math.floor(r.keepRecentTokens);
+  if (typeof r.summaryTimeoutMs === "number" && r.summaryTimeoutMs >= 1_000) out.summaryTimeoutMs = Math.floor(r.summaryTimeoutMs);
+  if (typeof r.model === "string" && r.model.trim()) out.model = r.model.trim();
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Instance settings with the agent's own compaction settings on top. */
+export function effectiveCompactionSettings(
+  global: import("@polpo-ai/core").CompactionSettings | undefined,
+  agent: import("@polpo-ai/core").CompactionSettings | undefined,
+): import("@polpo-ai/core").CompactionSettings {
+  return { ...(global ?? {}), ...(normalizeCompactionSettings(agent) ?? {}) };
 }

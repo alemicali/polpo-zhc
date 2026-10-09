@@ -1,7 +1,7 @@
-import { eq, desc, asc, count as drizzleCount, isNull, and } from "drizzle-orm";
+import { eq, desc, asc, count as drizzleCount, isNull, and, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
-import { type Dialect, deserializeJson } from "../utils.js";
+import type { CreateSessionOptions, ForkSessionOptions, ForkSessionResult, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
+import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
 
 type AnyTable = any;
 
@@ -22,6 +22,25 @@ export class DrizzleSessionStore implements SessionStore {
       messageCount,
       ...(row.agent ? { agent: row.agent } : {}),
       ...(row.starred ? { starred: true } : {}),
+      ...(row.scope ? { scope: row.scope } : {}),
+      ...(row.parentSessionId ? { parentSessionId: row.parentSessionId } : {}),
+      ...(row.forkMessageId ? { forkMessageId: row.forkMessageId } : {}),
+    };
+  }
+
+  /** Columns of a session summary (the message count is joined in). */
+  private summaryColumns() {
+    return {
+      id: this.sessions.id,
+      title: this.sessions.title,
+      agent: this.sessions.agent,
+      createdAt: this.sessions.createdAt,
+      updatedAt: this.sessions.updatedAt,
+      starred: this.sessions.starred,
+      scope: this.sessions.scope,
+      parentSessionId: this.sessions.parentSessionId,
+      forkMessageId: this.sessions.forkMessageId,
+      messageCount: drizzleCount(this.messages.id),
     };
   }
 
@@ -36,7 +55,7 @@ export class DrizzleSessionStore implements SessionStore {
     };
   }
 
-  async create(title?: string, agent?: string): Promise<string> {
+  async create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string> {
     const id = nanoid(10);
     const now = new Date().toISOString();
     await this.db.insert(this.sessions).values({
@@ -45,6 +64,7 @@ export class DrizzleSessionStore implements SessionStore {
       agent: agent ?? null,
       createdAt: now,
       updatedAt: now,
+      scope: opts?.scope ?? null,
     });
     return id;
   }
@@ -54,11 +74,12 @@ export class DrizzleSessionStore implements SessionStore {
     const ts = new Date().toISOString();
     const tcValue = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
     const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
+    const storedContent = this.dialect === "pg" ? pgSafe(content) : content;
     await this.db.insert(this.messages).values({
       id,
       sessionId,
       role,
-      content,
+      content: storedContent,
       ts,
       toolCalls: tcValue,
       segments: segmentsValue,
@@ -83,10 +104,10 @@ export class DrizzleSessionStore implements SessionStore {
     const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
 
     const result = await this.db.update(this.messages)
-      .set({ content, toolCalls: tcValue, segments: segmentsValue })
+      .set({ content: this.dialect === "pg" ? pgSafe(content) : content, toolCalls: tcValue, segments: segmentsValue })
       .where(eq(this.messages.id, messageId));
 
-    const changed = (result?.rowCount ?? result?.changes ?? 0) > 0;
+    const changed = affectedRows(result) > 0;
     if (changed) {
       await this.db.update(this.sessions)
         .set({ updatedAt: now })
@@ -102,6 +123,19 @@ export class DrizzleSessionStore implements SessionStore {
     return rows.map((r) => this.rowToMessage(r));
   }
 
+  async getMessagesAfter(sessionId: string, messageId: string): Promise<Message[] | undefined> {
+    const m = this.messages;
+    const anchor: any[] = await this.db.select({ ts: m.ts }).from(m)
+      .where(and(eq(m.sessionId, sessionId), eq(m.id, messageId)));
+    if (anchor.length === 0) return undefined;
+    // From the anchor's timestamp on (ties included), then cut after the anchor itself.
+    const rows: any[] = await this.db.select().from(m)
+      .where(and(eq(m.sessionId, sessionId), gte(m.ts, anchor[0].ts)))
+      .orderBy(asc(m.ts));
+    const index = rows.findIndex((r) => r.id === messageId);
+    return rows.slice(index + 1).map((r) => this.rowToMessage(r));
+  }
+
   async getRecentMessages(sessionId: string, limit: number): Promise<Message[]> {
     const rows: any[] = await this.db.select().from(this.messages)
       .where(eq(this.messages.sessionId, sessionId))
@@ -112,15 +146,7 @@ export class DrizzleSessionStore implements SessionStore {
 
   async listSessions(): Promise<Session[]> {
     const rows: any[] = await this.db
-      .select({
-        id: this.sessions.id,
-        title: this.sessions.title,
-        agent: this.sessions.agent,
-        createdAt: this.sessions.createdAt,
-        updatedAt: this.sessions.updatedAt,
-        starred: this.sessions.starred,
-        messageCount: drizzleCount(this.messages.id),
-      })
+      .select(this.summaryColumns())
       .from(this.sessions)
       .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId))
       .groupBy(this.sessions.id)
@@ -131,15 +157,7 @@ export class DrizzleSessionStore implements SessionStore {
 
   async getSession(sessionId: string): Promise<Session | undefined> {
     const rows: any[] = await this.db
-      .select({
-        id: this.sessions.id,
-        title: this.sessions.title,
-        agent: this.sessions.agent,
-        createdAt: this.sessions.createdAt,
-        updatedAt: this.sessions.updatedAt,
-        starred: this.sessions.starred,
-        messageCount: drizzleCount(this.messages.id),
-      })
+      .select(this.summaryColumns())
       .from(this.sessions)
       .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId))
       .where(eq(this.sessions.id, sessionId))
@@ -150,27 +168,20 @@ export class DrizzleSessionStore implements SessionStore {
 
   async getLatestSession(agent?: string | null): Promise<Session | undefined> {
     let query = this.db
-      .select({
-        id: this.sessions.id,
-        title: this.sessions.title,
-        agent: this.sessions.agent,
-        createdAt: this.sessions.createdAt,
-        updatedAt: this.sessions.updatedAt,
-        starred: this.sessions.starred,
-        messageCount: drizzleCount(this.messages.id),
-      })
+      .select(this.summaryColumns())
       .from(this.sessions)
       .leftJoin(this.messages, eq(this.sessions.id, this.messages.sessionId));
 
-    // Filter by agent scope
+    // Group conversations are never "the latest" chat; then filter by agent:
+    // null → orchestrator sessions only, a name → that agent, undefined → any.
+    const unscoped = isNull(this.sessions.scope);
     if (agent === null) {
-      // Orchestrator sessions only (no agent)
-      query = query.where(isNull(this.sessions.agent));
+      query = query.where(and(unscoped, isNull(this.sessions.agent)));
     } else if (agent !== undefined) {
-      // Agent-specific sessions
-      query = query.where(eq(this.sessions.agent, agent));
+      query = query.where(and(unscoped, eq(this.sessions.agent, agent)));
+    } else {
+      query = query.where(unscoped);
     }
-    // agent === undefined → no filter, return most recent regardless
 
     const rows: any[] = await query
       .groupBy(this.sessions.id)
@@ -185,7 +196,7 @@ export class DrizzleSessionStore implements SessionStore {
     const result = await this.db.update(this.sessions)
       .set({ title, updatedAt: now })
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async setStarred(sessionId: string, starred: boolean): Promise<boolean> {
@@ -195,14 +206,69 @@ export class DrizzleSessionStore implements SessionStore {
     const result = await this.db.update(this.sessions)
       .set({ starred })
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
     // Messages are cascade-deleted via FK
     const result = await this.db.delete(this.sessions)
       .where(eq(this.sessions.id, sessionId));
-    return (result?.rowCount ?? result?.changes ?? 0) > 0;
+    return affectedRows(result) > 0;
+  }
+
+  async forkSession(sessionId: string, messageId: string, opts?: ForkSessionOptions): Promise<ForkSessionResult | undefined> {
+    const parentRows: any[] = await this.db.select().from(this.sessions).where(eq(this.sessions.id, sessionId));
+    if (parentRows.length === 0) return undefined;
+    const parent = parentRows[0];
+    const rows: any[] = await this.db.select().from(this.messages)
+      .where(eq(this.messages.sessionId, sessionId))
+      .orderBy(asc(this.messages.ts));
+    const cut = rows.findIndex((r) => r.id === messageId);
+    if (cut < 0) return undefined;
+    const copied = rows.slice(0, cut + 1);
+
+    const id = nanoid(10);
+    const now = new Date().toISOString();
+    const title = opts?.title ?? parent.title ?? null;
+    const sessionRow = {
+      id,
+      title,
+      agent: parent.agent ?? null,
+      createdAt: now,
+      updatedAt: now,
+      starred: null,
+      scope: parent.scope ?? null,
+      parentSessionId: sessionId,
+      forkMessageId: messageId,
+    };
+    const messageIds: Record<string, string> = {};
+    // New ids, same timestamps: the copy sorts exactly like the original.
+    const messageRows = copied.map((r) => {
+      const copyId = nanoid();
+      messageIds[r.id] = copyId;
+      return { id: copyId, sessionId: id, role: r.role, content: r.content, ts: r.ts, toolCalls: r.toolCalls, segments: r.segments };
+    });
+
+    // One transaction: a branch is either complete or absent.
+    if (this.dialect === "pg") {
+      await this.db.transaction(async (tx: any) => {
+        await tx.insert(this.sessions).values(sessionRow);
+        for (let i = 0; i < messageRows.length; i += 500) {
+          await tx.insert(this.messages).values(messageRows.slice(i, i + 500));
+        }
+      });
+    } else {
+      // better-sqlite3 transactions are synchronous.
+      this.db.transaction((tx: any) => {
+        tx.insert(this.sessions).values(sessionRow).run();
+        for (let i = 0; i < messageRows.length; i += 500) {
+          tx.insert(this.messages).values(messageRows.slice(i, i + 500)).run();
+        }
+      });
+    }
+
+    const session = await this.getSession(id);
+    return session ? { session, messageIds } : undefined;
   }
 
   async prune(keepSessions: number): Promise<number> {

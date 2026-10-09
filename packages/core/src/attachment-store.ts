@@ -24,4 +24,9 @@ export interface AttachmentStore {
   get(id: string): Promise<Attachment | undefined>;
   delete(id: string): Promise<boolean>;
   deleteBySession(sessionId: string): Promise<number>;
+  /**
+   * Every attachment row pointing at `path` (a branched conversation shares its parent's files).
+   * Optional: when missing, callers must assume the file may be shared and keep it.
+   */
+  getByPath?(path: string): Promise<Attachment[]>;
 }

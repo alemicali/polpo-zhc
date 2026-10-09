@@ -211,6 +211,17 @@ export class EncryptedVaultStore implements VaultStore {
     if (dirty) this.persist();
   }
 
+  /**
+   * Every entry, for moving the vault into the database. Unlike the store's own loading, a vault
+   * that cannot be decrypted is an error here: an empty result would look like "nothing to move".
+   */
+  exportAll(): Array<{ agent: string; service: string; entry: VaultEntry }> {
+    if (!existsSync(this.vaultPath)) return [];
+    const data = JSON.parse(decrypt(readFileSync(this.vaultPath), this.key).toString("utf-8")) as VaultData;
+    return Object.entries(data).flatMap(([agent, entries]) =>
+      Object.entries(entries).map(([service, entry]) => ({ agent, service, entry })));
+  }
+
   // ── Internal ──
 
   private loadFromDisk(): VaultData {

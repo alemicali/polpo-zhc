@@ -3,9 +3,8 @@ import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig } from "../security.js";
-import { UpdateSettingsSchema, NotificationChannelConfigSchema } from "../schemas.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
-import { detectProviders } from "../../setup/index.js";
+import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
 import { createCliStores } from "../../cli/stores.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
@@ -32,42 +31,6 @@ function clearManagedLogos(polpoDir: string): void {
     if (existsSync(path)) unlinkSync(path);
   }
 }
-
-// ── Authed route definitions ──────────────────────────────────────────
-
-const reloadConfigRoute = createRoute({
-  method: "post",
-  path: "/reload",
-  tags: ["Config"],
-  summary: "Reload config",
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ message: z.string() }) }) } },
-      description: "Configuration reloaded successfully",
-    },
-    500: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Failed to reload configuration",
-    },
-  },
-});
-
-const getConfigRoute = createRoute({
-  method: "get",
-  path: "/",
-  tags: ["Config"],
-  summary: "Get config",
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Current configuration",
-    },
-    404: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "No configuration loaded",
-    },
-  },
-});
 
 // ── Public route definitions ──────────────────────────────────────────
 
@@ -166,31 +129,6 @@ const initializeRoute = createRoute({
   },
 });
 
-const updateSettingsRoute = createRoute({
-  method: "patch",
-  path: "/settings",
-  tags: ["Config"],
-  summary: "Update orchestrator settings",
-  description: "Partially update orchestrator settings (orchestratorModel, imageModel, reasoning). Persists to polpo.json and triggers a runtime config reload.",
-  request: {
-    body: { content: { "application/json": { schema: UpdateSettingsSchema } } },
-  },
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Settings updated",
-    },
-    404: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "No configuration loaded",
-    },
-    500: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Failed to update settings",
-    },
-  },
-});
-
 const uploadBrandingLogoRoute = createRoute({
   method: "post",
   path: "/instance-logo",
@@ -247,92 +185,6 @@ const deleteBrandingLogoRoute = createRoute({
     500: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
       description: "Failed to persist configuration",
-    },
-  },
-});
-
-// ── Channel CRUD route definitions ────────────────────────────────────
-
-const upsertChannelRoute = createRoute({
-  method: "put",
-  path: "/channels/{name}",
-  tags: ["Config"],
-  summary: "Create or update a notification channel",
-  description: "Upserts a notification channel in settings.notifications.channels. Persists to polpo.json and reloads the notification router.",
-  request: {
-    params: z.object({ name: z.string().min(1).regex(/^[a-zA-Z0-9_-]+$/, "Channel name must be alphanumeric with dashes/underscores") }),
-    body: { content: { "application/json": { schema: NotificationChannelConfigSchema } } },
-  },
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Channel saved",
-    },
-    404: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "No configuration loaded",
-    },
-    500: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Failed to save",
-    },
-  },
-});
-
-const deleteChannelRoute = createRoute({
-  method: "delete",
-  path: "/channels/{name}",
-  tags: ["Config"],
-  summary: "Delete a notification channel",
-  request: {
-    params: z.object({ name: z.string().min(1) }),
-  },
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Channel deleted",
-    },
-    404: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Channel or config not found",
-    },
-    500: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Failed to save",
-    },
-  },
-});
-
-const testChannelRoute = createRoute({
-  method: "post",
-  path: "/channels/{name}/test",
-  tags: ["Config"],
-  summary: "Test a notification channel",
-  description: "Sends a test notification to verify the channel is correctly configured.",
-  request: {
-    params: z.object({ name: z.string().min(1) }),
-  },
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ success: z.boolean() }) }) } },
-      description: "Test result",
-    },
-    404: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
-      description: "Channel not found",
-    },
-  },
-});
-
-const listChannelsRoute = createRoute({
-  method: "get",
-  path: "/channels",
-  tags: ["Config"],
-  summary: "List notification channels",
-  responses: {
-    200: {
-      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Channel list",
     },
   },
 });
@@ -420,139 +272,6 @@ function registerBrandingConfigRoutes(
 export function brandingConfigRoutes(getDeps: () => BrandingConfigRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
   registerBrandingConfigRoutes(app, getDeps);
-  return app;
-}
-
-/**
- * Config management routes (requires orchestrator).
- * GET    /config              — return current config (redacted)
- * POST   /config/reload       — trigger a runtime config reload
- * PATCH  /config/settings     — partially update settings (persists + reloads)
- * GET    /config/channels     — list notification channels
- * PUT    /config/channels/:n  — create or update a channel
- * DELETE /config/channels/:n  — delete a channel
- * POST   /config/channels/:n/test — test a channel
- */
-export function configRoutes(getDeps: () => {
-  getConfig: () => any;
-  reloadConfig: () => Promise<boolean>;
-  getPolpoDir: () => string;
-  getNotificationRouter: () => any;
-}): OpenAPIHono {
-  const app = new OpenAPIHono();
-  registerBrandingConfigRoutes(app, getDeps);
-
-  app.openapi(reloadConfigRoute, async (c) => {
-    const deps = getDeps();
-    const success = await deps.reloadConfig();
-    if (success) {
-      return c.json({ ok: true, data: { message: "Configuration reloaded successfully" } }, 200);
-    }
-    return c.json({ ok: false, error: "Failed to reload configuration — check polpo.json" }, 500);
-  });
-
-  app.openapi(getConfigRoute, (c) => {
-    const deps = getDeps();
-    const config = deps.getConfig();
-    if (!config) {
-      return c.json({ ok: false, error: "No configuration loaded" }, 404);
-    }
-    return c.json({ ok: true, data: redactPolpoConfig(config) }, 200);
-  });
-
-  app.openapi(updateSettingsRoute, async (c) => {
-    const deps = getDeps();
-    const body = c.req.valid("json");
-
-    const result = await mutateConfig(deps, (fileConfig) => {
-      const settings = fileConfig.settings ?? {} as any;
-      if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
-      if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
-      if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
-      if (body.branding !== undefined) settings.branding = body.branding;
-      fileConfig.settings = settings;
-    });
-
-    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
-    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
-  });
-
-  // ── Channel CRUD ──
-
-  app.openapi(listChannelsRoute, (c) => {
-    const deps = getDeps();
-    const config = deps.getConfig();
-    const channels = config?.settings?.notifications?.channels ?? {};
-    return c.json({ ok: true, data: channels }, 200);
-  });
-
-  app.openapi(upsertChannelRoute, async (c) => {
-    const deps = getDeps();
-    const { name } = c.req.valid("param");
-    const channelConfig = c.req.valid("json");
-
-    const result = await mutateConfig(deps, (fileConfig) => {
-      const settings = fileConfig.settings ?? {} as any;
-      if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
-      if (!settings.notifications.channels) settings.notifications.channels = {};
-      settings.notifications.channels[name] = channelConfig;
-      fileConfig.settings = settings;
-    });
-
-    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
-    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
-  });
-
-  app.openapi(deleteChannelRoute, async (c) => {
-    const deps = getDeps();
-    const { name } = c.req.valid("param");
-
-    // Check the channel exists before deleting
-    const currentConfig = deps.getConfig();
-    const channels = currentConfig?.settings?.notifications?.channels;
-    if (!channels || !(name in channels)) {
-      return c.json({ ok: false, error: `Channel "${name}" not found` }, 404);
-    }
-
-    const result = await mutateConfig(deps, (fileConfig) => {
-      const settings = fileConfig.settings ?? {} as any;
-      if (settings.notifications?.channels) {
-        delete settings.notifications.channels[name];
-      }
-      fileConfig.settings = settings;
-    });
-
-    if (!result.ok) return c.json({ ok: false, error: result.error }, result.status);
-    return c.json({ ok: true, data: redactPolpoConfig(result.config) }, 200);
-  });
-
-  app.openapi(testChannelRoute, async (c) => {
-    const deps = getDeps();
-    const { name } = c.req.valid("param");
-
-    const notificationRouter = deps.getNotificationRouter();
-    if (!notificationRouter) {
-      return c.json({ ok: false, error: "Notification system not initialized" }, 404);
-    }
-
-    const channelIds: string[] = notificationRouter.getChannelIds();
-    if (!channelIds.includes(name)) {
-      return c.json({ ok: false, error: `Channel "${name}" not found in runtime. Save and reload first.` }, 404);
-    }
-
-    try {
-      if (typeof notificationRouter.testChannel === "function") {
-        const result = await notificationRouter.testChannel(name);
-        return c.json({ ok: true, data: result }, 200);
-      }
-      const results = await notificationRouter.testChannels();
-      return c.json({ ok: true, data: { success: results[name] ?? false } }, 200);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Channel test failed";
-      return c.json({ ok: true, data: { success: false, error: msg } }, 200);
-    }
-  });
-
   return app;
 }
 
@@ -660,6 +379,14 @@ export function publicConfigRoutes(
         ));
         if (isInstanceAuthEnabled() && adminEmail) {
           createInitialInstanceAuth(targetPolpoDir, adminEmail);
+        }
+        // Provider keys saved during setup are written to the server's own
+        // project (clients can't choose the .env target). If setup picked a
+        // different directory, move exactly the keys saved through the API
+        // there (pre-existing entries in the starting .env are untouched).
+        const setupPolpoDir = getPolpoDir(workDir);
+        if (resolve(setupPolpoDir) !== resolve(targetPolpoDir)) {
+          moveEnvEntries(setupPolpoDir, targetPolpoDir, takeApiWrittenEnvKeys(setupPolpoDir));
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Unknown error";

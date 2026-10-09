@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { normalizeAppTags, type CreateRegisteredApp } from "../core/app-registry.js";
+import { normalizeAppTags, type CreateRegisteredApp } from "@polpo-ai/core/app-registry";
 import { ALL_ORCHESTRATOR_TOOLS, READ_TOOLS, WRITE_TOOLS } from "../llm/orchestrator-tools.js";
 import { AppRuntimeManager, appRuntimePath, resolveAppCwd } from "../server/app-runtime-manager.js";
 import { appsRoutes } from "../server/routes/apps.js";
@@ -64,16 +64,17 @@ describe("app registry", () => {
 
   test("adds user package-manager binaries to service PATH", () => {
     expect(appRuntimePath("/home/test", ["/usr/bin", "/bin"].join(delimiter)).split(delimiter)).toEqual([
-      "/home/test/.bun/bin",
-      "/home/test/.local/bin",
-      "/home/test/.npm-global/bin",
-      "/home/test/.local/share/pnpm",
+      join("/home/test", ".bun/bin"),
+      join("/home/test", ".local/bin"),
+      join("/home/test", ".npm-global/bin"),
+      join("/home/test", ".local/share/pnpm"),
       "/usr/bin",
       "/bin",
     ]);
   });
 
-  test("starts and stops a service process group while retaining logs", async () => {
+  // Services run as POSIX process groups through sh (Linux/macOS servers).
+  test.skipIf(process.platform === "win32")("starts and stops a service process group while retaining logs", async () => {
     const events: Array<{ action: string; resourceId?: string }> = [];
     runtime.setEmitter((event) => events.push(event));
     await store.create(appInput(project, {

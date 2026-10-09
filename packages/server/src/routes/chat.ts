@@ -1,6 +1,10 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
-import type { AttachmentStore } from "@polpo-ai/core";
+import { nanoid } from "nanoid";
+import type { AttachmentStore, ChatQueueStore } from "@polpo-ai/core";
+import { streamRegistry } from "../stream-registry.js";
+import { withAttachmentLock } from "../attachment-lock.js";
+import type { TurnScheduler } from "../turn-scheduler.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -117,7 +121,24 @@ const deleteSessionRoute = createRoute({
  * Chat session management routes.
  * Conversational AI is handled by /v1/chat/completions (see completions.ts).
  */
-export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?: AttachmentStore; emit?: (event: string, data: unknown) => void }): OpenAPIHono {
+export interface ChatRouteDeps {
+  sessionStore?: any;
+  attachmentStore?: AttachmentStore;
+  emit?: (event: string, data: unknown) => void;
+  /** Server-side prompt queue (queue routes answer 501 without it). */
+  chatQueueStore?: ChatQueueStore;
+  /** Starts server-side turns (queue auto-send, "send now", a branch's answer). */
+  turnScheduler?: TurnScheduler;
+  /** Delete an attachment file (project-relative path) once no message references it. */
+  removeAttachmentFile?: (path: string) => Promise<void>;
+}
+
+/** Longest queued prompt accepted (characters). */
+const MAX_QUEUE_ITEM_CHARS = 100_000;
+/** Most prompts one session can have queued. */
+export const MAX_QUEUE_ITEMS = 50;
+
+export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // GET /chat/sessions — list chat sessions
@@ -145,8 +166,12 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     if (!session) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    // Incremental sync: ?after=<msgId> returns only messages strictly newer than that id
+    // (read from the store when it can, instead of loading the whole transcript).
+    const afterId = c.req.valid("query").after;
+    const delta = afterId && sessionStore.getMessagesAfter ? await sessionStore.getMessagesAfter(id, afterId) : undefined;
     const [rawMessages, attachments] = await Promise.all([
-      sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
+      delta ?? sessionStore.getMessages(id), getDeps().attachmentStore?.getBySession(id) ?? [],
     ]);
     const byMessage = new Map<string, typeof attachments>();
     for (const attachment of attachments) {
@@ -168,10 +193,9 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     // than APPEND. That covers two cases: (1) the client cached a locally-
     // generated UUID that never existed on the server, (2) the server
     // pruned/lost the message after the client cached it.
-    const afterId = c.req.valid("query").after;
     let messages = allMessages;
-    let incremental = false;
-    if (afterId) {
+    let incremental = delta !== undefined;
+    if (afterId && delta === undefined) {
       const idx = allMessages.findIndex((m: any) => m.id === afterId);
       if (idx >= 0) {
         messages = allMessages.slice(idx + 1);
@@ -255,6 +279,11 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     if (!deleted) {
       return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
     }
+    // A turn still running on it must not write into a deleted conversation.
+    const live = streamRegistry.getActiveTurnForSession(id);
+    if (live) streamRegistry.discard(live);
+    await getDeps().chatQueueStore?.deleteSession(id).catch(() => undefined);
+    getDeps().turnScheduler?.forget(id);
     getDeps().emit?.("session:deleted", { sessionId: id });
     return c.json({ ok: true, data: { deleted: true } }, 200);
   });
@@ -295,6 +324,239 @@ export function chatRoutes(getDeps: () => { sessionStore?: any; attachmentStore?
     }
 
     return c.json({ ok: true, data: { sessionId, imported } }, 201);
+  });
+
+  // ── Prompt queue ─────────────────────────────────────────────────────
+  //
+  // GET    /sessions/:id/queue                  — { items, autoSend }
+  // POST   /sessions/:id/queue                  — { content, front?, next? } add a prompt (next: send
+  //                                                right after the running turn, auto-send or not)
+  // PATCH  /sessions/:id/queue                  — { autoSend } (also clears a hold)
+  // DELETE /sessions/:id/queue                  — clear
+  // PUT    /sessions/:id/queue/order            — { ids } new order
+  // PATCH  /sessions/:id/queue/:itemId          — { content }
+  // DELETE /sessions/:id/queue/:itemId
+  // POST   /sessions/:id/queue/:itemId/send     — send now (steers the running turn, if any)
+  //
+  // With auto-send on, the server sends the head when a turn completes normally, whether or not
+  // a browser is open. Every change is announced with `chat:queue-updated`.
+
+  const queueDeps = async (c: any): Promise<{ error: Response; id?: undefined; queue?: undefined } | { error?: undefined; id: string; queue: ChatQueueStore }> => {
+    const { sessionStore, chatQueueStore } = getDeps();
+    if (!sessionStore || !chatQueueStore) {
+      return { error: c.json({ ok: false, error: "Chat queue not available", code: "NOT_AVAILABLE" }, 501) };
+    }
+    const id = c.req.param("id");
+    if (!(await sessionStore.getSession(id))) {
+      return { error: c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404) };
+    }
+    return { id, queue: chatQueueStore };
+  };
+  const queueChanged = (sessionId: string) => {
+    getDeps().emit?.("chat:queue-updated", { sessionId });
+  };
+  const queueText = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 && value.length <= MAX_QUEUE_ITEM_CHARS ? value.trim() : undefined;
+
+  app.get("/sessions/:id/queue", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const state = await r.queue.get(r.id);
+    // Someone is looking at a queue that could be sending (e.g. after a restart): let it.
+    if (state.items.some((i) => i.steerId) || (state.autoSend && !state.hold && state.items.length > 0)) {
+      getDeps().turnScheduler?.queueChanged(r.id);
+    }
+    return c.json({ ok: true, data: state });
+  });
+
+  app.post("/sessions/:id/queue", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const body = await c.req.json().catch(() => null) as { content?: unknown; front?: unknown; next?: unknown } | null;
+    const content = queueText(body?.content);
+    if (!content) return c.json({ ok: false, error: "content (non-empty text) is required", code: "VALIDATION_ERROR" }, 400);
+    if ((await r.queue.get(r.id)).items.length >= MAX_QUEUE_ITEMS) {
+      return c.json({ ok: false, error: `The queue is full (${MAX_QUEUE_ITEMS} prompts)`, code: "QUEUE_FULL" }, 409);
+    }
+    // next: send it right after the running turn, whatever auto-send says (a message that could
+    // not be sent because the chat was busy).
+    const next = body?.next === true;
+    const item = await r.queue.add(r.id, content, { front: next || body?.front === true, ...(next ? { steerId: `next-${nanoid(12)}` } : {}) });
+    queueChanged(r.id);
+    getDeps().turnScheduler?.queueChanged(r.id);
+    return c.json({ ok: true, data: item }, 201);
+  });
+
+  app.patch("/sessions/:id/queue", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const body = await c.req.json().catch(() => null) as { autoSend?: unknown } | null;
+    if (typeof body?.autoSend !== "boolean") return c.json({ ok: false, error: "autoSend (boolean) is required", code: "VALIDATION_ERROR" }, 400);
+    await r.queue.setAutoSend(r.id, body.autoSend);
+    queueChanged(r.id);
+    if (body.autoSend) getDeps().turnScheduler?.queueChanged(r.id);
+    return c.json({ ok: true, data: await r.queue.get(r.id) });
+  });
+
+  app.delete("/sessions/:id/queue", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const cleared = await r.queue.clear(r.id);
+    queueChanged(r.id);
+    return c.json({ ok: true, data: { cleared } });
+  });
+
+  app.put("/sessions/:id/queue/order", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const body = await c.req.json().catch(() => null) as { ids?: unknown } | null;
+    if (!Array.isArray(body?.ids) || body.ids.length > MAX_QUEUE_ITEMS * 4 || !body.ids.every((x) => typeof x === "string" && x.length <= 100)) {
+      return c.json({ ok: false, error: "ids (string array, at most 200) is required", code: "VALIDATION_ERROR" }, 400);
+    }
+    const items = await r.queue.reorder(r.id, body.ids as string[]);
+    queueChanged(r.id);
+    return c.json({ ok: true, data: { items } });
+  });
+
+  app.patch("/sessions/:id/queue/:itemId", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const body = await c.req.json().catch(() => null) as { content?: unknown } | null;
+    const content = queueText(body?.content);
+    if (!content) return c.json({ ok: false, error: "content (non-empty text) is required", code: "VALIDATION_ERROR" }, 400);
+    const item = await r.queue.update(r.id, c.req.param("itemId"), content);
+    if (!item) return c.json({ ok: false, error: "Queued prompt not found", code: "NOT_FOUND" }, 404);
+    queueChanged(r.id);
+    return c.json({ ok: true, data: item });
+  });
+
+  app.delete("/sessions/:id/queue/:itemId", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const item = await r.queue.remove(r.id, c.req.param("itemId"));
+    if (!item) return c.json({ ok: false, error: "Queued prompt not found", code: "NOT_FOUND" }, 404);
+    queueChanged(r.id);
+    return c.json({ ok: true, data: { removed: true } });
+  });
+
+  app.post("/sessions/:id/queue/:itemId/send", async (c) => {
+    const r = await queueDeps(c);
+    if (r.error) return r.error;
+    const scheduler = getDeps().turnScheduler;
+    if (!scheduler) return c.json({ ok: false, error: "Sending from the queue is not available", code: "NOT_AVAILABLE" }, 501);
+    try {
+      const result = await scheduler.sendNow(r.id, c.req.param("itemId"));
+      if (!result) return c.json({ ok: false, error: "Queued prompt not found", code: "NOT_FOUND" }, 404);
+      return c.json({ ok: true, data: result });
+    } catch (error) {
+      return c.json({ ok: false, error: error instanceof Error ? error.message : "Could not send", code: "SEND_FAILED" }, 502);
+    }
+  });
+
+  // ── Branches ─────────────────────────────────────────────────────────
+  //
+  // POST   /sessions/:id/fork   — { messageId } new session with the conversation up to that user
+  //                               message; the assistant answers it again there (server-side turn)
+  // DELETE /sessions/:id/fork   — undo a branch: delete it and go back to the parent. Answers 409
+  //                               FORK_HAS_MESSAGES when the user already wrote in it (?force=1 to
+  //                               delete anyway).
+
+  app.post("/sessions/:id/fork", async (c) => {
+    const { sessionStore, attachmentStore, turnScheduler, emit } = getDeps();
+    if (!sessionStore?.forkSession) {
+      return c.json({ ok: false, error: "Branching is not available", code: "NOT_AVAILABLE" }, 501);
+    }
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null) as { messageId?: unknown } | null;
+    const messageId = typeof body?.messageId === "string" ? body.messageId : "";
+    if (!messageId) return c.json({ ok: false, error: "messageId is required", code: "VALIDATION_ERROR" }, 400);
+    const parent = await sessionStore.getSession(id);
+    if (!parent) return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    const messages: any[] = await sessionStore.getMessages(id);
+    const target = messages.find((m) => m.id === messageId);
+    if (!target) return c.json({ ok: false, error: "Message not found", code: "NOT_FOUND" }, 404);
+    if (target.role !== "user") {
+      return c.json({ ok: false, error: "Branch from one of your messages", code: "NOT_A_USER_MESSAGE" }, 400);
+    }
+
+    const fork = await sessionStore.forkSession(id, messageId);
+    if (!fork) return c.json({ ok: false, error: "Message not found", code: "NOT_FOUND" }, 404);
+    const forkId: string = fork.session.id;
+
+    // Attachments: new rows pointing at the same files (deleting one keeps shared files).
+    // Under the attachment lock: a row deleted meanwhile cannot take its file with it.
+    if (attachmentStore) {
+      try {
+        await withAttachmentLock(async () => {
+          const rows = await attachmentStore.getBySession(id);
+          for (const row of rows) {
+            const copyOf = row.messageId ? fork.messageIds[row.messageId] : undefined;
+            if (!copyOf) continue;
+            await attachmentStore.save({ ...row, id: nanoid(20), sessionId: forkId, messageId: copyOf });
+          }
+        });
+      } catch (error) {
+        // All or nothing: a branch without its files would answer a different question.
+        await attachmentStore.deleteBySession(forkId).catch(() => undefined);
+        await sessionStore.deleteSession(forkId).catch(() => undefined);
+        return c.json({ ok: false, error: error instanceof Error ? error.message : "Could not copy attachments", code: "FORK_FAILED" }, 500);
+      }
+    }
+    emit?.("session:created", { sessionId: forkId, title: fork.session.title });
+
+    // The assistant answers the copied user message again, in the branch.
+    let turnId: string | null = null;
+    let turnError: string | undefined;
+    if (turnScheduler) {
+      try {
+        turnId = (await turnScheduler.startTurn(forkId, { reason: "fork" }))?.turnId ?? null;
+      } catch (error) {
+        turnError = error instanceof Error ? error.message : "Could not start the answer";
+      }
+    }
+    return c.json({ ok: true, data: { session: fork.session, turnId, ...(turnError ? { turnError } : {}) } }, 201);
+  });
+
+  app.delete("/sessions/:id/fork", async (c) => {
+    const { sessionStore, attachmentStore, chatQueueStore, turnScheduler, emit, removeAttachmentFile } = getDeps();
+    if (!sessionStore) return c.json({ ok: false, error: "Session store not available", code: "NOT_AVAILABLE" }, 503);
+    const id = c.req.param("id");
+    const session = await sessionStore.getSession(id);
+    if (!session) return c.json({ ok: false, error: "Session not found", code: "NOT_FOUND" }, 404);
+    if (!session.parentSessionId) return c.json({ ok: false, error: "Not a branch", code: "NOT_A_FORK" }, 400);
+    const parentId: string = session.parentSessionId;
+    const parent = await sessionStore.getSession(parentId);
+    if (!parent) return c.json({ ok: false, error: "The original conversation no longer exists", code: "PARENT_MISSING" }, 409);
+
+    // What was written in the branch after the fork point (copies keep the parent's timestamps).
+    const parentMessages: any[] = await sessionStore.getMessages(parentId);
+    const cut = parentMessages.findIndex((m) => m.id === session.forkMessageId);
+    const forkMessages: any[] = await sessionStore.getMessages(id);
+    const added = cut >= 0 ? forkMessages.slice(cut + 1) : forkMessages;
+    const force = c.req.query("force") === "1" || c.req.query("force") === "true";
+    if (!force && added.some((m) => m.role === "user")) {
+      return c.json({ ok: false, error: "The branch has new messages", code: "FORK_HAS_MESSAGES" }, 409);
+    }
+
+    // Its running answer stops and records nothing (the session is going away).
+    const live = streamRegistry.getActiveTurnForSession(id);
+    if (live) streamRegistry.discard(live);
+    if (attachmentStore) {
+      await withAttachmentLock(async () => {
+        const rows = await attachmentStore.getBySession(id).catch(() => []);
+        for (const row of rows) {
+          await attachmentStore.delete(row.id).catch(() => undefined);
+          // Only files no other message points at (the parent's stay).
+          const shared = attachmentStore.getByPath ? await attachmentStore.getByPath(row.path).catch(() => [row]) : [row];
+          if (shared.length === 0) await removeAttachmentFile?.(row.path).catch(() => undefined);
+        }
+      });
+    }
+    await sessionStore.deleteSession(id);
+    await chatQueueStore?.deleteSession(id).catch(() => undefined);
+    turnScheduler?.forget(id);
+    emit?.("session:deleted", { sessionId: id });
+    return c.json({ ok: true, data: { deleted: true, parentSessionId: parentId, forkMessageId: session.forkMessageId ?? null } });
   });
 
   return app;

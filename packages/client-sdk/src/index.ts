@@ -2,6 +2,8 @@
 export { PolpoClient, ChatCompletionStream } from "./client/polpo-client.js";
 export type { PolpoClientConfig } from "./client/polpo-client.js";
 export { EventSourceManager } from "./client/event-source.js";
+export { POLPO_EVENT_NAMES } from "./client/event-names.js";
+export type { PolpoEventName } from "./client/event-names.js";
 export type { ConnectionStatus, EventSourceConfig } from "./client/event-source.js";
 export { PolpoApiError } from "./client/errors.js";
 
@@ -67,6 +69,9 @@ export type {
   ModelAllowlistEntry,
   CustomModelDef,
   ProviderConfig,
+  ProviderApi,
+  ProviderAuthConfig,
+  CustomProviderInfo,
   SSEEvent,
   ActiveDelay,
   CreateTaskRequest,
@@ -103,6 +108,11 @@ export type {
   LogEntry,
   RunActivityEntry,
   ChatSession,
+  ChatQueueItem,
+  ChatQueueState,
+  ChatQueueSendResult,
+  SteerResult,
+  ForkSessionResult,
   ChatMessage,
   ChatCompletionMessage,
   TextContentPart,

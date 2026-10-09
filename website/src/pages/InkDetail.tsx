@@ -100,14 +100,9 @@ function RelatedRow({ pkg }: { pkg: InkPackage }) {
 
 /* ── Human-readable content renderers ─────────────────────────────── */
 
-/** Build the raw GitHub URL for a package's JSON file. */
+/** The package's JSON file, served by the hub (it reads the registry, private ones included). */
 function getPackageRawUrl(source: string, name: string, type: PackageType): string {
-  const base = `https://raw.githubusercontent.com/${source}/main`;
-  switch (type) {
-    case "agent": return `${base}/agents/${name}.json`;
-    case "playbook": return `${base}/playbooks/${name}/playbook.json`;
-    case "company": return `${base}/companies/${name}/polpo.json`;
-  }
+  return `/api/packages/${source}/${encodeURIComponent(name)}/content?type=${type}`;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -684,7 +679,7 @@ export function InkDetailPage() {
             <span className="text-xs text-neutral-400">Ink — Package Registry</span>
           </div>
           <div className="flex items-center gap-4">
-            <ExtLink href="https://github.com/lumea-labs/polpo" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
+            <ExtLink href="https://github.com/alemicali/polpo-zhc" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
             <ExtLink href="https://docs.polpo.sh" className="text-xs text-neutral-400 hover:text-neutral-600 transition">Docs</ExtLink>
             <span className="text-xs text-neutral-400">MIT License</span>
           </div>

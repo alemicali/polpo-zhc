@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   parseInkSource,
   hashContent,
@@ -56,7 +56,7 @@ describe("parseInkSource", () => {
   it("parses local absolute path", () => {
     const result = parseInkSource("/home/user/my-registry");
     expect(result.type).toBe("local");
-    expect(result.url).toBe("/home/user/my-registry");
+    expect(result.url).toBe(resolve("/home/user/my-registry"));
     expect(result.ownerRepo).toBeUndefined();
   });
 
@@ -66,9 +66,16 @@ describe("parseInkSource", () => {
     expect(result.ownerRepo).toBeUndefined();
   });
 
-  it("parses bare git URL as github", () => {
+  it("normalises a git@github.com SSH reference to the canonical https URL", () => {
     const result = parseInkSource("git@github.com:acme-corp/polpo-registry.git");
     expect(result.type).toBe("github");
+    expect(result.url).toBe("https://github.com/acme-corp/polpo-registry.git");
+    expect(result.ownerRepo).toBe("acme-corp/polpo-registry");
+  });
+
+  it("rejects arbitrary git URLs and shell syntax", () => {
+    expect(() => parseInkSource("https://gitlab.com/acme/registry.git")).toThrow(/Invalid source/);
+    expect(() => parseInkSource('acme/registry"; touch /tmp/x; "')).toThrow(/Invalid source/);
   });
 });
 

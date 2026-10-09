@@ -173,7 +173,7 @@ beforeAll(async () => {
 
   // No API keys → no auth required
   app = createApp(orchestrator, sseBridge);
-});
+}, 60_000);
 
 afterAll(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
@@ -327,6 +327,29 @@ describe("POST /v1/chat/completions", () => {
       expect(persisted.some(m => m.content.includes("Context checkpoint"))).toBe(false);
     });
 
+    test("compacts on request (/compact) without answering, and the next turn reuses it", async () => {
+      const contexts: any[] = [];
+      setStreamImpl((_model, context) => { contexts.push(structuredClone(context)); return mockTextStream("## Goal\nKeep going"); });
+      const history = [
+        { role: "user", content: "First request" }, { role: "assistant", content: "First answer" },
+        { role: "user", content: "Second request" }, { role: "assistant", content: "Second answer" },
+      ];
+      const opened = await postCompletions({ messages: [{ role: "user", content: "hello" }], stream: false }, { "x-session-id": "new" });
+      const sid = opened.headers.get("x-session-id")!;
+      const res = await postCompletions({ messages: history, compact: { focus: "the requests" } } as any, { "x-session-id": sid });
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.data.compaction).toMatchObject({ reason: "manual", focus: "the requests" });
+      // nothing was added to the visible conversation
+      const persisted = await orchestrator.getSessionStore()!.getMessages(sid);
+      expect(persisted.map((m) => m.content)).not.toContain("Second request");
+    });
+
+    test("manual compaction needs an existing session", async () => {
+      const res = await postCompletions({ messages: [{ role: "user", content: "x" }], compact: {} } as any, { "x-session-id": "new" });
+      expect(res.status).toBe(400);
+    });
+
     test("retries once with forced compaction after a provider overflow", async () => {
       let calls = 0;
       setStreamImpl(() => {
@@ -353,10 +376,11 @@ describe("POST /v1/chat/completions", () => {
       const chunks = await parseSSE(res);
       const text = chunks.map((chunk) => (chunk.choices as any[])?.[0]?.delta?.content).filter(Boolean).join("");
       const recovery = chunks.find((chunk) =>
-        (chunk.choices as any[])?.[0]?.context_compaction?.reason === "overflow_recovery"
+        (chunk.choices as any[])?.[0]?.context_compaction?.reason === "overflow"
       );
 
-      expect(calls).toBe(2);
+      // provider error, the compaction summary, then the retry
+      expect(calls).toBe(3);
       expect(recovery).toBeDefined();
       expect(text).toBe("Recovered response.");
     });

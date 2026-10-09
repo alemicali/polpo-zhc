@@ -11,7 +11,7 @@
  * - Explicit variant components for each tab
  */
 
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,10 +25,8 @@ import {
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 // Provider + context hook
-import {
-  AgentDetailProvider,
-  useAgentDetail,
-} from "@/components/agents/agent-detail-provider";
+import { AgentDetailProvider } from "@/components/agents/agent-detail-provider";
+import { useAgentDetail } from "@/components/agents/agent-detail-context";
 import { cn } from "@/lib/utils";
 
 // Sidebar cards
@@ -47,6 +45,7 @@ import { AgentInstructionsTab } from "@/components/agents/agent-instructions-tab
 import { AgentToolsTab } from "@/components/agents/agent-tools-tab";
 import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
+import { AgentSandboxTab } from "@/components/agents/agent-sandbox-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 
@@ -119,6 +118,9 @@ function AgentDetailContent() {
   const {
     state: { agent, process, taskStats, sortedTasks, enabledCategories, vaultEntries },
   } = useAgentDetail();
+  // ?tab=credentials opens a tab directly (e.g. from a vault picker's "add it" link)
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") ?? "overview";
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -136,7 +138,7 @@ function AgentDetailContent() {
         </Card>
       )}
 
-      <Tabs defaultValue="overview" className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs defaultValue={initialTab} className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
@@ -156,6 +158,7 @@ function AgentDetailContent() {
             <Brain className="h-3.5 w-3.5 mr-1" />
             Memory
           </TabsTrigger>
+          <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
@@ -183,6 +186,10 @@ function AgentDetailContent() {
 
         <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
           <AgentMemoryTab />
+        </TabsContent>
+
+        <TabsContent value="sandbox" className="mt-4 flex-1 min-h-0">
+          <AgentSandboxTab />
         </TabsContent>
 
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">

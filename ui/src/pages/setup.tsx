@@ -643,22 +643,19 @@ export function SetupPage() {
   const handleSaveKey = useCallback(async (provider: string, key: string): Promise<boolean> => {
     const result = await api(`/providers/${provider}/api-key`, {
       method: "POST",
-      body: JSON.stringify({ apiKey: key, workDir }),
+      body: JSON.stringify({ apiKey: key }),
     });
     if (result.ok) {
       await refreshProviders();
       return true;
     }
     return false;
-  }, [refreshProviders, workDir]);
+  }, [refreshProviders]);
 
   const handleDisconnect = useCallback(async (provider: string) => {
-    await api(`/providers/${provider}/disconnect`, {
-      method: "DELETE",
-      body: JSON.stringify({ workDir }),
-    });
+    await api(`/providers/${provider}/disconnect`, { method: "DELETE" });
     await refreshProviders();
-  }, [refreshProviders, workDir]);
+  }, [refreshProviders]);
 
   const [setupError, setSetupError] = useState<string | null>(null);
 

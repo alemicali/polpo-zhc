@@ -3,7 +3,7 @@ import { resolve, join } from "node:path";
 import { mkdirSync, existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
-import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile } from "./config.js";
+import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile, parseProviders } from "./config.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -11,16 +11,20 @@ import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { FileMemoryStore } from "../stores/file-memory-store.js";
 import { FileLogStore } from "../stores/file-log-store.js";
 import { FileSessionStore } from "../stores/file-session-store.js";
+import { FileChatQueueStore } from "../stores/file-chat-queue-store.js";
+import { FileRoomStore } from "../stores/file-room-store.js";
 import type { SessionStore } from "./session-store.js";
 import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
 import type { MemoryStore } from "./memory-store.js";
-import type { LogStore } from "./log-store.js";
-import { assessTask } from "../assessment/assessor.js";
+import type { LogPruneResult, LogStore } from "./log-store.js";
+import { sandboxedAssessFn } from "../assessment/sandboxed.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
-import type { DeadlockResolverPort, DeadlockFacade } from "@polpo-ai/core";
-import { TypedEmitter } from "./events.js";
+import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
+import { MISSION_EDIT } from "@polpo-ai/core";
+import { TypedEmitter, withEventOrigin } from "./events.js";
+import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
 import type { BackgroundWaitStore, TaskControlStore } from "./task-control-store.js";
@@ -51,8 +55,13 @@ import {
   sleep,
 } from "./assessment-prompts.js";
 import type { AssessFn } from "./orchestrator-context.js";
+import type { RunRecord } from "./run-store.js";
 import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from "../llm/pi-client.js";
+import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../llm/custom-providers.js";
+import { readProviderSecrets } from "../llm/provider-secrets.js";
 import { startNotificationServer, getSocketPath } from "./notification.js";
+import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
+import { NetworkDeniedLog, type NetworkDeniedReport } from "../sandbox/denied-log.js";
 import { HookRegistry } from "./hooks.js";
 import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
@@ -61,12 +70,16 @@ import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway, type ChannelChatRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ChannelCompactRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
+import { GroupIntentArbiter } from "../notifications/group-intent.js";
+import { POLPO, RoomEngine } from "../rooms/room-engine.js";
+import { TelegramAgentRelay, type RelayBot } from "../rooms/telegram-relay.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
@@ -86,6 +99,20 @@ import type { PlaybookStore } from "./playbook-store.js";
 import { FilePlaybookStore } from "../stores/file-playbook-store.js";
 import { NodeSpawner } from "../adapters/node-spawner.js";
 import type { Spawner } from "./spawner.js";
+import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
+import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
+import { databaseStoresFor } from "./storage.js";
+import { resolveToolOutputDir } from "../tools/tool-output.js";
+import { NodeFileSystem } from "../adapters/node-filesystem.js";
+import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
+import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
+import type { FileSystem } from "@polpo-ai/core/filesystem";
+import { setProtectedPaths } from "../tools/path-sandbox.js";
+import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
+import { RemoteWorkspace } from "../sandbox/remote.js";
+import { remoteThenLocal } from "../sandbox/workspace-fs.js";
+import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
+import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
 export { buildFixPrompt, buildRetryPrompt };
@@ -99,6 +126,10 @@ export interface OrchestratorOptions {
   assessFn?: AssessFn;
   spawner?: Spawner;
 }
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+/** Days of orchestrator event logs kept when settings.logRetentionDays is not set. */
+const DEFAULT_LOG_RETENTION_DAYS = 30;
 
 function supportsBackgroundWaits(store: TaskControlStore): store is TaskControlStore & BackgroundWaitStore {
   return typeof store.createBackgroundWait === "function"
@@ -159,14 +190,17 @@ export class Orchestrator extends TypedEmitter {
   /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
-  private whatsappStore?: WhatsAppStore;
+  private whatsappStore?: WhatsAppMessageStore;
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
+  private channelCompactRunner?: ChannelCompactRunner;
+  private contextCheckpointStore?: ContextCheckpointStore;
   private configWatcher?: FSWatcher;
   private configReloadTimer?: ReturnType<typeof setTimeout>;
+  private logRetentionTimer?: ReturnType<typeof setTimeout>;
   private vaultStore?: VaultStore;
   private playbookStore!: PlaybookStore;
   private eventingTaskStores = new WeakMap<TaskStore, TaskStore>();
@@ -205,6 +239,235 @@ export class Orchestrator extends TypedEmitter {
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
+  /** Where chat sessions keep their compaction checkpoint (database when configured, files otherwise). */
+  // ── Sandboxes for chats (Polpo and agents): one workspace per interlocutor, closed when idle ──
+
+  private storageMountProvider?: StorageMountProvider;
+  private chatWorkspaces = new Map<string, { workspace: Promise<Workspace>; timer?: ReturnType<typeof setTimeout> }>();
+
+  private networkDenied = new NetworkDeniedLog();
+
+  /** Destinations the sandbox network rule refused recently (Settings → Sandbox). */
+  getNetworkDenied() { return this.networkDenied.list(); }
+
+  /** Record a refused destination and tell the bus the first time a workspace hits it. */
+  reportNetworkDenied(report: NetworkDeniedReport): void {
+    if (this.networkDenied.record(report)) this.emit("sandbox:network-denied", report);
+  }
+
+  /** The storage feature registers what each agent may mount. */
+  /** Remote sandbox adapters: the workspace a finished task's checks run in (see assessment/sandboxed.ts). */
+  workspaceForAssessment?: (taskId: string, run: RunRecord) => Promise<Workspace | undefined>;
+
+  /** Assessment commands run in the sandbox the task ran in; without one, as before on this machine. */
+  private defaultAssessFn(): AssessFn {
+    return sandboxedAssessFn({
+      getRunByTaskId: (taskId) => this.runStore.getRunByTaskId(taskId),
+      workspaceForAssessment: (taskId, run) => this.workspaceForAssessment?.(taskId, run) ?? Promise.resolve(undefined),
+      hostVolumes: async (agentName, selections) => (await this.storageMountProvider?.volumesFor(agentName, selections ?? [], "host")) ?? [],
+    });
+  }
+
+  setStorageMountProvider(provider: StorageMountProvider | undefined): void { this.storageMountProvider = provider; }
+
+  /**
+   * The shell an interlocutor's chat commands run in (agent tools in chat, Polpo's run_command).
+   * One workspace per conversation (per agent when the conversation is not known), opened on the
+   * first command and closed after the chat's idle time.
+   */
+  chatShell(agent?: AgentConfig, session?: () => string | undefined): Shell {
+    return {
+      execute: async (command, options = {}) => new WorkspaceShell(await this.acquireChatWorkspace(agent, session?.())).execute(command, options),
+      // Cowork chats (remote VM): known from the settings, without opening the workspace
+      isRemote: async () => {
+        const { provider } = (await this.chatSandbox(agent)).sandbox;
+        return provider === "daytona" || provider === "e2b";
+      },
+    };
+  }
+
+  /**
+   * Files a confirmed chat action (an email sent after its preview) refers to: read in the chat's
+   * remote VM while it is open (open Polpo: a tool's file I/O goes through the run's FileSystem),
+   * otherwise on this machine — where the chat's output directory has been copied back. Never
+   * opens a VM just for this.
+   */
+  async chatActionFileSystem(agent: AgentConfig | undefined, sessionKey: string | undefined): Promise<FileSystem> {
+    const local = new NodeFileSystem();
+    const key = `${agent?.name ?? "polpo"}${sessionKey ? `:${sessionKey}` : ""}`;
+    const entry = this.chatWorkspaces.get(key);
+    const workspace = entry ? await entry.workspace.catch(() => undefined) : undefined;
+    if (!workspace || (workspace.provider !== "daytona" && workspace.provider !== "e2b")) return local;
+    return remoteThenLocal(new WorkspaceFileSystem(workspace), local);
+  }
+
+  /**
+   * The file tools' FileSystem in chat: inside the remote VM for "Cowork" chats (the files live
+   * there), on this machine otherwise. Resolved on each call, so nothing opens until a tool runs.
+   */
+  chatFileSystem(agent?: AgentConfig, session?: () => string | undefined): FileSystem {
+    const local = new NodeFileSystem();
+    const pick = async (): Promise<FileSystem> => {
+      const { sandbox } = await this.chatSandbox(agent);
+      if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") return local;
+      return new WorkspaceFileSystem(await this.acquireChatWorkspace(agent, session?.()));
+    };
+    const call = <K extends keyof FileSystem>(name: K) => async (...args: any[]) => ((await pick())[name] as any)(...args);
+    return {
+      readFile: call("readFile"), writeFile: call("writeFile"), exists: call("exists"), readdir: call("readdir"),
+      readdirWithTypes: call("readdirWithTypes"), mkdir: call("mkdir"), remove: call("remove"), stat: call("stat"),
+      rename: call("rename"), readFileBuffer: call("readFileBuffer"), writeFileBuffer: call("writeFileBuffer"),
+    } as FileSystem;
+  }
+
+  /** sandbox_volume_checkpoint in a Cowork chat: persist the chat VM's hydrated volumes now. */
+  async checkpointChatVolume(agent: AgentConfig, sessionKey: string | undefined, name?: string): Promise<void> {
+    const { sandbox } = await this.chatSandbox(agent);
+    if (sandbox.provider !== "daytona" && sandbox.provider !== "e2b") throw new Error("This chat has no remote sandbox with volumes");
+    const workspace = await this.acquireChatWorkspace(agent, sessionKey);
+    if (!(workspace instanceof RemoteWorkspace)) throw new Error("This chat has no remote sandbox with volumes");
+    await workspace.checkpointVolume(name);
+  }
+
+  private acquireChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
+    const key = `${agent?.name ?? "polpo"}${sessionKey ? `:${sessionKey}` : ""}`;
+    const idleMs = (normalizeSandboxSettings(this.config?.settings?.sandbox)?.chatIdleMinutes ?? 30) * 60_000;
+    const existing = this.chatWorkspaces.get(key);
+    const entry = existing ?? { workspace: this.openChatWorkspace(agent, sessionKey) };
+    if (!existing) this.chatWorkspaces.set(key, entry);
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => void this.closeChatWorkspace(key, "idle"), idleMs);
+    entry.timer.unref?.();
+    entry.workspace.catch(() => this.chatWorkspaces.delete(key));
+    return entry.workspace;
+  }
+
+  /** The sandbox a chat with this agent (or with Polpo) runs its commands in, and the volumes it selected. */
+  async chatSandbox(agent?: AgentConfig): Promise<{ sandbox: EffectiveSandbox; volumes: ResolvedSandboxVolume[] }> {
+    const instanceSandbox = normalizeSandboxSettings(this.config?.settings?.sandbox);
+    let sandbox = effectiveSandbox({
+      scope: "chat",
+      cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
+      // Polpo reads messages from people on channels: treat it like an agent reading external content
+      agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
+    });
+    // Polpo's own commands manage this instance: they never run in a remote VM
+    if (!agent && (sandbox.provider === "daytona" || sandbox.provider === "e2b")) sandbox = { ...sandbox, provider: "bwrap" };
+    const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+    // a selected volume that is not granted is left out of the chat (tasks fail instead)
+    const volumes = sandbox.volumes?.length
+      ? (await this.storageMountProvider?.volumesFor(agent?.name, sandbox.volumes, remote ? "remote" : "host").catch((err) => {
+          this.emit("log", { level: "warn", message: `[sandbox ${agent?.name ?? "polpo"}] volumes not attached: ${(err as Error).message}` });
+          return [] as ResolvedSandboxVolume[];
+        })) ?? []
+      : [];
+    return { sandbox, volumes };
+  }
+
+  private async openChatWorkspace(agent?: AgentConfig, sessionKey?: string): Promise<Workspace> {
+    const { sandbox, volumes } = await this.chatSandbox(agent);
+    const root = this.getAgentWorkDir();
+    const agentName = agent?.name ?? "polpo";
+    const remote = sandbox.provider === "daytona" || sandbox.provider === "e2b";
+    let workspaceId: string | undefined;
+    try {
+      const workspace = createWorkspace(sandbox, {
+        onNetworkDenied: (d) => this.reportNetworkDenied({ ...d, workspaceId, provider: sandbox.provider, scope: "chat", agentName }),
+        root,
+        readable: [
+          resolveToolOutputDir({ polpoDir: this.polpoDir, agentName }),
+          join(this.polpoDir, "skills"),
+          join(this.polpoDir, "playbooks"),
+        ],
+        volumes,
+        // Cowork: deliverables go to the chat's output directory, copied back after every command
+        ...(remote ? { writable: [chatOutputDir(this.polpoDir, agentName)] } : {}),
+        // config, sessions, vault, control socket: never visible to commands
+        hide: [this.polpoDir],
+        ...(remote ? {
+          pool: { polpoDir: this.polpoDir, owner: agentName, scope: "chat" as const, sessionKey },
+          syncEachExec: true,
+          // the person reads and types between commands: suspend after a minute, not 1.5 s
+          idleSuspendMs: 60_000,
+          onRemoteEvent: (e: RemoteWorkspaceEvent) => this.reportRemoteSandboxEvent(e, { workspaceId: workspaceId ?? "", provider: sandbox.provider, agentName, sessionId: sessionKey }),
+        } : {}),
+      });
+      workspaceId = workspace.id;
+      this.emit("sandbox:created", {
+        workspaceId: workspace.id, provider: workspace.provider, scope: "chat", agentName, network: sandbox.network.mode,
+        ...(sessionKey ? { sessionId: sessionKey } : {}),
+      });
+      return workspace;
+    } catch (error) {
+      this.emit("sandbox:failed", { provider: sandbox.provider, scope: "chat", sessionId: sessionKey, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  /** Where a Cowork chat (remote sandbox) puts the files it produces for the person. */
+  chatOutputDir(agentName: string): string {
+    return chatOutputDir(this.polpoDir, agentName);
+  }
+
+  /** Remote VM lifecycle steps (from chats here, from task runners over the notification socket). */
+  reportRemoteSandboxEvent(
+    e: RemoteWorkspaceEvent,
+    at: { workspaceId: string; provider: string; agentName?: string; taskId?: string; sessionId?: string },
+  ): void {
+    const base = { workspaceId: at.workspaceId, provider: at.provider, ...(at.agentName ? { agentName: at.agentName } : {}), ...(at.taskId ? { taskId: at.taskId } : {}), ...(at.sessionId ? { sessionId: at.sessionId } : {}) };
+    switch (e.kind) {
+      case "ready": this.emit("sandbox:ready", { ...base, durationMs: e.durationMs, steps: e.steps, remoteId: e.remoteId, source: e.source }); break;
+      case "suspended": this.emit("sandbox:suspended", { ...base, remoteId: e.remoteId, idleMs: e.idleMs }); break;
+      case "resumed": this.emit("sandbox:resumed", { ...base, remoteId: e.remoteId, durationMs: e.durationMs }); break;
+      case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
+      case "volume": this.emit("sandbox:volume", { ...base, step: e.step, name: e.name, revision: e.revision, message: e.message }); break;
+      case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
+      default: break;
+    }
+  }
+
+  private chatBrowserGuards = new Map<string, { signature: string; guard: BrowserNetworkGuard }>();
+
+  /**
+   * The network rule for the browser in this agent's chats (or Polpo's): undefined when the
+   * sandbox does not isolate. One guard per agent, rebuilt when the effective rule changes.
+   */
+  async chatBrowserNetwork(agent?: AgentConfig): Promise<BrowserNetworkGuard | undefined> {
+    const key = agent?.name ?? "polpo";
+    const { sandbox } = await this.chatSandbox(agent);
+    const signature = JSON.stringify([sandbox.provider, sandbox.network]);
+    const existing = this.chatBrowserGuards.get(key);
+    if (existing?.signature === signature) return existing.guard;
+    await existing?.guard.close().catch(() => undefined);
+    this.chatBrowserGuards.delete(key);
+    const guard = createBrowserNetworkGuard({
+      sandbox, session: key === "polpo" ? "orchestrator" : key,
+      onDenied: (d) => this.reportNetworkDenied({ ...d, provider: sandbox.provider, scope: "chat", agentName: key }),
+    });
+    if (guard) this.chatBrowserGuards.set(key, { signature, guard });
+    return guard;
+  }
+
+  private async closeChatWorkspace(key: string, reason: "idle" | "shutdown"): Promise<void> {
+    const entry = this.chatWorkspaces.get(key);
+    if (!entry) return;
+    this.chatWorkspaces.delete(key);
+    if (entry.timer) clearTimeout(entry.timer);
+    const workspace = await entry.workspace.catch(() => undefined);
+    if (!workspace) return;
+    await workspace.dispose().catch(() => undefined);
+    // remote VMs report their own release (pooled or deleted, running time)
+    if (workspace.provider !== "daytona" && workspace.provider !== "e2b") {
+      this.emit("sandbox:destroyed", { workspaceId: workspace.id, provider: workspace.provider, durationMs: 0, reason });
+    }
+  }
+
+  getContextCheckpointStore(): ContextCheckpointStore {
+    this.contextCheckpointStore ??= databaseStoresFor(this.polpoDir)?.contextCheckpointStore ?? new FileContextCheckpointStore(this.polpoDir);
+    return this.contextCheckpointStore;
+  }
+  getChannelCompactRunner(): ChannelCompactRunner | undefined { return this.channelCompactRunner; }
+  setChannelCompactRunner(runner: ChannelCompactRunner): void { this.channelCompactRunner = runner; }
   getSLAMonitor(): SLAMonitor | undefined { return this.slaMonitor; }
   getQualityController(): QualityController | undefined { return this.qualityController; }
   getScheduler(): Scheduler | undefined { return this.scheduler; }
@@ -214,7 +477,7 @@ export class Orchestrator extends TypedEmitter {
     this.backgroundWaitContinuation = handler;
     this.backgroundWaitMgr?.setContinuation(handler);
   }
-  getWhatsAppStore(): WhatsAppStore | undefined { return this.whatsappStore; }
+  getWhatsAppStore(): WhatsAppMessageStore | undefined { return this.whatsappStore; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   /** Re-point the orchestrator at a different project directory (before init). */
@@ -233,13 +496,13 @@ export class Orchestrator extends TypedEmitter {
       const workDir = workDirOrOptions ?? ".";
       this.workDir = resolve(workDir);
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = assessTask;
+      this.assessFn = this.defaultAssessFn();
       this.spawner = new NodeSpawner({ polpoDir: this.polpoDir, cwd: this.workDir });
     } else {
       const opts = workDirOrOptions;
       this.workDir = resolve(opts.workDir ?? ".");
       this.polpoDir = getPolpoDir(this.workDir);
-      this.assessFn = opts.assessFn ?? assessTask;
+      this.assessFn = opts.assessFn ?? this.defaultAssessFn();
       this.injectedStore = opts.store;
       this.injectedRunStore = opts.runStore;
       this.injectedTaskControlStore = opts.taskControlStore;
@@ -248,6 +511,8 @@ export class Orchestrator extends TypedEmitter {
     }
   }
 
+  /** The open database (or the file backend), closed on shutdown. */
+  private storage?: import("./storage.js").OpenStorage;
   /** Drizzle store bundle — populated when storage is "sqlite" or "postgres". */
   private drizzleStores?: import("@polpo-ai/drizzle").DrizzleStores;
   /** Raw Drizzle DB handle — used by file→sqlite migration after init. */
@@ -267,6 +532,9 @@ export class Orchestrator extends TypedEmitter {
    * use registry.transition(...) directly.
    */
   private withTaskTransitionEvents(store: TaskStore): TaskStore {
+    const removedPayload = (taskId: string, task: Task | undefined) => ({
+      taskId, ...(task ? { title: task.title, group: task.group, missionId: task.missionId } : {}),
+    });
     const cached = this.eventingTaskStores.get(store);
     if (cached) return cached;
 
@@ -301,6 +569,63 @@ export class Orchestrator extends TypedEmitter {
                 from: before.status,
                 to: updated.status,
                 task: updated,
+                reason,
+              });
+            }
+            return updated;
+          };
+        }
+
+        // Field changes: one event per write, naming the fields (status goes through transition).
+        if (prop === "updateTask") {
+          return async (taskId: string, updates: Partial<Task>) => {
+            const updated = await target.updateTask(taskId, updates);
+            orchestrator.emit("task:updated", { taskId, task: updated, fields: Object.keys(updates) });
+            return updated;
+          };
+        }
+
+        if (prop === "removeTask") {
+          return async (taskId: string) => {
+            const before = await target.getTask(taskId);
+            const removed = await target.removeTask(taskId);
+            if (removed) orchestrator.emit("task:removed", removedPayload(taskId, before));
+            return removed;
+          };
+        }
+
+        if (prop === "removeTasks") {
+          return async (filter: (task: Task) => boolean) => {
+            const doomed = (await target.getAllTasks()).filter(filter);
+            const count = await target.removeTasks(filter);
+            if (count > 0) {
+              const still = new Set((await target.getAllTasks()).map((t) => t.id));
+              for (const task of doomed) if (!still.has(task.id)) orchestrator.emit("task:removed", removedPayload(task.id, task));
+            }
+            return count;
+          };
+        }
+
+        if (prop === "saveMission" && target.saveMission) {
+          return async (mission: Parameters<NonNullable<TaskStore["saveMission"]>>[0]) => {
+            const saved = await target.saveMission!(mission);
+            orchestrator.emit("mission:created", { missionId: saved.id, name: saved.name, status: saved.status });
+            return saved;
+          };
+        }
+
+        if (prop === "updateMission" && target.updateMission) {
+          return async (missionId: string, updates: Parameters<NonNullable<TaskStore["updateMission"]>>[1]) => {
+            const edit = (updates as Record<symbol, MissionEdit | undefined>)[MISSION_EDIT];
+            const { [MISSION_EDIT]: _edit, ...plain } = updates as typeof updates & { [MISSION_EDIT]?: MissionEdit };
+            const before = await target.getMission?.(missionId);
+            const updated = await target.updateMission!(missionId, plain);
+            const fields = Object.keys(plain).filter((k) => k !== "updatedAt");
+            if (fields.length > 0) {
+              orchestrator.emit("mission:updated", {
+                missionId, name: updated.name, status: updated.status,
+                ...(edit ? { section: edit.section, action: edit.action, ...(edit.item ? { item: edit.item } : {}) } : { fields }),
+                ...(before && before.status !== updated.status ? { prevStatus: before.status } : {}),
               });
             }
             return updated;
@@ -316,56 +641,60 @@ export class Orchestrator extends TypedEmitter {
     return wrapped;
   }
 
+  /** Playbook writes announce themselves (playbook:changed), whoever makes them. */
+  private withPlaybookEvents(store: PlaybookStore): PlaybookStore {
+    const orchestrator = this;
+    return new Proxy(store, {
+      get(target, prop, receiver) {
+        if (prop === "save") {
+          return async (definition: Parameters<PlaybookStore["save"]>[0]) => {
+            const existed = !!(await target.get(definition.name).catch(() => null));
+            const location = await target.save(definition);
+            orchestrator.emit("playbook:changed", { name: definition.name, action: existed ? "updated" : "created" });
+            return location;
+          };
+        }
+        if (prop === "delete") {
+          return async (name: string) => {
+            const deleted = await target.delete(name);
+            if (deleted) orchestrator.emit("playbook:changed", { name, action: "deleted" });
+            return deleted;
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
   /** Create task + run stores based on the configured storage backend. */
   private async createStores(storage?: "file" | "sqlite" | "postgres", databaseUrl?: string): Promise<{
     task: TaskStore; run: RunStore; taskControlStore: TaskControlStore;
     logStore?: LogStore; sessionStore?: SessionStore; memoryStore?: MemoryStore;
   }> {
-    if (storage === "postgres") {
-      const dbUrl = databaseUrl ?? this.config?.settings?.databaseUrl;
-      if (!dbUrl) throw new Error('storage: "postgres" requires a databaseUrl');
-      const { createPgStores, ensurePgSchema } = await import("@polpo-ai/drizzle");
-      const postgres = (await import("postgres")).default;
-      const { drizzle } = await import("drizzle-orm/postgres-js");
-      const sql = postgres(dbUrl);
-      const db = drizzle(sql);
-      await ensurePgSchema(db);
-      this.drizzleStores = createPgStores(db);
+    const { openStorage } = await import("./storage.js");
+    const opened = await openStorage({
+      storage,
+      polpoDir: this.polpoDir,
+      databaseUrl: databaseUrl ?? this.config?.settings?.databaseUrl,
+      role: "server",
+      log: (message) => this.emit("log", { level: "info", message: `[storage] ${message}` }),
+    });
+    this.storage = opened;
+    if (opened.kind !== "file") {
+      this.drizzleStores = opened.stores;
+      this.resolvedStorage = opened.kind;
+      if (opened.kind === "sqlite") {
+        this.drizzleDb = opened.db;
+        this.drizzleSchema = (await import("@polpo-ai/drizzle")).sqliteSchema;
+      }
       return {
-        task: this.drizzleStores.taskStore,
-        run: this.drizzleStores.runStore,
-        taskControlStore: this.drizzleStores.taskControlStore,
-        logStore: this.drizzleStores.logStore,
-        sessionStore: this.drizzleStores.sessionStore,
-        memoryStore: this.drizzleStores.memoryStore,
-      };
-    }
-    if (storage === "sqlite") {
-      const drizzleMod = await import("@polpo-ai/drizzle");
-      const { createSqliteStores, sqliteSchema } = drizzleMod;
-      const { createRequire } = await import("node:module");
-      const req = createRequire(import.meta.url);
-      const Database = req("better-sqlite3");
-      const dbPath = join(this.polpoDir, "state.db");
-      const sqlite = new Database(dbPath);
-      sqlite.exec("PRAGMA journal_mode = WAL");
-      sqlite.exec("PRAGMA synchronous = NORMAL");
-      sqlite.exec("PRAGMA foreign_keys = ON");
-      const { ensureSqliteSchema } = await import("./drizzle-sqlite-schema.js");
-      ensureSqliteSchema(sqlite);
-      const { drizzle } = await import("drizzle-orm/better-sqlite3");
-      const db = drizzle(sqlite);
-      this.drizzleStores = createSqliteStores(db);
-      this.drizzleDb = db;
-      this.drizzleSchema = sqliteSchema;
-      this.resolvedStorage = "sqlite";
-      return {
-        task: this.drizzleStores.taskStore,
-        run: this.drizzleStores.runStore,
-        taskControlStore: this.drizzleStores.taskControlStore,
-        logStore: this.drizzleStores.logStore,
-        sessionStore: this.drizzleStores.sessionStore,
-        memoryStore: this.drizzleStores.memoryStore,
+        task: opened.stores.taskStore,
+        run: opened.stores.runStore,
+        taskControlStore: opened.stores.taskControlStore,
+        logStore: opened.stores.logStore,
+        sessionStore: opened.stores.sessionStore,
+        memoryStore: opened.stores.memoryStore,
       };
     }
     this.resolvedStorage = "file";
@@ -409,6 +738,14 @@ export class Orchestrator extends TypedEmitter {
   async init(): Promise<void> {
     this.config = await parseConfig(this.workDir);
 
+    // Agents' file tools never reach .polpo through a broader grant (config, .env, sessions,
+    // vault, storage mounts); granted paths inside it (task output, mounts) stay reachable.
+    setProtectedPaths([this.polpoDir], [
+      join(this.polpoDir, "tmp", "tool-output"),
+      join(this.polpoDir, "skills"),
+      join(this.polpoDir, "playbooks"),
+    ]);
+
     // Apply provider overrides from config
     if (this.config.providers) {
       setProviderOverrides(this.config.providers);
@@ -444,6 +781,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initLogStore();
     }
+    this.scheduleLogRetention();
     if ("sessionStore" in stores && stores.sessionStore) {
       this.sessionStore = stores.sessionStore;
     } else {
@@ -459,6 +797,11 @@ export class Orchestrator extends TypedEmitter {
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
 
+    // Vault first: custom provider keys live there ("$providers"), and the key check below
+    // must see them (otherwise vault-only custom providers are reported as missing).
+    this.initVaultStore();
+    await refreshCustomProviderSecretStatus();
+
     // Validate API keys (after stores are available so we can read per-agent models)
     await this.validateProviders();
 
@@ -467,8 +810,7 @@ export class Orchestrator extends TypedEmitter {
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
 
-    this.initVaultStore();
-    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
+    this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
   }
 
   /**
@@ -561,6 +903,8 @@ export class Orchestrator extends TypedEmitter {
       runStore: this.runStore,
       taskControlStore: this.taskControlStore,
       memoryStore: this.memoryStore,
+      sandboxProviders: () => availableProviders(),
+      sandboxVolumes: (agentName, selections, target, options) => this.storageMountProvider?.volumesFor(agentName, selections, target, options) ?? Promise.resolve([]),
       logStore: this.logStore,
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
@@ -619,6 +963,11 @@ export class Orchestrator extends TypedEmitter {
       () => {
         this.runner.collectResults((id, res) => this.assessor.handleResult(id, res));
       },
+      (msg) => this.reportNetworkDenied({
+        workspaceId: msg.runId, provider: msg.provider, scope: "task", taskId: msg.taskId, agentName: msg.agentName,
+        host: msg.host, port: msg.port, reason: msg.reason,
+      }),
+      (msg) => this.reportRemoteSandboxEvent(msg.event as any, { workspaceId: msg.runId, provider: msg.provider, taskId: msg.taskId, agentName: msg.agentName }),
     );
 
     // Initialize approval gates if configured
@@ -721,7 +1070,7 @@ export class Orchestrator extends TypedEmitter {
     // Initialize scheduler (always available — zero cost when no schedules exist)
     if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+      this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
       this.scheduler.init();
     }
 
@@ -861,6 +1210,7 @@ export class Orchestrator extends TypedEmitter {
     } else {
       await this.initLogStore();
     }
+    this.scheduleLogRetention();
     if ("sessionStore" in stores && stores.sessionStore) {
       this.sessionStore = stores.sessionStore;
     } else {
@@ -886,7 +1236,9 @@ export class Orchestrator extends TypedEmitter {
       teams: [], // populated by syncConfigCache() from stores
       tasks: [],
       settings,
-      providers: polpoConfig?.providers,
+      providers: polpoConfig?.providers
+        ? parseProviders(polpoConfig.providers as Record<string, unknown>)
+        : undefined,
     };
 
     // Apply provider overrides and allowlist
@@ -903,7 +1255,8 @@ export class Orchestrator extends TypedEmitter {
     await this.agentMgr.syncConfigCache();
 
     this.initVaultStore();
-    this.playbookStore = this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir);
+    await refreshCustomProviderSecretStatus();
+    this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
     this.interactive = true;
     await this.registry.setState({
       project,
@@ -937,6 +1290,13 @@ export class Orchestrator extends TypedEmitter {
           this.emit("log", { level: "info", message: "[watch] polpo.json changed on disk — auto-reloading config" });
           this.reloadConfig().catch(() => {});
         }, 500);
+      });
+      // Without a listener an FSWatcher error is an uncaught exception that kills the process.
+      // Windows emits EPERM when the watched file or its folder is deleted or moved.
+      this.configWatcher.on("error", (err) => {
+        this.configWatcher?.close();
+        this.configWatcher = undefined;
+        this.emit("log", { level: "warn", message: `[watch] Stopped watching polpo.json: ${err.message}` });
       });
 
       this.emit("log", { level: "info", message: "[watch] Watching polpo.json for changes" });
@@ -980,7 +1340,7 @@ export class Orchestrator extends TypedEmitter {
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
   async abortGroup(group: string): Promise<number> { return this.engine.abortGroup(group); }
   async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.engine.clearTasks(filter); }
-  async forceFailTask(taskId: string): Promise<void> { return this.engine.forceFailTask(taskId); }
+  async forceFailTask(taskId: string, reason?: string): Promise<void> { return this.engine.forceFailTask(taskId, reason); }
 
   // ── Approval Management (delegates to OrchestratorEngine) ──
 
@@ -1020,22 +1380,90 @@ export class Orchestrator extends TypedEmitter {
     return this.drizzleStores?.attachmentStore;
   }
 
+  /** Per-session chat prompt queue: database-backed with sqlite/postgres, `.polpo/chat-queue.json` otherwise. */
+  getChatQueueStore(): import("@polpo-ai/core/session-store").ChatQueueStore {
+    return this.drizzleStores?.chatQueueStore ?? (this.fileChatQueueStore ??= new FileChatQueueStore(this.polpoDir));
+  }
+  private fileChatQueueStore?: FileChatQueueStore;
+
+  /** Rooms (group conversations of people and agents): database-backed with sqlite/postgres, `.polpo/rooms/` otherwise. */
+  getRoomStore(): import("@polpo-ai/core/room-store").RoomStore {
+    return this.drizzleStores?.roomStore ?? (this.fileRoomStore ??= new FileRoomStore(this.polpoDir));
+  }
+  private fileRoomStore?: FileRoomStore;
+
   /**
-   * Initialize the vault store.
-   * ALWAYS uses EncryptedVaultStore (file-based, .polpo/vault.enc) regardless
-   * of storage mode. Rationale: vault crypto operations are sensitive — keeping
-   * the file-based store as the single source of truth avoids any risk of
-   * key-resolution drift or migration-time data loss when storage flips to
-   * SQLite. The DrizzleVaultStore implementation exists (and the `vault` table
-   * is still created in the schema) but is intentionally NOT wired here.
-   * If/when we want full DB consolidation, do it via an explicit
-   * `polpo vault migrate` command that round-trips through resolveKey()
-   * — not by silently flipping the wiring.
+   * The group intent classifier (TypeSafe Jev), one for the instance: Telegram groups and web
+   * rooms. It reads the room's persisted transcript.
+   */
+  getGroupIntent(): GroupIntentArbiter {
+    if (this.groupIntent) return this.groupIntent;
+    const roomStore = this.getRoomStore();
+    this.groupIntent = new GroupIntentArbiter({
+      apiKey: () => process.env.TYPESAFE_API_KEY || undefined,
+      transcript: async (conversation) => {
+        const messages = await roomStore.getRecentMessages(conversation, 30);
+        const names = new Map(messages.map(m => [m.id, m.authorName]));
+        return messages.map(m => ({
+          id: m.id,
+          name: m.authorName,
+          text: m.text,
+          at: Date.parse(m.ts),
+          ...(m.authorKind === "agent" ? { agent: true } : {}),
+          ...(m.replyToId && names.has(m.replyToId) ? { to: names.get(m.replyToId)! } : {}),
+          ...(m.externalId ? { externalId: m.externalId } : {}),
+        }));
+      },
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+    return this.groupIntent;
+  }
+  private groupIntent?: GroupIntentArbiter;
+
+  /** Group chats of people and agents on the web (rooms of kind "web"). */
+  getRoomEngine(): RoomEngine {
+    if (this.roomEngine) return this.roomEngine;
+    this.roomEngine = new RoomEngine({
+      rooms: this.getRoomStore(),
+      sessions: this.sessionStore,
+      runner: () => this.channelChatRunner,
+      intent: this.getGroupIntent(),
+      profile: async (name) => {
+        if (name === POLPO) {
+          return { id: POLPO, name: "Polpo", role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
+        }
+        const agent = (await this.getAgents()).find(a => a.name === name);
+        const id = agent?.identity;
+        const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+        return {
+          id: name,
+          name: id?.displayName ?? name,
+          role: short(id?.title ?? agent?.role ?? "an agent of the company", 160),
+          responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+        };
+      },
+      emit: (event) => {
+        if (event.type === "room:message") this.emit("room:message", { roomId: event.roomId, message: event.message });
+        else this.emit("room:typing", { roomId: event.roomId, agent: event.agent, name: event.name, typing: event.typing });
+      },
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+    return this.roomEngine;
+  }
+  private roomEngine?: RoomEngine;
+
+  /**
+   * Initialize the vault store: the `vault` table when the project runs on a database (each entry
+   * encrypted with AES-256-GCM, same key as before; .polpo/vault.enc is imported once at startup
+   * and kept as a backup), .polpo/vault.enc otherwise.
    * Key: POLPO_VAULT_KEY env var or auto-generated ~/.polpo/vault.key.
    */
   private initVaultStore(): void {
     try {
-      this.vaultStore = new EncryptedVaultStore(this.polpoDir);
+      this.vaultStore = this.drizzleStores?.vaultStore ?? new EncryptedVaultStore(this.polpoDir);
+      // Custom provider keys / secret headers live in the vault (owner "$providers").
+      const vault = this.vaultStore;
+      setProviderSecretsSource({ get: (id) => readProviderSecrets(vault, id) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit("log", { level: "warn", message: `Vault store init failed: ${msg}. Vault features disabled.` });
@@ -1082,13 +1510,16 @@ export class Orchestrator extends TypedEmitter {
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
   async cleanupVolatileAgents(group: string): Promise<number> { return this.engine.cleanupVolatileAgents(group); }
 
-  private async emitTeamSnapshot(event: string, data: Record<string, unknown>): Promise<void> {
+  private async emitTeamSnapshot<K extends "agent:created" | "agent:updated" | "agent:removed" | "team:created" | "team:updated" | "team:removed">(
+    event: K,
+    data: Omit<PolpoEventMap[K], "agents" | "teams" | "timestamp">,
+  ): Promise<void> {
     this.emit(event, {
       ...data,
       agents: await this.getAgents(),
       teams: await this.getTeams(),
       timestamp: new Date().toISOString(),
-    });
+    } as PolpoEventMap[K]);
   }
 
 
@@ -1203,6 +1634,38 @@ export class Orchestrator extends TypedEmitter {
     try { await this.logStore.prune(20); } catch { /* best-effort: non-critical */ }
   }
 
+  /**
+   * Removes orchestrator event logs older than settings.logRetentionDays (default 30, 0 keeps
+   * them): a minute after start, then daily. Agent run transcripts are kept: they back the task
+   * activity view and the task token totals.
+   */
+  private scheduleLogRetention(delayMs = 60_000): void {
+    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
+    this.logRetentionTimer = setTimeout(() => {
+      void this.pruneOldLogs().finally(() => {
+        if (!this.stopped) this.scheduleLogRetention(DAY_MS);
+      });
+    }, delayMs);
+    this.logRetentionTimer.unref?.();
+  }
+
+  /** Remove the event logs older than the retention period now. */
+  async pruneOldLogs(): Promise<LogPruneResult | undefined> {
+    const days = this.config?.settings?.logRetentionDays ?? DEFAULT_LOG_RETENTION_DAYS;
+    if (!(days > 0) || !this.logStore?.pruneBefore) return undefined;
+    const cutoff = new Date(Date.now() - days * DAY_MS).toISOString();
+    try {
+      const result = await this.logStore.pruneBefore(cutoff);
+      if (result.entries > 0 || result.sessions > 0) {
+        this.emit("log", { level: "info", message: `[logs] Removed ${result.entries} log entries and ${result.sessions} log session(s) older than ${days} days.` });
+      }
+      return result;
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `[logs] Log cleanup failed: ${err instanceof Error ? err.message : String(err)}` });
+      return undefined;
+    }
+  }
+
   /** Get the chat session store. */
   getSessionStore(): SessionStore | undefined {
     return this.sessionStore;
@@ -1255,7 +1718,11 @@ export class Orchestrator extends TypedEmitter {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
+    for (const key of [...this.chatWorkspaces.keys()]) await this.closeChatWorkspace(key, "shutdown");
+    for (const { guard } of this.chatBrowserGuards.values()) await guard.close().catch(() => undefined);
+    this.chatBrowserGuards.clear();
     const activeRuns = await this.runStore.getActiveRuns();
+    this.emit("orchestrator:stopping", { activeRuns: activeRuns.length });
 
     if (activeRuns.length > 0) {
       this.emit("log", { level: "warn", message: `Shutting down ${activeRuns.length} running agent(s)...` });
@@ -1304,6 +1771,7 @@ export class Orchestrator extends TypedEmitter {
     // Clear process list in state and close stores
     await this.registry.setState({ processes: [], completedAt: new Date().toISOString() });
     if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+    if (this.logRetentionTimer) clearTimeout(this.logRetentionTimer);
     this.configWatcher?.close();
     this.telegramPoller?.stop();
     this.stopDedicatedTelegramPollers();
@@ -1322,8 +1790,11 @@ export class Orchestrator extends TypedEmitter {
     await this.runStore.close();
     this.emit("orchestrator:shutdown", {});
     await this.hookRegistry.runAfter("orchestrator:shutdown", {});
+    // Nothing may write to the log store once its database is closing.
+    this.setLogSink(undefined);
     await this.logStore?.close();
     await this.sessionStore?.close();
+    await this.storage?.close().catch(() => {});
   }
 
   // ── Config Hot Reload ──
@@ -1369,13 +1840,18 @@ export class Orchestrator extends TypedEmitter {
     //    Settings and providers come from polpo.json; teams come from stores.
     const newSettings = polpoConfig.settings ?? this.config.settings;
     this.config.settings = newSettings;
-    if (polpoConfig.providers) {
-      this.config.providers = polpoConfig.providers;
-      setProviderOverrides(polpoConfig.providers);
-    }
-    if (newSettings.modelAllowlist) {
-      setModelAllowlist(newSettings.modelAllowlist);
-    }
+    // Providers: parse like at boot and always replace — removed providers must disappear
+    // from the runtime registry too.
+    const parsedProviders = polpoConfig.providers
+      ? parseProviders(polpoConfig.providers as Record<string, unknown>)
+      : {};
+    this.config.providers = Object.keys(parsedProviders).length > 0 ? parsedProviders : undefined;
+    setProviderOverrides(parsedProviders);
+    await refreshCustomProviderSecretStatus();
+    // Allowlist: an allowlist removed from polpo.json must stop being enforced.
+    setModelAllowlist(newSettings.modelAllowlist && Object.keys(newSettings.modelAllowlist).length > 0
+      ? newSettings.modelAllowlist
+      : undefined);
 
     // Re-sync config.teams from TeamStore/AgentStore (authoritative source)
     await this.agentMgr.syncConfigCache();
@@ -1423,6 +1899,9 @@ export class Orchestrator extends TypedEmitter {
         }
         return { taskNotifications, missionNotifications };
       });
+
+      // Reconnect rule actions (create_task, execute_mission, run_script, send_notification)
+      this.notificationRouter.setActionExecutor(this.buildActionExecutor(ctx));
     }
 
     // Wire notification router to approval manager
@@ -1475,7 +1954,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.enableScheduler !== false) {
       if (!this.scheduler) {
         this.scheduler = new Scheduler(ctx);
-        this.scheduler.setExecutor((missionId) => this.missionExec.executeMission(missionId));
+        this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
       }
       this.scheduler.init();
     } else {
@@ -1543,6 +2022,36 @@ export class Orchestrator extends TypedEmitter {
 
     const resolver = this.createApprovalResolver();
 
+    // groupReplies "intent": one arbiter for all the bots, so a group message is classified once
+    const roomStore = this.getRoomStore();
+    const intent = this.getGroupIntent();
+    // agents answering each other in groups: every bot of the instance, through one relay
+    const relay = new TelegramAgentRelay({
+      rooms: roomStore,
+      intent,
+      log: (level, message) => this.emit("log", { level, message }),
+      bots: () => [...this.channelGateways.entries()].flatMap(([key, gateway]) => {
+        const poller = this.telegramPollersByChannel.get(key);
+        if (!poller) return [];
+        const bot: RelayBot = {
+          key,
+          isIn: (c) => gateway.isIn(c),
+          mode: (c) => gateway.relayMode(c),
+          threshold: () => gateway.relayThreshold(),
+          profile: async (c) => {
+            const me = await poller.getIdentity().catch(() => undefined);
+            return { ...await gateway.relayProfile(c), aliases: me?.username ? [me.username] : [] };
+          },
+          answer: (c, m) => gateway.answerAgent(c, m),
+          post: async (c, text) => {
+            const m = /^[^:]+:group:([^:]+)(?::topic:(\d+))?$/.exec(c);
+            if (m) await poller.sendPartial(m[1]!, text, m[2] ? { threadId: Number(m[2]) } : undefined);
+          },
+        };
+        return [bot];
+      }),
+    });
+
     const usedTokens = new Set<string>();
     for (const key of ordered) {
       const ch = this.notificationRouter!.getChannel(key);
@@ -1571,15 +2080,25 @@ export class Orchestrator extends TypedEmitter {
           sessionStore: this.sessionStore,
           channelConfig,
           approvalResolver: resolver,
-          onTyping: (chatId) => poller.sendTyping(chatId),
+          onTyping: (chatId, target) => poller.sendTyping(chatId, target),
+          key,
+          roomStore,
         });
-        gateway.setPartialResponseHandler((chatId, text) => poller.sendPartial(chatId, text));
+        gateway.setIntentArbiter(intent);
+        gateway.setAgentRelay(relay);
+        gateway.setPartialResponseHandler((chatId, text, target) => poller.sendPartial(chatId, text, target));
         gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
         poller.setGateway(new TelegramGatewayAdapter(gateway));
         // The main bot's menu is static; dedicated bots get theirs (agent suggestions) once agents are loaded.
         if (!channelConfig.gateway.agent) {
-          void gateway.menuCommands().then(commands => poller.setMenuCommands(commands)).catch(() => {});
+          void Promise.all([gateway.menuCommands(), gateway.groupMenuCommands()])
+            .then(([commands, groupCommands]) => poller.setMenuCommands(commands, groupCommands)).catch(() => {});
         }
+        void poller.getIdentity().then(me => {
+          if (me && me.canReadAllGroupMessages === false) {
+            this.emit("log", { level: "info", message: `[telegram] "${key}" (@${me.username}) has privacy mode on: in groups it only sees commands and replies to its messages. Turn it off in BotFather (/setprivacy) for mentions and group context.` });
+          }
+        });
         this.channelGateways.set(key, gateway);
         if (isPrimary) this.channelGateway = gateway;
 
@@ -1651,10 +2170,12 @@ export class Orchestrator extends TypedEmitter {
   private async refreshDedicatedBot(key: string): Promise<boolean> {
     const bot = this.dedicatedTelegramBots.get(key);
     if (!bot) return true;
+    // The engine exists once the stores are open: until then, retry later (not an error).
+    if (!this.engine) return false;
     try {
       const agents = await this.getAgents();
       if (!agents.some(a => a.name === bot.agent)) return false;
-      bot.poller.setMenuCommands(await bot.gateway.menuCommands());
+      bot.poller.setMenuCommands(await bot.gateway.menuCommands(), await bot.gateway.groupMenuCommands());
       await this.syncDedicatedBotProfile(key);
       return true;
     } catch (err) {
@@ -1807,16 +2328,20 @@ export class Orchestrator extends TypedEmitter {
     if (!ch || ch.type !== "whatsapp") return;
     const waChannel = ch as WhatsAppChannel;
 
-    // Create or reuse WhatsApp message store (SQLite)
+    // WhatsApp history: the project's database, or .polpo/whatsapp.db on files.
     if (!this.whatsappStore) {
-      const dbPath = join(this.polpoDir, "whatsapp.db");
-      this.whatsappStore = new WhatsAppStore(dbPath);
-      this.emit("log", { level: "info", message: `WhatsApp store opened: ${dbPath}` });
+      if (this.drizzleStores) {
+        this.whatsappStore = this.drizzleStores.whatsappStore;
+      } else {
+        const dbPath = join(this.polpoDir, "whatsapp.db");
+        this.whatsappStore = new WhatsAppStore(dbPath);
+        this.emit("log", { level: "info", message: `WhatsApp store opened: ${dbPath}` });
+      }
     }
 
     // Create the bridge
     const bridge = new WhatsAppBridge(waChannel, (level, msg) => {
-      this.emit("log", { level: level as "info" | "warn" | "verbose", message: msg });
+      this.emit("log", { level: level === "verbose" ? "debug" : level as "info" | "warn", message: msg });
     });
 
     // Attach store to bridge (buffers all messages for tool access)
@@ -1947,4 +2472,9 @@ export class Orchestrator extends TypedEmitter {
 
   /** Access the pure orchestration engine (for advanced use / testing). */
   getEngine(): OrchestratorEngine { return this.engine; }
+}
+
+/** Cowork chats: <polpoDir>/output/chat/<agent> (tasks use <polpoDir>/output/<task id>). */
+export function chatOutputDir(polpoDir: string, agentName: string): string {
+  return join(polpoDir, "output", "chat", agentName.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "default");
 }

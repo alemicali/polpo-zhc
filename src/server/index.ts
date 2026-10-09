@@ -13,6 +13,10 @@ import { Orchestrator } from "../core/orchestrator.js";
 import { SSEBridge } from "./sse-bridge.js";
 import type { Team } from "../core/types.js";
 import type { ServerConfig } from "./types.js";
+import { withEventOrigin } from "../core/events.js";
+import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
+import { configureRemoteProviders } from "../sandbox/remote-providers.js";
+import { SandboxReaper } from "../sandbox/reaper.js";
 
 /**
  * Polpo HTTP Server.
@@ -40,6 +44,8 @@ export class PolpoServer {
   private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
   private supervisorRun: Promise<void> | null = null;
+  private storage: StorageRuntime | null = null;
+  private sandboxReaper: SandboxReaper | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -59,8 +65,38 @@ export class PolpoServer {
       agents: [{ name: "dev-1", role: "developer" }],
     };
 
-    await this.orchestrator.initInteractive(
-      persistedConfig?.project ?? basename(workDir), [defaultTeam]);
+    // Init may run inside the setup request: timers and pollers it starts belong to the system
+    await withEventOrigin({ source: "system" }, () => this.orchestrator.initInteractive(
+      persistedConfig?.project ?? basename(workDir), [defaultTeam]));
+
+    // Storage buckets: mount the enabled ones on this host (the server is the only process that
+    // mounts) and let workspaces ask which mounts an agent may see.
+    const o = this.orchestrator;
+    const storage = getStorageRuntime(polpoDir, o.getVaultStore(), (payload) => o.emit("storage:changed", payload));
+    if (this.storage && this.storage !== storage) await this.storage.shutdown().catch(() => {});
+    this.storage = storage;
+    o.setStorageMountProvider(storage);
+    void withEventOrigin({ source: "system" }, () => storage.startMounts()).catch((err) => {
+      console.error("[PolpoServer] Storage mounts failed to start:", err instanceof Error ? err.message : err);
+    });
+
+    // Remote sandbox providers (Daytona, E2B): settings in settings.sandbox.providers, keys in
+    // the vault entry each one references.
+    configureRemoteProviders(o.getVaultStore(), () => o.getConfig()?.settings?.sandbox?.providers as Record<string, unknown> | undefined);
+
+    // Remote VM pool upkeep: expired and orphaned VMs, warm VMs (server process only)
+    this.sandboxReaper?.stop();
+    this.sandboxReaper = new SandboxReaper({
+      polpoDir,
+      settings: () => o.getConfig()?.settings?.sandbox,
+      onDeleted: (e) => o.emit("sandbox:destroyed", {
+        workspaceId: e.remoteId, provider: e.provider, durationMs: 0, reason: e.reason, remoteId: e.remoteId, outcome: "destroyed",
+        ...(e.owner && e.owner !== "-" ? { agentName: e.owner } : {}),
+      }),
+      onWarmCreated: (e) => o.emit("log", { level: "info", message: `[sandbox] warm ${e.provider} VM ${e.remoteId} ready` }),
+      onError: (message) => o.emit("log", { level: "warn", message: `[sandbox] ${message}` }),
+    });
+    this.sandboxReaper.start();
 
     // (Re-)create SSE bridge
     this.sseBridge?.dispose();
@@ -82,9 +118,11 @@ export class PolpoServer {
     if (!this.orchestrator?.isInitialized) return;
     if (this.supervisorRun) return;
 
-    this.supervisorRun = this.orchestrator.run()
+    // The loop outlives the request that may have woken it: its events are the system's own
+    this.supervisorRun = withEventOrigin({ source: "system" }, () => this.orchestrator.run())
       .catch((err) => {
         console.error(`[PolpoServer] Supervisor loop crashed (${reason}):`, err instanceof Error ? err.message : err);
+        this.orchestrator?.emit("orchestrator:stopped", { reason: "error", message: err instanceof Error ? err.message : String(err) });
       })
       .finally(() => {
         this.supervisorRun = null;
@@ -173,8 +211,18 @@ export class PolpoServer {
     });
   }
 
-  /** Graceful shutdown: stop orchestrator, close HTTP server. */
-  async stop(): Promise<void> {
+  private stopping?: Promise<void>;
+
+  /**
+   * Graceful shutdown: stop orchestrator, close HTTP server. Safe to call more than once: a
+   * SIGTERM reaches both this server's handler and the CLI's, and they share one shutdown.
+   */
+  stop(): Promise<void> {
+    this.stopping ??= this.shutdown();
+    return this.stopping;
+  }
+
+  private async shutdown(): Promise<void> {
     console.log("\nShutting down Polpo Server...");
     this.sseBridge?.dispose();
     this.terminalWs?.close();
@@ -187,6 +235,11 @@ export class PolpoServer {
     if (this.orchestrator?.isInitialized) {
       await this.orchestrator.gracefulStop();
     }
+    // Unmount buckets after the runners stopped using them.
+    this.sandboxReaper?.stop();
+    await this.storage?.shutdown().catch((err) => {
+      console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
+    });
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
     console.log("Polpo Server stopped.");

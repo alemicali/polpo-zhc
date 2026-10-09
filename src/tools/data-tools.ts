@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { nanoid } from "nanoid";
-import { normalizeDataTags, type DataQuery, type DataSource, type DataViewBinding, type DataViewWidget } from "../core/data-registry.js";
+import { normalizeDataTags, type DataQuery, type DataSource, type DataViewBinding, type DataViewWidget } from "@polpo-ai/core/data-registry";
 import { getDataRegistryRuntime, type DataPrincipal } from "../server/data-runtime.js";
 import type { VaultStore } from "../core/vault-store.js";
 import type { DataRegistryChangeEmitter } from "../stores/file-data-registry-store.js";

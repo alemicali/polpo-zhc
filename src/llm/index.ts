@@ -13,7 +13,7 @@ export {
 export type { SkillInfo, LoadedSkill, ParsedSource, FoundSkill, InstallResult, SkillWithAssignment, SkillIndexEntry, SkillIndex } from "./skills.js";
 export {
   // Model resolution
-  parseModelSpec, resolveModel, resolveModelSpec, resolveModelWithFallback, resolveModelWithFallbackAsync, resolveApiKey, resolveApiKeyAsync, resolveModelAuthAsync, streamSimpleWithAuth, completeSimpleWithAuth,
+  parseModelSpec, resolveModel, resolveModelSpec, resolveModelWithFallback, resolveModelWithFallbackAsync, resolveApiKey, resolveApiKeyAsync, resolveModelAuthAsync, streamSimpleWithAuth, completeSimpleWithAuth, completeWithAuth, hasProviderCredentials, hasAmbientCredentials,
   // Catalog
   listProviders, listModels, getModelInfo, buildModelListingForPrompt,
   // Cost tracking

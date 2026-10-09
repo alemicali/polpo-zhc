@@ -1,6 +1,6 @@
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, ReasoningLevel } from "./types.js";
 import type { VaultStore } from "./vault-store.js";
-import type { WhatsAppStore } from "../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 
 /**
  * Handle returned by the engine after spawning an agent.
@@ -48,6 +48,17 @@ export interface AgentHandle {
 
 /** Extra context passed to the engine at spawn time. */
 export interface SpawnContext {
+  /** The sandbox this run uses (resolved by the orchestrator) and the volumes it selected. */
+  sandbox?: import("@polpo-ai/core/sandbox").EffectiveSandbox;
+  volumes?: import("@polpo-ai/core/sandbox").ResolvedSandboxVolume[];
+  /** Called when the sandbox network rule refuses a destination (commands or browser). */
+  onNetworkDenied?: (denial: import("../sandbox/net-proxy.js").NetworkDenial) => void;
+  /** Remote sandbox lifecycle steps (ready, suspended, resumed, released). */
+  onSandboxEvent?: (event: import("../sandbox/remote.js").RemoteWorkspaceEvent) => void;
+  /** This run's id (pool bookkeeping). */
+  runId?: string;
+  /** Instance compaction settings; the agent's own settings apply on top. */
+  compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
   /** Per-task output directory (.polpo/output/<taskId>/). Agents write deliverables here. */
@@ -63,7 +74,7 @@ export interface SpawnContext {
   /** Vault store — for resolving agent credentials at runtime. */
   vaultStore?: VaultStore;
   /** WhatsApp message store — for whatsapp_* agent tools. */
-  whatsappStore?: WhatsAppStore;
+  whatsappStore?: WhatsAppMessageStore;
   /** WhatsApp send function — for whatsapp_send agent tool. */
   whatsappSendMessage?: (jid: string, text: string) => Promise<string | undefined>;
   /** WhatsApp media send function — for whatsapp_send_file agent tool. */
@@ -74,6 +85,8 @@ export interface SpawnContext {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }) => Promise<string | undefined>;
   /** WhatsApp read receipt function — for whatsapp_read markRead. */
   whatsappMarkRead?: (keys: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }[]) => Promise<void>;

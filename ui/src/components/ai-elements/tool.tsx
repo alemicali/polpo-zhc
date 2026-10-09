@@ -8,12 +8,9 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { MessageResponse } from "@/components/ai-elements/message";
-import {
-  FilePreviewDialog,
-  useFilePreview,
-  mimeFromPath,
-  previewCategory,
-} from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath, previewCategory } from "@/components/shared/file-preview-utils";
 import { cn } from "@/lib/utils";
 import { apiUrl, config } from "@/lib/config";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
@@ -27,7 +24,12 @@ import {
   Wrench,
   FileText,
   PictureInPicture2,
+  Box,
 } from "lucide-react";
+import { useChatSandbox } from "@/components/sandbox/sandbox-context";
+import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
+import { EnvFromVaultChips } from "@/components/ai-elements/env-from-vault-chips";
+import { envFromVaultRefs } from "@/components/ai-elements/env-from-vault";
 
 // ── Types ──
 
@@ -147,6 +149,26 @@ function getStateBadge(state: ToolState) {
 
 // ── Components ──
 
+/** Where the tool ran: a small badge for sandboxed tools when the chat has a sandbox. */
+function SandboxBadge({ toolName }: { toolName: string }) {
+  const sandbox = useChatSandbox();
+  if (!sandbox || sandbox.provider === "local") return null;
+  const placement = toolPlacement(toolName);
+  if (placement === "host") return null;
+  const where = sandbox.provider === "bwrap" ? "bubblewrap" : sandbox.provider === "e2b" ? "E2B" : sandbox.provider === "daytona" ? "Daytona" : sandbox.provider;
+  const label = `sandbox · ${where}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-1.5 py-0 text-[10px] leading-4 text-teal-400">
+          <Box className="h-2.5 w-2.5" />{label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs">{PLACEMENT_INFO[placement].description}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export interface ToolInvocationProps extends HTMLAttributes<HTMLDivElement> {
   tool: ToolCallInfo;
   defaultOpen?: boolean;
@@ -163,6 +185,7 @@ export function ToolInvocation({
   const [movingToBackground, setMovingToBackground] = useState(false);
   const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
+  const vaultEnv = tool.name === "bash" ? envFromVaultRefs(tool.arguments) : [];
   const { previewState, openPreview, closePreview } = useFilePreview();
 
   useEffect(() => {
@@ -271,7 +294,9 @@ export function ToolInvocation({
                 <span className="truncate">{filePath.split("/").pop()}</span>
               </button>
             )}
+            <EnvFromVaultChips refs={vaultEnv} />
             <span className="flex-1" />
+            <SandboxBadge toolName={tool.name} />
             {tool.name === "wait_for_task" && tool.state === "calling" && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -380,13 +405,22 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
   const shouldOpenForStreamingInput = cardTools.some((t) => t.state === "preparing" && !!t.argumentsText);
   const [open, setOpen] = useState(hasError || shouldOpenForStreamingInput);
 
-  useEffect(() => {
+  // Auto-open on errors / streaming input, auto-close when calls finish.
+  // Adjusted during render when the inputs change (no effect round-trip);
+  // manual toggles in between are kept until the next change.
+  const [prevAutoOpen, setPrevAutoOpen] = useState({ hasError, isCalling, shouldOpenForStreamingInput });
+  if (
+    prevAutoOpen.hasError !== hasError ||
+    prevAutoOpen.isCalling !== isCalling ||
+    prevAutoOpen.shouldOpenForStreamingInput !== shouldOpenForStreamingInput
+  ) {
+    setPrevAutoOpen({ hasError, isCalling, shouldOpenForStreamingInput });
     if (hasError || shouldOpenForStreamingInput) {
       setOpen(true);
     } else if (!isCalling) {
       setOpen(false);
     }
-  }, [hasError, isCalling, shouldOpenForStreamingInput]);
+  }
 
   const summaryIcon = isCalling
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />

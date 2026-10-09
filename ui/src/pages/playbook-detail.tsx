@@ -25,11 +25,10 @@ import type {
 import { toast } from "sonner";
 import { JsonBlock } from "@/components/json-block";
 import {
-  parseMissionData,
   MissionGraphInner,
   TaskStepCard,
 } from "@/pages/mission-detail";
-import type { MissionTaskDef } from "@/pages/mission-detail";
+import { parseMissionData, type MissionTaskDef } from "@/lib/mission-data";
 
 // ── Parameter detail card ──
 
@@ -70,19 +69,21 @@ export function PlaybookDetailPage() {
   const navigate = useNavigate();
   const { getPlaybook } = usePlaybooks();
 
-  const [playbook, setPlaybook] = useState<PlaybookDefinition | null>(null);
-  const [loading, setLoading] = useState(true);
+  // The fetched playbook is tagged with the name it was loaded for, so a
+  // route change shows the loader without resetting state in the effect.
+  const [loaded, setLoaded] = useState<{ name: string; playbook: PlaybookDefinition | null } | null>(null);
+  const loading = !loaded || loaded.name !== name;
+  const playbook = loaded && !loading ? loaded.playbook : null;
 
   useEffect(() => {
     if (!name) return;
-    setLoading(true);
     getPlaybook(name)
-      .then(setPlaybook)
+      .then((pb) => setLoaded({ name, playbook: pb }))
       .catch((e) => {
         toast.error(`Failed to load playbook: ${(e as Error).message}`);
         navigate("/playbooks");
-      })
-      .finally(() => setLoading(false));
+        setLoaded({ name, playbook: null });
+      });
   }, [name, getPlaybook, navigate]);
 
   // Parse the mission body for the graph
@@ -90,6 +91,12 @@ export function PlaybookDetailPage() {
     if (!playbook?.mission) return null;
     return parseMissionData(JSON.stringify(playbook.mission));
   }, [playbook]);
+
+  // Optional volatile team declared inline in the playbook mission
+  const missionTeam: unknown = (playbook?.mission as { team?: unknown } | undefined)?.team;
+  const volatileTeam = Array.isArray(missionTeam)
+    ? (missionTeam as Array<{ name: string; role?: string; model?: string }>)
+    : null;
 
   const taskDefs = parsed?.tasks ?? [];
   const checkpoints = parsed?.checkpoints;
@@ -250,11 +257,11 @@ export function PlaybookDetailPage() {
               )}
 
               {/* Team section if volatile team is defined */}
-              {playbook.mission && (playbook.mission as any).team && Array.isArray((playbook.mission as any).team) && (
+              {volatileTeam && (
                 <div className="mt-6">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Volatile Team</p>
                   <div className="space-y-2">
-                    {((playbook.mission as any).team as Array<{ name: string; role?: string; model?: string }>).map((member, i) => (
+                    {volatileTeam.map((member, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2">
                         <Bot className="h-4 w-4 text-primary/60 shrink-0" />
                         <div className="min-w-0">

@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Star, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 import { taskStatusConfig } from "@/lib/agent-meta";
 import type { Task } from "@polpo-ai/react";
 

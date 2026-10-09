@@ -19,6 +19,12 @@ export { attachmentsSqlite } from "./attachments.js";
 export { codingSessionsSqlite } from "./coding-sessions.js";
 export { expoTokensSqlite } from "./expo-tokens.js";
 export { pushSubscriptionsSqlite, pushVapidSqlite } from "./push-subscriptions.js";
+export { tokenUsageSqlite, contextCheckpointsSqlite } from "./usage.js";
+export { appsSqlite, dataSourcesSqlite, dataViewsSqlite, dataActivitySqlite, storageEntriesSqlite } from "./registries.js";
+export { brainItemsSqlite } from "./company-brain.js";
+export { whatsappMessagesSqlite, whatsappContactsSqlite } from "./whatsapp.js";
+export { chatQueueItemsSqlite, chatQueueSettingsSqlite } from "./chat-queue.js";
+export { roomsSqlite, roomMessagesSqlite } from "./rooms.js";
 
 // PostgreSQL schemas
 export {
@@ -41,3 +47,9 @@ export { attachmentsPg } from "./attachments.js";
 export { codingSessionsPg } from "./coding-sessions.js";
 export { expoTokensPg } from "./expo-tokens.js";
 export { pushSubscriptionsPg, pushVapidPg } from "./push-subscriptions.js";
+export { tokenUsagePg, contextCheckpointsPg } from "./usage.js";
+export { appsPg, dataSourcesPg, dataViewsPg, dataActivityPg, storageEntriesPg } from "./registries.js";
+export { brainItemsPg } from "./company-brain.js";
+export { whatsappMessagesPg, whatsappContactsPg } from "./whatsapp.js";
+export { chatQueueItemsPg, chatQueueSettingsPg } from "./chat-queue.js";
+export { roomsPg, roomMessagesPg } from "./rooms.js";

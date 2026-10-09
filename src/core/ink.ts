@@ -18,8 +18,11 @@
  */
 
 import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
-import { join, basename, resolve } from "node:path";
+import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
+import { resolveSource } from "./git-source.js";
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
+import { PROVIDER_ENV_MAP } from "@polpo-ai/core";
 
 import type { AgentConfig, PolpoFileConfig } from "./types.js";
 import type { PlaybookDefinition } from "./playbook.js";
@@ -37,6 +40,8 @@ export function stripInkMetadata(agent: AgentConfig): AgentConfig {
   delete (clean as any).version;
   delete (clean as any).author;
   delete (clean as any).tags;
+  // Where an agent's tools run is decided by whoever installs it, never by a template
+  delete (clean as any).sandbox;
   return clean;
 }
 
@@ -204,6 +209,8 @@ export function validateInkAgent(def: unknown): InkValidationResult {
 
   if (typeof obj.name !== "string" || !obj.name) {
     errors.push("Missing or invalid 'name' field");
+  } else if (isReservedVaultOwner(obj.name)) {
+    errors.push(`Invalid agent name '${obj.name}' — names starting with "$" are reserved`);
   }
 
   // Security warnings
@@ -263,6 +270,9 @@ export function validateInkCompany(def: unknown): InkValidationResult {
   for (const team of teams) {
     const agents = (Array.isArray(team.agents) ? team.agents : []) as Array<Record<string, unknown>>;
     for (const agent of agents) {
+      if (isReservedVaultOwner(agent.name)) {
+        errors.push(`Invalid agent name '${String(agent.name)}' in team '${team.name ?? "unknown"}' — names starting with "$" are reserved`);
+      }
       if (typeof agent.systemPrompt === "string" && agent.systemPrompt.length > 0) {
         warnings.push(`Agent '${agent.name ?? "unknown"}' in team '${team.name ?? "unknown"}' has a custom systemPrompt — review for prompt injection`);
       }
@@ -276,37 +286,15 @@ export function validateInkCompany(def: unknown): InkValidationResult {
 
 /**
  * Parse an Ink source identifier into a structured source object.
- * Supports: owner/repo, full GitHub URLs, local paths.
- * Reuses the same logic as parseSkillSource() from the skills system.
+ * Supports: owner/repo, https GitHub URLs, local paths.
+ *
+ * Strict: anything that is not a valid GitHub repo reference or a local path
+ * throws InvalidSourceError — the result is passed to `git clone`, so
+ * arbitrary strings (shell metacharacters, `ext::` URLs, options) must never
+ * get through. See ./git-source.ts.
  */
 export function parseInkSource(input: string): InkSource {
-  // Local path
-  if (input.startsWith("/") || input.startsWith("./") || input.startsWith("../") || input === ".") {
-    return { type: "local", url: resolve(input) };
-  }
-
-  // Full GitHub URL
-  const ghUrlMatch = input.match(/github\.com\/([^/]+\/[^/]+)/);
-  if (ghUrlMatch) {
-    const ownerRepo = ghUrlMatch[1].replace(/\.git$/, "");
-    return {
-      type: "github",
-      url: `https://github.com/${ownerRepo}.git`,
-      ownerRepo,
-    };
-  }
-
-  // owner/repo shorthand
-  if (/^[^/]+\/[^/]+$/.test(input)) {
-    return {
-      type: "github",
-      url: `https://github.com/${input}.git`,
-      ownerRepo: input,
-    };
-  }
-
-  // Assume it's a git URL
-  return { type: "github", url: input };
+  return resolveSource(input);
 }
 
 // ── Content Hashing ────────────────────────────────────────────────────
@@ -597,4 +585,140 @@ export async function uninstallInkPackages(
   }
 
   return removed;
+}
+
+// ── Import sanitisation (providers / settings) ─────────────────────────
+
+/**
+ * Settings keys an Ink company package may fill in (only when missing):
+ * inert numeric limits and toggles only.
+ *
+ * Everything else is never imported, notably:
+ *  - approvalGates (condition.expression is compiled and run server-side),
+ *  - notifications / sla channels (webhook URLs, tokens, data exfiltration),
+ *  - storage / databaseUrl / workDir, emailAllowedDomains,
+ *  - branding (external logo URLs), enableScheduler, orchestratorSkills,
+ *  - defaultRetryPolicy / modelAllowlist (model & agent routing).
+ */
+export const INK_IMPORTABLE_SETTINGS = new Set<string>([
+  "maxRetries", "logLevel", "taskTimeout", "staleThreshold",
+  "enableVolatileTeams", "volatileCleanup", "maxFixAttempts",
+  "maxQuestionRounds", "maxResolutionAttempts", "autoCorrectExpectations",
+  "reasoning", "logRetentionDays", "maxAssessmentRetries", "maxConcurrency",
+  "defaultQualityThreshold",
+]);
+
+/**
+ * Model-routing settings: they can send orchestrator traffic to a provider
+ * declared by the package, so they are only imported together with custom
+ * providers (`polpo ink add --allow-custom-providers`).
+ */
+export const INK_MODEL_ROUTING_SETTINGS = new Set<string>(["orchestratorModel", "imageModel"]);
+
+/**
+ * Merge company settings into `target` (fill-missing only), restricted to
+ * INK_IMPORTABLE_SETTINGS (+ INK_MODEL_ROUTING_SETTINGS when
+ * `allowModelRouting`). Returns the keys applied and the keys skipped.
+ */
+export function mergeInkSettings(
+  target: Record<string, unknown>,
+  incoming: unknown,
+  opts: { allowModelRouting?: boolean } = {},
+): { applied: string[]; skipped: string[] } {
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return { applied, skipped };
+  for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
+    if (value == null) continue;
+    const allowed = INK_IMPORTABLE_SETTINGS.has(key)
+      || (opts.allowModelRouting === true && INK_MODEL_ROUTING_SETTINGS.has(key));
+    if (!allowed) {
+      skipped.push(key);
+      continue;
+    }
+    if (target[key] == null) {
+      target[key] = value;
+      applied.push(key);
+    }
+  }
+  return { applied, skipped };
+}
+
+let builtinProviderIds: Set<string> | undefined;
+
+/**
+ * Provider ids that resolve real credentials (env API keys / OAuth) — an
+ * Ink package must never be able to point them at another endpoint.
+ */
+export async function getBuiltinProviderIds(): Promise<Set<string>> {
+  if (builtinProviderIds) return builtinProviderIds;
+  const ids = new Set<string>(Object.keys(PROVIDER_ENV_MAP).map((id) => id.toLowerCase()));
+  try {
+    const { getBuiltinProviders } = await import("@earendil-works/pi-ai/providers/all");
+    for (const id of getBuiltinProviders()) ids.add(String(id).toLowerCase());
+  } catch { /* catalog unavailable — env map is still enforced */ }
+  builtinProviderIds = ids;
+  return ids;
+}
+
+export interface InkProviderDecision {
+  name: string;
+  action: "added" | "skipped";
+  reason?: string;
+}
+
+/**
+ * Decide which providers from an Ink company package may be added.
+ *
+ * - Built-in provider ids (anthropic, openai, ...) are ALWAYS skipped: a
+ *   package setting `baseUrl` on them would send the user's real API key to
+ *   an arbitrary host.
+ * - Custom providers are only added when `allowCustom` is true (explicit
+ *   user opt-in in the CLI); agent/orchestrator tools never pass it.
+ * - Existing providers are never touched.
+ *
+ * Mutates `target` (the project's providers map) and returns per-provider decisions.
+ */
+export async function mergeInkProviders(
+  target: Record<string, unknown>,
+  incoming: unknown,
+  opts: { allowCustom?: boolean } = {},
+): Promise<InkProviderDecision[]> {
+  const decisions: InkProviderDecision[] = [];
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return decisions;
+  const builtins = await getBuiltinProviderIds();
+  for (const [name, providerConfig] of Object.entries(incoming as Record<string, unknown>)) {
+    if (builtins.has(name.toLowerCase())) {
+      decisions.push({ name, action: "skipped", reason: "built-in provider — packages cannot override its endpoint or auth" });
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(target, name)) {
+      decisions.push({ name, action: "skipped", reason: "already configured" });
+      continue;
+    }
+    if (!opts.allowCustom) {
+      decisions.push({ name, action: "skipped", reason: "custom providers are not imported automatically" });
+      continue;
+    }
+    if (!providerConfig || typeof providerConfig !== "object" || Array.isArray(providerConfig)) {
+      decisions.push({ name, action: "skipped", reason: "invalid provider config" });
+      continue;
+    }
+    // Only structural fields; never auth material or headers. Mark the entry
+    // explicitly as package-imported so it can never be mistaken for a
+    // hand-written (admin) legacy provider — which custom-gateway support
+    // may allow to reach private networks.
+    const { baseUrl, api, models } = providerConfig as Record<string, unknown>;
+    const clean: Record<string, unknown> = {
+      preset: "ink",
+      auth: { type: "none" },
+      allowPrivateNetwork: false,
+    };
+    if (typeof baseUrl === "string") clean.baseUrl = baseUrl;
+    if (typeof api === "string") clean.api = api;
+    if (Array.isArray(models)) clean.models = models;
+    target[name] = clean;
+    decisions.push({ name, action: "added" });
+  }
+  return decisions;
 }

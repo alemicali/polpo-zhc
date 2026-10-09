@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
+import { normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
@@ -30,6 +31,10 @@ export class TaskRunner {
   private lastActivity = new Map<string, string>();
   /** Tracks files already seen per task to emit incremental file:changed events */
   private knownFiles = new Map<string, Set<string>>();
+  /** Outcome ids already announced per running task (task:outcome). */
+  private knownOutcomes = new Map<string, Set<string>>();
+  /** Compactions already announced per running task (context:compacted). */
+  private knownCompactions = new Map<string, number>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -40,6 +45,14 @@ export class TaskRunner {
   async collectResults(onResult: (taskId: string, result: TaskResult) => Promise<void> | void): Promise<void> {
     const terminalRuns = await this.ctx.runStore.getTerminalRuns();
     for (const run of terminalRuns) {
+      const runSandbox = (run.config as { sandbox?: { provider?: string } } | undefined)?.sandbox;
+      // remote VMs report their own release (pooled or deleted, running time) from the runner
+      if (runSandbox?.provider && runSandbox.provider !== "daytona" && runSandbox.provider !== "e2b") {
+        this.ctx.emitter.emit("sandbox:destroyed", {
+          workspaceId: run.id, provider: runSandbox.provider,
+          durationMs: Math.max(0, Date.now() - Date.parse(run.startedAt)), reason: run.status === "failed" ? "error" : "done",
+        });
+      }
       const recoveredContinuation = await this.recoverInterruptedDirections(run);
       const task = await this.ctx.registry.getTask(run.taskId);
       const queuedContinuation = (task?.status === "pending" || recoveredContinuation) && this.ctx.taskControlStore
@@ -227,6 +240,19 @@ export class TaskRunner {
 
     const activeRuns = await this.ctx.runStore.getActiveRuns();
     for (const run of activeRuns) {
+      // 0. The runner process is gone (crashed, killed by the system) but the run is still open:
+      // fail it now instead of waiting for the stale check, so retries start right away.
+      if (run.status === "running" && run.pid > 0 && !this.isProcessAlive(run.pid)) {
+        const elapsed = Date.now() - new Date(run.startedAt).getTime();
+        this.ctx.emitter.emit("log", { level: "error", message: `[${run.taskId}] Runner process ${run.pid} exited unexpectedly` });
+        await this.ctx.runStore.completeRun(run.id, "failed", {
+          exitCode: 1, stdout: "", duration: elapsed,
+          stderr: `The agent process (pid ${run.pid}) exited unexpectedly without reporting a result. It may have crashed or been killed by the system; its error output is in .polpo/tmp/run-${run.id}.stderr.log.`,
+        });
+        this.staleWarned.delete(run.taskId);
+        continue;
+      }
+
       // 1. Task timeout (hard kill)
       const task = await this.ctx.registry.getTask(run.taskId);
       const timeout = task?.maxDuration ?? defaultTimeout;
@@ -310,13 +336,52 @@ export class TaskRunner {
       }
     }
 
+    // Announce outcomes as the agent registers them, not only when the task ends
+    for (const r of active) {
+      if (!r.outcomes?.length) continue;
+      let known = this.knownOutcomes.get(r.taskId);
+      if (!known) { known = new Set(); this.knownOutcomes.set(r.taskId, known); }
+      const fresh = r.outcomes.filter((o) => !known!.has(o.id));
+      if (fresh.length === 0) continue;
+      for (const o of fresh) known.add(o.id);
+      this.ctx.emitter.emit("task:outcome", {
+        taskId: r.taskId,
+        outcomes: fresh.map((o) => ({ id: o.id, type: o.type, label: o.label, ...(o.mimeType ? { mimeType: o.mimeType } : {}), ...(o.path ? { path: o.path } : {}) })),
+      });
+    }
+
+    // Announce context compactions of running agents; their durable facts go to the agent's memory
+    for (const r of active) {
+      const count = r.activity.compactions ?? 0;
+      if (count <= (this.knownCompactions.get(r.taskId) ?? 0) || !r.activity.lastCompaction) continue;
+      this.knownCompactions.set(r.taskId, count);
+      const { at: _at, durableFacts, ...info } = r.activity.lastCompaction;
+      let savedFacts = 0;
+      if (durableFacts?.length) {
+        const scope = agentMemoryScope(r.agentName);
+        // incremental summaries repeat earlier facts: only new ones, a few per compaction
+        const known = ((await this.ctx.memoryStore.get(scope).catch(() => "")) ?? "").toLowerCase();
+        for (const fact of durableFacts.slice(0, 10)) {
+          const line = fact.length > 300 ? `${fact.slice(0, 297)}...` : fact;
+          if (known.includes(line.toLowerCase())) continue;
+          try { await this.ctx.memoryStore.append(line, scope); savedFacts += 1; } catch { /* memory is best effort */ }
+        }
+      }
+      this.ctx.emitter.emit("context:compacted", {
+        scope: "task", taskId: r.taskId, runId: r.id, agentName: r.agentName, ...info,
+        ...(savedFacts ? { savedFacts } : {}),
+      });
+    }
+
     // Cleanup stale entries for tasks no longer active
+    for (const taskId of this.knownCompactions.keys()) if (!seenTaskIds.has(taskId)) this.knownCompactions.delete(taskId);
     for (const taskId of this.lastActivity.keys()) {
       if (!seenTaskIds.has(taskId)) {
         this.lastActivity.delete(taskId);
         this.knownFiles.delete(taskId);
       }
     }
+    for (const taskId of this.knownOutcomes.keys()) if (!seenTaskIds.has(taskId)) this.knownOutcomes.delete(taskId);
 
     await this.ctx.registry.setState({
       processes: active.map(r => ({
@@ -499,6 +564,52 @@ export class TaskRunner {
       taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
     }
 
+    // Sandbox: resolve the cascade instance → agent → mission → task here, where all levels are
+    // known. Mission and task may only tighten; what they cannot get is reported.
+    // The mission document holds both levels: `sandbox` for the mission, and per task.
+    let missionSandbox: SandboxSettings | undefined;
+    let taskSandbox: SandboxSettings | undefined;
+    if (task.missionId || task.group) {
+      try {
+        const mission = task.missionId
+          ? await this.ctx.registry.getMission?.(task.missionId)
+          : await this.ctx.registry.getMissionByName?.(task.group!);
+        const doc = mission?.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
+        missionSandbox = normalizeSandboxSettings(doc?.sandbox);
+        taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
+      } catch { /* a mission document without a sandbox section */ }
+    }
+    // a volume selected by a mission or task must be granted above (open Polpo's narrowing),
+    // and every volume must be a storage entry granted to the agent: otherwise the run fails
+    let sandbox: ReturnType<typeof resolveSandbox>;
+    let volumes: ResolvedSandboxVolume[] = [];
+    try {
+      sandbox = resolveSandbox(
+        {
+          instance: normalizeSandboxSettings(this.ctx.config.settings.sandbox),
+          agent: normalizeSandboxSettings(agent.sandbox),
+          mission: missionSandbox,
+          task: taskSandbox,
+        },
+        { scope: "task", agentTools: agent.allowedTools, available: this.ctx.sandboxProviders?.() },
+      );
+      // temporary bucket keys (remote sandboxes) live as long as the task may run, plus a margin
+      const ttlSeconds = task.maxDuration ? Math.ceil(task.maxDuration / 1000) + 300 : undefined;
+      if (sandbox.volumes?.length && this.ctx.sandboxVolumes) {
+        volumes = await this.ctx.sandboxVolumes(agent.name, sandbox.volumes, sandbox.provider === "daytona" || sandbox.provider === "e2b" ? "remote" : "host", { ttlSeconds });
+      }
+    } catch (err) {
+      if (!(err instanceof SandboxVolumeGrantError)) throw err;
+      const message = `${err.message}. Grant the volume to agent "${agent.name}" (Storage → the entry → access) or remove it from the mission/task sandbox.`;
+      this.ctx.emitter.emit("log", { level: "error", message: `[${task.id}] ${message}` });
+      await this.ctx.registry.updateTask(task.id, { result: { exitCode: 1, stdout: "", stderr: message, duration: 0 } }).catch(() => undefined);
+      await this.ctx.registry.transition(task.id, "failed");
+      return;
+    }
+    for (const d of sandbox.denied) {
+      this.ctx.emitter.emit("sandbox:override-denied", { scope: "task", taskId: task.id, agentName: agent.name, ...d });
+    }
+
     // WhatsApp tools: if agent has whatsapp_* in allowedTools and a WhatsApp channel is configured,
     // pass the DB path and profile path so the runner can create its own store + connection
     let whatsappDbPath: string | undefined;
@@ -528,6 +639,9 @@ export class TaskRunner {
       notifySocket: this.ctx.notifySocketPath,
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
       reasoning: this.ctx.config.settings.reasoning,
+      compaction: this.ctx.config.settings.compaction,
+      sandbox,
+      ...(volumes.length ? { volumes } : {}),
       whatsappDbPath,
       whatsappProfilePath,
     };
@@ -554,6 +668,10 @@ export class TaskRunner {
         taskId: task.id,
         agentName: agent.name,
         taskTitle: task.title,
+      });
+      this.ctx.emitter.emit("sandbox:created", {
+        workspaceId: runId, provider: sandbox.provider, scope: "task", taskId: task.id, runId,
+        agentName: agent.name, network: sandbox.network.mode,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

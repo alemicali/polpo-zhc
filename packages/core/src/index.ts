@@ -13,6 +13,9 @@ export { VALID_TRANSITIONS, isValidTransition, assertValidTransition } from "./s
 // ── Schemas (Zod validation) ─────────────────────────────────────────────
 export * from "./schemas.js";
 
+// ── Custom providers / AI gateways (schema, presets, helpers) ────────────
+export * from "./provider-config.js";
+
 // ── Hooks ────────────────────────────────────────────────────────────────
 export { HookRegistry } from "./hooks.js";
 export type {
@@ -31,8 +34,9 @@ export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";
-export type { LogStore, LogEntry, SessionInfo } from "./log-store.js";
-export type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState } from "./session-store.js";
+export type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "./log-store.js";
+export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState, ForkSessionOptions, ForkSessionResult, ChatQueueItem, ChatQueueState, ChatQueueStore } from "./session-store.js";
+export type { Room, RoomKind, RoomReplyMode, RoomSettings, RoomMessage, RoomAuthorKind, NewRoomMessage, RoomStore } from "./room-store.js";
 export type { CodingSessionStore, CodingSessionState, CodingWorkspace, CodingTerminal, CodingCodeServerSession } from "./coding-session-store.js";
 export type { ApprovalStore } from "./approval-store.js";
 export type { NotificationStore, NotificationRecord, NotificationStatus } from "./notification-store.js";
@@ -40,6 +44,7 @@ export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
 export type { VaultStore } from "./vault-store.js";
+export { isReservedVaultOwner, RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";
 export type { AttachmentStore, Attachment } from "./attachment-store.js";
 
@@ -58,8 +63,20 @@ export type { AgentPromptOptions } from "./agent-prompt.js";
 export {
   discoverSkills, loadAgentSkills, listSkillsWithAssignments,
   buildSkillPrompt, parseSkillFrontmatter, extractSkillBody,
+  sanitizeFrontmatterValue, buildSkillFrontmatter,
 } from "./skills-reader.js";
 export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillIndexEntry } from "./skills-reader.js";
+
+// ── Source parsing & secret redaction (security helpers) ──────────────
+export {
+  parseGitSource, parseGitHubSource, isLocalSourcePath, shellQuote,
+  InvalidSourceError, GITHUB_OWNER_REPO_RE,
+} from "./git-source.js";
+export type { GitSource } from "./git-source.js";
+export {
+  redactSecrets, restoreRedactedSecrets, maskSecret, maskUrlPassword, maskCapabilityUrl,
+  isSecretKey, isRedactedValue, isEnvReference, REDACTED_MARK, UnrestorableSecretError, urlOrigin,
+} from "./secret-redaction.js";
 
 // ── Model Spec Parsing ─────────────────────────────────────────────────
 export { parseModelSpec, PROVIDER_ENV_MAP } from "./model-spec.js";
@@ -80,6 +97,28 @@ export type {
   ContextMessageLike,
   ContextModelLimits,
 } from "./context-compaction.js";
+export {
+  ContextCompactor,
+  checkpointMessage,
+  defaultPinned,
+  serializeForSummary,
+  buildSummaryPrompt,
+  parseSummary,
+  isContextOverflowError,
+  CHECKPOINT_START,
+  CHECKPOINT_END,
+} from "./context-compactor.js";
+export type {
+  CompactionSettings,
+  CompactionInfo,
+  CompactionReason,
+  CompactionMode,
+  ContextSummarizer,
+  SummaryRequest,
+  SummaryResult,
+  CompactorState,
+  ContextCompactorOptions,
+} from "./context-compactor.js";
 
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
@@ -106,7 +145,8 @@ export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
 
 // ── MissionExecutor ─────────────────────────────────────────────────────
-export { MissionExecutor } from "./mission-executor.js";
+export { MissionExecutor, MISSION_EDIT } from "./mission-executor.js";
+export type { MissionEdit } from "./mission-executor.js";
 
 // ── TaskRunner ──────────────────────────────────────────────────────────
 export { TaskRunner } from "./task-runner.js";
@@ -146,3 +186,34 @@ export { assessTask, runCheck, runMetric, type AssessmentDeps, type CheckProgres
 export { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./assessment-scoring.js";
 export { validateReviewPayload, ReviewPayloadSchema, ReviewScoreSchema, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./assessment-schemas.js";
 export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
+
+// ── Sandboxes and storage mounts ────────────────────────────────────────
+export {
+  resolveSandbox, normalizeSandboxSettings, toolPlacement, TOOL_PLACEMENT, DEFAULT_LIFECYCLE, DEFAULT_ISOLATION, REMOTE_SANDBOX_PROVIDERS, effectiveLifecycle, resolveRuntimeLevels, SandboxVolumeGrantError, SANDBOX_VOLUME_ROOT, SANDBOX_VOLUME_NAME_PATTERN, readsExternalContent, LOCAL_PROVIDERS, PROVIDER_ISOLATION, EXTERNAL_CONTENT_TOOLS,
+} from "./sandbox.js";
+export type {
+  Workspace, ExecOptions, ExecResult, WorkspaceFileStat, WorkspaceEntry, SandboxProviderId, SandboxNetwork,
+  SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
+  StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider, SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack, SandboxVolumeStrategy, SandboxVolumeSelection, ResolvedSandboxVolume,
+} from "./sandbox.js";
+// open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
+export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
+export type { RuntimeSandboxOptions, RuntimeSandboxLifecycleOptions, RuntimeSandboxVolumeSelection } from "./runtime-sandbox.js";
+export type {
+  SandboxProvider, SandboxSession, SandboxLifecycle, SandboxUsage, SandboxRuntimeEvent,
+  SandboxRuntimeEventType, SandboxRuntimeOperation, SandboxAcquisitionSource, SandboxReleaseOutcome, SandboxLifecycleInfo,
+  ResolvedSandboxVolumeAttachment, SandboxWorkspaceContext,
+} from "./sandbox-provider.js";
+export {
+  STORAGE_SLUG_PATTERN, 
+  normalizeStoragePrefix, normalizeStoragePath, storageGrantFor, storageAccessFor, storagePathAllowed,
+  assertStorageAccess, scopeStorageListing, validateStorageEntry, VOLUME_REVISION_OBJECT,
+} from "./storage-registry.js";
+export type {
+  StorageProvider, StorageDriver, StorageAccess, StorageGrant, StorageCacheOptions, StorageEntry, CreateStorageEntry,
+  StorageRegistryChangeEvent, StorageRegistryChangeEmitter, StorageRegistryStore, StorageCredentials,
+  StorageCredentialStatus, StorageAccessGrant, StorageVolumeSettings,
+} from "./storage-registry.js";
+
+export { isVaultRef, normalizeVaultRef, describeVaultRef, resolveVaultRef, pickCredential, CREDENTIAL_NAMES } from "./vault-ref.js";
+export type { VaultRef } from "./vault-ref.js";

@@ -1,6 +1,6 @@
 {
   "name": "@polpo-ai/core",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Pure business logic, types, schemas, and store interfaces for the Polpo AI agent orchestration platform",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,14 @@
     "./schemas": {
       "types": "./dist/schemas.d.ts",
       "import": "./dist/schemas.js"
+    },
+    "./provider-config": {
+      "types": "./dist/provider-config.d.ts",
+      "import": "./dist/provider-config.js"
+    },
+    "./provider-presets": {
+      "types": "./dist/provider-presets.d.ts",
+      "import": "./dist/provider-presets.js"
     },
     "./events": {
       "types": "./dist/events.d.ts",
@@ -61,6 +69,10 @@
     "./session-store": {
       "types": "./dist/session-store.d.ts",
       "import": "./dist/session-store.js"
+    },
+    "./room-store": {
+      "types": "./dist/room-store.d.ts",
+      "import": "./dist/room-store.js"
     },
     "./coding-session-store": {
       "types": "./dist/coding-session-store.d.ts",
@@ -205,6 +217,50 @@
     "./retry": {
       "types": "./dist/retry.d.ts",
       "import": "./dist/retry.js"
+    },
+    "./app-registry": {
+      "types": "./dist/app-registry.d.ts",
+      "import": "./dist/app-registry.js"
+    },
+    "./data-registry": {
+      "types": "./dist/data-registry.d.ts",
+      "import": "./dist/data-registry.js"
+    },
+    "./company-brain": {
+      "types": "./dist/company-brain.d.ts",
+      "import": "./dist/company-brain.js"
+    },
+    "./token-usage": {
+      "types": "./dist/token-usage.d.ts",
+      "import": "./dist/token-usage.js"
+    },
+    "./context-checkpoint": {
+      "types": "./dist/context-checkpoint.d.ts",
+      "import": "./dist/context-checkpoint.js"
+    },
+    "./whatsapp-store": {
+      "types": "./dist/whatsapp-store.d.ts",
+      "import": "./dist/whatsapp-store.js"
+    },
+    "./git-source": {
+      "types": "./dist/git-source.d.ts",
+      "import": "./dist/git-source.js"
+    },
+    "./secret-redaction": {
+      "types": "./dist/secret-redaction.d.ts",
+      "import": "./dist/secret-redaction.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "import": "./dist/sandbox.js"
+    },
+    "./vault-ref": {
+      "types": "./dist/vault-ref.d.ts",
+      "import": "./dist/vault-ref.js"
+    },
+    "./storage-registry": {
+      "types": "./dist/storage-registry.d.ts",
+      "import": "./dist/storage-registry.js"
     }
   },
   "sideEffects": false,

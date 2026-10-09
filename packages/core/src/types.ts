@@ -349,6 +349,10 @@ export interface AgentConfig {
    *  "off" disables thinking (default). Higher levels = more reasoning tokens = better quality but slower + more expensive.
    *  Falls back to the global `settings.reasoning` when not set. */
   reasoning?: ReasoningLevel;
+  /** Context compaction for this agent's runs and chats (overrides `settings.compaction`). */
+  compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Where this agent's tools run (sandbox), set by a person: overrides the instance default. */
+  sandbox?: import("./sandbox.js").SandboxSettings;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -416,6 +420,10 @@ export interface AgentActivity {
   lastUpdate: string;       // ISO timestamp of last activity
   summary?: string;         // agent's last text output / message
   sessionId?: string;       // SDK session ID for transcript access
+  /** Context compactions in this run so far. */
+  compactions?: number;
+  /** The latest compaction, with the durable facts it found (saved to the agent's memory). */
+  lastCompaction?: import("./context-compactor.js").CompactionInfo & { at: string; durableFacts?: string[] };
 }
 
 export interface AgentProcess {
@@ -664,6 +672,12 @@ export interface RunnerConfig {
   emailAllowedDomains?: string[];
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
+  /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
+  compaction?: import("./context-compactor.js").CompactionSettings;
+  /** The sandbox this run uses, already resolved from the cascade by the orchestrator. */
+  sandbox?: import("./sandbox.js").EffectiveSandbox;
+  /** Volumes this run selected (host mount paths for local sandboxes, buckets and keys for remote ones). */
+  volumes?: import("./sandbox.js").ResolvedSandboxVolume[];
   /** WhatsApp message DB path (for whatsapp_* agent tools). */
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
@@ -702,16 +716,61 @@ export interface PolpoFileConfigRaw {
 
 // === Provider Config ===
 
+/** Wire protocols a custom provider / gateway can speak. */
+export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages" | "azure-openai-responses";
+
+/**
+ * How the provider key is sent to a custom endpoint.
+ * - none: keyless (local Ollama / vLLM / LM Studio)
+ * - bearer: `Authorization: Bearer <key>`
+ * - x-api-key: `x-api-key: <key>`
+ * - header: `<headerName>: <prefix><key>`
+ */
+export interface ProviderAuthConfig {
+  type: "none" | "bearer" | "x-api-key" | "header";
+  /** Header name for type "header" (e.g. "api-key", "cf-aig-authorization"). */
+  headerName?: string;
+  /** Optional value prefix for type "header" (e.g. "Bearer "). */
+  prefix?: string;
+  /** Environment variable used as fallback when no key is stored in the vault. */
+  envVar?: string;
+}
+
+/**
+ * Provider entry in polpo.json `providers`.
+ *
+ * For built-in pi-ai providers (anthropic, openai, ...) only `baseUrl`/`api`/`models`
+ * act as overrides. Any other id is a custom provider / gateway. Secrets never live
+ * here: keys and secret headers are stored encrypted in the vault (owner "$providers").
+ */
 export interface ProviderConfig {
+  /** Display name. */
+  label?: string;
+  /** Wizard preset this provider was created from (openrouter, litellm, ollama, ...). */
+  preset?: string;
+  /** Built-in provider this endpoint proxies (catalog metadata is reused for its models). */
+  proxyFor?: string;
   /** Override base URL for the provider (e.g. custom proxy, Ollama, vLLM). */
   baseUrl?: string;
   /** API compatibility mode for custom endpoints. */
-  api?: "openai-completions" | "openai-responses" | "anthropic-messages";
+  api?: ProviderApi;
+  /** How the key is sent. Default: bearer (x-api-key for anthropic-messages); legacy entries without auth are keyless. */
+  auth?: ProviderAuthConfig;
+  /** Static, NON-secret headers sent with every request. */
+  headers?: Record<string, string>;
+  /** Provider-wide compatibility flags (whitelisted per API). */
+  compat?: Record<string, unknown>;
+  /** Allow private/internal network targets (localhost, RFC1918, Tailscale CGNAT, ULA). */
+  allowPrivateNetwork?: boolean;
+  /** Request timeout in ms. */
+  timeoutMs?: number;
+  /** SDK-level retries. */
+  maxRetries?: number;
   /** Custom model definitions for this provider (used with custom endpoints). */
   models?: CustomModelDef[];
 }
 
-/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, etc.) */
+/** Custom model definition for non-catalog providers (Ollama, vLLM, LM Studio, gateways, etc.) */
 export interface CustomModelDef {
   /** Model ID used in API calls. */
   id: string;
@@ -723,10 +782,12 @@ export interface CustomModelDef {
   input?: ("text" | "image")[];
   /** Cost per million tokens. Default: all zeros (free/local). */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  /** Context window size in tokens. Default: 200000 */
+  /** Context window size in tokens. Default: 128000 */
   contextWindow?: number;
   /** Max output tokens. Default: 8192 */
   maxTokens?: number;
+  /** Per-model compatibility flags (override provider-level compat). */
+  compat?: Record<string, unknown>;
 }
 
 // === Model Config (primary + fallbacks) ===
@@ -810,6 +871,13 @@ export interface PolpoSettings {
   /** PostgreSQL connection URL (required when storage is "postgres").
    *  Example: "postgres://user:pass@localhost:5432/polpo" */
   databaseUrl?: string;
+  /** Days of orchestrator event logs to keep; older ones are removed at startup and daily.
+   *  0 keeps them forever. Default: 30 */
+  logRetentionDays?: number;
+  /** How long conversations and task runs are compacted when they fill the model's window. */
+  compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Where agents' tools run: default sandbox and what lower levels may choose. */
+  sandbox?: import("./sandbox.js").SandboxSettings;
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */
@@ -1027,6 +1095,14 @@ export interface ChannelGatewayConfig {
    * (e.g. messages in from a webhook, replies out on Telegram). Unset = reply here.
    */
   replyTo?: ChannelReplyTarget;
+  /**
+   * Which group messages get an answer. "mentions" (default): mentions, replies to the bot and
+   * commands. "intent": those, plus the messages a fast classifier (TypeSafe Jev, needs
+   * TYPESAFE_API_KEY) judges this bot's agent should answer; without a key it stays "mentions".
+   */
+  groupReplies?: "mentions" | "intent";
+  /** groupReplies "intent": how sure the classifier must be (0–1) before the agent joins in. Default 0.7. */
+  intentThreshold?: number;
 }
 
 /** Channel a conversation reply is delivered through. */

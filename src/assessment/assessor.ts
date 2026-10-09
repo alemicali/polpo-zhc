@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { getPolpoDir } from "../core/constants.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
+import type { Shell } from "@polpo-ai/core/shell";
 import {
   assessTask as coreAssessTask,
   runCheck as coreRunCheck,
@@ -44,10 +45,19 @@ function getShell(): NodeShell {
   return _shell;
 }
 
-function makeDeps(cwd: string): AssessmentDeps {
+/**
+ * Where the commands of the checks run. By default on this machine (NodeShell); a task that ran
+ * in a sandbox has its checks run in that sandbox, whose shell cannot see .polpo.
+ */
+export interface AssessOptions {
+  shell?: Shell;
+}
+
+function makeDeps(cwd: string, options?: AssessOptions): AssessmentDeps {
   return {
     fs: getFS(),
-    shell: getShell(),
+    shell: options?.shell ?? getShell(),
+    ...(options?.shell ? { inlineScripts: true } : {}),
     polpoDir: getPolpoDir(cwd),
     runLLMReview,
   };
@@ -61,15 +71,17 @@ export async function runCheck(
   onProgress?: (msg: string) => void,
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
+  options?: AssessOptions,
 ): Promise<CheckResult> {
-  return coreRunCheck(makeDeps(cwd), expectation, cwd, onProgress, context, reasoning);
+  return coreRunCheck(makeDeps(cwd, options), expectation, cwd, onProgress, context, reasoning);
 }
 
 export async function runMetric(
   metric: TaskMetric,
   cwd: string,
+  options?: AssessOptions,
 ): Promise<MetricResult> {
-  return coreRunMetric(makeDeps(cwd), metric, cwd);
+  return coreRunMetric(makeDeps(cwd, options), metric, cwd);
 }
 
 export async function assessTask(
@@ -79,6 +91,7 @@ export async function assessTask(
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
   onCheckProgress?: (event: import("@polpo-ai/core/assessor").CheckProgressEvent) => void,
+  options?: AssessOptions,
 ): Promise<AssessmentResult> {
-  return coreAssessTask(makeDeps(cwd), task, cwd, onProgress, context, reasoning, onCheckProgress);
+  return coreAssessTask(makeDeps(cwd, options), task, cwd, onProgress, context, reasoning, onCheckProgress);
 }

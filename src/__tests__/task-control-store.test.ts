@@ -129,6 +129,23 @@ describe("FileTaskControlStore", () => {
     ]);
   });
 
+  it("lists background waits filtered by state and session", async () => {
+    const waiting = await store.createBackgroundWait({ taskId: "task-1", sessionId: "session-1" });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const ready = await store.createBackgroundWait({ taskId: "task-2", sessionId: "session-2" });
+    await store.markBackgroundWaitReady(ready.id, "done");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const cancelled = await store.createBackgroundWait({ taskId: "task-3", sessionId: "session-1" });
+    await store.cancelBackgroundWait(cancelled.id);
+
+    const ids = (waits: Array<{ id: string }>) => waits.map((w) => w.id);
+    expect(ids(await store.listBackgroundWaits())).toEqual([cancelled.id, ready.id, waiting.id]);
+    expect(ids(await store.listBackgroundWaits(undefined, ["waiting"]))).toEqual([waiting.id]);
+    expect(ids(await store.listBackgroundWaits(undefined, ["ready"]))).toEqual([ready.id]);
+    expect(ids(await store.listBackgroundWaits("session-1", ["waiting", "cancelled"]))).toEqual([cancelled.id, waiting.id]);
+    expect(ids(await store.listBackgroundWaits("session-2", ["waiting"]))).toEqual([]);
+  });
+
   it("recovers interrupted background continuations after restart", async () => {
     const wait = await store.createBackgroundWait({ taskId: "task-1", sessionId: "session-1" });
     await store.markBackgroundWaitReady(wait.id, "failed");

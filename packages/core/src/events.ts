@@ -9,12 +9,33 @@
 import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, MissionReport, ChannelType, PeerIdentity, Team } from "./types.js";
 import type { BackgroundWait, TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
+/** Where a change came from: the UI or an HTTP call, Polpo's own tools, an agent's tools, a messaging channel, a schedule, or the system itself. */
+export type EventSource = "api" | "polpo" | "agent" | "channel" | "schedule" | "system";
+
+/** Who caused an event: carried by events about changes (`by` is a person: email or channel contact id). */
+export interface EventOrigin {
+  source?: EventSource;
+  by?: string;
+}
+
 export interface PolpoEventMap {
   // Task lifecycle
   "task:created": { task: Task };
-  "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task };
-  "task:updated": { taskId: string; task: Task };
-  "task:removed": { taskId: string };
+  /** `reason` is set when the status was forced (recovery, races, manual set). */
+  "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task; reason?: string } & EventOrigin;
+  /** Any change of a task's fields; `fields` names them (status changes are task:transition). */
+  "task:updated": { taskId: string; task: Task; fields?: string[] } & EventOrigin;
+  "task:removed": { taskId: string; title?: string; group?: string; missionId?: string } & EventOrigin;
+  /** A person (or Polpo) asked to run a failed task again; automatic retries are task:retry. */
+  "task:retried": { taskId: string; title: string } & EventOrigin;
+  /** A running or waiting task was stopped on request. */
+  "task:killed": { taskId: string; title: string; runId?: string; pid?: number } & EventOrigin;
+  /** A task was failed on purpose (deadlock, manual force-fail). */
+  "task:force-failed": { taskId: string; title: string; reason?: string } & EventOrigin;
+  /** The agent produced new outcomes (files, text, media…) for a task. */
+  "task:outcome": { taskId: string; outcomes: Array<{ id: string; type: string; label: string; mimeType?: string; path?: string }> };
+  /** A lifecycle hook refused to mark the task done. */
+  "task:complete-blocked": { taskId: string; reason: string };
   "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
@@ -41,6 +62,15 @@ export interface PolpoEventMap {
   "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number };
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;
+  /** Graceful shutdown started: `activeRuns` agents are still running. */
+  "orchestrator:stopping": { activeRuns: number };
+  /** The supervisor loop stopped (all work done in one-shot mode, stop requested, or a crash). */
+  "orchestrator:stopped": { reason: "done" | "stopped" | "error"; message?: string };
+
+  // Playbooks
+  "playbook:changed": { name: string; action: "created" | "updated" | "deleted" | "installed" } & EventOrigin;
+  /** A playbook was run: the mission it became (parameter names only, never values). */
+  "playbook:run": { name: string; missionId: string; params: string[] } & EventOrigin;
 
   // Retry & Fix
   "task:retry": { taskId: string; attempt: number; maxRetries: number };
@@ -67,6 +97,18 @@ export interface PolpoEventMap {
 
   // Missions
   "mission:saved": { missionId: string; name: string; status: MissionStatus };
+  "mission:created": { missionId: string; name: string; status: MissionStatus } & EventOrigin;
+  /**
+   * A mission changed. `fields` for direct edits (name, status, schedule, data…); `section` +
+   * `action` + `item` for edits inside its document (a task, a checkpoint, a delay…).
+   */
+  "mission:updated": {
+    missionId: string; name: string; status: MissionStatus; prevStatus?: MissionStatus; fields?: string[];
+    section?: "task" | "checkpoint" | "delay" | "qualityGate" | "team" | "notifications" | "order";
+    action?: "added" | "updated" | "removed" | "reordered"; item?: string;
+  } & EventOrigin;
+  /** A mission was stopped: its running tasks were killed. */
+  "mission:aborted": { missionId?: string; name?: string; group: string; killedTasks: number } & EventOrigin;
   "mission:executed": { missionId: string; group: string; taskCount: number };
   "mission:completed": { missionId: string; group: string; allPassed: boolean; report: MissionReport };
   "mission:resumed": { missionId: string; name: string; retried: number; pending: number };
@@ -77,6 +119,18 @@ export interface PolpoEventMap {
   "session:updated": { sessionId: string; title?: string; starred?: boolean };
   "session:deleted": { sessionId: string };
   "message:added": { sessionId: string; messageId: string; role: "user" | "assistant" };
+  /** The server started a chat turn on its own (queued prompt, undelivered steer, branch answer). */
+  "chat:turn-started": { sessionId: string; turnId: string; reason: "queue" | "steer" | "fork" | "send-now"; userMessageId?: string };
+  /** A session's prompt queue changed (items or auto-send). */
+  "chat:queue-updated": { sessionId: string };
+
+  // Rooms (group conversations of people and agents)
+  "room:created": { room: import("./room-store.js").Room };
+  "room:updated": { room: import("./room-store.js").Room };
+  "room:deleted": { roomId: string };
+  "room:message": { roomId: string; message: import("./room-store.js").RoomMessage };
+  /** An agent started (typing: true) or finished (false) its turn in a room. */
+  "room:typing": { roomId: string; agent: string; name: string; typing: boolean };
 
   // Durable background task waits
   "background-wait:created": { wait: BackgroundWait };
@@ -85,12 +139,15 @@ export interface PolpoEventMap {
   "background-wait:completed": { wait: BackgroundWait };
   "background-wait:failed": { wait: BackgroundWait };
   "background-wait:cancelled": { wait: BackgroundWait };
+  "background-wait:requeued": { wait: BackgroundWait };
 
   // Approval gates
   "approval:requested": { requestId: string; gateId: string; gateName: string; taskId?: string; missionId?: string };
   "approval:resolved": { requestId: string; status: "approved" | "rejected"; resolvedBy?: string };
   "approval:rejected": { requestId: string; taskId?: string; feedback: string; rejectionCount: number; resolvedBy?: string };
   "approval:timeout": { requestId: string; action: "approve" | "reject" };
+  /** An automatic gate's condition blocked an operation (no person involved). */
+  "approval:auto-blocked": { gateId: string; gateName: string; hook: string; taskId?: string; missionId?: string };
 
   // Escalation
   "escalation:triggered": { taskId: string; level: number; handler: string; target?: string };
@@ -120,6 +177,10 @@ export interface PolpoEventMap {
   "schedule:created": { scheduleId: string; missionId: string; nextRunAt?: string };
   "schedule:completed": { scheduleId: string; missionId: string };
   "schedule:expired": { scheduleId: string; missionId: string; endDate?: string };
+  "schedule:updated": { scheduleId: string; missionId: string; expression: string; enabled: boolean; nextRunAt?: string } & EventOrigin;
+  "schedule:removed": { scheduleId: string; missionId: string } & EventOrigin;
+  /** A due schedule did not run (a hook refused it, or its mission is gone). */
+  "schedule:skipped": { scheduleId: string; missionId: string; reason: string };
 
   // Registries and operational surfaces
   "app:changed": { appId: string; action: "created" | "updated" | "deleted" | "runtime" | "log"; resourceId?: string; timestamp: string };
@@ -147,12 +208,44 @@ export interface PolpoEventMap {
   "watcher:created": { watcherId: string; taskId: string; targetStatus: TaskStatus };
   "watcher:fired": { watcherId: string; taskId: string; targetStatus: TaskStatus; actionType: string };
   "watcher:removed": { watcherId: string };
+  "watcher:action-completed": { watcherId: string; taskId: string; actionType: string; result?: string };
+  "watcher:action-failed": { watcherId: string; taskId: string; actionType: string; error: string };
 
   // Notification rule actions
   "action:triggered": { ruleId: string; actionType: string; result?: string; error?: string };
 
   // Filesystem
   "file:changed": { path: string; dir: string; action: "created" | "modified" | "deleted" | "renamed"; source: "agent" | "server" | "chat" };
+
+  // Context compaction (chat sessions and task runs)
+  /** A conversation or a task run was compacted to fit the model's window. */
+  "context:compacted": {
+    scope: "chat" | "task";
+    sessionId?: string; taskId?: string; runId?: string; agentName?: string;
+    reason: "budget" | "overflow" | "manual";
+    mode: "prune" | "summary" | "fallback" | "truncate";
+    beforeTokens: number; afterTokens: number; hardLimit: number;
+    removedMessages: number; prunedToolResults: number; compactionCount: number; durationMs: number;
+    model?: string; focus?: string; fallbackReason?: string;
+    /** Durable facts saved to memory by this compaction. */
+    savedFacts?: number;
+  } & EventOrigin;
+
+  // Sandboxes (where agents' tools run) and storage (mounted buckets)
+  "sandbox:created": { workspaceId: string; provider: string; scope: "chat" | "task"; taskId?: string; runId?: string; sessionId?: string; agentName?: string; network: string };
+  "sandbox:ready": { workspaceId: string; provider: string; durationMs: number; steps?: Record<string, number>; remoteId?: string; source?: "created" | "pool" | "warm" | "shared"; agentName?: string; taskId?: string; sessionId?: string };
+  "sandbox:suspended": { workspaceId: string; provider: string; remoteId?: string; agentName?: string; taskId?: string; sessionId?: string; idleMs: number };
+  "sandbox:resumed": { workspaceId: string; provider: string; remoteId?: string; agentName?: string; taskId?: string; sessionId?: string; durationMs: number };
+  "sandbox:override-denied": { scope: "chat" | "task"; taskId?: string; agentName?: string; level: "mission" | "task"; field: string; requested: unknown; applied: unknown };
+  "sandbox:network-denied": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; agentName?: string; host: string; port?: number; reason: "not-allowed" | "private-address" };
+  "sandbox:failed": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; sessionId?: string; error: string };
+  "sandbox:destroyed": { workspaceId: string; provider: string; durationMs: number; reason: "done" | "idle" | "error" | "shutdown" | "expired" | "orphan"; remoteId?: string; outcome?: "pooled" | "destroyed" | "shared"; runningMs?: number; agentName?: string; taskId?: string; sessionId?: string };
+  /** open Polpo's volume.* events: attached, written back (checkpoint or end), revision conflict. */
+  "sandbox:volume": { workspaceId: string; provider: string; step: "prepared" | "checkpointed" | "finalized" | "conflict"; name: string; revision?: number; message?: string; agentName?: string; taskId?: string; sessionId?: string };
+  "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;
+
+  // Company brain
+  "brain:changed": import("./company-brain.js").BrainChangeEvent;
 
   // General
   "log": { level: "info" | "warn" | "error" | "debug"; message: string };

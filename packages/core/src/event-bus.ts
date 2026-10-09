@@ -7,8 +7,8 @@
 import type { PolpoEvent, PolpoEventMap } from "./events.js";
 
 export interface EventBus {
+  /** Typed only: an event must be declared in PolpoEventMap, with its payload. */
   emit<K extends PolpoEvent>(event: K, payload: PolpoEventMap[K]): boolean;
-  emit(event: string | symbol, ...args: unknown[]): boolean;
 
   on<K extends PolpoEvent>(event: K, listener: (payload: PolpoEventMap[K]) => void): unknown;
   on(event: string | symbol, listener: (...args: unknown[]) => void): unknown;

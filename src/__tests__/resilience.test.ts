@@ -108,8 +108,8 @@ describe("Orchestrator Resilience", () => {
       await store.transition(task.id, "in_progress");
 
       const killCalls: number[] = [];
-      vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
-        killCalls.push(pid);
+      vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | string) => {
+        if (signal !== 0) killCalls.push(pid); // signal 0 is the liveness probe, not a kill
         return true;
       }) as any);
 
@@ -175,8 +175,8 @@ describe("Orchestrator Resilience", () => {
       await store.transition(task.id, "in_progress");
 
       const killCalls: number[] = [];
-      vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
-        killCalls.push(pid);
+      vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | string) => {
+        if (signal !== 0) killCalls.push(pid); // signal 0 is the liveness probe, not a kill
         return true;
       }) as any);
 
@@ -192,6 +192,40 @@ describe("Orchestrator Resilience", () => {
       await orchestrator.tick();
 
       expect(killCalls.filter(p => p === 33333)).toHaveLength(0);
+    });
+  });
+
+  // ─── Dead runner ─────────────────────────────────────────
+
+  describe("Dead runner", () => {
+    it("fails the run at once when the runner process no longer exists", async () => {
+      (orchestrator as any).config.settings.taskTimeout = 0;
+      const task = await orchestrator.addTask({ title: "Crashed", description: "Runner died", assignTo: "agent-1", maxDuration: 0 });
+      await store.transition(task.id, "assigned");
+      await store.transition(task.id, "in_progress");
+
+      // signal 0 on a pid that does not exist throws ESRCH
+      vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | string) => {
+        if (pid === 55555 && (signal === 0 || signal === undefined)) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+        return true;
+      }) as any);
+
+      await runStore.upsertRun(createTestRunRecord({
+        id: "run-dead",
+        taskId: task.id,
+        pid: 55555,
+        status: "running",
+        startedAt: new Date().toISOString(),
+        activity: createTestActivity({ lastUpdate: new Date().toISOString() }),
+      }));
+
+      const logs: string[] = [];
+      orchestrator.on("log", (e: any) => logs.push(e.message));
+      await orchestrator.tick();
+
+      expect(logs.some((m) => m.includes("exited unexpectedly"))).toBe(true);
+      const run = await runStore.getRun("run-dead");
+      expect(run === undefined || run === null || run.status === "failed").toBe(true);
     });
   });
 
@@ -546,8 +580,8 @@ describe("Orchestrator Resilience", () => {
 
     it("skips processes with pid 0 (in-process agent)", async () => {
       const killCalls: number[] = [];
-      vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
-        killCalls.push(pid);
+      vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | string) => {
+        if (signal !== 0) killCalls.push(pid); // signal 0 is the liveness probe, not a kill
         return true;
       }) as any);
 
@@ -572,8 +606,8 @@ describe("Orchestrator Resilience", () => {
 
     it("skips processes not marked alive", async () => {
       const killCalls: number[] = [];
-      vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
-        killCalls.push(pid);
+      vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | string) => {
+        if (signal !== 0) killCalls.push(pid); // signal 0 is the liveness probe, not a kill
         return true;
       }) as any);
 

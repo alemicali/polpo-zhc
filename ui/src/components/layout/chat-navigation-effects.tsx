@@ -13,7 +13,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatState, useChatActions, sidebarActions } from "@/hooks/chat-context";
-import { useFilePreview, mimeFromPath, FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath } from "@/components/shared/file-preview-utils";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
 
 export function ChatNavigationEffects() {
   const {
@@ -58,7 +60,7 @@ export function ChatNavigationEffects() {
       case "agent":      route = name ? `/agents/${encodeURIComponent(name)}` : "/agents"; break;
       case "skills":     route = "/skills"; break;
       case "skill":      route = name ? `/skills/${encodeURIComponent(name)}` : "/skills"; break;
-      case "activity":       route = "/activity"; break;
+      case "activity":       route = "/events"; break;
       case "chat":           route = "/chat"; break;
       case "memory":         route = "/memory"; break;
       case "notifications":  route = "/notifications"; break;
@@ -67,6 +69,7 @@ export function ChatNavigationEffects() {
       case "apps":           route = "/apps"; break;
       case "app":            route = id ? `/apps/${encodeURIComponent(id)}` : "/apps"; break;
       case "data":           route = "/data"; break;
+      case "storage":        route = "/files"; break;
       case "views":          route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
       case "view":           route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
       case "brain":          route = id ? `/brain?entity=${encodeURIComponent(id)}` : "/brain"; break;

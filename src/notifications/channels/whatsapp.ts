@@ -27,7 +27,7 @@
 
 import type { NotificationChannel, Notification, OutcomeAttachment } from "../types.js";
 import type { NotificationChannelConfig } from "../../core/types.js";
-import type { WhatsAppStore } from "../../stores/whatsapp-store.js";
+import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { basename, extname, join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
@@ -228,7 +228,7 @@ export class WhatsAppBridge {
   private profilePath: string;
   private mediaDir: string;
   private gateway?: WhatsAppGatewayHandler;
-  private store?: WhatsAppStore;
+  private store?: WhatsAppMessageStore;
   private stopping = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private log: (level: string, msg: string) => void;
@@ -254,12 +254,21 @@ export class WhatsAppBridge {
   }
 
   /** Attach a message store for buffering all messages (inbound + outbound). */
-  setStore(store: WhatsAppStore): void {
+  /** Event handlers write to the store (a database): a failure is logged, never an unhandled rejection. */
+  private guarded<A extends unknown[]>(event: string, handler: (...args: A) => Promise<void>): (...args: A) => void {
+    return (...args: A) => {
+      handler(...args).catch((err) => {
+        this.log("warn", `WhatsApp ${event} handling failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    };
+  }
+
+  setStore(store: WhatsAppMessageStore): void {
     this.store = store;
   }
 
   /** Get the attached store (for tool access). */
-  getStore(): WhatsAppStore | undefined {
+  getStore(): WhatsAppMessageStore | undefined {
     return this.store;
   }
 
@@ -275,7 +284,7 @@ export class WhatsAppBridge {
 
     // Store outbound message
     if (this.store && msgId) {
-      this.store.appendMessage({
+      await this.store.appendMessage({
         id: msgId,
         chatJid: jid,
         senderJid: this.selfJid ?? "me",
@@ -296,17 +305,19 @@ export class WhatsAppBridge {
     fileName?: string;
     mediaKind?: "auto" | "image" | "video" | "audio" | "document";
     viewOnce?: boolean;
+    /** The file's bytes, when they were read elsewhere (the agent's files may live in a remote sandbox). */
+    data?: Uint8Array;
   }): Promise<string | undefined> {
     const sock = this.channel.getSocket();
     if (!sock) throw new Error("WhatsApp not connected");
-    const content = buildMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce);
+    const content = buildMediaContent(opts.path, opts.mimeType, opts.fileName, opts.caption, opts.mediaKind, opts.viewOnce, opts.data);
     const result = await sock.sendMessage(jid, content as any);
     const msgId = result?.key?.id ?? undefined;
 
     if (this.store && msgId) {
       const mime = opts.mimeType ?? guessMime(opts.path);
       const kind = resolveMediaKind(opts.mediaKind, mime);
-      this.store.appendMessage({
+      await this.store.appendMessage({
         id: msgId,
         chatJid: jid,
         senderJid: this.selfJid ?? "me",
@@ -328,7 +339,7 @@ export class WhatsAppBridge {
     const sock = this.channel.getSocket();
     if (!sock || keys.length === 0) return;
     await sock.readMessages(keys as any);
-    this.store?.markRead(keys.map(k => k.id));
+    await this.store?.markRead(keys.map(k => k.id));
   }
 
   /** Start the Baileys connection. Returns when initially connected (or throws on auth failure). */
@@ -426,18 +437,18 @@ export class WhatsAppBridge {
     });
 
     // ── Contact updates (Baileys contacts.upsert event) ──
-    sock.ev.on("contacts.upsert", (contacts) => {
+    sock.ev.on("contacts.upsert", this.guarded("contacts.upsert", async (contacts) => {
       if (!this.store) return;
       for (const contact of contacts) {
         const name = contact.notify ?? contact.verifiedName ?? contact.name;
         if (name && contact.id) {
-          this.store.upsertContact(contact.id, name);
+          await this.store.upsertContact(contact.id, name);
         }
       }
-    });
+    }));
 
     // ── History sync (initial connect — bulk message import) ──
-    sock.ev.on("messaging-history.set", async ({ messages: historyMsgs, contacts: historyContacts }) => {
+    sock.ev.on("messaging-history.set", this.guarded("messaging-history.set", async ({ messages: historyMsgs, contacts: historyContacts }) => {
       if (!this.store) return;
 
       // Buffer historical contacts
@@ -446,7 +457,7 @@ export class WhatsAppBridge {
         for (const contact of historyContacts) {
           const name = contact.notify ?? contact.verifiedName ?? contact.name;
           if (name && contact.id) {
-            this.store.upsertContact(contact.id, name);
+            await this.store.upsertContact(contact.id, name);
             contactCount++;
           }
         }
@@ -469,12 +480,12 @@ export class WhatsAppBridge {
           this.log("info", `WhatsApp history sync: ${msgCount} messages imported`);
         }
       }
-    });
+    }));
 
     // ── Inbound messages ──
     // Store ALL messages (notify + history sync) for tool access,
     // but only route new real-time messages through the gateway.
-    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    sock.ev.on("messages.upsert", this.guarded("messages.upsert", async ({ messages, type }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
 
@@ -493,7 +504,7 @@ export class WhatsAppBridge {
         // ── Store: buffer ALL messages (history + realtime, inbound + outbound) ──
         // This gives agents complete conversation history via whatsapp_* tools
         if (await this.persistMessage(msg, downloadMediaMessage, sock)) {
-          if (!isFromMe && pushName && senderId && !senderId.endsWith("@g.us")) this.store?.upsertContact(senderId, pushName, timestamp);
+          if (!isFromMe && pushName && senderId && !senderId.endsWith("@g.us")) await this.store?.upsertContact(senderId, pushName, timestamp);
         }
 
         // ── Gateway routing: only new real-time messages ──
@@ -537,7 +548,7 @@ export class WhatsAppBridge {
           }
         }
       }
-    });
+    }));
   }
 
   /**
@@ -646,7 +657,7 @@ export class WhatsAppBridge {
       downloaded = await this.downloadMedia(msg, downloadMediaMessage, sock, chatId, messageId, media, timestamp);
     }
 
-    this.store.appendMessage({
+    await this.store.appendMessage({
       id: messageId,
       chatJid: chatId,
       senderJid: isFromMe ? (this.selfJid ?? "me") : (msg.key?.participant ?? msg.key?.remoteJid ?? ""),
@@ -722,10 +733,11 @@ function buildMediaContent(
   caption?: string,
   mediaKind: "auto" | "image" | "video" | "audio" | "document" = "auto",
   viewOnce?: boolean,
+  data?: Uint8Array,
 ): Record<string, unknown> {
   const mime = mimeType ?? guessMime(path);
   const kind = resolveMediaKind(mediaKind, mime);
-  const file = { url: path };
+  const file = data ? Buffer.from(data) : { url: path };
   const base = { mimetype: mime, ...(caption ? { caption } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
   if (kind === "image") return { image: file, ...base };
   if (kind === "video") return { video: file, ...base };

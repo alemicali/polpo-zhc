@@ -27,10 +27,9 @@ import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, Revie
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { validateReviewPayload, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./schemas.js";
 import { withRetry } from "../llm/retry.js";
-import { resolveModel, resolveModelAuthAsync, completeSimpleWithAuth, buildStreamOpts } from "../llm/pi-client.js";
+import { resolveModel, completeSimpleWithAuth, completeWithAuth, buildStreamOpts } from "../llm/pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";
 import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
 
 export type LLMQueryFn = (prompt: string, cwd: string) => Promise<string>;
 
@@ -301,7 +300,6 @@ async function runScoring(
   reasoning?: ReasoningLevel,
 ): Promise<{ payload: ReviewPayload | null; attemptErrors: string[] }> {
   const m = resolveModel(model);
-  const auth = await resolveModelAuthAsync(m.provider as string);
 
   const scoringPrompt = `Based on the following code analysis, score each dimension and call submit_review.
 
@@ -344,9 +342,8 @@ RULES:
   // Strategy 1: Force toolChoice (works on Anthropic, OpenAI completions, Bedrock)
   onProgress?.("Scoring with forced tool choice...");
   try {
-    const response = await complete(auth?.baseUrl ? { ...m, baseUrl: auth.baseUrl } : m, context, {
-      apiKey: auth?.apiKey,
-      headers: auth?.headers,
+    // Same auth path as every other call (env / OAuth / custom-provider registry).
+    const response = await completeWithAuth(m, context, {
       toolChoice: { type: "tool", name: "submit_review" },
       ...(reasoningVal ? { reasoning: reasoningVal } : {}),
     } as any);

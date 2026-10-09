@@ -1019,7 +1019,7 @@ describe("MissionExecutor", () => {
 
       // Mission is now active — second execution should throw
       await expect(missionExec.executeMission(mission.id)).rejects.toThrow(
-        'Cannot execute mission in "active" state (must be "draft", "scheduled", or "recurring")',
+        'Cannot execute mission in "active" state (must be "draft", "scheduled", "recurring", "failed", "cancelled")',
       );
     });
 

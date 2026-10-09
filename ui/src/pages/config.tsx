@@ -69,6 +69,7 @@ import {
   Image as ImageIcon,
   Copy,
   type LucideIcon,
+  Box as SandboxIcon,
 } from "lucide-react";
 import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
@@ -101,8 +102,13 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
+import { CustomProviderWizard, CustomProvidersSection } from "@/components/config/custom-providers";
+import { useCustomProviders } from "@/hooks/use-custom-providers";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
+import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -125,6 +131,11 @@ const api = async (path: string, init?: RequestInit) => {
 };
 
 // ── Helpers ──
+
+/** Secrets come back from the API masked ("••••1234"); saving them unchanged keeps the stored value. */
+function isMaskedSecret(value?: string): boolean {
+  return !!value && value.includes("••••");
+}
 
 /** Extract provider name from a "provider:model" spec */
 function parseModelSpec(spec: string): { provider: string; model: string } {
@@ -201,6 +212,7 @@ const baseSections = [
   { id: "channels", label: "Channels", icon: Send },
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
+  { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
 ] as const;
@@ -449,14 +461,14 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
 
 const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "whatsapp", "slack", "email", "webhook", "push"];
 
-const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string }> = {
-  sky: { iconBg: "bg-sky-500/12", iconRing: "ring-sky-500/30", gradient: "from-sky-500/15", pip: "bg-sky-500" },
-  green: { iconBg: "bg-green-500/12", iconRing: "ring-green-500/30", gradient: "from-green-500/15", pip: "bg-green-500" },
-  amber: { iconBg: "bg-amber-500/12", iconRing: "ring-amber-500/30", gradient: "from-amber-500/15", pip: "bg-amber-500" },
-  violet: { iconBg: "bg-violet-500/12", iconRing: "ring-violet-500/30", gradient: "from-violet-500/15", pip: "bg-violet-500" },
-  fuchsia: { iconBg: "bg-fuchsia-500/12", iconRing: "ring-fuchsia-500/30", gradient: "from-fuchsia-500/15", pip: "bg-fuchsia-500" },
-  emerald: { iconBg: "bg-emerald-500/12", iconRing: "ring-emerald-500/30", gradient: "from-emerald-500/15", pip: "bg-emerald-500" },
-  zinc: { iconBg: "bg-zinc-500/12", iconRing: "ring-zinc-500/30", gradient: "from-zinc-500/15", pip: "bg-zinc-500" },
+const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string; text: string; glow: string; hoverBorder: string; line: string; chip: string }> = {
+  sky: { iconBg: "bg-sky-500/12", iconRing: "ring-sky-500/30", gradient: "from-sky-500/15", pip: "bg-sky-500", text: "text-sky-400", glow: "bg-sky-500/25", hoverBorder: "hover:border-sky-500/40", line: "via-sky-400/70", chip: "border-sky-500/25 bg-sky-500/10 text-sky-300" },
+  green: { iconBg: "bg-green-500/12", iconRing: "ring-green-500/30", gradient: "from-green-500/15", pip: "bg-green-500", text: "text-green-400", glow: "bg-green-500/25", hoverBorder: "hover:border-green-500/40", line: "via-green-400/70", chip: "border-green-500/25 bg-green-500/10 text-green-300" },
+  amber: { iconBg: "bg-amber-500/12", iconRing: "ring-amber-500/30", gradient: "from-amber-500/15", pip: "bg-amber-500", text: "text-amber-400", glow: "bg-amber-500/25", hoverBorder: "hover:border-amber-500/40", line: "via-amber-400/70", chip: "border-amber-500/25 bg-amber-500/10 text-amber-300" },
+  violet: { iconBg: "bg-violet-500/12", iconRing: "ring-violet-500/30", gradient: "from-violet-500/15", pip: "bg-violet-500", text: "text-violet-400", glow: "bg-violet-500/25", hoverBorder: "hover:border-violet-500/40", line: "via-violet-400/70", chip: "border-violet-500/25 bg-violet-500/10 text-violet-300" },
+  fuchsia: { iconBg: "bg-fuchsia-500/12", iconRing: "ring-fuchsia-500/30", gradient: "from-fuchsia-500/15", pip: "bg-fuchsia-500", text: "text-fuchsia-400", glow: "bg-fuchsia-500/25", hoverBorder: "hover:border-fuchsia-500/40", line: "via-fuchsia-400/70", chip: "border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300" },
+  emerald: { iconBg: "bg-emerald-500/12", iconRing: "ring-emerald-500/30", gradient: "from-emerald-500/15", pip: "bg-emerald-500", text: "text-emerald-400", glow: "bg-emerald-500/25", hoverBorder: "hover:border-emerald-500/40", line: "via-emerald-400/70", chip: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" },
+  zinc: { iconBg: "bg-zinc-500/12", iconRing: "ring-zinc-500/30", gradient: "from-zinc-500/15", pip: "bg-zinc-500", text: "text-zinc-400", glow: "bg-zinc-500/25", hoverBorder: "hover:border-zinc-500/40", line: "via-zinc-400/70", chip: "border-zinc-500/25 bg-zinc-500/10 text-zinc-300" },
 };
 
 /** Default empty config per channel type */
@@ -535,6 +547,13 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
               : "/agent /polpo /new /status … (9)"}
             wrap
           />
+          <Row
+            label="Groups"
+            value={info.canReadAllGroupMessages === false
+              ? "Privacy mode on: in groups only commands and replies reach the bot. BotFather → /setprivacy → Disable, then add the bot again."
+              : "Add the bot to a group: enabled at once if you add it, or /enable"}
+            wrap
+          />
         </>
       )}
     </>
@@ -571,6 +590,8 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
   };
   const url = channelName ? webhookInboundUrl(channelName) : "";
   const secret = config.inboundSecret ?? "";
+  // The server never returns stored secrets ("••••1234"); only a freshly generated one can be copied.
+  const secretHidden = isMaskedSecret(secret);
   const example = `curl -X POST '${url || "<url>"}' \\\n  -H 'Authorization: Bearer ${secret ? "<secret>" : "<generate a secret>"}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"sender":"my-iphone","text":"Hi!"}'`;
 
   return (
@@ -585,11 +606,13 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
           )}
         </div>
       </Field>
-      <Field label="Secret" hint="Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel.">
+      <Field label="Secret" hint={secretHidden
+        ? "Stored secret is hidden. Click New to generate (and copy) a replacement, then save."
+        : "Sent as Authorization: Bearer <secret>. Anyone with it can talk to this channel."}>
         <div className="flex gap-1.5">
           <Input className="h-8 text-xs font-mono" placeholder="Generate one" value={secret}
             onChange={(e) => onChange({ ...config, inboundSecret: e.target.value || undefined })} />
-          {secret && (
+          {secret && !secretHidden && (
             <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("secret", secret)}>
               <Copy className="h-3 w-3" /> {copied === "secret" ? "Copied" : "Copy"}
             </Button>
@@ -920,7 +943,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
           <Field label="Bot Token" hint="From @BotFather on Telegram">
             <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
-          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning ? channelName : undefined} />
+          <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning || isMaskedSecret(config.botToken) ? channelName : undefined} />
           <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
             <Input className="h-8 text-xs font-mono" placeholder="-1001234567890" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value })} />
           </Field>
@@ -1282,6 +1305,51 @@ interface ChannelTestResult {
   error?: string;
 }
 
+/** Is the channel ready to deliver? (what the card's status pill shows) */
+function channelReadiness(ch: NotificationChannelConfig): { ok: boolean; label: string } {
+  switch (ch.type) {
+    case "telegram": return ch.botToken ? { ok: true, label: ch.gateway?.enableInbound ? "Live · two-way" : "Live" } : { ok: false, label: "Needs bot token" };
+    case "slack": return ch.webhookUrl ? { ok: true, label: "Live" } : { ok: false, label: "Needs webhook" };
+    case "whatsapp": return { ok: true, label: ch.gateway?.enableInbound ? "Live · two-way" : "Live" };
+    case "email": return ch.apiKey || ch.host ? { ok: true, label: "Live" } : { ok: false, label: "Needs credentials" };
+    case "webhook": return ch.url || ch.gateway?.enableInbound ? { ok: true, label: ch.gateway?.enableInbound ? (ch.url ? "Live · two-way" : "Inbound only") : "Live" } : { ok: false, label: "Needs URL" };
+    default: return { ok: true, label: "Live" };
+  }
+}
+
+/** The two to four facts worth seeing at a glance, per channel type. */
+function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; value: React.ReactNode; mono?: boolean }> {
+  const gateway = ch.gateway;
+  switch (ch.type) {
+    case "telegram": return [
+      { label: "Chat", value: ch.chatId || "—", mono: true },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+    ];
+    case "slack": return [
+      { label: "Webhook", value: ch.webhookUrl ? "configured" : "—" },
+      { label: "Files", value: ch.apiKey ? "uploads on" : "off" },
+    ];
+    case "whatsapp": return [
+      { label: "Chat", value: ch.chatId || "—", mono: true },
+      { label: "Profile", value: ch.profileDir || "default", mono: true },
+    ];
+    case "email": return [
+      { label: "Provider", value: ch.provider ?? "resend" },
+      { label: "Recipients", value: ch.to?.length ? String(ch.to.length) : "—" },
+      ...(ch.from ? [{ label: "From", value: ch.from, mono: true }] : []),
+    ];
+    case "webhook": return [
+      { label: "Outbound", value: ch.url ? "on" : "off" },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+    ];
+    case "push": return [
+      { label: "Urgency", value: ch.urgency ?? "normal" },
+      { label: "TTL", value: `${ch.ttl ?? 3600}s`, mono: true },
+    ];
+    default: return [];
+  }
+}
+
 function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, testResult }: {
   name: string;
   ch: NotificationChannelConfig;
@@ -1295,174 +1363,175 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
   const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-zinc-500", hue: "zinc" };
   const hue = HUE_STYLES[meta.hue] ?? HUE_STYLES.zinc;
   const gateway = ch.gateway;
+  const ready = channelReadiness(ch);
+  const facts = channelFacts(ch);
+  const failed = testResult?.success === false;
 
   return (
     <Card className={cn(
-      "relative overflow-hidden bg-card border border-border/40 py-0 gap-0 group",
-      "transition-all duration-200 hover:border-border/70 hover:shadow-md",
+      "group relative overflow-hidden border border-border/40 bg-card py-0 gap-0",
+      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20",
+      hue.hoverBorder,
     )}>
-      {/* Brand gradient wash — diagonal soft tint, fades to nothing */}
-      <div
-        className={cn(
-          "absolute inset-0 pointer-events-none bg-gradient-to-br via-transparent to-transparent",
-          hue.gradient,
-        )}
-        aria-hidden
-      />
-      {/* Top-left brand accent strip (4px) */}
-      <div
-        className={cn(
-          "absolute top-0 left-0 h-full w-[3px] rounded-l-xl",
-          hue.pip.replace("bg-", "bg-"),
-        )}
-        aria-hidden
-      />
+      {/* Brand light: a hairline across the top and a soft glow behind the mark */}
+      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent", hue.line)} aria-hidden />
+      <div className={cn("absolute -top-16 -left-10 h-40 w-40 rounded-full blur-3xl opacity-60 transition-opacity duration-300 group-hover:opacity-100", hue.glow)} aria-hidden />
+      <div className={cn("absolute inset-0 pointer-events-none bg-gradient-to-br via-transparent to-transparent", hue.gradient)} aria-hidden />
 
-      <CardContent className="relative pt-4 pb-3 px-4 space-y-3">
-        {/* Hero header — big brand mark + name + meta */}
-        <div className="flex items-start gap-3">
+      <CardContent className="relative p-0">
+        {/* Header */}
+        <div className="flex items-start gap-3.5 px-4 pt-4">
           <div className={cn(
-            "h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ring-1",
-            hue.iconBg,
+            "relative h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 ring-1 bg-background/60 backdrop-blur-sm",
             hue.iconRing,
           )}>
-            <ChannelLogo type={ch.type} size={24} />
+            <ChannelLogo type={ch.type} size={26} />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-semibold truncate">{name}</span>
-              {gateway?.enableInbound && (
-                <Badge variant="secondary" className="text-[9px] gap-0.5 px-1.5 py-0 h-4">
-                  <Zap className="h-2 w-2" /> Inbound
-                </Badge>
-              )}
-              {gateway?.agent && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">→ {gateway.agent}</Badge>
-              )}
+          <div className="flex-1 min-w-0 pt-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[15px] font-semibold tracking-tight truncate">{name}</span>
             </div>
-            <p className="text-[10.5px] text-muted-foreground/80 mt-0.5 flex items-center gap-1.5">
-              <span className={cn("inline-block h-1.5 w-1.5 rounded-full", hue.pip)} />
-              <span className="capitalize">{meta.label}</span>
-              <span className="text-muted-foreground/40">·</span>
-              <code className="font-mono text-[10px]">{ch.type}</code>
-            </p>
+            <p className={cn("text-[11px] mt-0.5 font-medium", hue.text)}>{meta.label}</p>
           </div>
-          {/* Inline delete — ghost X, top-right */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground/60 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={onDelete}
-            disabled={deleting}
-            aria-label="Delete channel"
-          >
-            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-          </Button>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium",
+              failed ? "border-destructive/30 bg-destructive/10 text-destructive"
+                : ready.ok ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                : "border-amber-500/25 bg-amber-500/10 text-amber-400",
+            )}>
+              <span className="relative flex h-1.5 w-1.5">
+                {ready.ok && !failed && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
+                <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : ready.ok ? "bg-emerald-400" : "bg-amber-400")} />
+              </span>
+              {failed ? "Test failed" : ready.label}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground/60 hover:text-destructive opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+              onClick={onDelete}
+              disabled={deleting}
+              aria-label="Delete channel"
+            >
+              {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
         </div>
 
-        {/* Type-specific summary — softer styling, indented under the icon */}
-        <div className="space-y-0.5 pl-[3.5rem] -mt-1">
-          {ch.type === "telegram" && (
-            <>
-              <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
-              <Row label="Chat ID" value={ch.chatId || "not set"} mono />
-              <TelegramCardDetails name={name} ch={ch} />
-            </>
+        {/* Capabilities */}
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3">
+          <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]", hue.chip)}>
+            <Send className="h-2.5 w-2.5" /> Notifications
+          </span>
+          {gateway?.enableInbound && (
+            <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]", hue.chip)}>
+              <Zap className="h-2.5 w-2.5" /> Inbound chat
+            </span>
           )}
-          {ch.type === "slack" && (
-            <>
-              <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />
-              {ch.apiKey && <StatusDot ok label="File uploads enabled" />}
-            </>
+          {gateway?.enableInbound && (
+            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              DM · {gateway.dmPolicy ?? "allowlist"}
+            </span>
           )}
-          {ch.type === "whatsapp" && (
-            <>
-              <Row label="Chat ID" value={ch.chatId || "not set"} mono />
-              {ch.profileDir && <Row label="Profile" value={ch.profileDir} mono />}
-            </>
+          {gateway?.agent && (
+            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              → {gateway.agent}
+            </span>
           )}
-          {ch.type === "email" && (
-            <>
-              <Row label="Provider" value={<Badge variant="secondary" className="text-[10px]">{ch.provider ?? "resend"}</Badge>} />
-              {ch.from && <Row label="From" value={ch.from} mono />}
-              {(ch.to?.length ?? 0) > 0 && (
-                <Row label="To" value={`${ch.to!.length} recipient${ch.to!.length > 1 ? "s" : ""}`} />
-              )}
-              <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "No credentials"} />
-            </>
-          )}
-          {ch.type === "webhook" && (
-            <>
-              <Row label="Notifications" value={ch.url || "off"} mono />
-              {gateway?.enableInbound && (
+        </div>
+
+        {/* Facts at a glance */}
+        {facts.length > 0 && (
+          <div className={cn("grid gap-px mx-4 mt-3 overflow-hidden rounded-xl border border-border/30 bg-border/30", facts.length >= 3 ? "grid-cols-3" : "grid-cols-2")}>
+            {facts.map((fact) => (
+              <div key={fact.label} className="bg-card/90 px-3 py-2 min-w-0">
+                <div className="text-[9.5px] uppercase tracking-wider text-muted-foreground/70">{fact.label}</div>
+                <div className={cn("mt-0.5 text-[12px] font-medium truncate", fact.mono && "font-mono text-[11px]")}>{fact.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Everything else, one click away */}
+        <Collapsible>
+          <CollapsibleTrigger className="group/details flex w-full items-center gap-1 px-4 pt-3 text-[10.5px] text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronRight className="h-3 w-3 transition-transform group-data-[state=open]/details:rotate-90" />
+            Details
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="space-y-0.5 px-4 pt-1.5">
+              {ch.type === "telegram" && (
                 <>
-                  <Row label="Inbound" value={`/api/v1/channels/${name}/inbound${ch.inboundSecret ? "" : " · no secret"}`} mono wrap />
-                  <Row label="Talks to" value={gateway.agent ?? "Polpo · /agent to switch"} mono wrap />
-                  <Row label="Replies" value={gateway.replyTo ? `→ ${gateway.replyTo.channel}` : "in the HTTP response"} mono wrap />
-                  <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
-                  {Object.entries(gateway.agentSessions ?? {}).map(([agent, s]) => (
-                    <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
-                  ))}
+                  <Row label="Bot Token" value={ch.botToken ? "*** configured" : "not set"} mono />
+                  <TelegramCardDetails name={name} ch={ch} />
                 </>
               )}
-              {ch.headers && Object.keys(ch.headers).length > 0 && (
-                <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />
+              {ch.type === "email" && (
+                <>
+                  {(ch.to?.length ?? 0) > 0 && <Row label="To" value={ch.to!.join(", ")} mono wrap />}
+                  <StatusDot ok={!!ch.apiKey || !!ch.host} label={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "No credentials"} />
+                </>
               )}
-            </>
-          )}
-          {ch.type === "push" && (
-            <>
-              <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
-              <Row label="TTL" value={`${ch.ttl ?? 3600}s`} mono />
-              <Row label="Urgency" value={<Badge variant="secondary" className="text-[10px]">{ch.urgency ?? "normal"}</Badge>} />
-            </>
-          )}
-
-          {/* Gateway — inline footnote */}
-          {gateway?.enableInbound && (
-            <div className="pt-1.5 mt-1.5 border-t border-border/20">
-              <Row
-                label={
-                  <span className="flex items-center gap-1">
-                    <Zap className="h-2.5 w-2.5" /> DM Policy
-                  </span>
-                }
-                value={gateway.dmPolicy ?? "allowlist"}
-                mono
-              />
-              {(ch.type === "telegram" || ch.type === "whatsapp") && <ChannelAccessPanel api={api} channel={ch.type} />}
+              {ch.type === "webhook" && (
+                <>
+                  <Row label="Notifications" value={ch.url || "off"} mono wrap />
+                  {gateway?.enableInbound && (
+                    <>
+                      <Row label="Inbound" value={`/api/v1/channels/${name}/inbound${ch.inboundSecret ? "" : " · no secret"}`} mono wrap />
+                      <Row label="Replies" value={gateway.replyTo ? `→ ${gateway.replyTo.channel}` : "in the HTTP response"} mono wrap />
+                      <Row label="Conversation" value={describeSession(gateway.sessionMode, gateway.sessionIdleMinutes)} wrap />
+                      {Object.entries(gateway.agentSessions ?? {}).map(([agent, s]) => (
+                        <Row key={agent} label={<span className="pl-2">↳ {agent}</span>} value={describeSession(s.sessionMode ?? gateway.sessionMode, s.sessionIdleMinutes ?? gateway.sessionIdleMinutes)} wrap />
+                      ))}
+                    </>
+                  )}
+                  {ch.headers && Object.keys(ch.headers).length > 0 && <Row label="Headers" value={`${Object.keys(ch.headers).length} custom`} />}
+                </>
+              )}
+              {ch.type === "push" && (
+                <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
+              )}
+              {ch.type === "whatsapp" && <Row label="Type" value={ch.type} mono />}
+              {ch.type === "slack" && <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />}
+              {!["telegram", "email", "webhook", "push", "whatsapp", "slack"].includes(ch.type) && <Row label="Type" value={ch.type} mono />}
             </div>
-          )}
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
 
-        {/* Test result error — just above actions */}
-        {testResult?.success === false && testResult.error && (
-          <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-destructive">
+        {/* Who may talk to it — always visible when inbound is on */}
+        {gateway?.enableInbound && (ch.type === "telegram" || ch.type === "whatsapp") && (
+          <div className="px-4 pt-2">
+            <ChannelAccessPanel api={api} channel={ch.type} />
+          </div>
+        )}
+
+        {failed && testResult?.error && (
+          <div className="mx-4 mt-3 rounded-lg border border-destructive/25 bg-destructive/10 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-destructive">
             {testResult.error}
           </div>
         )}
 
-        {/* Actions — separated by hairline, denser */}
-        <div className="flex items-center gap-1 pt-2.5 -mx-4 px-4 border-t border-border/30">
-          <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1 px-2" onClick={onEdit}>
+        {/* Actions */}
+        <div className="mt-3 flex items-center gap-1.5 border-t border-border/30 bg-muted/10 px-3 py-2">
+          <Button variant="ghost" size="sm" className="h-7 rounded-full text-[11px] gap-1 px-3" onClick={onEdit}>
             <Pencil className="h-3 w-3" /> Edit
           </Button>
           <Button
-            variant={testResult?.success === true ? "secondary" : "ghost"}
+            variant="ghost"
             size="sm"
             className={cn(
-              "h-7 text-[11px] gap-1 px-2 transition-colors",
-              testResult?.success === true && "text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/15",
-              testResult?.success === false && "text-destructive hover:bg-destructive/10",
+              "h-7 rounded-full text-[11px] gap-1 px-3 transition-colors",
+              testResult?.success === true && "text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15",
+              failed && "text-destructive hover:bg-destructive/10",
             )}
             onClick={onTest}
             disabled={testing}
           >
-            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> :
-             testResult?.success === true ? <Activity className="h-3 w-3 fill-current" /> :
-             <Activity className="h-3 w-3" />}
-            {testing ? "Testing…" : testResult?.success === true ? "Reachable" : testResult?.success === false ? "Failed" : "Test"}
+            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
+            {testing ? "Testing…" : testResult?.success === true ? "Reachable" : failed ? "Retry test" : "Send test"}
           </Button>
+          <span className="ml-auto font-mono text-[10px] text-muted-foreground/50">{ch.type}</span>
         </div>
       </CardContent>
     </Card>
@@ -1729,7 +1798,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
         </div>
 
         {Object.keys(channels).length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="columns-1 lg:columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid">
             {Object.entries(channels).map(([name, ch]) => (
               <ChannelCard
                 key={name}
@@ -1972,12 +2041,21 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo 
     });
   };
 
-  useEffect(() => {
+  // Re-seed the drafts when the underlying theme values change (mode switch,
+  // reset, external update) — adjusted during render, not in an effect.
+  const [draftSource, setDraftSource] = useState(activeTheme);
+  if (
+    draftSource.primary !== activeTheme.primary ||
+    draftSource.secondary !== activeTheme.secondary ||
+    draftSource.text !== activeTheme.text ||
+    draftSource.fontFamily !== activeTheme.fontFamily
+  ) {
+    setDraftSource(activeTheme);
     setPrimaryDraft(activeTheme.primary);
     setSecondaryDraft(activeTheme.secondary);
     setTextDraft(activeTheme.text);
     setFontDraft(activeTheme.fontFamily);
-  }, [activeTheme.fontFamily, activeTheme.primary, activeTheme.secondary, activeTheme.text]);
+  }
 
   const updateHexDraft = (
     value: string,
@@ -2567,13 +2645,15 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
 
   // Active providers (have credentials) — derived from auth status
   const authProviders = objectOrEmpty<ProviderAuthInfo>(authStatus?.providers);
+  const isActiveProvider = (info: ProviderAuthInfo) => (info.custom ? !!info.configured : info.hasEnvKey)
+    || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active");
   const configuredProviders = Object.entries(authProviders)
-    .filter(([, info]) => info.hasEnvKey || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
+    .filter(([, info]) => isActiveProvider(info))
     .map(([name]) => name);
   const providerSources = Object.fromEntries(
     Object.entries(authProviders)
-      .filter(([, info]) => info.hasEnvKey || arrayOrEmpty<AuthProfileMeta>(info.profiles).some((p) => p.status === "active"))
-      .map(([name, info]) => [name, info.hasEnvKey ? "env" : "oauth"]),
+      .filter(([, info]) => isActiveProvider(info))
+      .map(([name, info]) => [name, info.custom ? "custom" : info.hasEnvKey ? "env" : "oauth"]),
   );
 
   const handleReasoningChange = async (value: string) => {
@@ -2823,6 +2903,18 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 }) {
   // ── "Add provider" dialog (full AuthStep — lists all providers) ──
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addTab, setAddTab] = useState<"builtin" | "custom">("builtin");
+
+  // ── Custom endpoints / gateways ──
+  const { providers: customProviders, loaded: customLoaded, reload: reloadCustom } = useCustomProviders(api);
+  const customIds = new Set<string>([
+    ...customProviders.map((p) => p.id),
+    ...Object.entries(authStatus?.providers ?? {}).filter(([, info]) => info.custom).map(([name]) => name),
+  ]);
+  const refreshCustom = useCallback(async () => {
+    await reloadCustom();
+    await onRefresh();
+  }, [reloadCustom, onRefresh]);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
 
@@ -2937,15 +3029,15 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
             variant="outline"
             size="sm"
             className="h-7 text-xs gap-1"
-            onClick={async () => { await ensureAuthProviders(); setAddDialogOpen(true); }}
+            onClick={async () => { await ensureAuthProviders(); setAddTab("builtin"); setAddDialogOpen(true); }}
           >
             <Key className="h-3 w-3" />
             Add provider
           </Button>
         </div>
-        {allProviderNames.size > 0 ? (
+        {[...allProviderNames].some((name) => !customIds.has(name)) ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {[...allProviderNames].sort().map((name) => {
+            {[...allProviderNames].filter((name) => !customIds.has(name)).sort().map((name) => {
               const prov = providers?.[name] ?? {} as ProviderConfig;
               const agentUsage = providerAgentUsage.get(name) ?? [];
               const authInfo = authStatus?.providers[name];
@@ -2967,6 +3059,16 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
           <Empty text="No providers configured — using environment variables for auto-detection" />
         )}
       </section>
+
+      {/* ── Custom endpoints & gateways ── */}
+      <CustomProvidersSection
+        apiFetch={api}
+        providers={customProviders}
+        loaded={customLoaded}
+        agentUsage={providerAgentUsage}
+        onChanged={refreshCustom}
+        onAdd={async () => { await ensureAuthProviders(); setAddTab("custom"); setAddDialogOpen(true); }}
+      />
 
       {/* ── Model Allowlist ── */}
       {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
@@ -3073,27 +3175,46 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
 
       {/* ── Add Provider Dialog (full AuthStep) ── */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
+        <DialogContent className={cn("p-0 gap-0 max-h-[90vh] overflow-y-auto", addTab === "custom" ? "sm:max-w-2xl" : "sm:max-w-lg")}>
           <DialogHeader className="px-6 pt-6 pb-0">
-            <DialogTitle className="text-base">Manage providers</DialogTitle>
+            <DialogTitle className="text-base">Add provider</DialogTitle>
             <DialogDescription className="text-xs">
-              Connect or disconnect LLM providers via OAuth subscription or API key.
+              Connect a built-in provider (OAuth or API key), or a custom endpoint / AI gateway.
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 py-5">
-            {authProviders.length > 0 ? (
-              <AuthStep
-                providers={authProviders}
-                onKeySave={handleSaveKey}
-                onOAuthComplete={async () => { await refreshProviderList(); }}
-                onDisconnect={handleAuthDisconnect}
-                apiFetch={api}
-              />
-            ) : (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
+            <Tabs value={addTab} onValueChange={(v) => setAddTab(v as "builtin" | "custom")}>
+              <TabsList className="mb-3">
+                <TabsTrigger value="builtin" className="text-xs">Built-in</TabsTrigger>
+                <TabsTrigger value="custom" className="text-xs">Custom endpoint / gateway</TabsTrigger>
+              </TabsList>
+              <TabsContent value="builtin">
+                {authProviders.length > 0 ? (
+                  <AuthStep
+                    providers={authProviders}
+                    onKeySave={handleSaveKey}
+                    onOAuthComplete={async () => { await refreshProviderList(); }}
+                    onDisconnect={handleAuthDisconnect}
+                    apiFetch={api}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </TabsContent>
+              {/* forceMount: switching tabs must not discard a half-filled wizard */}
+              <TabsContent value="custom" forceMount className="data-[state=inactive]:hidden">
+                {addDialogOpen && (
+                  <CustomProviderWizard
+                    apiFetch={api}
+                    takenIds={customIds}
+                    onCancel={() => setAddDialogOpen(false)}
+                    onSaved={async () => { setAddDialogOpen(false); await refreshCustom(); }}
+                  />
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>
@@ -3118,7 +3239,10 @@ export function ConfigPage() {
   const { config, isLoading, error, refetch, setOptimistic } = useConfig();
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
-  const [activeSection, setActiveSection] = useState<SectionId>("general");
+  const [activeSection, setActiveSection] = useState<SectionId>(() => {
+    const requested = new URLSearchParams(window.location.search).get("section");
+    return baseSections.find((section) => section.id === requested)?.id ?? "general";
+  });
 
   // ── Rule dialog state ──
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
@@ -3435,6 +3559,9 @@ export function ConfigPage() {
             )}
           </div>
         )}
+
+        {/* ═══ SANDBOX ═══ */}
+        {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
 
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (
@@ -4898,8 +5025,31 @@ function SyncProgressBar({ progress }: { progress: SyncProgress }) {
 
 /** Parse one NDJSON line emitted by the /sync streaming endpoints and
  * fold it into the panel's progress state. */
+/** rclone --use-json-log stats payload (fields are checked before use). */
+interface SyncStatsPayload {
+  bytes?: unknown;
+  totalBytes?: unknown;
+  transfers?: unknown;
+  totalTransfers?: unknown;
+  speed?: unknown;
+  eta?: unknown;
+  transferring?: unknown;
+}
+
+/** One NDJSON line from the /sync streaming endpoints. */
+interface SyncStreamEvent extends SyncStatsPayload {
+  type?: string;
+  ok?: unknown;
+  code?: number;
+  error?: string;
+  source?: string;
+  stats?: SyncStatsPayload;
+  object?: unknown;
+  msg?: string;
+}
+
 function handleSyncEvent(line: string, setProgress: React.Dispatch<React.SetStateAction<SyncProgress>>) {
-  let evt: any;
+  let evt: SyncStreamEvent | null;
   try { evt = JSON.parse(line); } catch { return; }
   if (evt?.type === "done") {
     setProgress((p) => ({ ...p, done: { ok: !!evt.ok, code: evt.code ?? -1 }, error: evt.error || p.error, active: null }));
@@ -4908,8 +5058,8 @@ function handleSyncEvent(line: string, setProgress: React.Dispatch<React.SetStat
   if (evt?.type !== "log") return;
   // Stats payload — shape from rclone --use-json-log
   if (evt.source === "accounting/stats" || evt.stats) {
-    const s = evt.stats ?? evt;
-    const tx = Array.isArray(s.transferring) ? s.transferring[0] : null;
+    const s: SyncStatsPayload = evt.stats ?? evt;
+    const tx = Array.isArray(s.transferring) ? (s.transferring[0] as { name?: string } | undefined) : null;
     setProgress((p) => ({
       ...p,
       bytes: typeof s.bytes === "number" ? s.bytes : p.bytes,

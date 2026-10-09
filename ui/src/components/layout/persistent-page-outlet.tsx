@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { lazy, Suspense, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,10 +27,9 @@ export function PersistentPageOutlet() {
   const [terminalMounted, setTerminalMounted] = useState(isTerminal);
   const [codingMounted, setCodingMounted] = useState(isCoding);
 
-  useEffect(() => {
-    if (isTerminal) setTerminalMounted(true);
-    if (isCoding) setCodingMounted(true);
-  }, [isTerminal, isCoding]);
+  // Once visited, keep the page mounted (adjusted during render, not in an effect).
+  if (isTerminal && !terminalMounted) setTerminalMounted(true);
+  if (isCoding && !codingMounted) setCodingMounted(true);
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -68,7 +68,9 @@ export function PersistentPageOutlet() {
         )}
         aria-hidden={isPersistentPage}
       >
-        <Outlet />
+        <ErrorBoundary area="questa pagina" resetKey={pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </div>
     </div>
   );

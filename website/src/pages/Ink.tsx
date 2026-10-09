@@ -39,10 +39,10 @@ const TYPE_CONFIG: Record<PackageType, { icon: LucideIcon; label: string; color:
 };
 
 const FILTER_TABS: { key: PackageType | "all"; label: string; count: (pkgs: InkPackage[]) => number; comingSoon?: boolean }[] = [
-  { key: "all", label: "All", count: (p) => p.filter((x) => x.type !== "company").length },
+  { key: "all", label: "All", count: (p) => p.length },
   { key: "playbook", label: "Playbooks", count: (p) => p.filter((x) => x.type === "playbook").length },
   { key: "agent", label: "Agents", count: (p) => p.filter((x) => x.type === "agent").length },
-  { key: "company", label: "Companies", count: () => 0, comingSoon: true },
+  { key: "company", label: "Companies", count: (p) => p.filter((x) => x.type === "company").length },
 ];
 
 /* ── Sort options ─────────────────────────────────────────────────── */
@@ -181,7 +181,7 @@ export function InkPage() {
   const [sortKey, setSortKey] = useState<SortKey>("installs");
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
 
-  const allTags = useMemo(() => getAllTags(packages.filter((p) => p.type !== "company")), [packages]);
+  const allTags = useMemo(() => getAllTags(packages), [packages]);
 
   const toggleTag = (tag: string) => {
     setActiveTags((prev) => {
@@ -195,11 +195,10 @@ export function InkPage() {
   const clearTags = () => setActiveTags(new Set());
 
   const filtered = useMemo(() => {
-    // Always exclude companies (coming soon)
-    let result = packages.filter((p) => p.type !== "company");
+    let result = packages;
 
     // Type filter
-    if (activeFilter !== "all" && activeFilter !== "company") {
+    if (activeFilter !== "all") {
       result = result.filter((p) => p.type === activeFilter);
     }
 
@@ -229,7 +228,7 @@ export function InkPage() {
     return sortPackages(result, sortKey);
   }, [packages, search, activeFilter, sortKey, activeTags]);
 
-  const visiblePackages = useMemo(() => packages.filter((p) => p.type !== "company"), [packages]);
+  const visiblePackages = packages;
   const totalInstalls = useMemo(() => visiblePackages.reduce((sum, p) => sum + p.installs, 0), [visiblePackages]);
 
   return (
@@ -441,7 +440,7 @@ export function InkPage() {
                 <ExtLink href="https://docs.polpo.sh/features/ink" className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 hover:text-neutral-950 transition">
                   Read the docs <ArrowRight className="h-3.5 w-3.5" />
                 </ExtLink>
-                <ExtLink href="https://github.com/lumea-labs/ink-registry" className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-700 transition">
+                <ExtLink href={`https://github.com/${import.meta.env.VITE_INK_REGISTRY ?? "lumea-labs/ink-registry"}`} className="inline-flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-700 transition">
                   <GitHubIcon className="h-3.5 w-3.5" />
                   Example registry
                 </ExtLink>
@@ -459,7 +458,7 @@ export function InkPage() {
             <span className="text-xs text-neutral-400">Polpo Ink Hub — Package Registry</span>
           </div>
           <div className="flex items-center gap-4">
-            <ExtLink href="https://github.com/lumea-labs/polpo" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
+            <ExtLink href="https://github.com/alemicali/polpo-zhc" className="text-xs text-neutral-400 hover:text-neutral-600 transition">GitHub</ExtLink>
             <ExtLink href="https://docs.polpo.sh" className="text-xs text-neutral-400 hover:text-neutral-600 transition">Docs</ExtLink>
             <span className="text-xs text-neutral-400">MIT License</span>
           </div>

@@ -5,9 +5,10 @@ import { Orchestrator } from "../../core/orchestrator.js";
 import { buildChatSystemPrompt } from "../../llm/prompts.js";
 import { queryOrchestratorText } from "../../llm/query.js";
 import type { SessionStore } from "../../core/session-store.js";
+import { resolveModel, resolveModelSpec, completeSimpleWithAuth, resolveSummaryModel } from "../../llm/pi-client.js";
+import { createSessionCompaction } from "@polpo-ai/server";
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
-const MAX_HISTORY = 20;
 
 async function initOrchestrator(configPath: string): Promise<Orchestrator> {
   const o = new Orchestrator(resolve(configPath));
@@ -54,19 +55,36 @@ export function registerChatCommands(program: Command): void {
         })();
         const systemPrompt = await buildChatSystemPrompt(orchestrator, state);
 
-        // Assemble full prompt with conversation history
-        const history = sessionStore && sessionId
-          ? await sessionStore.getRecentMessages(sessionId, MAX_HISTORY)
-          : [];
+        // Conversation history: the whole session, compacted like any chat when it gets long
+        const history = sessionStore && sessionId ? await sessionStore.getMessages(sessionId) : [];
+        const past = history
+          .filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
+          .filter((m, i, all) => !(i === all.length - 1 && m.role === "user" && m.content === message))
+          .map((m) => ({ role: m.role, content: m.content }));
+        const settings = orchestrator.getConfig()?.settings;
+        const model = resolveModel(resolveModelSpec(settings?.orchestratorModel));
+        const session = sessionId ? await sessionStore?.getSession(sessionId) : undefined;
+        const compaction = await createSessionCompaction({
+          model,
+          settings: settings?.compaction ?? {},
+          systemPrompt: () => systemPrompt,
+          tools: () => [],
+          original: past,
+          sessionId: sessionId ?? null,
+          scope: JSON.stringify([session?.createdAt, "polpo:cli", model.provider, model.id]),
+          store: orchestrator.getContextCheckpointStore(),
+          completeLLM: completeSimpleWithAuth as any,
+          summaryModel: (promptTokens) => resolveSummaryModel(model, settings?.compaction?.model, promptTokens),
+          memory: { store: orchestrator.getMemoryStore() },
+        });
+        const { messages: projected } = await compaction.prepare(past);
 
         const parts: string[] = [systemPrompt];
-
-        // Inject conversation history (skip current message)
-        const past = history.filter((m) => !(m.role === "user" && m.content === message));
-        if (past.length > 0) {
+        if (projected.length > 0) {
           parts.push("", "## Conversation History", "");
-          for (const m of past) {
-            parts.push(`${m.role === "user" ? "User" : "Assistant"}: ${m.content}`);
+          for (const m of projected) {
+            const text = typeof m.content === "string" ? m.content : (m.content as any[]).map((p) => p.text ?? "").join("");
+            parts.push(`${m.role === "assistant" ? "Assistant" : "User"}: ${text}`);
           }
         }
 

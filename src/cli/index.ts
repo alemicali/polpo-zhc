@@ -15,6 +15,9 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST, getPolpoDir } from "../core/constants.js";
 
+/** Upper bound for a graceful shutdown (systemd's default stop timeout is 90s). */
+const SHUTDOWN_TIMEOUT_MS = 30_000;
+
 // Read version from package.json at build time fallback
 const __dirname_cli = dirname(fileURLToPath(import.meta.url));
 const pkgPath = resolve(__dirname_cli, "..", "..", "package.json");
@@ -261,6 +264,11 @@ const serveAction = async (opts: any) => {
     const gracefulStop = async (signal: string) => {
       if (stopping) return;
       stopping = true;
+      // Whatever happens during shutdown, exit well before the service manager has to kill us.
+      setTimeout(() => {
+        console.error("Shutdown is taking too long — exiting anyway.");
+        process.exit(1);
+      }, SHUTDOWN_TIMEOUT_MS).unref();
       try { await server.stop(); } catch (err) { console.error("Shutdown error:", err); }
       process.exit(signal === "SIGINT" ? 130 : 0);
     };

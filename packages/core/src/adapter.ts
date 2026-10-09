@@ -54,6 +54,9 @@ export interface AgentHandle {
 
 /** Extra context passed to the engine at spawn time. */
 export interface SpawnContext {
+  /** The sandbox this run uses (resolved by the orchestrator) and the volumes it selected. */
+  sandbox?: import("./sandbox.js").EffectiveSandbox;
+  volumes?: import("./sandbox.js").ResolvedSandboxVolume[];
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
   /** Per-task output directory (.polpo/output/<taskId>/). Agents write deliverables here. */
@@ -62,6 +65,8 @@ export interface SpawnContext {
   emailAllowedDomains?: string[];
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
+  /** Instance compaction settings; the agent's own settings apply on top. */
+  compaction?: import("./context-compactor.js").CompactionSettings;
   /** Consistent conversation messages restored for a manual continuation. */
   resumeMessages?: unknown[];
   /** Human direction that triggered this continuation run. */

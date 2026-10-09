@@ -6,6 +6,7 @@
  * polpo agent show <name>      — Detailed agent view (identity + vault masked)
  */
 
+import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { resolve } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import readline from "node:readline";
@@ -57,6 +58,12 @@ export function registerAgentOnboardCommands(program: Command): void {
     .description("Interactive wizard to set up an agent's identity, vault, and hierarchy")
     .option("-d, --dir <path>", "Working directory", ".")
     .action(async (name: string, opts: { dir: string }) => {
+      // "$"-prefixed owners are system vault namespaces ("$data", "$providers"):
+      // onboarding must never read or write their credentials.
+      if (isReservedVaultOwner(name)) {
+        console.error(chalk.red(`  Invalid agent name "${name}": names starting with "$" are reserved.`));
+        process.exit(1);
+      }
       const polpoDir = getPolpoDir(resolve(opts.dir));
       const { agentStore, vaultStore } = await createCliStores(polpoDir);
 

@@ -2,15 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { createSqliteStores } from "@polpo-ai/drizzle";
-import { ensureSqliteSchema } from "../core/drizzle-sqlite-schema.js";
+import { migrateSqlite } from "@polpo-ai/drizzle";
 import type { TaskStore } from "../core/task-store.js";
 
 let sqlite: InstanceType<typeof Database>;
 
 function makeStore(): TaskStore {
   sqlite = new Database(":memory:");
-  ensureSqliteSchema(sqlite);
   const db = drizzle(sqlite);
+  migrateSqlite(db);
   return createSqliteStores(db).taskStore;
 }
 

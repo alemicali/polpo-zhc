@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { BrainChangeEmitter, CompanyBrainSnapshot } from "../core/company-brain.js";
+import type { BrainChangeEmitter, CompanyBrainSnapshot } from "@polpo-ai/core/company-brain";
 
 const EMPTY: CompanyBrainSnapshot = {
   version: 1,

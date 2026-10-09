@@ -15,6 +15,9 @@
  *   - Approval inline buttons (preserves existing TelegramCallbackPoller behavior)
  *   - Reply routing ("conversation pipe"): chat replies can leave from another channel
  *     (gateway.replyTo or per message), e.g. in from a webhook, out on Telegram
+ *   - Groups: a group is enabled once (by an authorized person) and then everyone in it can
+ *     talk to the agents, in a conversation of its own per group and topic. Only messages
+ *     addressed to the bot are answered; the others are kept as context for the next turn.
  *   - Presence tracking
  *
  * Architecture:
@@ -27,23 +30,33 @@
  */
 
 import { nanoid } from "nanoid";
+import { sessionLeases } from "@polpo-ai/server";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
+import type { InboundGroup } from "./telegram-groups.js";
+import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
+import type { RoomKind, RoomMessage, RoomStore } from "@polpo-ai/core";
+import type { TelegramAgentRelay } from "../rooms/telegram-relay.js";
+import type { AgentProfile } from "../rooms/room-engine.js";
+import { ROOM_TURN_LINES, roomTurnText } from "../rooms/transcript.js";
 import type {
   ChannelGatewayConfig,
   ChannelReplyTarget,
   ChannelType,
   NotificationChannelConfig,
 } from "../core/types.js";
-import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth } from "../llm/pi-client.js";
+import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
+import { createSessionCompaction } from "@polpo-ai/server";
+import { isContextOverflowError } from "@polpo-ai/core";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
   executeOrchestratorTool,
 } from "../llm/orchestrator-tools.js";
+import { withEventOrigin } from "../core/events.js";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -54,7 +67,20 @@ export interface ChannelGatewayOptions {
   channelConfig: NotificationChannelConfig;
   approvalResolver?: ApprovalCallbackResolver;
   /** Called periodically during long-running operations (e.g. to send typing indicators). */
-  onTyping?: (chatId: string) => Promise<void>;
+  onTyping?: (chatId: string, target?: ChannelSendTarget) => Promise<void>;
+  /** Channel key (notifications.channels): names this bot among the group's agents. */
+  key?: string;
+  /**
+   * Group conversations as rooms: one persisted transcript (people and agents) that the agents
+   * read and the intent classifier judges on. Without it, group context stays in memory.
+   */
+  roomStore?: RoomStore;
+}
+
+/** Where a message goes inside a chat: a forum topic, as a reply to a message (groups). */
+export interface ChannelSendTarget {
+  threadId?: number;
+  replyTo?: number;
 }
 
 interface InboundMessage {
@@ -68,7 +94,21 @@ interface InboundMessage {
   attachments?: InboundAttachment[];
   /** Where the chat reply goes: "origin" forces this channel; unset = gateway.replyTo, else origin. */
   replyTo?: ChannelReplyTarget | "origin";
+  /** Set when the message was written in a group. */
+  group?: InboundGroup;
+  /** The message as stored in its room (groups with a room store). */
+  roomMessageId?: string;
 }
+
+/** A group message that was not addressed to the bot, kept as context for the next turn. */
+interface GroupLine { name: string; text: string; at: number }
+
+/** Context lines kept per group conversation, and for how long. */
+const GROUP_CONTEXT_LINES = 30;
+const GROUP_CONTEXT_MS = 12 * 60 * 60 * 1000;
+/** groupReplies "intent": the probability above which an agent joins in unprompted. */
+const DEFAULT_INTENT_THRESHOLD = 0.7;
+const GROUP_CONTEXT_CONVERSATIONS = 500;
 
 interface CommandResult {
   text: string;
@@ -159,6 +199,10 @@ export interface ChannelOutboundFile { path: string; filename: string }
 /** Runs one chat turn and returns the reply. The host persists both messages. */
 export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string; files?: ChannelOutboundFile[] }>;
 
+/** Compacts a session's context now (manual /compact) and says what it did. */
+export type ChannelCompactRunner = (request: { agent?: string; sessionId: string; messages: ChannelChatRequest["messages"]; focus?: string }) =>
+  Promise<{ beforeTokens: number; afterTokens: number; mode: string; removedMessages: number } | null>;
+
 /** One-time link that pairs whoever opens it (e.g. t.me/<bot>?start=<token>). */
 export interface ChannelInvite {
   token: string;
@@ -211,9 +255,12 @@ const COMMANDS: Record<string, string> = {
   "/approve": "Approve a pending approval (usage: /approve REQUEST_ID)",
   "/reject":  "Reject a pending approval (usage: /reject REQUEST_ID [reason])",
   "/new":     "Reset your conversation session",
+  "/compact": "Summarize the conversation so far to free context (usage: /compact [focus])",
   "/agent":   "Talk directly to an agent (usage: /agent NAME)",
   "/polpo":   "Go back to talking with the orchestrator",
   "/pair":    "Approve a pairing code (usage: /pair CODE)",
+  "/enable":  "Let everyone in this group talk to me (authorized people only)",
+  "/disable": "Stop answering in this group (authorized people only)",
 };
 
 // ── Channel Gateway ─────────────────────────────────────────────────────
@@ -227,13 +274,20 @@ export class ChannelGateway {
   private approvalResolver?: ApprovalCallbackResolver;
   private pendingRevise = new Map<string, string>(); // chatId → approvalRequestId
   private recentMessageIds = new Set<string>(); // dedup guard for duplicate polls
-  private onTyping?: (chatId: string) => Promise<void>;
-  private onPartialResponse?: (chatId: string, text: string) => Promise<void>;
+  private onTyping?: (chatId: string, target?: ChannelSendTarget) => Promise<void>;
+  private onPartialResponse?: (chatId: string, text: string, target?: ChannelSendTarget) => Promise<void>;
+  private groupContext = new Map<string, GroupLine[]>(); // group conversation → recent unaddressed messages
   private invites = new Map<string, ChannelInvite>(); // token → invite (in-memory, short-lived)
   private pendingSuggestion = new Map<string, SuggestionCommand>(); // chatId → suggestion awaiting its placeholder
   private forceNewSession = new Set<string>(); // session keys reset by /new in shared mode
   private replyRouter?: ReplyRouter;
   private partialOverride = new Map<string, (text: string) => Promise<void>>(); // chatId → routed partials
+  private key: string;
+  private intent?: GroupIntentArbiter;
+  private roomStore?: RoomStore;
+  private relay?: TelegramAgentRelay;
+  /** Group conversations this bot has seen a message in (it is a member). */
+  private presentIn = new Set<string>();
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -243,6 +297,8 @@ export class ChannelGateway {
     this.gatewayConfig = opts.channelConfig.gateway ?? {};
     this.approvalResolver = opts.approvalResolver;
     this.onTyping = opts.onTyping;
+    this.key = opts.key ?? "default";
+    this.roomStore = opts.roomStore;
   }
 
   /** Emit a structured log via the orchestrator's event bus. */
@@ -264,7 +320,7 @@ export class ChannelGateway {
   }
 
   /** Set a callback to send partial responses as separate messages (e.g. Telegram messages). */
-  setPartialResponseHandler(handler: (chatId: string, text: string) => Promise<void>): void {
+  setPartialResponseHandler(handler: (chatId: string, text: string, target?: ChannelSendTarget) => Promise<void>): void {
     this.onPartialResponse = handler;
   }
 
@@ -278,16 +334,27 @@ export class ChannelGateway {
 
   /** Like handleMessage, keeping inline buttons for channels that can render them. */
   async handleMessageReply(msg: InboundMessage): Promise<GatewayReply | undefined> {
-    const reply = await this.routeMessage(msg);
-    return typeof reply === "string" ? { text: reply } : reply;
+    // Whatever this message causes is attributed to the channel and the person who wrote it
+    const reply = await withEventOrigin({ source: "channel", by: `${msg.channel}:${msg.externalId}` }, () => this.routeMessage(msg));
+    const out = typeof reply === "string" ? { text: reply } : reply;
+    if (msg.group) {
+      const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+      this.presentIn.add(conversation);
+      if (this.roomStore) {
+        const stored = await this.recordAgentReply(msg, out?.text);
+        // the other agents of the group may answer this reply (they never see it on Telegram)
+        if (stored && this.relay) this.relay.agentReplied(conversation, stored, this.key);
+      } else await this.hearGroup(msg, out?.text);
+    }
+    return out;
   }
 
   private async routeMessage(msg: InboundMessage): Promise<string | GatewayReply | undefined> {
     if (!this.gatewayConfig.enableInbound) return undefined;
 
-    // Dedup: skip if we've already processed this exact message
+    // Dedup: skip if we've already processed this exact message (message ids are per chat)
     if (msg.messageId) {
-      const dedupKey = `${msg.channel}:${msg.messageId}`;
+      const dedupKey = `${msg.channel}:${msg.chatId}:${msg.messageId}`;
       if (this.recentMessageIds.has(dedupKey)) return undefined;
       this.recentMessageIds.add(dedupKey);
       // Cap the set to prevent unbounded growth
@@ -299,30 +366,40 @@ export class ChannelGateway {
 
     const peerId = `${msg.channel}:${msg.externalId}`;
 
-    // Upsert peer identity
-    await this.peerStore.upsertPeer({
-      channel: msg.channel,
-      externalId: msg.externalId,
-      displayName: msg.displayName,
-      lastSeenAt: new Date().toISOString(),
-    });
+    if (msg.group) {
+      // ── Groups: the group is the trust boundary, not the person ──
+      const admitted = await this.admitGroupMessage(msg, peerId);
+      if (admitted !== true) return admitted;
+    } else {
+      // Upsert peer identity
+      await this.peerStore.upsertPeer({
+        channel: msg.channel,
+        externalId: msg.externalId,
+        displayName: msg.displayName,
+        lastSeenAt: new Date().toISOString(),
+      });
 
-    // Update presence
-    this.peerStore.updatePresence(peerId, "chatting");
+      // Update presence
+      this.peerStore.updatePresence(peerId, "chatting");
 
-    // ── One-time invite link (/start <token>) — pairs without a code ──
-    const invite = this.matchInvite(msg.text);
-    if (invite) return this.redeemInvite(invite, msg, peerId);
+      // ── One-time invite link (/start <token>) — pairs without a code ──
+      const invite = this.matchInvite(msg.text);
+      if (invite) return this.redeemInvite(invite, msg, peerId);
 
-    // ── DM Policy enforcement ──
-    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
-      return this.handleUnauthorized(msg, peerId);
+      // ── DM Policy enforcement ──
+      if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) {
+        return this.handleUnauthorized(msg, peerId);
+      }
     }
 
+    // Who the agents talk with: the person in a DM, the group (and topic) in a group.
+    const conversation = this.conversationId(msg, peerId);
+    const pendingKey = this.pendingKey(msg);
+
     // ── Check for pending approval rejection feedback ──
-    const pendingRequestId = this.pendingRevise.get(msg.chatId);
+    const pendingRequestId = this.pendingRevise.get(pendingKey);
     if (pendingRequestId && this.approvalResolver) {
-      this.pendingRevise.delete(msg.chatId);
+      this.pendingRevise.delete(pendingKey);
       const result = await this.approvalResolver.reject(pendingRequestId, msg.text, peerId);
       return result.ok
         ? `Rejected — task will retry with your feedback:\n${msg.text}`
@@ -330,38 +407,403 @@ export class ChannelGateway {
     }
 
     // ── Suggestion waiting for its [placeholder] ──
-    const pendingSuggestion = this.pendingSuggestion.get(msg.chatId);
+    const pendingSuggestion = this.pendingSuggestion.get(pendingKey);
     if (pendingSuggestion) {
-      this.pendingSuggestion.delete(msg.chatId);
+      this.pendingSuggestion.delete(pendingKey);
       if (!msg.text.startsWith("/")) {
         const filled = pendingSuggestion.prompt.replace(PLACEHOLDER, msg.text.trim());
-        return this.handleChat({ ...msg, text: filled }, peerId);
+        return this.handleChat({ ...msg, text: filled }, conversation);
       }
     }
 
     // ── Slash commands ──
     if (msg.text.startsWith("/")) {
-      const suggestion = await this.handleSuggestionCommand(msg, peerId);
+      const suggestion = await this.handleSuggestionCommand(msg, conversation);
       if (suggestion) return suggestion;
-      const result = await this.handleCommand(msg, peerId);
+      const result = await this.handleCommand(msg, peerId, conversation);
       if (result) return result.buttons ? { text: result.text, buttons: result.buttons } : result.text;
     }
 
     // ── Free-text chat → orchestrator completions ──
-    return this.handleChat(msg, peerId);
+    return this.handleChat(msg, conversation);
+  }
+
+  // ── Groups ────────────────────────────────────────────────────────
+
+  /** Allowlist entry and peer id of a group (all of this instance's bots share it). */
+  private groupId(msg: Pick<InboundMessage, "channel" | "chatId">): string {
+    return `${msg.channel}:group:${msg.chatId}`;
+  }
+
+  /** Conversation key: the person in a DM; the group, and its topic, in a group. */
+  private conversationId(msg: InboundMessage, peerId: string): string {
+    if (!msg.group) return peerId;
+    return msg.group.threadId !== undefined ? `${this.groupId(msg)}:topic:${msg.group.threadId}` : this.groupId(msg);
+  }
+
+  // ── Groups: joining in by intent ──────────────────────────────────
+
+  /** The instance's group arbiter (gateway.groupReplies = "intent"). */
+  setIntentArbiter(arbiter: GroupIntentArbiter): void {
+    this.intent = arbiter;
+  }
+
+  private intentMode(): boolean {
+    return this.gatewayConfig.groupReplies === "intent" && !!this.intent?.available;
+  }
+
+  /**
+   * This bot as one of the agents of a group conversation, when it answers by intent there:
+   * intent mode on and the group enabled. The orchestrator's bot speaks as Polpo.
+   */
+  async intentCandidate(conversation: string): Promise<IntentCandidate | undefined> {
+    if (this.gatewayConfig.groupReplies !== "intent") return undefined;
+    const groupId = conversation.replace(/:topic:.*$/, "");
+    if (!await this.peerStore.isAllowed(groupId, this.gatewayConfig)) return undefined;
+    const name = this.gatewayConfig.agent;
+    if (!name) {
+      return {
+        key: this.key,
+        name: "Polpo",
+        role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents, answers about tasks, missions and agents",
+        responsibilities: [],
+      };
+    }
+    const agent = (await this.orchestrator.getAgents()).find(a => a.name === name);
+    const id = agent?.identity;
+    const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    return {
+      key: this.key,
+      name: id?.displayName ?? name,
+      role: short(id?.title ?? agent?.role ?? "an agent of the company", 160),
+      responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+    };
+  }
+
+  /**
+   * Feed the group's transcript (shared by the instance's bots): the person's message, heard
+   * once whichever bot got it, and this bot's reply. The classifier reads it to tell who is
+   * involved in the conversation.
+   */
+  private async hearGroup(msg: InboundMessage, reply: string | undefined): Promise<void> {
+    if (!this.intent || !msg.text.trim() || msg.text.startsWith("/")) return;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    const person = msg.displayName ?? msg.externalId;
+    this.intent.hear(conversation, { name: person, text: msg.text }, msg.messageId);
+    if (reply?.trim()) {
+      const me = await this.intentCandidate(conversation).catch(() => undefined);
+      this.intent.hear(conversation, { name: me?.name ?? this.interlocutorName(), text: reply, agent: true, to: person });
+    }
+  }
+
+  /**
+   * An unaddressed group message: should this bot answer it anyway? Asked before the message is
+   * kept as context. True only in intent mode, in an enabled group, above the threshold.
+   */
+  async joinsByIntent(msg: InboundMessage): Promise<boolean> {
+    if (!msg.group || msg.group.addressed || !this.intentMode() || !msg.messageId) return false;
+    if (!msg.text.trim() || msg.text.startsWith("/")) return false;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    const me = await this.intentCandidate(conversation);
+    if (!me) return false;
+    const decision = await this.intent!.decide({
+      conversation,
+      messageId: msg.messageId,
+      title: msg.group.title,
+      speaker: msg.displayName ?? msg.externalId,
+      text: msg.text,
+      members: msg.group.members,
+    }, me);
+    const p = decision[this.key] ?? 0;
+    return p >= (this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD);
+  }
+
+  /** Key of per-person pending state (reject feedback, suggestion placeholder). */
+  private pendingKey(msg: Pick<InboundMessage, "chatId" | "externalId" | "group">): string {
+    return msg.group ? `${msg.chatId}:${msg.externalId}` : msg.chatId;
+  }
+
+  /** In groups replies go to the message's topic, quoting it. */
+  private sendTarget(msg: InboundMessage): ChannelSendTarget | undefined {
+    if (!msg.group) return undefined;
+    const replyTo = msg.messageId && /^\d+$/.test(msg.messageId) ? Number(msg.messageId) : undefined;
+    return { threadId: msg.group.threadId, replyTo };
+  }
+
+  /**
+   * A person trusted on their own (paired, invited, or in the channel's allowFrom), whatever the
+   * DM policy: needed to enable or disable a group, and for approvals and pairing inside groups.
+   */
+  private personAuthorized(peerId: string): Promise<boolean> {
+    return this.peerStore.isAllowed(peerId, { ...this.gatewayConfig, dmPolicy: "allowlist" });
+  }
+
+  private interlocutorName(): string {
+    return this.gatewayConfig.agent ?? "Polpo";
+  }
+
+  /**
+   * Group messages: the unaddressed ones become context, the addressed ones are answered once
+   * the group is enabled. Returns true to continue routing, or what to answer (if anything).
+   */
+  private async admitGroupMessage(msg: InboundMessage, peerId: string): Promise<true | string | undefined> {
+    const enabled = await this.peerStore.isAllowed(this.groupId(msg), this.gatewayConfig);
+    if (!msg.group!.addressed) {
+      if (enabled) await this.rememberGroupLine(msg, peerId);
+      return undefined;
+    }
+    const command = msg.text.trim().split(/\s+/)[0].toLowerCase();
+    if (command === "/enable") return this.enableGroup(msg, peerId, enabled);
+    if (!enabled) {
+      return `I'm not enabled in this group yet. Someone already authorized to talk to ${this.interlocutorName()} can enable me by sending /enable here.`;
+    }
+    if (command === "/disable") return this.disableGroup(msg, peerId);
+    if (this.roomStore && !command.startsWith("/")) await this.recordPerson(msg, peerId);
+    await this.peerStore.upsertPeer({
+      channel: msg.channel,
+      externalId: msg.externalId,
+      displayName: msg.displayName,
+      lastSeenAt: new Date().toISOString(),
+    });
+    this.peerStore.updatePresence(peerId, "chatting");
+    return true;
+  }
+
+  private groupWelcome(): string {
+    const who = this.interlocutorName();
+    return [
+      `Enabled: everyone in this group can now talk to ${who}.`,
+      this.gatewayConfig.groupReplies === "intent"
+        ? "Mention me or reply to one of my messages and I'll answer; I also join in when a message is for me, and read the rest as context."
+        : "Mention me or reply to one of my messages and I'll answer; I read the rest of the conversation as context.",
+      this.gatewayConfig.agent ? "" : "/agent picks who answers in this group, /polpo goes back to the orchestrator.",
+      "/new starts a fresh conversation, /disable turns me off here.",
+    ].filter(Boolean).join("\n");
+  }
+
+  private async enableGroup(msg: InboundMessage, peerId: string, alreadyEnabled: boolean): Promise<string> {
+    if (alreadyEnabled) return `Already enabled: everyone here can talk to ${this.interlocutorName()}.`;
+    // Only someone already trusted (paired in a private chat) can extend that trust to a group.
+    if (!await this.personAuthorized(peerId)) {
+      return "Only someone already authorized to talk to me can enable this group. Pair with me in a private chat first, then send /enable here.";
+    }
+    await this.activateGroup(msg.channel, msg.chatId, msg.group?.title, peerId);
+    return this.groupWelcome();
+  }
+
+  private async disableGroup(msg: InboundMessage, peerId: string): Promise<string> {
+    if (!await this.personAuthorized(peerId)) return "Only someone already authorized to talk to me can disable this group.";
+    const id = this.groupId(msg);
+    await this.peerStore.removeFromAllowlist(id);
+    for (const key of this.groupContext.keys()) if (key === id || key.startsWith(`${id}:`)) this.groupContext.delete(key);
+    this.log("info", `Group ${id} disabled by ${peerId}`);
+    return "Disabled: I won't answer in this group until someone authorized sends /enable again.";
+  }
+
+  private async activateGroup(channel: ChannelType, chatId: string, title: string | undefined, by: string): Promise<void> {
+    const id = this.groupId({ channel, chatId });
+    await this.peerStore.addToAllowlist(id);
+    await this.peerStore.upsertPeer({ channel, externalId: `group:${chatId}`, displayName: title, lastSeenAt: new Date().toISOString() });
+    this.log("info", `Group ${id}${title ? ` ("${title}")` : ""} enabled by ${by}`);
+  }
+
+  /** The bot was added to a group: enabled at once when the person who added it is authorized. */
+  async handleGroupJoined(channel: ChannelType, chatId: string, title: string | undefined, senderId: string): Promise<string | undefined> {
+    if (!this.gatewayConfig.enableInbound) return undefined;
+    if (await this.peerStore.isAllowed(this.groupId({ channel, chatId }), this.gatewayConfig)) return this.groupWelcome();
+    const peerId = `${channel}:${senderId}`;
+    if (await this.personAuthorized(peerId)) {
+      await this.activateGroup(channel, chatId, title, peerId);
+      return this.groupWelcome();
+    }
+    return `Hi! I'll answer here once someone already authorized to talk to ${this.interlocutorName()} sends /enable in this group.`;
+  }
+
+  /** A group became a supergroup: its activation follows the new chat id. */
+  async handleGroupMigrated(channel: ChannelType, chatId: string, fromChatId: string, title?: string): Promise<void> {
+    const from = this.groupId({ channel, chatId: fromChatId });
+    if (!await this.peerStore.isAllowed(from)) return;
+    await this.activateGroup(channel, chatId, title, from);
+    await this.peerStore.removeFromAllowlist(from);
+  }
+
+  // ── Groups as rooms ───────────────────────────────────────────────
+
+  /** The room of a group conversation (created on its first message). */
+  private async roomOf(msg: InboundMessage, conversation: string) {
+    const title = [msg.group?.title ?? "Group", msg.group?.threadId !== undefined ? `topic ${msg.group.threadId}` : ""].filter(Boolean).join(" · ");
+    return this.roomStore!.ensureRoom({ id: conversation, kind: msg.channel as RoomKind, title });
+  }
+
+  /** This bot in a room: the agent it speaks as (the orchestrator is "polpo"). */
+  private async speaker(conversation: string): Promise<{ id: string; name: string }> {
+    const agent = await this.getActiveAgent(conversation).catch(() => undefined);
+    if (!agent) return { id: "polpo", name: "Polpo" };
+    const def = (await this.orchestrator.getAgents()).find(a => a.name === agent);
+    return { id: agent, name: def?.identity?.displayName ?? agent };
+  }
+
+  /** A person's group message into its room, once whichever bot got it. */
+  private async recordPerson(msg: InboundMessage, peerId: string): Promise<void> {
+    if (!this.roomStore || !msg.text.trim()) return;
+    const conversation = this.conversationId(msg, peerId);
+    this.presentIn.add(conversation);
+    if (msg.messageId) this.relay?.personSpoke(conversation, msg.messageId);
+    try {
+      await this.roomOf(msg, conversation);
+      const saved = await this.roomStore.addMessage(conversation, {
+        authorKind: "person",
+        authorId: peerId,
+        authorName: msg.displayName ?? msg.externalId,
+        text: msg.text,
+        ...(msg.messageId ? { externalId: msg.messageId } : {}),
+        ...(msg.group?.addressed ? { addressedTo: [(await this.speaker(conversation)).id] } : {}),
+      });
+      msg.roomMessageId = saved.id;
+    } catch (err) {
+      this.log("warn", `Room ${conversation}: could not store a message: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** This bot's reply into the room, answering the person's (or agent's) message. */
+  private async recordAgentReply(msg: InboundMessage, reply: string | undefined): Promise<RoomMessage | undefined> {
+    if (!this.roomStore || !msg.roomMessageId || !reply?.trim()) return undefined;
+    const conversation = this.conversationId(msg, `${msg.channel}:${msg.externalId}`);
+    try {
+      const me = await this.speaker(conversation);
+      return await this.roomStore.addMessage(conversation, {
+        authorKind: "agent", authorId: me.id, authorName: me.name, text: reply, replyToId: msg.roomMessageId,
+      });
+    } catch (err) {
+      this.log("warn", `Room ${conversation}: could not store a reply: ${err instanceof Error ? err.message : String(err)}`);
+      return undefined;
+    }
+  }
+
+  // ── Groups: agents answering each other (the relay) ───────────────
+
+  setAgentRelay(relay: TelegramAgentRelay): void {
+    this.relay = relay;
+  }
+
+  /** This bot has seen the group conversation (it is a member). */
+  isIn(conversation: string): boolean {
+    return this.presentIn.has(conversation);
+  }
+
+  /** How this bot answers in the group: by intent, mentions only, or not at all (not enabled). */
+  async relayMode(conversation: string): Promise<"intent" | "mentions" | undefined> {
+    const groupId = conversation.replace(/:topic:.*$/, "");
+    if (!await this.peerStore.isAllowed(groupId, this.gatewayConfig)) return undefined;
+    return this.gatewayConfig.groupReplies === "intent" ? "intent" : "mentions";
+  }
+
+  relayThreshold(): number {
+    return this.gatewayConfig.intentThreshold ?? DEFAULT_INTENT_THRESHOLD;
+  }
+
+  /** Who this bot speaks as in a group. */
+  async relayProfile(conversation: string): Promise<AgentProfile> {
+    const me = await this.speaker(conversation);
+    if (me.id === "polpo") return { id: me.id, name: me.name, role: "the orchestrator: plans and coordinates the company's work", responsibilities: [] };
+    const def = (await this.orchestrator.getAgents()).find(a => a.name === me.id);
+    const id = def?.identity;
+    const short = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    return {
+      id: me.id,
+      name: me.name,
+      role: short(id?.title ?? def?.role ?? "an agent of the company", 160),
+      responsibilities: (id?.responsibilities ?? []).map(r => short(typeof r === "string" ? r : `${r.area}: ${r.description}`, 160)),
+    };
+  }
+
+  /** Answer another agent's message in a group (the relay); the reply is stored and returned, not sent. */
+  async answerAgent(conversation: string, message: RoomMessage): Promise<RoomMessage | undefined> {
+    const m = /^([^:]+):group:([^:]+)(?::topic:(\d+))?$/.exec(conversation);
+    if (!m) return undefined;
+    const room = await this.roomStore?.getRoom(conversation);
+    const msg: InboundMessage = {
+      channel: m[1] as InboundMessage["channel"],
+      externalId: `agent:${message.authorId}`,
+      chatId: m[2]!,
+      displayName: `${message.authorName} (agent)`,
+      text: message.text,
+      group: { title: room?.title.replace(/ · topic \d+$/, ""), ...(m[3] ? { threadId: Number(m[3]) } : {}), addressed: true },
+      roomMessageId: message.id,
+      replyTo: "origin",
+    };
+    const reply = await this.handleChat(msg, conversation);
+    const text = typeof reply === "string" ? reply : reply?.text;
+    return this.recordAgentReply(msg, text);
+  }
+
+  /**
+   * The text of a group turn from the room: what was said since this agent last spoke (people
+   * and the other agents), then the speaker's message.
+   */
+  private async roomTurnText(msg: InboundMessage, conversation: string): Promise<string> {
+    const current = { id: msg.roomMessageId, speaker: msg.displayName ?? msg.externalId, text: msg.text };
+    try {
+      const me = await this.speaker(conversation);
+      const text = roomTurnText(await this.roomStore!.getRecentMessages(conversation, ROOM_TURN_LINES + 20), me.id, current);
+      const peers = this.relay ? await this.relay.peers(conversation, this.key).catch(() => []) : [];
+      if (peers.length === 0) return text;
+      const list = peers.map(p => `${p.name} (@${p.id}: ${p.role})`).join(", ");
+      return `[Other agents in this group: ${list}. Lines marked "(agent)" are theirs; to ask one of them, write @its-id. Do not repeat what another agent already said.]\n\n${text}`;
+    } catch {
+      return `${current.speaker}: ${current.text}`;
+    }
+  }
+
+  /** Keep an unaddressed group message for the next turn of that group conversation. */
+  private async rememberGroupLine(msg: InboundMessage, peerId: string): Promise<void> {
+    if (this.roomStore) return this.recordPerson(msg, peerId);
+    const key = this.conversationId(msg, peerId);
+    const now = Date.now();
+    const lines = (this.groupContext.get(key) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
+    lines.push({ name: msg.displayName ?? msg.externalId, text: msg.text.slice(0, 1_000), at: now });
+    this.groupContext.delete(key); // re-insert: Map order = least recently used first
+    this.groupContext.set(key, lines.slice(-GROUP_CONTEXT_LINES));
+    if (this.groupContext.size > GROUP_CONTEXT_CONVERSATIONS) {
+      this.groupContext.delete(this.groupContext.keys().next().value!);
+    }
+  }
+
+  /**
+   * The text of a group turn: who is speaking, preceded by what the group said since the last
+   * turn (those lines are consumed: from now on they are part of the session).
+   */
+  private groupTurnText(msg: InboundMessage, conversation: string): string {
+    const now = Date.now();
+    const lines = (this.groupContext.get(conversation) ?? []).filter(l => now - l.at < GROUP_CONTEXT_MS);
+    this.groupContext.delete(conversation);
+    const speaker = `${msg.displayName ?? msg.externalId}: ${msg.text}`;
+    if (lines.length === 0) return speaker;
+    return `[Earlier in the group, not addressed to you]\n${lines.map(l => `${l.name}: ${l.text}`).join("\n")}\n\n${speaker}`;
   }
 
   /**
    * Handle approval button callbacks (preserves existing TelegramCallbackPoller behavior).
    */
-  async handleApprovalCallback(action: string, requestId: string, chatId: string, resolvedBy: string): Promise<string> {
+  async handleApprovalCallback(
+    action: string,
+    requestId: string,
+    chatId: string,
+    resolvedBy: string,
+    /** Who pressed the button. trusted: pressed in the channel's own (owner) chat. */
+    actor?: { peerId: string; trusted?: boolean; pendingKey?: string },
+  ): Promise<string> {
     if (!this.approvalResolver) return "No approval resolver configured";
+    // In a group anyone can press a button: only authorized people decide.
+    if (actor && !actor.trusted && !await this.personAuthorized(actor.peerId)) {
+      return "Only people authorized to talk to me can approve or reject.";
+    }
 
     if (action === "approve") {
       const result = await this.approvalResolver.approve(requestId, resolvedBy);
       return result.ok ? "Approved successfully" : `Error: ${result.error}`;
     } else if (action === "reject") {
-      this.pendingRevise.set(chatId, requestId);
+      this.pendingRevise.set(actor?.pendingKey ?? chatId, requestId);
       return "Rejected — tell the agent why. Reply with your feedback:";
     }
     return "Unknown action";
@@ -455,14 +897,22 @@ export class ChannelGateway {
 
   // ── Command handler ───────────────────────────────────────────────
 
-  private async handleCommand(msg: InboundMessage, peerId: string): Promise<CommandResult | undefined> {
+  /** `conversation` keys the interlocutor and session: the person, or the group in a group. */
+  private async handleCommand(msg: InboundMessage, peerId: string, conversation: string): Promise<CommandResult | undefined> {
     const parts = msg.text.trim().split(/\s+/);
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1);
 
+    // Approvals and pairing stay with people authorized in a private chat, also inside groups.
+    if (msg.group && ["/approve", "/reject", "/pair"].includes(cmd) && !await this.personAuthorized(peerId)) {
+      return { text: "Only people authorized in a private chat with me can do this." };
+    }
+
     switch (cmd) {
+      case "/start": // Telegram sends it when the bot is added to a group from a link
+        return msg.group ? await this.cmdHelp(true) : undefined;
       case "/help":
-        return await this.cmdHelp();
+        return await this.cmdHelp(!!msg.group);
       case "/status":
         return this.cmdStatus();
       case "/tasks":
@@ -474,13 +924,15 @@ export class ChannelGateway {
       case "/approve":
         return this.cmdApprove(args, peerId);
       case "/reject":
-        return this.cmdReject(args, peerId, msg.chatId);
+        return this.cmdReject(args, peerId, this.pendingKey(msg));
       case "/new":
-        return this.cmdNewSession(peerId);
+        return this.cmdNewSession(conversation, !!msg.group);
+      case "/compact":
+        return this.cmdCompact(args.join(" "), conversation);
       case "/agent":
-        return this.cmdAgent(args, peerId);
+        return this.cmdAgent(args, conversation, !!msg.group);
       case "/polpo":
-        return this.cmdPolpo(peerId);
+        return this.cmdPolpo(conversation);
       case "/pair":
         return this.cmdPair(args, peerId);
       default:
@@ -489,7 +941,11 @@ export class ChannelGateway {
     }
   }
 
-  private async cmdHelp(): Promise<CommandResult> {
+  private async cmdHelp(inGroup = false): Promise<CommandResult> {
+    if (inGroup) {
+      const commands = (await this.groupMenuCommands()).map(c => `/${c.command} — ${c.description}`);
+      return { text: `Mention me or reply to my messages to talk to ${this.interlocutorName()} here; I read the rest of the conversation as context.\n\n${commands.join("\n")}` };
+    }
     if (this.gatewayConfig.agent) {
       const suggestions = await this.agentSuggestions();
       const lines = [
@@ -499,6 +955,7 @@ export class ChannelGateway {
       return { text: `You are talking to ${this.gatewayConfig.agent}. Write freely, or use:\n\n${lines.join("\n")}` };
     }
     const lines = Object.entries(COMMANDS)
+      .filter(([cmd]) => cmd !== "/enable" && cmd !== "/disable")
       .map(([cmd, desc]) => `${cmd} — ${desc}`);
     return { text: `Available commands:\n\n${lines.join("\n")}` };
   }
@@ -512,13 +969,13 @@ export class ChannelGateway {
   }
 
   /** /<suggestion> on a dedicated bot: send the prompt, or ask for its [placeholder] first. */
-  private async handleSuggestionCommand(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+  private async handleSuggestionCommand(msg: InboundMessage, conversation: string): Promise<string | GatewayReply | undefined> {
     if (!this.gatewayConfig.agent) return undefined;
     const name = msg.text.trim().split(/\s+/)[0].slice(1).replace(/@\S+$/, "").toLowerCase();
     const suggestion = (await this.agentSuggestions()).find(s => s.command === name);
     if (!suggestion) return undefined;
-    if (!suggestion.placeholder) return this.handleChat({ ...msg, text: suggestion.prompt }, peerId);
-    this.pendingSuggestion.set(msg.chatId, suggestion);
+    if (!suggestion.placeholder) return this.handleChat({ ...msg, text: suggestion.prompt }, conversation);
+    this.pendingSuggestion.set(this.pendingKey(msg), suggestion);
     return {
       text: `${suggestion.title}\n\n${suggestion.prompt.replace(PLACEHOLDER, `<${suggestion.placeholder}>`)}\n\nReply with: ${suggestion.placeholder}`,
       forceReply: { placeholder: suggestion.placeholder.slice(0, 64) },
@@ -627,23 +1084,46 @@ export class ChannelGateway {
     return { text: result.ok ? `Rejected: ${requestId} — ${feedback}` : `Error: ${result.error}` };
   }
 
-  private async cmdNewSession(peerId: string): Promise<CommandResult> {
-    const agent = await this.getActiveAgent(peerId);
-    const key = await this.sessionKey(peerId, agent);
+  private async cmdNewSession(conversation: string, inGroup = false): Promise<CommandResult> {
+    const agent = await this.getActiveAgent(conversation);
+    const key = await this.sessionKey(conversation, agent);
     await this.peerStore.clearSession(key);
     this.forceNewSession.add(key);
-    return { text: `Session reset. Your next message starts a new conversation with ${agent ?? "Polpo"}.` };
+    this.groupContext.delete(conversation);
+    return { text: `Session reset. ${inGroup ? "The next message here" : "Your next message"} starts a new conversation with ${agent ?? "Polpo"}.` };
+  }
+
+  /** /compact [focus]: summarize this conversation's earlier messages now (agent conversations). */
+  private async cmdCompact(focus: string, conversation: string): Promise<CommandResult> {
+    const agent = await this.getActiveAgent(conversation);
+    if (!agent) {
+      return { text: "The conversation with Polpo here keeps only its recent messages, so there is nothing to compact. /compact works in conversations with an agent." };
+    }
+    const compact = this.orchestrator.getChannelCompactRunner?.();
+    if (!compact) return { text: "Compaction is not available on this instance." };
+    const sessionId = await this.peerStore.getSessionId(await this.sessionKey(conversation, agent));
+    if (!sessionId) return { text: "There is no conversation to compact yet." };
+    const messages = (typeof this.sessionStore.getMessages === "function"
+      ? await this.sessionStore.getMessages(sessionId)
+      : await this.sessionStore.getRecentMessages(sessionId, 200))
+      .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
+      .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
+    if (messages.length < 2) return { text: "There is not enough conversation to compact yet." };
+    const done = await compact({ agent, sessionId, messages, ...(focus.trim() ? { focus: focus.trim() } : {}) });
+    if (!done) return { text: "Nothing to compact." };
+    const k = (n: number) => `${Math.round(n / 1000)}k`;
+    return { text: `Context compacted: ${k(done.beforeTokens)} → ${k(done.afterTokens)} tokens (${done.removedMessages} earlier messages summarized). ${agent} keeps the summary and the recent messages.` };
   }
 
   private dedicatedMessage(): CommandResult {
     return { text: `This bot is dedicated to ${this.gatewayConfig.agent}. Use the main bot to talk to Polpo or other agents.` };
   }
 
-  private async cmdAgent(args: string[], peerId: string): Promise<CommandResult> {
+  private async cmdAgent(args: string[], conversation: string, inGroup = false): Promise<CommandResult> {
     if (this.gatewayConfig.agent) return this.dedicatedMessage();
     const agents = await this.orchestrator.getAgents();
     if (args.length === 0) {
-      const current = await this.getActiveAgent(peerId);
+      const current = await this.getActiveAgent(conversation);
       const names = agents.map(a => a.name).join(", ") || "none";
       const choices: ReplyButton[] = [
         { text: `🐙 Polpo${current ? "" : " ✓"}`, data: `agent:${ORCHESTRATOR_CHOICE}` },
@@ -652,7 +1132,7 @@ export class ChannelGateway {
       const buttons: ReplyButton[][] = [];
       for (let i = 0; i < choices.length; i += 2) buttons.push(choices.slice(i, i + 2));
       return {
-        text: `You are talking to ${current ?? "Polpo (orchestrator)"}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
+        text: `${inGroup ? "This group is" : "You are"} talking to ${current ?? "Polpo (orchestrator)"}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
         buttons,
       };
     }
@@ -666,22 +1146,27 @@ export class ChannelGateway {
       return { text: "Direct agent chat is not available on this instance." };
     }
 
-    await this.peerStore.setSessionId(await this.activeAgentKey(peerId), agent.name);
-    return { text: `You are now talking to ${agent.name} (${agent.role}).\nSend /polpo to go back to the orchestrator.` };
+    await this.peerStore.setSessionId(await this.activeAgentKey(conversation), agent.name);
+    return { text: `${inGroup ? "This group is" : "You are"} now talking to ${agent.name} (${agent.role}).\nSend /polpo to go back to the orchestrator.` };
   }
 
-  private async cmdPolpo(peerId: string): Promise<CommandResult> {
+  private async cmdPolpo(conversation: string): Promise<CommandResult> {
     if (this.gatewayConfig.agent) return this.dedicatedMessage();
-    await this.peerStore.clearSession(await this.activeAgentKey(peerId));
-    return { text: "You are now talking to Polpo (orchestrator)." };
+    await this.peerStore.clearSession(await this.activeAgentKey(conversation));
+    return { text: "Now talking to Polpo (orchestrator)." };
   }
 
   /** Inline-button selection ("agent:<name>"); same rules as /agent and /polpo. */
   async handleMenuCallback(action: string, value: string, msg: Omit<InboundMessage, "text">): Promise<string | undefined> {
     if (action !== "agent" || !this.gatewayConfig.enableInbound) return undefined;
     const peerId = `${msg.channel}:${msg.externalId}`;
-    if (!await this.peerStore.isAllowed(peerId, this.gatewayConfig)) return undefined;
-    const result = value === ORCHESTRATOR_CHOICE ? await this.cmdPolpo(peerId) : await this.cmdAgent([value], peerId);
+    // In a group the button belongs to the group (enabled = everyone may use it).
+    const allowedId = msg.group ? this.groupId(msg) : peerId;
+    if (!await this.peerStore.isAllowed(allowedId, this.gatewayConfig)) return undefined;
+    const conversation = this.conversationId({ ...msg, text: "" }, peerId);
+    const result = value === ORCHESTRATOR_CHOICE
+      ? await this.cmdPolpo(conversation)
+      : await this.cmdAgent([value], conversation, !!msg.group);
     return result.text;
   }
 
@@ -692,6 +1177,16 @@ export class ChannelGateway {
       : ["/agent", "/polpo", "/new", "/status", "/tasks", "/missions", "/agents", "/approve", "/help"];
     const suggestions = (await this.agentSuggestions()).map(s => ({ command: s.command, description: s.title.slice(0, 256) }));
     return [...suggestions, ...pick.map(cmd => ({ command: cmd.slice(1), description: COMMANDS[cmd] }))];
+  }
+
+  /** Commands for the menu inside groups. */
+  async groupMenuCommands(): Promise<MenuCommand[]> {
+    const pick = this.gatewayConfig.agent
+      ? ["/new", "/help", "/enable", "/disable"]
+      : ["/agent", "/polpo", "/new", "/status", "/help", "/enable", "/disable"];
+    const suggestions = (await this.agentSuggestions()).map(s => ({ command: s.command, description: s.title.slice(0, 256) }));
+    const describe: Record<string, string> = { ...COMMANDS, "/new": "Start a fresh conversation in this group" };
+    return [...suggestions, ...pick.map(cmd => ({ command: cmd.slice(1), description: describe[cmd] }))];
   }
 
   // ── Interlocutor and session resolution ────────────────────────────
@@ -739,9 +1234,12 @@ export class ChannelGateway {
    * one the web UI resumes. Both start fresh after the idle timeout, unless
    * it is 0 (never expire).
    */
-  private async resolveSessionId(peerId: string, agent: string | undefined, firstText: string): Promise<string> {
+  private async resolveSessionId(peerId: string, agent: string | undefined, firstText: string, scope?: string): Promise<string> {
     const key = await this.sessionKey(peerId, agent);
-    const { sessionMode, idleMinutes } = this.sessionSettings(agent);
+    const settings = this.sessionSettings(agent);
+    // A group keeps its own conversation (scoped): it never continues someone's web chat, nor the reverse.
+    const sessionMode = scope ? "per-peer" : settings.sessionMode;
+    const { idleMinutes } = settings;
     const isFresh = (updatedAt: string) =>
       idleMinutes === 0 || Date.now() - new Date(updatedAt).getTime() <= idleMinutes * 60 * 1000;
     const forceNew = this.forceNewSession.delete(key);
@@ -758,7 +1256,10 @@ export class ChannelGateway {
       }
     }
 
-    if (!sessionId) sessionId = await this.sessionStore.create(firstText.slice(0, 60), agent);
+    if (!sessionId) {
+      const title = firstText.slice(0, 60);
+      sessionId = scope ? await this.sessionStore.create(title, agent, { scope }) : await this.sessionStore.create(title, agent);
+    }
     await this.peerStore.setSessionId(key, sessionId);
     return sessionId;
   }
@@ -783,9 +1284,10 @@ export class ChannelGateway {
    * Chat turn, answered on the origin channel or piped to another one: the inbound
    * message is echoed there first (unless echoInbound is false), then partials and reply.
    */
-  private async handleChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+  private async handleChat(msg: InboundMessage, conversation: string): Promise<string | GatewayReply | undefined> {
+    if (msg.group) msg = { ...msg, text: this.roomStore ? await this.roomTurnText(msg, conversation) : this.groupTurnText(msg, conversation) };
     const target = this.replyTargetFor(msg);
-    if (!target || !this.replyRouter) return this.runChat(msg, peerId);
+    if (!target || !this.replyRouter) return this.runChat(msg, conversation);
     const route = this.replyRouter;
     const deliver = (event: ReplyRouteEvent) => route(target, event).catch(err => {
       this.log("warn", `Reply route to "${target.channel}" failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -798,7 +1300,7 @@ export class ChannelGateway {
     this.partialOverride.set(msg.chatId, text => deliver({ kind: "partial", text }));
     let reply: string | GatewayReply | undefined;
     try {
-      reply = await this.runChat(msg, peerId);
+      reply = await this.runChat(msg, conversation);
     } finally {
       this.partialOverride.delete(msg.chatId);
     }
@@ -807,14 +1309,25 @@ export class ChannelGateway {
     return { text: "", deliveredTo: target.channel };
   }
 
-  private async runChat(msg: InboundMessage, peerId: string): Promise<string | GatewayReply | undefined> {
+  private async runChat(msg: InboundMessage, conversation: string): Promise<string | GatewayReply | undefined> {
+    /** Session lease held by this gateway's own loop (one turn per session, like every turn). */
+    let leased: { sessionId: string; owner: string } | undefined;
     try {
-      const agent = await this.getActiveAgent(peerId);
+      const agent = await this.getActiveAgent(conversation);
       const attachments = msg.attachments ?? [];
-      const title = msg.text || attachments.map(a => a.filename).join(", ");
-      const sessionId = await this.resolveSessionId(peerId, agent, title);
+      const title = msg.group
+        ? `${msg.group.title ?? "Group"} (${msg.channel} group)`
+        : msg.text || attachments.map(a => a.filename).join(", ");
+      const sessionId = await this.resolveSessionId(conversation, agent, title, msg.group ? conversation : undefined);
       // Agents, and any turn with media, go through the host pipeline (vision + attachment storage).
       if (agent || attachments.length > 0) return await this.handleRunnerChat(msg, agent, sessionId);
+
+      // One turn per session: wait for a web/queued answer running in this conversation.
+      const owner = `channel-${nanoid(10)}`;
+      if (!(await sessionLeases.acquire(sessionId, owner, { waitMs: ChannelGateway.LEASE_WAIT_MS }))) {
+        return "I'm still working on the previous message in this conversation — please try again in a moment.";
+      }
+      leased = { sessionId, owner };
 
       // Store user message
       await this.sessionStore.addMessage(sessionId, "user", msg.text);
@@ -822,7 +1335,10 @@ export class ChannelGateway {
       // Build conversation history from session
       // Note: pi-ai uses "user" role for both user and assistant messages.
       // Assistant messages are wrapped with a prefix, matching the completions endpoint behavior.
-      const recentMessages = await this.sessionStore.getRecentMessages(sessionId, 20);
+      // The whole conversation: compaction (below) keeps it within the model's window
+      const recentMessages = typeof this.sessionStore.getMessages === "function"
+        ? await this.sessionStore.getMessages(sessionId)
+        : await this.sessionStore.getRecentMessages(sessionId, 40);
       const piMessages: Message[] = recentMessages
         .filter(m => m.role === "user" || m.role === "assistant")
         .map(m => ({
@@ -841,10 +1357,12 @@ export class ChannelGateway {
       const systemPrompt = await buildChatSystemPrompt(this.orchestrator, state);
 
       // Add peer context
-      const peer = await this.peerStore.getPeer(peerId);
-      const peerContext = peer
-        ? `\n\n## Caller context\nName: ${peer.displayName ?? "Unknown"}\nChannel: ${peer.channel}\nPeer ID: ${peer.id}`
-        : "";
+      const peer = msg.group ? undefined : await this.peerStore.getPeer(conversation);
+      const peerContext = msg.group
+        ? `\n\n## Caller context\nA ${msg.channel} group${msg.group.title ? ` ("${msg.group.title}")` : ""}: several people talk here and anyone in it may write to you. Each message starts with the speaker's name.`
+        : peer
+          ? `\n\n## Caller context\nName: ${peer.displayName ?? "Unknown"}\nChannel: ${peer.channel}\nPeer ID: ${peer.id}`
+          : "";
 
       // Resolve model
       const settings = this.orchestrator.getConfig()?.settings;
@@ -852,9 +1370,28 @@ export class ChannelGateway {
       const m = resolveModel(modelSpec);
       const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
+      // Same compaction as the web chat: checkpoint kept per session, model summaries, events
+      const session = await this.sessionStore.getSession(sessionId).catch(() => undefined);
+      const compactionSettings = settings?.compaction ?? {};
+      const compaction = await createSessionCompaction({
+        model: m,
+        settings: compactionSettings,
+        systemPrompt: () => systemPrompt + peerContext,
+        tools: () => ALL_ORCHESTRATOR_TOOLS,
+        original: piMessages,
+        sessionId,
+        scope: JSON.stringify([session?.createdAt, "polpo:channel", m?.provider, m?.id]),
+        store: this.orchestrator.getContextCheckpointStore?.(),
+        completeLLM: completeSimpleWithAuth as any,
+        summaryModel: (promptTokens) => resolveSummaryModel(m, compactionSettings.model, promptTokens),
+        memory: { store: this.orchestrator.getMemoryStore() },
+        onCompacted: (info) => this.orchestrator.emit("context:compacted", { scope: "chat", sessionId, ...info }),
+      });
+
       // Run the agentic loop (non-streaming for messaging)
       const MAX_TURNS = 15;
       const messages: Message[] = [...piMessages];
+      let overflowRetried = false;
       let finalText = "";
       let sentPartials = false;
 
@@ -862,11 +1399,12 @@ export class ChannelGateway {
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         this.log("verbose", `Turn ${turn + 1}: sending ${messages.length} messages`);
+        const prepared = await compaction.prepare(messages);
         const piStream = await streamSimpleWithAuth(m, {
           systemPrompt: systemPrompt + peerContext,
-          messages,
+          messages: prepared.messages as Message[],
           tools: ALL_ORCHESTRATOR_TOOLS,
-        }, streamOpts);
+        }, { ...streamOpts, sessionId });
 
         let turnText = "";
         let streamError: string | undefined;
@@ -879,10 +1417,19 @@ export class ChannelGateway {
         }
 
         if (streamError) {
+          // "context too long": compact harder and try this turn again, once
+          if (!overflowRetried && isContextOverflowError(streamError)) {
+            overflowRetried = true;
+            await compaction.prepare(messages, "overflow");
+            turn -= 1;
+            continue;
+          }
           return `Error: ${streamError}`;
         }
 
         const response = await piStream.result();
+        const usage = (response as any).usage;
+        if (usage) compaction.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0));
         this.log("verbose", `Turn ${turn + 1} complete: ${turnText.length} chars, blocks: ${response.content.map((c: { type: string }) => c.type).join(",")}`);
         messages.push(response);
 
@@ -899,7 +1446,7 @@ export class ChannelGateway {
 
         // There are tool calls — send partial text as a separate message if present
         const partial = this.partialOverride.get(msg.chatId)
-          ?? (this.onPartialResponse ? (text: string) => this.onPartialResponse!(msg.chatId, text) : undefined);
+          ?? (this.onPartialResponse ? (text: string) => this.onPartialResponse!(msg.chatId, text, this.sendTarget(msg)) : undefined);
         if (turnText.trim() && partial) {
           await partial(turnText);
           sentPartials = true;
@@ -909,7 +1456,7 @@ export class ChannelGateway {
         }
 
         // Send typing indicator while executing tools
-        if (this.onTyping) await this.onTyping(msg.chatId);
+        if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
 
         for (const call of toolCalls) {
 
@@ -941,8 +1488,13 @@ export class ChannelGateway {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
+    } finally {
+      if (leased) sessionLeases.release(leased.sessionId, leased.owner);
     }
   }
+
+  /** How long a channel message waits for an answer already running in its conversation. */
+  static LEASE_WAIT_MS = 10 * 60 * 1000;
 
   /**
    * Turn through the host's chat pipeline (agent-direct, or orchestrator when
@@ -961,13 +1513,17 @@ export class ChannelGateway {
     const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
     if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
 
-    const history = await this.sessionStore.getRecentMessages(sessionId, 40);
+    // The whole conversation: compaction keeps it within the window and reuses its checkpoint,
+    // which a sliding window of recent messages would invalidate at every turn.
+    const history = typeof this.sessionStore.getMessages === "function"
+      ? await this.sessionStore.getMessages(sessionId)
+      : await this.sessionStore.getRecentMessages(sessionId, 40);
     const messages: ChannelChatRequest["messages"] = history
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
     messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
 
-    if (this.onTyping) await this.onTyping(msg.chatId);
+    if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
     const { text, files = [] } = await runner({ agent, sessionId, messages });
 
     const body = text.trim();

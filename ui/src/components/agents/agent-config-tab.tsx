@@ -13,7 +13,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 
 export function AgentConfigTab() {
   const { state: { agent } } = useAgentDetail();

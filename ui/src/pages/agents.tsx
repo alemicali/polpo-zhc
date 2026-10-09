@@ -21,7 +21,8 @@ import {
   LayoutList,
   Network,
 } from "lucide-react";
-import { AgentsPageProvider, useAgentsPage } from "@/components/agents/agents-page-provider";
+import { AgentsPageProvider } from "@/components/agents/agents-page-provider";
+import { useAgentsPage } from "@/components/agents/agents-page-context";
 import { SummaryHeader } from "@/components/agents/agents-summary";
 import { AddAgentDialog, AddTeamDialog } from "@/components/agents/agents-dialogs";
 import { ListView } from "@/components/agents/agents-list-view";

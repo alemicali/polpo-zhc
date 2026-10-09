@@ -61,11 +61,14 @@ export function estimateContextTokens(input: ContextEstimateInput): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-export function contextBudgetForModel(model: ContextModelLimits): ContextBudget {
+export function contextBudgetForModel(
+  model: ContextModelLimits,
+  overrides: { reserveTokens?: number; keepRecentTokens?: number } = {},
+): ContextBudget {
   const hardLimit = Math.max(16_384, model.contextWindow ?? DEFAULT_CONTEXT_WINDOW);
   const configuredOutput = Math.max(0, model.maxTokens ?? 0);
   const outputReserve = Math.min(
-    Math.max(16_384, configuredOutput),
+    overrides.reserveTokens && overrides.reserveTokens > 0 ? overrides.reserveTokens : Math.max(16_384, configuredOutput),
     Math.floor(hardLimit * 0.25),
   );
   const softLimit = Math.min(
@@ -76,7 +79,9 @@ export function contextBudgetForModel(model: ContextModelLimits): ContextBudget 
     hardLimit,
     softLimit,
     targetTokens: Math.floor(hardLimit * 0.5),
-    keepRecentTokens: Math.min(100_000, Math.floor(hardLimit * 0.2)),
+    keepRecentTokens: overrides.keepRecentTokens && overrides.keepRecentTokens > 0
+      ? Math.min(overrides.keepRecentTokens, Math.floor(hardLimit * 0.5))
+      : Math.min(100_000, Math.floor(hardLimit * 0.2)),
   };
 }
 
@@ -128,15 +133,19 @@ export function summarizeContextMessages(
   const lines: string[] = [];
   let used = 0;
 
-  for (const message of messages) {
+  // Newest first: when the budget runs out, the oldest messages are the ones left out (the
+  // ones closest to the retained context matter most for continuing the work).
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
     const tool = typeof message.toolName === "string" ? ` (${message.toolName})` : "";
     const line = `- ${message.role}${tool}: ${compactText(message.content, perMessage)}`;
     if (used + line.length > maxChars) break;
     lines.push(line);
     used += line.length + 1;
   }
+  lines.reverse();
 
   const omitted = messages.length - lines.length;
-  if (omitted > 0) lines.push(`- ${omitted} additional earlier messages omitted from this checkpoint.`);
+  if (omitted > 0) lines.unshift(`- ${omitted} earlier messages omitted from this checkpoint.`);
   return lines.join("\n");
 }

@@ -7,7 +7,9 @@ import {
   useRef,
   useEffect,
   useMemo,
+  useId,
   type CSSProperties,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -56,7 +58,8 @@ import {
   BarChart3,
   Compass,
   Palette,
-  List,
+  CornerDownRight,
+  Undo2,
   ListPlus,
   Pencil,
   Star,
@@ -66,6 +69,7 @@ import {
   AppWindow,
   Database,
   Table2,
+  UsersRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -125,13 +129,18 @@ import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
-import { FilePreviewDialog, useFilePreview, mimeFromPath } from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { useFilePreview } from "@/components/shared/use-file-preview";
+import { mimeFromPath } from "@/components/shared/file-preview-utils";
 import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
 import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
+import { ChatSandboxContext, type ChatSandboxInfo } from "@/components/sandbox/sandbox-context";
+import { sandboxApi } from "@/lib/sandbox-api";
 import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
-import { Queue } from "@/components/ai-elements/queue";
+import { Queue, PendingSteers } from "@/components/ai-elements/queue";
 import { BackgroundWaits } from "@/components/ai-elements/background-waits";
 import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
+import { composerKeyAction, mergeDraft, onComposerRestore, pendingSteers, usePendingSteers } from "@/hooks/use-chat-steering";
 import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
@@ -149,6 +158,21 @@ import {
   useAppPreviewContext,
 } from "@/hooks/use-app-preview-context";
 import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
+import { GroupConversation } from "@/components/groups/group-conversation";
+import { GroupSettingsDialog, NewGroupDialog } from "@/components/groups/group-dialogs";
+import { GroupSidebarSection } from "@/components/groups/group-list";
+import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { useMemberDirectory } from "@/components/groups/use-member-directory";
+import { useGroups } from "@/hooks/use-rooms";
+import {
+  closeNewGroup,
+  requestNewGroup,
+  setActiveChatRoom,
+  setActiveChatRoomTitle,
+  useActiveChatRoom,
+  useNewGroupRequest,
+} from "@/hooks/use-chat-room";
+import { ORCHESTRATOR_MEMBER_ID, type RoomInput } from "@/lib/rooms-api";
 
 const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
@@ -219,7 +243,7 @@ function useSpeechRecognition(opts?: { lang?: string; onResult?: (text: string) 
   const [transcript, setTranscript] = useState("");
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onResultRef = useRef(opts?.onResult);
-  onResultRef.current = opts?.onResult;
+  useEffect(() => { onResultRef.current = opts?.onResult; });
 
   const Ctor = getSpeechRecognitionCtor();
   const isSupported = !!Ctor;
@@ -1293,11 +1317,13 @@ function CopyAction({ text }: { text: string }) {
 // Singleton: only one message can play at a time. Clicking another stops the previous.
 let currentTtsAudio: HTMLAudioElement | null = null;
 let currentTtsStop: (() => void) | null = null;
+let currentTtsOwner: string | null = null;
 
 function SpeakAction({ text }: { text: string }) {
   const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const ttsOwnerId = useId();
 
   const stop = useCallback(() => {
     if (audioRef.current) {
@@ -1310,16 +1336,19 @@ function SpeakAction({ text }: { text: string }) {
       objectUrlRef.current = null;
     }
     if (currentTtsAudio === audioRef.current) currentTtsAudio = null;
-    if (currentTtsStop === stop) currentTtsStop = null;
+    if (currentTtsOwner === ttsOwnerId) {
+      currentTtsOwner = null;
+      currentTtsStop = null;
+    }
     setState("idle");
-  }, []);
+  }, [ttsOwnerId]);
 
   const play = useCallback(async () => {
     if (state === "loading") return;
     if (state === "playing") { stop(); return; }
 
     // Stop any other speak action that's currently active
-    if (currentTtsStop && currentTtsStop !== stop) currentTtsStop();
+    if (currentTtsStop && currentTtsOwner !== ttsOwnerId) currentTtsStop();
 
     setState("loading");
     try {
@@ -1351,6 +1380,7 @@ function SpeakAction({ text }: { text: string }) {
       audioRef.current = audio;
       currentTtsAudio = audio;
       currentTtsStop = stop;
+      currentTtsOwner = ttsOwnerId;
       audio.onended = stop;
       audio.onerror = stop;
       await audio.play();
@@ -1359,7 +1389,7 @@ function SpeakAction({ text }: { text: string }) {
       console.warn("[TTS] play error:", err);
       setState("idle");
     }
-  }, [state, text, stop]);
+  }, [state, text, stop, ttsOwnerId]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1563,13 +1593,12 @@ function AskUserCards({
   const hasAnyAnswer = answeredCount > 0;
 
   // Auto-navigate to summary when all questions are answered
-  const prevAllAnswered = useRef(false);
-  useEffect(() => {
-    if (isWizard && allAnswered && !prevAllAnswered.current && !isSummaryStep) {
-      setStep(questions.length);
-    }
-    prevAllAnswered.current = allAnswered;
-  }, [allAnswered, isWizard, isSummaryStep, questions.length]);
+  // (adjusted during render when allAnswered flips, not in an effect)
+  const [prevAllAnswered, setPrevAllAnswered] = useState(false);
+  if (allAnswered !== prevAllAnswered) {
+    setPrevAllAnswered(allAnswered);
+    if (isWizard && allAnswered && !isSummaryStep) setStep(questions.length);
+  }
 
   const handleSubmit = () => {
     if (submitting) return;
@@ -1606,9 +1635,13 @@ function AskUserCards({
     onSubmit(answers);
   };
 
-  // Reset warnings when navigating
-  useEffect(() => { if (!isSummaryStep) setPartialWarning(false); }, [isSummaryStep]);
-  useEffect(() => { setSkipWarning(false); }, [step]);
+  // Reset warnings when navigating (adjusted during render on step change)
+  const [warningStep, setWarningStep] = useState(step);
+  if (warningStep !== step) {
+    setWarningStep(step);
+    setSkipWarning(false);
+    if (!isSummaryStep) setPartialWarning(false);
+  }
 
   // ── Single question — flat layout ──
   if (!isWizard) {
@@ -1964,7 +1997,7 @@ const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
 const SESSION_SIDEBAR_MIN_WIDTH = 320;
 const SESSION_SIDEBAR_MAX_WIDTH = 520;
 
-type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean };
+type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean; parentSessionId?: string; forkMessageId?: string };
 type SidebarView = "drill" | "flat";
 
 const clampSessionSidebarWidth = (value: number) => {
@@ -2035,6 +2068,9 @@ function SessionRow({
                   className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
                   aria-label="Starred"
                 />
+              )}
+              {session.parentSessionId && (
+                <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Branch" />
               )}
               <p className={cn(
                 "whitespace-normal break-words text-[13px] font-medium leading-snug min-w-0",
@@ -2151,6 +2187,8 @@ function SessionSidebar({
   fullWidth,
   mobileFullWidth,
   mobileOnlyBack,
+  onNewGroup,
+  groupsSection,
 }: {
   sessions: SessionItem[];
   activeSessionId: string | null;
@@ -2169,6 +2207,10 @@ function SessionSidebar({
   mobileFullWidth?: boolean;
   /** Show the close/back control only while the mobile overlay layout applies. */
   mobileOnlyBack?: boolean;
+  /** Opens the "New group" dialog, preselecting the agent when given. */
+  onNewGroup: (agent?: string) => void;
+  /** "Groups" section rendered above the threads. */
+  groupsSection?: ReactNode;
 }) {
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
@@ -2221,18 +2263,17 @@ function SessionSidebar({
 
   // ── Drill-down state ──
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const lastAutoDrilledSessionRef = useRef<string | null>(null);
+  const [lastAutoDrilledSession, setLastAutoDrilledSession] = useState<string | null>(null);
 
   // Auto-drill into the group that contains the active session
-  useEffect(() => {
-    if (view !== "drill" || !activeSessionId) return;
-    if (lastAutoDrilledSessionRef.current === activeSessionId) return;
+  // (adjusted during render, not in an effect)
+  if (view === "drill" && activeSessionId && lastAutoDrilledSession !== activeSessionId) {
     const session = sessions.find((s) => s.id === activeSessionId);
     if (session) {
       setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
-      lastAutoDrilledSessionRef.current = activeSessionId;
+      setLastAutoDrilledSession(activeSessionId);
     }
-  }, [activeSessionId, sessions, view]);
+  }
 
   // ── Flat/accordion state: which groups are expanded ──
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
@@ -2266,14 +2307,16 @@ function SessionSidebar({
   }, []);
 
   // Auto-expand group of active session when it changes
-  useEffect(() => {
-    if (view !== "flat" || !activeSessionId) return;
-    const s = sessions.find((s) => s.id === activeSessionId);
+  // (adjusted during render when the inputs change, not in an effect)
+  const [expandInputs, setExpandInputs] = useState({ activeSessionId, sessions, view });
+  if (expandInputs.activeSessionId !== activeSessionId || expandInputs.sessions !== sessions || expandInputs.view !== view) {
+    setExpandInputs({ activeSessionId, sessions, view });
+    const s = view === "flat" && activeSessionId ? sessions.find((s) => s.id === activeSessionId) : undefined;
     if (s) {
       const key = s.agent ?? ORCHESTRATOR_KEY;
       setExpandedGroups((prev) => prev.has(key) ? prev : new Set(prev).add(key));
     }
-  }, [activeSessionId, sessions, view]);
+  }
 
   // ── Build groups: key → sessions[], sorted by most-recent-first ──
   const groups = useMemo((): [string, SessionItem[]][] => {
@@ -2326,14 +2369,15 @@ function SessionSidebar({
             )}
             <span className="whitespace-normal break-words text-sm font-medium leading-snug">{name}</span>
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}>
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">New session</TooltipContent>
-          </Tooltip>
+          <NewChatMenu
+            className="h-7 w-7 shrink-0 text-foreground"
+            iconClassName="h-3.5 w-3.5"
+            align="end"
+            newChatLabel={`New chat with ${name}`}
+            newGroupLabel={`New group with ${name}`}
+            onNewChat={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}
+            onNewGroup={() => onNewGroup(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : ORCHESTRATOR_MEMBER_ID)}
+          />
         </div>
       );
     }
@@ -2348,6 +2392,13 @@ function SessionSidebar({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
           History
         </span>
+        <NewChatMenu
+          className="h-7 w-7 shrink-0"
+          iconClassName="h-3.5 w-3.5"
+          align="end"
+          onNewChat={() => onNew()}
+          onNewGroup={() => onNewGroup()}
+        />
         {/* View toggle — text labels, not icons */}
         <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
           <button
@@ -2662,6 +2713,8 @@ function SessionSidebar({
       )}
       {renderHeader()}
       <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Groups sit above the threads (top level only, not inside an agent drill-down). */}
+        {(view === "flat" || !activeGroup) && groupsSection}
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
             <p className="text-xs font-medium">No sessions yet</p>
@@ -2974,7 +3027,7 @@ function ChatEmptyState() {
   }, [agentConfig, skills]);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center px-4 py-8">
+    <div className="flex h-full flex-col items-center justify-center-safe overflow-y-auto px-4 py-8">
       {/* Avatar */}
       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 mb-4 text-3xl">
         {agentConfig ? (
@@ -3026,6 +3079,17 @@ function ChatEmptyState() {
                 {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => requestNewGroup(selectedAgent ?? ORCHESTRATOR_MEMBER_ID)}
+              className="gap-2"
+            >
+              <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Group chat…</p>
+                <p className="text-[11px] text-muted-foreground truncate">Talk with several agents at once</p>
+              </div>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </h2>
@@ -3095,9 +3159,107 @@ function ChatEmptyState() {
 
 // ── ChatMessages — Virtuoso message list, empty state, scroll-to-bottom ──
 
+/** Message to bring into view once a session's transcript is on screen (undo of a branch). */
+let scrollTarget: { sessionId: string; messageId: string } | null = null;
+
+function takeScrollTarget(sessionId: string | null, messages: { id: string }[]): number | undefined {
+  if (!scrollTarget || scrollTarget.sessionId !== sessionId) return undefined;
+  const index = messages.findIndex((m) => m.id === scrollTarget!.messageId);
+  if (index < 0) return undefined;
+  scrollTarget = null;
+  return index;
+}
+
+/** "Branched from <parent>" with Undo, at the top of a branch. */
+function ForkBreadcrumb({ forkId, parentId, parentTitle }: { forkId: string; parentId: string; parentTitle?: string }) {
+  const { undoFork, loadSession } = useChatActions();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const undo = useCallback(async (force: boolean) => {
+    setBusy(true);
+    try {
+      const result = await undoFork(forkId, { force });
+      if (result === "confirm") {
+        setConfirming(true);
+        return;
+      }
+      if (result.forkMessageId) scrollTarget = { sessionId: result.parentSessionId, messageId: result.forkMessageId };
+      await loadSession(result.parentSessionId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not undo the branch");
+    } finally {
+      setBusy(false);
+    }
+  }, [forkId, loadSession, undoFork]);
+  return (
+    <div className="mx-auto flex max-w-3xl items-center gap-2 px-4 pt-3 text-xs text-muted-foreground" data-testid="fork-breadcrumb">
+      <GitBranch className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 truncate">
+        Branched from{" "}
+        <button type="button" className="font-medium text-foreground hover:underline" onClick={() => { void loadSession(parentId); }}>
+          {parentTitle || "a previous chat"}
+        </button>
+      </span>
+      <Button type="button" variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-xs" disabled={busy} onClick={() => { void undo(false); }}>
+        <Undo2 className="h-3 w-3" />
+        Undo branch
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Undo this branch?"
+        description="You already continued the conversation here. Undoing deletes this branch and everything written in it."
+        confirmLabel="Delete branch"
+        destructive
+        onConfirm={() => { setConfirming(false); void undo(true); }}
+      />
+    </div>
+  );
+}
+
+/** The sandbox this chat's tools run in (for the badges on tool calls); null until known. */
+function useChatSandboxInfo(agentName: string | null): ChatSandboxInfo | null {
+  const [info, setInfo] = useState<ChatSandboxInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    sandboxApi.overview().then((o) => {
+      if (!alive) return;
+      const provider = agentName ? o.agents.find((a) => a.name === agentName)?.chat.provider : o.polpo.provider;
+      setInfo(provider ? { provider } : null);
+    }).catch(() => { if (alive) setInfo(null); });
+    return () => { alive = false; };
+  }, [agentName]);
+  return info;
+}
+
 function ChatMessages() {
   const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
-  const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign } = useChatActions();
+  const chatSandbox = useChatSandboxInfo(selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null);
+  const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign, forkSession, loadSession } = useChatActions();
+
+  // Branches: this session's origin (breadcrumb) and the branches started from its messages.
+  const currentSession = sessions.find((s) => s.id === sessionId);
+  const parentSession = currentSession?.parentSessionId ? sessions.find((s) => s.id === currentSession.parentSessionId) : undefined;
+  const forksByMessage = useMemo(() => {
+    const map = new Map<string, { id: string; title?: string }[]>();
+    for (const s of sessions) {
+      if (!sessionId || s.parentSessionId !== sessionId || !s.forkMessageId) continue;
+      map.set(s.forkMessageId, [...(map.get(s.forkMessageId) ?? []), { id: s.id, title: s.title }]);
+    }
+    return map;
+  }, [sessionId, sessions]);
+  const [forking, setForking] = useState<string | null>(null);
+  const handleFork = useCallback(async (messageId: string) => {
+    setForking(messageId);
+    try {
+      const forkId = await forkSession(messageId);
+      if (forkId) await loadSession(forkId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not branch the conversation");
+    } finally {
+      setForking(null);
+    }
+  }, [forkSession, loadSession]);
 
   // Resolve agent config for agent-direct sessions
   const { agents } = useAgents();
@@ -3119,7 +3281,10 @@ function ChatMessages() {
   // is done on `isScrolling=false` (scroll settled) and on `rangeChanged`
   // (item-size measurements grew) — both cheap, both synchronous.
   const sessionKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
-  const restoredState = chatScrollStates.get(sessionKey);
+  // Read once per session: handing Virtuoso a fresh snapshot on every render (the map is
+  // rewritten on each scroll/range change) made it restore itself in a loop (React #185).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const restoredState = useMemo(() => chatScrollStates.get(sessionKey), [sessionKey]);
   const captureScrollState = useCallback(() => {
     const handle = virtuosoRef.current;
     if (!handle) return;
@@ -3133,7 +3298,29 @@ function ChatMessages() {
 
   const isEmpty = messages.length === 0 && !messagesLoading;
 
+  // Back from an undone branch: bring the fork point into view.
+  useEffect(() => {
+    const target = takeScrollTarget(sessionId, messages);
+    if (target === undefined) return;
+    requestAnimationFrame(() => virtuosoRef.current?.scrollToIndex({ index: target, align: "center" }));
+  }, [messages, sessionId]);
+
+  const virtuosoComponents = useMemo(() => currentSession?.parentSessionId ? {
+    Header: () => (
+      <ForkBreadcrumb
+        forkId={currentSession.id}
+        parentId={currentSession.parentSessionId!}
+        parentTitle={parentSession?.title}
+      />
+    ),
+  } : undefined, [currentSession?.id, currentSession?.parentSessionId, parentSession?.title]);
+
+  // Stable identities: a new components object each render makes Virtuoso rebuild its parts
+  const virtuosoContext = useMemo(() => ({ isLoading }), [isLoading]);
+  const virtuosoAllComponents = useMemo(() => ({ ...virtuosoComponents, Footer: ChatWorkingFooter }), [virtuosoComponents]);
+
   return (
+    <ChatSandboxContext.Provider value={chatSandbox}>
     <div className="relative flex-1 min-h-0">
       {messagesLoading ? (
         <div className="flex-1 overflow-hidden">
@@ -3180,10 +3367,40 @@ function ChatMessages() {
                             {chatTimeAgo(new Date(msg.ts))}
                           </span>
                         )}
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
                           <CopyAction text={msg.content} />
+                          {sessionId && !msg.id.startsWith("temp-") && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                  onClick={() => { void handleFork(msg.id); }}
+                                  disabled={forking !== null}
+                                  aria-label="Fork from here"
+                                >
+                                  {forking === msg.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitBranch className="h-3 w-3" />}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">Fork from here — new chat, answered again</TooltipContent>
+                            </Tooltip>
+                          )}
                         </span>
                       </div>
+                      {forksByMessage.get(msg.id)?.map((fork) => (
+                        <button
+                          key={fork.id}
+                          type="button"
+                          onClick={() => { void loadSession(fork.id); }}
+                          className="mt-1 ml-auto flex max-w-full items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                          title="Open the branch started here"
+                        >
+                          <GitBranch className="h-3 w-3 shrink-0" />
+                          <span className="truncate">Branched: {fork.title || "Untitled"}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -3403,24 +3620,8 @@ function ChatMessages() {
               </div>
             );
           }}
-          components={{
-            Footer: () => isLoading ? (
-              <div className="w-full py-2 px-4">
-                <div className="mx-auto max-w-3xl">
-                  <div className="flex items-center gap-2.5 pl-10 py-1.5">
-                    <span className="relative flex h-4 w-4 items-center justify-center">
-                      <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
-                      <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Agent is working
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : null,
-          }}
+          context={virtuosoContext}
+          components={virtuosoAllComponents}
         />
       )}
 
@@ -3439,14 +3640,16 @@ function ChatMessages() {
       {/* File preview dialog — for inline reopen clicks */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </div>
+    </ChatSandboxContext.Provider>
   );
 }
 
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
-  const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions } = useChatState();
-  const { send, stop } = useChatActions();
+  const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
+  const { send, stop, steer, cancelSteer } = useChatActions();
+  const steersPending = usePendingSteers(activeSessionKey);
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
   const previewContext = useAppPreviewContext();
@@ -3495,16 +3698,9 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     [messages],
   );
 
-  // Per-session prompt queue. Keyed by sessionId (or the new-session
-  // sentinel until the server assigns one). The Queue panel renders
-  // above the composer; the auto-send effect below dequeues the head
-  // when a stream ends.
+  // Per-session prompt queue, kept on the server (shared by tabs and devices). With auto-send
+  // on, the server sends the head when a turn completes. The list renders above the composer.
   const queue = useChatQueue(sessionId ?? NEW_SESSION_QUEUE_KEY);
-  // Single source of truth for queue panel visibility. Defaults to OPEN
-  // when the persisted queue already has items (so user sees their stash
-  // on reload), CLOSED otherwise. The user can always close via the X in
-  // the panel header — items survive the close (re-open via ListPlus).
-  const [queueOpen, setQueueOpen] = useState(() => queue.items.length > 0);
   const backgroundWaits = useBackgroundWaits(sessionId);
   const [backgroundWaitsOpen, setBackgroundWaitsOpen] = useState(false);
   // Clear confirmation modal (avoid accidental wipes of queued prompts).
@@ -3672,105 +3868,71 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 
   // ── Queue: enqueue current draft + auto-send-on-stream-end ────────────
 
-  // Queue button click handler:
-  //  • If there's a non-empty draft, stash it (enqueue) and OPEN the
-  //    panel so the user immediately sees their queued item.
-  //  • If the draft is empty, TOGGLE the panel — gives the user access
-  //    to the manager (Auto-send switch, edit/delete existing items)
-  //    even on an empty queue without forcing them to type first.
-  const enqueueCurrentDraft = useCallback(() => {
+  /** Take the composer text for steering/queueing: mentions resolved, composer cleared. */
+  const takeDraft = useCallback((): string | null => {
     if (attachmentCountRef.current > 0) {
       toast.info("Attachments stay in this draft. Send it when the current response finishes.");
-      return;
+      return null;
     }
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
-    const raw = textarea?.value ?? "";
-    const text = raw.trim();
-    if (!text) {
-      // No draft → use the button as a toggle for the panel.
-      setQueueOpen((v) => !v);
-      return;
-    }
-    // Resolve display mentions → wire mentions, same as a real submit, so
-    // the queued copy is what the agent will eventually receive.
+    const text = (textarea?.value ?? "").trim();
+    if (!text) return null;
+    // Resolve display mentions → wire mentions, same as a real submit.
     const resolved = mentionRef.current?.resolveMessage(text) ?? text;
-    const added = queue.add(resolved);
-    if (!added) return;
-    // Clear the composer (mirrors PromptInput.form.reset post-submit).
     setTextareaValue("");
     chatInputDrafts.delete(sessionId ?? NEW_SESSION_DRAFT_KEY);
     setHasDraft(false);
-    setQueueOpen(true); // ensure manager is visible right after enqueueing
     textarea?.focus();
-  }, [queue, sessionId, setTextareaValue]);
+    return resolved;
+  }, [sessionId, setTextareaValue]);
 
-  // Manual per-item send: pulls the prompt out of the queue and dispatches
-  // it through the same `send` path used by the composer + auto-send.
-  // Guarded by inputDisabled + isLoading so the user can't double-fire
-  // while a stream is already in flight.
+  // Ctrl/Cmd+Enter (or the queue button) while a response runs: send it after this one.
+  const enqueueCurrentDraft = useCallback(() => {
+    const text = takeDraft();
+    if (text) queue.add(text);
+  }, [queue, takeDraft]);
+
+  // Enter while a response runs: the text joins that response at its next step.
+  const steerCurrentDraft = useCallback(() => {
+    const text = takeDraft();
+    if (text) void steer(text);
+  }, [steer, takeDraft]);
+
+  // Send a queued prompt now, through the server so it is atomic (the prompt leaves the queue
+  // only when it is actually sent): while a response runs it joins it (steer), otherwise it
+  // starts a turn, which this chat follows like any server-started turn.
   const handleManualSend = useCallback((id: string) => {
-    if (isLoading || inputDisabled) return;
+    if (inputDisabled) return;
     const item = queue.items.find((i) => i.id === id);
     if (!item) return;
-    queue.remove(id);
-    void send(item.text).catch((err) => {
-      console.warn("[queue] manual send failed:", err);
-      toast.error("Failed to send queued prompt");
+    void queue.sendNow(id).then((result) => {
+      if (result?.mode === "steer") {
+        pendingSteers.add(activeSessionKey, { id: result.steerId, content: item.text, turnId: result.turnId, status: "pending" });
+      } else if (result?.mode === "scheduled") {
+        toast.info("It will be sent as soon as the current response ends");
+      }
+    }).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to send queued prompt");
     });
-  }, [queue, isLoading, inputDisabled, send]);
+  }, [activeSessionKey, queue, inputDisabled]);
 
-  // Migrate the `__new__` queue to the real sessionId once the server
-  // assigns one (first stream completes). Until then the queue lives
-  // under the sentinel; after, it lives under the real id so it survives
-  // tab switches.
+  // A new chat got its server id: prompts queued meanwhile move to the server.
   useEffect(() => {
     if (!sessionId) return;
-    migrateNewSessionQueue(sessionId);
-  }, [sessionId]);
+    migrateNewSessionQueue(sessionId, client as never);
+  }, [client, sessionId]);
 
-  // Auto-send the head of the queue when a stream finishes.
-  //
-  // Why a ref-tracked previous: `isLoading` flips during the SSE stream;
-  // we only want to react to the falling edge (true → false). Without the
-  // ref we'd dequeue on initial mount when isLoading is already false.
-  //
-  // Why the small delay: gives the server a beat to release the session
-  // (e.g. mark its turn complete) before we shove the next request in;
-  // a flush-during-cleanup race was observed in dev otherwise.
-  const prevLoadingRef = useRef(isLoading);
-  useEffect(() => {
-    const prev = prevLoadingRef.current;
-    prevLoadingRef.current = isLoading;
-    // Falling edge only — and gate every other precondition the manual
-    // path checks (input enabled, autoSend on, queue non-empty).
-    if (!(prev === true && isLoading === false)) return;
-    if (!queue.autoSend) return;
-    if (queue.items.length === 0) return;
-    if (inputDisabled) return; // pending askUser / mission / vault / etc.
-
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      // Re-check guards at flush time — user may have toggled autoSend
-      // off or cleared the queue during the wait.
-      if (!queue.autoSend || queue.items.length === 0 || inputDisabled) return;
-      const isLastQueuedItem = queue.items.length === 1;
-      const next = queue.shift();
-      if (!next) return;
-      if (isLastQueuedItem) setQueueOpen(false);
-      void send(next.text).catch((err) => {
-        // Re-queue at the head on failure so the user doesn't silently
-        // lose work, and surface a toast.
-        console.warn("[queue] auto-send failed:", err);
-        toast.error("Queued prompt failed to send");
-      });
-    }, 150);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [isLoading, queue, inputDisabled, send]);
+  // Text handed back (Stop with messages still waiting, a withdrawn steer) returns to the composer.
+  useEffect(() => onComposerRestore((key, text) => {
+    const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
+    if (key === activeSessionKey && textarea) {
+      setTextareaValue(mergeDraft(textarea.value, text));
+      textarea.focus();
+      return;
+    }
+    if (key.startsWith("__polpo_new_session__")) return;
+    chatInputDrafts.set(key, mergeDraft(chatInputDrafts.get(key) ?? "", text));
+  }), [activeSessionKey, setTextareaValue]);
 
   // ── Per-session draft preservation ─────────────────────────────────
   // The composer is uncontrolled. When the user switches tabs we need to
@@ -3888,23 +4050,22 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             />
           </div>
         )}
-        {/* Prompt queue panel — `queueOpen` is the single source of truth.
-            User opens via ListPlus button (auto-opens when enqueueing a
-            draft); closes via the X in the header. Items survive close —
-            re-open to see them again. */}
-        {queueOpen && (
+        {/* Messages joining the running response, then prompts queued after it. */}
+        <PendingSteers className="mb-2" steers={steersPending} onCancel={(id) => { void cancelSteer(id); }} />
+        {queue.items.length > 0 && (
           <div className="mb-2">
             <Queue
               items={queue.items}
               autoSend={queue.autoSend}
-              onUpdate={(id, text) => { queue.update(id, text); }}
-              onRemove={(id) => { queue.remove(id); }}
+              hold={queue.hold}
+              onUpdate={queue.update}
+              onRemove={queue.remove}
               onSend={handleManualSend}
-              sendDisabled={isLoading || inputDisabled}
+              sendDisabled={inputDisabled}
+              running={isLoading}
               onClear={() => setQueueClearConfirm(true)}
               onAutoSendChange={queue.setAutoSend}
               onReorder={queue.reorder}
-              onClose={() => setQueueOpen(false)}
             />
           </div>
         )}
@@ -4048,27 +4209,24 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
               ref={textareaRef}
-              placeholder={isLoading ? `Draft next message for ${recipientName}...` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
+              placeholder={isLoading ? `Add to ${recipientName}'s response — Enter sends now, Ctrl+Enter queues` : pendingQuestions ? "Answer the questions above first..." : pendingMission ? "Review the mission preview above..." : pendingVault ? "Review the vault entry above..." : pendingWhatsApp ? "Confirm the WhatsApp message above first..." : pendingEmail ? "Confirm the email above first..." : pendingSetDesign ? "Review the design preview above..." : `Message ${recipientName}...`}
               disabled={inputDisabled}
               onKeyDown={(e) => {
                 mentionRef.current?.handleTextareaKeyDown(e);
                 handlePromptHistoryKeyDown(e);
-                if (
-                  !e.defaultPrevented &&
-                  isLoading &&
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  // During streaming Enter never goes to the form: with a
-                  // draft it enqueues (same as the queue CTA); empty, it's a
-                  // no-op so the user can't accidentally hit Stop with the
-                  // keyboard — Stop only fires from an explicit click.
-                  e.preventDefault();
-                  if (e.currentTarget.value.trim().length > 0) {
-                    enqueueCurrentDraft();
-                  }
-                }
+                if (e.defaultPrevented || !isLoading) return;
+                // While a response runs Enter never goes to the form: Enter joins the
+                // response (steer), Ctrl/Cmd+Enter queues. Empty, it's a no-op so the
+                // keyboard can't hit Stop — Stop only fires from an explicit click.
+                const action = composerKeyAction({
+                  key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey,
+                  altKey: e.altKey, isComposing: e.nativeEvent.isComposing,
+                }, true);
+                if (!action) return;
+                e.preventDefault();
+                if (e.currentTarget.value.trim().length === 0) return;
+                if (action === "queue") enqueueCurrentDraft();
+                else steerCurrentDraft();
               }}
               onInput={(e) => {
                 if (!textareaRef.current) textareaRef.current = e.currentTarget;
@@ -4133,41 +4291,6 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                     Background waits ({backgroundWaits.activeCount} active)
                   </TooltipContent>
                 </Tooltip>
-                {/* Queue button — stash current draft instead of sending.
-                    Disabled while a stream is in progress would defeat the
-                    point (the whole reason to queue is to pile up sends
-                    while busy), so we only honour `inputDisabled` (which
-                    excludes the loading flag here).
-
-                    Icon = bare `List` (manager/toggle role). The streaming
-                    CTA uses `ListPlus` (action role: add). Keeping the two
-                    icons distinct prevents confusion when both render side
-                    by side during a streamed reply with a pending draft. */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
-                      onClick={enqueueCurrentDraft}
-                      disabled={inputDisabled}
-                      aria-label="Add to queue"
-                    >
-                      <List className="h-4 w-4" />
-                      {queue.items.length > 0 && (
-                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold leading-none text-primary-foreground">
-                          {queue.items.length}
-                        </span>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">
-                    {queue.items.length === 0
-                      ? (queueOpen ? "Close queue manager" : "Open queue manager (or type a prompt and click to queue)")
-                      : `Add to queue (${queue.items.length} pending${queue.autoSend ? " • auto-send" : ""})`}
-                  </TooltipContent>
-                </Tooltip>
                 {/* ml-2 here adds breathing room ONLY between the Queue
                     button and the Send/Stop action — Mic↔Queue stays at
                     the tight gap-1 of the parent container. */}
@@ -4181,27 +4304,45 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       Recording
                     </div>
                   ) : isLoading && hasDraft ? (
-                    // Streaming + draft non vuoto: il CTA principale diventa
-                    // "enqueue" (stesso effetto del bottone Queue + Enter).
-                    // Stop resta accessibile svuotando il textarea — lo
-                    // switch avviene automaticamente.
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="icon"
-                          className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
-                          onClick={enqueueCurrentDraft}
-                          aria-label="Add to queue"
-                        >
-                          <ListPlus className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">
-                        Add to queue (Enter)
-                      </TooltipContent>
-                    </Tooltip>
+                    // Streaming + draft: send it into the running response (Enter), or
+                    // queue it for after (Ctrl/Cmd+Enter — on touch screens, this button).
+                    // Stop comes back once the composer is empty.
+                    <div className="flex items-center gap-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground"
+                            onClick={enqueueCurrentDraft}
+                            aria-label="Queue instead"
+                          >
+                            <ListPlus className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          Queue for after this response (Ctrl+Enter)
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="default"
+                            size="icon"
+                            className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
+                            onClick={steerCurrentDraft}
+                            aria-label="Send now"
+                          >
+                            <CornerDownRight className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          Send now — joins the current response (Enter)
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                   ) : (
                     <PromptInputSubmit
                       status={isLoading ? "streaming" : undefined}
@@ -4242,12 +4383,9 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 
 // ── ChatLoadingSkeleton — full-page skeleton while sessions are loading ──
 
-function ChatLoadingSkeleton({ compact }: { compact?: boolean }) {
+function ChatLoadingSkeleton() {
   return (
-    <div className={cn(
-      "flex flex-1 min-h-0",
-      !compact && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
-    )}>
+    <div className="flex flex-1 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Skeleton toolbar */}
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
@@ -4329,33 +4467,86 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   // All hooks MUST be above the early return to satisfy Rules of Hooks
   const handleSelectSession = useCallback((id: string) => {
+    setActiveChatRoom(null);
     loadSession(id);
     if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
   }, [loadSession, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
   const handleNewSession = useCallback((agent?: string) => {
+    setActiveChatRoom(null);
     newSession();
     setSelectedAgent(agent ?? null);
     if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
   }, [newSession, setSelectedAgent, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
 
+  // ── Groups: a group opens in the chat area in place of the conversation.
+  // The open room lives in the use-chat-room store (mirrored to ?room=<id> on /chat).
+  const activeRoomId = useActiveChatRoom();
+  const groups = useGroups(activeRoomId);
+  const { room, createRoom, updateRoom, deleteRoom, refreshRooms } = groups;
+  const directory = useMemberDirectory();
+  const newGroupRequest = useNewGroupRequest();
+  const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
+  // Focus the group composer on open only with a real keyboard (no on-screen keyboard pop).
+  const [autoFocusGroupComposer] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.("(min-width: 1024px) and (pointer: fine)").matches,
+  );
+
+  // Headers outside this column (page header, chat-first panel) show the group title.
+  const roomTitle = activeRoomId ? room?.title ?? null : null;
+  useEffect(() => {
+    setActiveChatRoomTitle(roomTitle);
+  }, [roomTitle]);
+
+  const handleSelectRoom = useCallback((id: string) => {
+    setActiveChatRoom(id);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
+
+  const handleNewGroup = useCallback((agent?: string) => {
+    requestNewGroup(agent);
+  }, []);
+
+  const handleCreateGroup = useCallback(async (input: RoomInput) => {
+    const created = await createRoom(input);
+    setActiveChatRoom(created.id);
+    if (shouldCloseSidebarAfterMobileAction()) setSidebarOpen(false);
+  }, [createRoom, setSidebarOpen, shouldCloseSidebarAfterMobileAction]);
+
+  const leaveGroup = useCallback(() => setActiveChatRoom(null), []);
+
   if (sessionsLoading) {
-    return <ChatLoadingSkeleton compact={compact} />;
+    return <ChatLoadingSkeleton />;
   }
 
+  const groupsSection = (
+    <GroupSidebarSection
+      rooms={groups.rooms}
+      loading={groups.roomsLoading}
+      error={groups.roomsError}
+      activeRoomId={activeRoomId}
+      unread={groups.unread}
+      resolve={directory.resolve}
+      onSelect={handleSelectRoom}
+      onNew={() => handleNewGroup()}
+      onRetry={() => { void refreshRooms(); }}
+    />
+  );
+  // While a group is open no thread row is highlighted.
+  const activeThreadId = activeRoomId ? null : sessionId;
+
   return (
-    <div className={cn(
-      "relative flex flex-1 min-h-0",
-      !compact && !embedded && "-mx-4 -mt-4 -mb-2 lg:-mx-6 lg:-mt-6 lg:-mb-3",
-    )}>
+    <div className="relative flex flex-1 min-h-0">
       {/* Compact mode: sidebar replaces the entire chat area */}
       {compact && sidebarOpen ? (
         <SessionSidebar
           sessions={visibleSessions}
-          activeSessionId={sessionId}
+          activeSessionId={activeThreadId}
           streamingSessionIds={streamingSessionIds}
           onSelect={handleSelectSession}
           onNew={handleNewSession}
+          onNewGroup={handleNewGroup}
+          groupsSection={groupsSection}
           onDelete={deleteSession}
           onRename={openRename}
           onToggleStar={handleToggleStar}
@@ -4373,10 +4564,12 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
             )}>
               <SessionSidebar
                 sessions={visibleSessions}
-                activeSessionId={sessionId}
+                activeSessionId={activeThreadId}
                 streamingSessionIds={streamingSessionIds}
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
+                onNewGroup={handleNewGroup}
+                groupsSection={groupsSection}
                 onDelete={deleteSession}
                 onRename={openRename}
                 onToggleStar={handleToggleStar}
@@ -4387,19 +4580,79 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
             </div>
           )}
 
-          {/* Main chat area */}
+          {/* Main chat area — a group conversation when a room is open */}
           <div className="flex-1 flex flex-col min-w-0 h-full">
-            {!embedded && compact && (
-              <ChatToolbar
-                sidebarOpen={sidebarOpen}
-                onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-                compact={compact}
+            {activeRoomId ? (
+              <GroupConversation
+                room={room}
+                roomMissing={groups.roomMissing}
+                messages={groups.messages}
+                loading={groups.messagesLoading}
+                error={groups.messagesError}
+                typingAgents={groups.typingAgents}
+                resolve={directory.resolve}
+                onSend={groups.send}
+                onBack={leaveGroup}
+                leading={compact && !embedded ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        onClick={() => setSidebarOpen(!sidebarOpen)}
+                        aria-label="Show threads"
+                      >
+                        <History className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">Threads</TooltipContent>
+                  </Tooltip>
+                ) : undefined}
+                onOpenSettings={() => setGroupSettingsOpen(true)}
+                onRetry={groups.reloadConversation}
+                autoFocusComposer={autoFocusGroupComposer}
               />
+            ) : (
+              <>
+                {!embedded && compact && (
+                  <ChatToolbar
+                    sidebarOpen={sidebarOpen}
+                    onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+                    compact={compact}
+                  />
+                )}
+                <ChatMessages />
+                {!isEmptyThread && <ChatInput />}
+              </>
             )}
-            <ChatMessages />
-            {!isEmptyThread && <ChatInput />}
           </div>
         </>
+      )}
+      <NewGroupDialog
+        open={newGroupRequest !== null}
+        onOpenChange={(open) => { if (!open) closeNewGroup(); }}
+        initialAgents={newGroupRequest?.agents}
+        members={directory.members}
+        membersLoading={directory.isLoading}
+        resolve={directory.resolve}
+        onCreate={handleCreateGroup}
+      />
+      {room && room.kind !== "telegram" && (
+        <GroupSettingsDialog
+          room={room}
+          open={groupSettingsOpen}
+          onOpenChange={setGroupSettingsOpen}
+          members={directory.members}
+          membersLoading={directory.isLoading}
+          onSave={(patch) => updateRoom(room.id, patch)}
+          onDelete={async () => {
+            await deleteRoom(room.id);
+            // Back to a normal, new chat.
+            setActiveChatRoom(null);
+            newSession();
+          }}
+        />
       )}
       {/* Rename dialog — controlled by `renameTarget`. Lives at the page
           root (outside the sidebar) so it survives sidebar close/open
@@ -4495,4 +4748,24 @@ function RenameSessionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Footer of the message list while the agent works (reads `isLoading` from the Virtuoso context). */
+function ChatWorkingFooter({ context }: { context?: { isLoading: boolean } }) {
+  return context?.isLoading ? (
+    <div className="w-full py-2 px-4">
+      <div className="mx-auto max-w-3xl">
+        <div className="flex items-center gap-2.5 pl-10 py-1.5">
+          <span className="relative flex h-4 w-4 items-center justify-center">
+            <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
+            <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            Agent is working
+          </span>
+        </div>
+      </div>
+    </div>
+  ) : null;
 }

@@ -5,6 +5,7 @@ import {
   readTaskTokenEvents,
   type TokenUsageRange,
 } from "../../stores/file-token-usage-store.js";
+import { databaseStoresFor } from "../../core/storage.js";
 
 const VALID_RANGES = new Set<TokenUsageRange>(["today", "24h", "7d", "30d", "all"]);
 const RANGE_MS: Record<Exclude<TokenUsageRange, "all" | "today">, number> = {
@@ -29,7 +30,8 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
   app.get("/", async (c) => {
     const requested = c.req.query("range") as TokenUsageRange | undefined;
     const range = requested && VALID_RANGES.has(requested) ? requested : "7d";
-    const records = await new FileTokenUsageStore(getPolpoDir()).list(range);
+    const store = databaseStoresFor(getPolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(getPolpoDir());
+    const records = await store.list(range);
     const cutoff = rangeCutoff(range);
     const taskEvents = (await readTaskTokenEvents(getPolpoDir()))
       .filter((event) => Date.parse(event.timestamp) >= cutoff);

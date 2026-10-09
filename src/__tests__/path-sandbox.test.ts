@@ -9,22 +9,22 @@ import { createSystemTools } from "../tools/system-tools.js";
 describe("resolveAllowedPaths", () => {
   it("defaults to [cwd] when no allowedPaths given", () => {
     const result = resolveAllowedPaths("/project");
-    expect(result).toEqual(["/project"]);
+    expect(result).toEqual([resolve("/project")]);
   });
 
   it("defaults to [cwd] when empty array given", () => {
     const result = resolveAllowedPaths("/project", []);
-    expect(result).toEqual(["/project"]);
+    expect(result).toEqual([resolve("/project")]);
   });
 
   it("resolves relative paths against cwd", () => {
     const result = resolveAllowedPaths("/project", ["src", "lib"]);
-    expect(result).toEqual(["/project/src", "/project/lib"]);
+    expect(result).toEqual([resolve("/project/src"), resolve("/project/lib")]);
   });
 
   it("keeps absolute paths as-is", () => {
     const result = resolveAllowedPaths("/project", ["/tmp/shared", "src"]);
-    expect(result).toEqual(["/tmp/shared", "/project/src"]);
+    expect(result).toEqual([resolve("/tmp/shared"), resolve("/project/src")]);
   });
 });
 
@@ -214,5 +214,43 @@ describe("createSystemTools with allowedPaths", () => {
     // Bash runs with cwd=tmpDir, not sandboxed at path level
     const result = await bashTool.execute("tc14", { command: "echo hello" });
     expect((result.content[0] as any).text).toContain("hello");
+  });
+});
+
+describe("isPathAllowed with symlinks (macOS /tmp → /private/tmp)", () => {
+  const { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } = require("node:fs") as typeof import("node:fs");
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const { join } = require("node:path") as typeof import("node:path");
+  let root: string;
+  let real: string;
+  let link: string;
+  let outside: string;
+
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "polpo-sandbox-link-")));
+    real = join(root, "private-tmp", "work");
+    outside = join(root, "outside");
+    mkdirSync(real, { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(join(real, "report.pdf"), "x");
+    link = join(root, "tmp-link");
+    symlinkSync(join(root, "private-tmp"), link); // like /tmp -> /private/tmp
+    symlinkSync(outside, join(real, "escape"));   // a symlink inside the sandbox pointing out
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("allows an existing file reached through the real path when the sandbox is the symlinked one", () => {
+    expect(isPathAllowed(join(real, "report.pdf"), [join(link, "work")])).toBe(true);
+    expect(isPathAllowed(join(link, "work", "report.pdf"), [real])).toBe(true);
+  });
+
+  it("allows a file that does not exist yet, either way", () => {
+    expect(isPathAllowed(join(real, "new", "chart.png"), [join(link, "work")])).toBe(true);
+    expect(isPathAllowed(join(link, "work", "new.txt"), [real])).toBe(true);
+  });
+
+  it("still denies escapes through a symlink, also for files that do not exist yet", () => {
+    expect(isPathAllowed(join(real, "escape", "secret.txt"), [real])).toBe(false);
+    expect(isPathAllowed(join(real, "escape", "new-file.txt"), [join(link, "work")])).toBe(false);
   });
 });

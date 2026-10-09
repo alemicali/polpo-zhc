@@ -1,8 +1,11 @@
+import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { redactPolpoConfig } from "../security.js";
+import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
+import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
+  StoredNotificationChannelConfigSchema,
   UpsertNotificationRuleSchema,
   UpsertApprovalGateSchema,
 } from "../schemas.js";
@@ -80,6 +83,10 @@ const upsertChannelRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Channel saved",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Invalid channel config (or a masked secret that cannot be restored)",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -316,6 +323,8 @@ export function configRoutes(getDeps: () => {
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
+      if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
+      if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
       config.settings = settings;
     });
 
@@ -329,19 +338,41 @@ export function configRoutes(getDeps: () => {
     const deps = getDeps();
     const config = deps.getConfig();
     const channels = config?.settings?.notifications?.channels ?? {};
-    return c.json({ ok: true, data: channels }, 200);
+    return c.json({ ok: true, data: redactSecrets(channels) }, 200);
   });
 
   app.openapi(upsertChannelRoute, async (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const channelConfig = c.req.valid("json");
+    const incoming = c.req.valid("json");
+
+    // Clients read channels redacted ("••••1234"): restore the stored secret
+    // wherever the incoming value is still the masked placeholder, THEN
+    // validate the result as a stored channel. A masked value with nothing
+    // stored under this name (e.g. a renamed channel) is a client error.
+    const storedChannel = deps.getConfig()?.settings?.notifications?.channels?.[name];
+    let channelConfig: unknown;
+    try {
+      // Fields that decide where the channel's secrets are sent: if any of
+      // them changes, saved secrets (headers, tokens, keys) are not reused.
+      channelConfig = restoreRedactedSecrets(incoming, storedChannel, {
+        strict: true,
+        destinationKeys: ["type", "url", "webhookUrl", "host", "port", "provider"],
+      });
+    } catch (err) {
+      if (err instanceof UnrestorableSecretError) return c.json({ ok: false, error: err.message }, 400);
+      throw err;
+    }
+    const checked = StoredNotificationChannelConfigSchema.safeParse(channelConfig);
+    if (!checked.success) {
+      return c.json({ ok: false, error: `Invalid channel config: ${checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` }, 400);
+    }
 
     const result = await mutateConfig(deps, (config) => {
       const settings = config.settings ?? {};
       if (!settings.notifications) settings.notifications = { channels: {}, rules: [] };
       if (!settings.notifications.channels) settings.notifications.channels = {};
-      settings.notifications.channels[name] = channelConfig;
+      settings.notifications.channels[name] = checked.data;
       config.settings = settings;
     });
 

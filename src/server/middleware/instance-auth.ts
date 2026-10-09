@@ -17,6 +17,8 @@ export function instanceAuthMiddleware(polpoDir: PolpoDirRef, apiKeys: string[] 
     if (!session) {
       return c.json({ ok: false, error: "Login required", code: "AUTH_REQUIRED" }, 401);
     }
+    // Who is acting: events emitted by this request carry it (see app.ts)
+    c.set("polpoUserEmail" as never, session.email as never);
     return next();
   };
 }

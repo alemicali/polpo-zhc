@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import type { SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "../core/session-store.js";
+import type { CreateSessionOptions, ForkSessionOptions, ForkSessionResult, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "../core/session-store.js";
 
 /**
  * File-backed SessionStore.
@@ -36,7 +36,7 @@ export class FileSessionStore implements SessionStore {
     this.sessionsDir = join(polpoDir, "sessions");
   }
 
-  async create(title?: string, agent?: string): Promise<string> {
+  async create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string> {
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true });
     }
@@ -49,6 +49,7 @@ export class FileSessionStore implements SessionStore {
       createdAt,
     };
     if (agent) header.agent = agent;
+    if (opts?.scope) header.scope = opts.scope;
     try {
       appendFileSync(this.sessionFile(sessionId), JSON.stringify(header) + "\n", "utf-8");
     } catch { /* best-effort: non-critical */
@@ -64,6 +65,7 @@ export class FileSessionStore implements SessionStore {
         updatedAt: createdAt,
         messageCount: 0,
         ...(agent ? { agent } : {}),
+        ...(opts?.scope ? { scope: opts.scope } : {}),
       });
     }
     return sessionId;
@@ -178,6 +180,9 @@ export class FileSessionStore implements SessionStore {
           messageCount,
           ...(header.agent ? { agent: header.agent } : {}),
           ...(header.starred ? { starred: true } : {}),
+          ...(header.scope ? { scope: header.scope } : {}),
+          ...(header.parentSessionId ? { parentSessionId: header.parentSessionId } : {}),
+          ...(header.forkMessageId ? { forkMessageId: header.forkMessageId } : {}),
         });
       } catch { /* skip corrupt file */ }
     }
@@ -198,7 +203,8 @@ export class FileSessionStore implements SessionStore {
   }
 
   async getLatestSession(agent?: string | null): Promise<Session | undefined> {
-    const sessions = await this.listSessions();
+    // Group conversations are never "the latest" chat.
+    const sessions = (await this.listSessions()).filter(s => !s.scope);
     if (agent === undefined) {
       // No filter — return the most recent session regardless of agent
       return sessions[0];
@@ -263,6 +269,47 @@ export class FileSessionStore implements SessionStore {
     } catch { /* file already removed */
       return false;
     }
+  }
+
+  async forkSession(sessionId: string, messageId: string, opts?: ForkSessionOptions): Promise<ForkSessionResult | undefined> {
+    const parent = await this.getSession(sessionId);
+    if (!parent) return undefined;
+    const messages = await this.getMessages(sessionId);
+    const cut = messages.findIndex((m) => m.id === messageId);
+    if (cut < 0) return undefined;
+
+    const id = nanoid(10);
+    const createdAt = new Date().toISOString();
+    const title = opts?.title ?? parent.title;
+    const header: Record<string, unknown> = { _session: true, id, title, createdAt };
+    if (parent.agent) header.agent = parent.agent;
+    if (parent.scope) header.scope = parent.scope;
+    header.parentSessionId = sessionId;
+    header.forkMessageId = messageId;
+    const messageIds: Record<string, string> = {};
+    // New ids, same timestamps: the copy sorts exactly like the original.
+    const copies = messages.slice(0, cut + 1).map((m) => {
+      const copy = { ...m, id: nanoid(10) };
+      messageIds[m.id] = copy.id;
+      return copy;
+    });
+    if (!existsSync(this.sessionsDir)) mkdirSync(this.sessionsDir, { recursive: true });
+    // A single write: the branch file is either complete or absent.
+    writeFileSync(this.sessionFile(id), [header, ...copies].map((line) => JSON.stringify(line)).join("\n") + "\n", { encoding: "utf-8", flag: "wx" });
+
+    const session: Session = {
+      id,
+      title,
+      createdAt,
+      updatedAt: createdAt,
+      messageCount: copies.length,
+      ...(parent.agent ? { agent: parent.agent } : {}),
+      ...(parent.scope ? { scope: parent.scope } : {}),
+      parentSessionId: sessionId,
+      forkMessageId: messageId,
+    };
+    this.headerCache?.set(id, session);
+    return { session, messageIds };
   }
 
   async prune(keepSessions: number): Promise<number> {

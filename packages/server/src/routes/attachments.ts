@@ -1,3 +1,4 @@
+import { withAttachmentLock } from "../attachment-lock.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
 import { nanoid } from "nanoid";
@@ -239,14 +240,21 @@ export function attachmentRoutes(getDeps: () => AttachmentDeps) {
     const attachment = await attachmentStore.get(id);
     if (!attachment) return c.json({ ok: false, error: "Not found" }, 404);
 
-    // Delete file
-    const absPath = join(workDir, attachment.path);
-    try {
-      if ((fs as any).unlink) await (fs as any).unlink(absPath);
-    } catch { /* best effort */ }
-
-    // Delete metadata
-    await attachmentStore.delete(id);
+    // Delete metadata, then the file — unless another message still points at it (a branched
+    // conversation shares its parent's files). Stores that cannot tell keep the file.
+    // Under the attachment lock, so a branch copying rows right now cannot lose the file.
+    await withAttachmentLock(async () => {
+      await attachmentStore.delete(id);
+      const stillUsed = attachmentStore.getByPath
+        ? (await attachmentStore.getByPath(attachment.path).catch(() => [attachment])).length > 0
+        : true;
+      if (!stillUsed) {
+        const absPath = join(workDir, attachment.path);
+        try {
+          if ((fs as any).unlink) await (fs as any).unlink(absPath);
+        } catch { /* best effort */ }
+      }
+    });
     return c.json({ ok: true }, 200);
   });
 

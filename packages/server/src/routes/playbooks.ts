@@ -15,6 +15,8 @@ export function playbookRoutes(getDeps: () => {
   playbookStore: any;
   saveMission: (opts: any) => Promise<any>;
   executeMission: (id: string) => Promise<any>;
+  /** Called when a playbook is run, with its mission and the names of the parameters given. */
+  onRun?: (name: string, missionId: string, params: string[]) => void;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -146,6 +148,7 @@ export function playbookRoutes(getDeps: () => {
       name: instance.name,
     });
 
+    deps.onRun?.(name, mission.id, Object.keys(params));
     const result = await deps.executeMission(mission.id);
 
     return c.json({

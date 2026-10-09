@@ -37,14 +37,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
 
+  # Linux only: Polpo runs on Linux servers. macOS/Windows jobs were dropped to keep PRs fast;
+  # add the OS back to a matrix here if the CLI or the desktop app is distributed on them.
   test:
-    name: Test (Node ${{ matrix.node-version }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         node-version: [20, 22]
-        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -53,10 +54,64 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The sandbox tests run commands in bubblewrap. Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor
+      # by default: an AppArmor profile gives bwrap alone the permission, the way Ubuntu does for the programs that need it.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
+          printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+            'profile bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' | sudo tee /etc/apparmor.d/bwrap >/dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
+          bwrap --ro-bind / / true
+      # Tests import the workspace packages (@polpo-ai/core, drizzle, server, sdk…) from their dist.
+      - run: pnpm run build:packages && pnpm --filter @polpo-ai/sdk build
       - run: pnpm run test run
+      # UI component/hook tests (jsdom) live outside the root vitest include (src/**).
+      - name: UI tests
+        if: matrix.node-version == 22
+        run: pnpm --filter @polpo-ai/react build && npx vitest run --config ui/vitest.config.ts
 
+  storage:
+    name: Storage (SQLite + PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: polpo
+          POSTGRES_PASSWORD: polpo
+          POSTGRES_DB: polpo_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U polpo"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:packages
+      # Migrations must match the schema: regenerating them must change nothing.
+      - name: Migrations up to date
+        run: |
+          pnpm --filter @polpo-ai/drizzle exec drizzle-kit generate --config drizzle.pg.config.ts
+          pnpm --filter @polpo-ai/drizzle exec drizzle-kit generate --config drizzle.sqlite.config.ts
+          if [ -n "$(git status --porcelain packages/drizzle/migrations)" ]; then
+            git status --porcelain packages/drizzle/migrations
+            echo "::error::Schema changed without a migration: run pnpm --filter @polpo-ai/drizzle db:generate"
+            exit 1
+          fi
+      - run: pnpm --filter @polpo-ai/drizzle test
+        env:
+          POLPO_TEST_DATABASE_URL: postgres://polpo:polpo@localhost:5432/polpo_test
+
+  # Verifies the npm package installs and imports: only relevant when releasing to main.
   install-check:
     name: Install Check
+    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
     runs-on: ubuntu-latest
     needs: [build]
     steps:
@@ -67,18 +122,29 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm pack
+      # The tarball ships dist/ only, so build before packing.
+      - run: pnpm run build
+      # polpo-ai pins the exact versions of the workspace packages; pack them from this commit
+      # too, so the check covers the packages as they would be published together instead of
+      # whatever older versions are on the registry.
+      - name: Pack polpo-ai and its workspace packages
+        run: |
+          mkdir -p /tmp/pack
+          pnpm pack --pack-destination /tmp/pack
+          for p in core vault-crypto drizzle server; do
+            pnpm --filter "@polpo-ai/$p" pack --pack-destination /tmp/pack
+          done
       - name: Verify npm install from tarball
+        timeout-minutes: 15
         run: |
           mkdir /tmp/install-test && cd /tmp/install-test
           npm init -y
-          npm install $GITHUB_WORKSPACE/polpo-ai-*.tgz
-          node --input-type=module -e "import 'polpo-ai'"
+          npm install /tmp/pack/*.tgz
+          timeout 60 node --input-type=module -e "import 'polpo-ai'"
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [typecheck]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -88,5 +154,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - run: pnpm run --filter @polpo-ai/sdk build
       - run: pnpm run --filter @polpo-ai/react build
       - run: pnpm run --filter ui build

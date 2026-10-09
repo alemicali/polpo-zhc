@@ -10,7 +10,16 @@ export const sessionsSqlite = sqliteTable("sessions", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   starred: integer("starred", { mode: "boolean" }),
-});
+  /** Channel conversation (e.g. a Telegram group); scoped sessions are never "the latest" chat. */
+  scope: text("scope"),
+  /** Branch origin: the session and message this conversation was forked from. */
+  parentSessionId: text("parent_session_id"),
+  forkMessageId: text("fork_message_id"),
+}, (table) => [
+  index("idx_sessions_agent").on(table.agent),
+  index("idx_sessions_updated_at").on(table.updatedAt),
+  index("idx_sessions_parent").on(table.parentSessionId),
+]);
 
 export const messagesSqlite = sqliteTable("messages", {
   id: text("id").primaryKey(),
@@ -33,7 +42,16 @@ export const sessionsPg = pgTable("sessions", {
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   starred: pgBoolean("starred"),
-});
+  /** Channel conversation (e.g. a Telegram group); scoped sessions are never "the latest" chat. */
+  scope: pgText("scope"),
+  /** Branch origin: the session and message this conversation was forked from. */
+  parentSessionId: pgText("parent_session_id"),
+  forkMessageId: pgText("fork_message_id"),
+}, (table) => [
+  pgIndex("idx_pg_sessions_agent").on(table.agent),
+  pgIndex("idx_pg_sessions_updated_at").on(table.updatedAt.desc()),
+  pgIndex("idx_pg_sessions_parent").on(table.parentSessionId),
+]);
 
 export const messagesPg = pgTable("messages", {
   id: pgText("id").primaryKey(),

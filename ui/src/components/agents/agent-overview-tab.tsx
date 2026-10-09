@@ -15,7 +15,7 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { SectionHeader } from "@/components/shared/section-header";
 import { cn } from "@/lib/utils";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 import { responsibilityPriorityColors } from "@/lib/agent-meta";
 
 export function AgentOverviewTab() {

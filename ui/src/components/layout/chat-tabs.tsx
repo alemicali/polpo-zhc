@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Plus, X, Star, StarOff, Pencil, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatActions, useChatSessionState } from "@/hooks/chat-context";
+import { setActiveChatRoom, useActiveChatRoom } from "@/hooks/use-chat-room";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -88,7 +89,7 @@ function setTabs(next: string[]) {
 }
 
 /** Hook: read current open-tab ids. Re-renders only when the list changes. */
-export function useOpenTabs(): string[] {
+function useOpenTabs(): string[] {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -243,6 +244,8 @@ export function ChatTabs() {
   const { loadSession, newSession, renameSession, setStarred } = useChatActions();
   const tabIds = useOpenTabs();
   const streamingSet = useMemo(() => new Set(streamingSessionIds), [streamingSessionIds]);
+  // While a group is open in the chat, no thread tab is active; picking one leaves the group.
+  const inGroup = useActiveChatRoom() !== null;
 
   // Rename dialog — local state so chat-tabs is self-contained (doesn't
   // depend on the ChatPage's RenameSessionDialog, which lives in a
@@ -274,7 +277,7 @@ export function ChatTabs() {
     (id: string) => {
       const wasActive = id === sessionId;
       const { next } = closeTab(id);
-      if (!wasActive) return;
+      if (!wasActive || inGroup) return;
       if (next.length === 0) {
         newSession();
       } else {
@@ -283,7 +286,7 @@ export function ChatTabs() {
         void loadSession(fallback);
       }
     },
-    [sessionId, loadSession, newSession],
+    [sessionId, inGroup, loadSession, newSession],
   );
 
   // Hide the strip entirely when there are no tabs to show — the [+] button
@@ -309,10 +312,11 @@ export function ChatTabs() {
               key={id}
               id={id}
               title={title}
-              active={id === sessionId}
+              active={!inGroup && id === sessionId}
               streaming={streamingSet.has(id)}
               starred={starred}
               onSelect={() => {
+                setActiveChatRoom(null);
                 if (id === sessionId) return;
                 void loadSession(id);
               }}
@@ -326,7 +330,10 @@ export function ChatTabs() {
       <button
         type="button"
         aria-label="New conversation"
-        onClick={() => newSession()}
+        onClick={() => {
+          setActiveChatRoom(null);
+          newSession();
+        }}
         className="ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <Plus className="h-3.5 w-3.5" />

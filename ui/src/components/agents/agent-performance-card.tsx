@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
-import { useAgentDetail } from "./agent-detail-provider";
+import { useAgentDetail } from "./agent-detail-context";
 
 export function AgentPerformanceCard() {
   const { state: { taskStats } } = useAgentDetail();

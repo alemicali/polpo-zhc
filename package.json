@@ -35,7 +35,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build && ./node_modules/.bin/tsc",
+    "build": "pnpm run build:packages && ./node_modules/.bin/tsc",
+    "build:packages": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/vault-crypto build && pnpm --filter @polpo-ai/drizzle build && pnpm --filter @polpo-ai/server build",
     "build:all": "pnpm build && pnpm --filter @polpo-ai/react build && pnpm --filter ui build",
     "build:sdk": "pnpm --filter @polpo-ai/react build",
     "build:ui": "pnpm --filter ui build",
@@ -49,7 +50,7 @@
     "start:all": "pnpm build:all && node dist/cli/index.js serve -p 3890",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "pnpm --filter @polpo-ai/core build && pnpm --filter @polpo-ai/drizzle build && ./node_modules/.bin/tsc --noEmit",
+    "typecheck": "pnpm run build:packages && ./node_modules/.bin/tsc --noEmit",
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",
@@ -77,11 +78,12 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.9",
-    "@hono/zod-openapi": "^1.2.2",
+    "@daytonaio/sdk": "0.222.0",
     "@earendil-works/pi-agent-core": "^1.0.4",
     "@earendil-works/pi-ai": "^1.0.4",
-    "@polpo-ai/core": "workspace:*",
+    "@hono/node-server": "^1.19.9",
+    "@hono/zod-openapi": "^1.2.2",
+    "@polpo-ai/core": "workspace:^0.3.12",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",
     "@sinclair/typebox": "^0.34.48",
@@ -89,6 +91,7 @@
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "croner": "^10.0.1",
+    "e2b": "2.53.1",
     "execa": "^9.6.1",
     "expo-server-sdk": "^3.10.0",
     "hono": "^4.11.9",

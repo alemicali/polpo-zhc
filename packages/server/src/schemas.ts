@@ -214,6 +214,10 @@ const ModelConfigSchema = z.object({
 });
 
 export const UpdateSettingsSchema = z.object({
+  /** Where agents' tools run: default sandbox and what lower levels may choose (null removes it). */
+  sandbox: z.any().optional(),
+  /** Context compaction settings (null removes them). */
+  compaction: z.any().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
@@ -328,6 +332,8 @@ const LoopConfigSchema = z.object({
   output: LoopOutputSchema.optional(),
 });
 
+// Recursive: it must be a named OpenAPI component (emitted as a $ref), or generating the
+// spec recurses forever and GET /api/v1/openapi.json fails with a stack overflow.
 const PipelineStepSchema: z.ZodType<any> = z.lazy(() => z.union([
   z.object({
     loop: z.string().min(1),
@@ -356,7 +362,7 @@ const PipelineStepSchema: z.ZodType<any> = z.lazy(() => z.union([
     notify: z.array(z.string().min(1)).optional(),
     when: z.string().min(1).optional(),
   }),
-]));
+])).openapi("PipelineStep");
 
 const PipelineSchema = z.object({
   mode: z.enum(["sequential", "parallel"]).optional(),
@@ -367,7 +373,7 @@ const PipelineSchema = z.object({
 const AgentLoopsSchema = z.record(z.string().min(1), LoopConfigSchema);
 
 export const AddAgentSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
   model: z.string().optional(),
   allowedTools: z.array(z.string()).optional(),
@@ -383,6 +389,8 @@ export const AddAgentSchema = z.object({
   reportsTo: z.string().optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
+  sandbox: z.any().optional(),
+  compaction: z.any().optional(),
 });
 
 export const UpdateAgentSchema = z.object({
@@ -398,6 +406,10 @@ export const UpdateAgentSchema = z.object({
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
   reasoning: z.string().optional(),
+  /** Where this agent's tools run (normalized server-side; see packages/core/src/sandbox.ts). */
+  sandbox: z.any().optional(),
+  /** Context compaction overrides for this agent. */
+  compaction: z.any().optional(),
   runtime: z.string().min(1).optional(),
   loops: AgentLoopsSchema.optional(),
   pipeline: PipelineSchema.optional(),
@@ -434,12 +446,19 @@ const ChannelGatewaySchema = z.object({
     chatId: z.string().optional(),
     echoInbound: z.boolean().optional(),
   }).strict().optional(),
+  groupReplies: z.enum(["mentions", "intent"]).optional(),
+  intentThreshold: z.number().min(0).max(1).optional(),
 }).strict();
 
-export const NotificationChannelConfigSchema = z.object({
+/** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */
+const MaskedSecret = z.string().refine((v) => v.includes("••••"), { message: "not a masked value" });
+const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
+  allowMasked ? z.union([schema, MaskedSecret]) : schema;
+
+const channelConfigSchema = (allowMasked: boolean) => z.object({
   type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
   // Slack
-  webhookUrl: z.string().url().optional(),
+  webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email
   to: z.array(z.string().email()).optional(),
   provider: z.string().optional(),
@@ -454,9 +473,9 @@ export const NotificationChannelConfigSchema = z.object({
   // WhatsApp
   profileDir: z.string().optional(),
   // Webhook
-  url: z.string().url().optional(),
+  url: orMasked(z.string().url(), allowMasked).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  inboundSecret: z.string().min(16).optional(),
+  inboundSecret: orMasked(z.string().min(16), allowMasked).optional(),
   // Push
   vapidPublicKey: z.string().optional(),
   vapidPrivateKey: z.string().optional(),
@@ -466,6 +485,15 @@ export const NotificationChannelConfigSchema = z.object({
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });
+
+/**
+ * Request body for PUT /config/channels/:name. Secret fields may carry the
+ * masked value returned by GET /config — the route restores the stored
+ * secret, then validates the result with StoredNotificationChannelConfigSchema.
+ */
+export const NotificationChannelConfigSchema = channelConfigSchema(true);
+/** A channel config as persisted (no masked placeholders allowed). */
+export const StoredNotificationChannelConfigSchema = channelConfigSchema(false);
 
 // ── Direct notification schema ─────────────────────────────────────────
 

@@ -1,5 +1,5 @@
-import { sqliteTable, text, primaryKey } from "drizzle-orm/sqlite-core";
-import { pgTable, text as pgText, primaryKey as pgPrimaryKey } from "drizzle-orm/pg-core";
+import { sqliteTable, text, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { pgTable, text as pgText, primaryKey as pgPrimaryKey, index as pgIndex } from "drizzle-orm/pg-core";
 
 // ── SQLite schema ──────────────────────────────────────────────────────
 
@@ -20,6 +20,7 @@ export const vaultSqlite = sqliteTable("vault", {
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
   primaryKey({ columns: [table.agent, table.service] }),
+  index("idx_vault_agent").on(table.agent),
 ]);
 
 // ── PostgreSQL schema ──────────────────────────────────────────────────
@@ -36,4 +37,5 @@ export const vaultPg = pgTable("vault", {
   updatedAt: pgText("updated_at").notNull(),
 }, (table) => [
   pgPrimaryKey({ columns: [table.agent, table.service] }),
+  pgIndex("idx_pg_vault_agent").on(table.agent),
 ]);

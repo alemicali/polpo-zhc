@@ -64,12 +64,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  FilePreviewDialog,
-  fileReadUrl,
-  previewCategory,
-  useFilePreview,
-} from "@/components/shared/file-preview";
+import { FilePreviewDialog } from "@/components/shared/file-preview";
+import { fileReadUrl, previewCategory } from "@/components/shared/file-preview-utils";
+import { useFilePreview } from "@/components/shared/use-file-preview";
 import { ToolResultArtifacts } from "@/components/shared/tool-result-artifacts";
 import {
   DropdownMenu,
@@ -1024,7 +1021,7 @@ export function TaskDetailPage() {
         <TabsList className="shrink-0 w-fit">
           {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
           <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
-          <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Activity</TabsTrigger>
+          <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
           <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 

@@ -2,7 +2,7 @@
  * Static config from env vars.
  */
 declare global {
-  var __POLPO_RUNTIME_CONFIG__: { baseUrl?: string; apiKey?: string } | undefined;
+  var __POLPO_RUNTIME_CONFIG__: { baseUrl?: string; apiKey?: string; inkHubUrl?: string } | undefined;
 }
 
 const runtimeConfig = globalThis.__POLPO_RUNTIME_CONFIG__;
@@ -10,6 +10,8 @@ const runtimeConfig = globalThis.__POLPO_RUNTIME_CONFIG__;
 export const config = {
   baseUrl: runtimeConfig?.baseUrl ?? import.meta.env.VITE_POLPO_API_URL ?? "",
   apiKey: runtimeConfig?.apiKey ?? import.meta.env.VITE_POLPO_API_KEY ?? undefined,
+  /** The Ink Hub (template catalogue) the sidebar links to. */
+  inkHubUrl: runtimeConfig?.inkHubUrl ?? "https://polpo.sh/ink",
 } as const;
 
 export function apiUrl(path: string): string {
