@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-10 — Desktop Server Fix
+
+### Fixed
+- Desktop app: "Server Start Failed" on every platform. The bundled server could not find `playwright-core` and `sharp`. They now ship next to it with this platform's sharp binaries, the sidecar is built with `--compile-autoload-package-json`, and the app starts the server with `NODE_PATH` on them whatever folder Polpo is started from. The server also starts without them: they are loaded only when used (#101)
+- `/api/v1/health` reports the running version instead of `0.1.0`, and the desktop server's `--version` no longer reports `0.0.0` (#101)
+- Desktop auto-update looked for releases in `lumea-labs/polpo`. It now uses `alemicali/polpo-zhc` (#101)
+
+### Changed
+- "Server Start Failed" shows the server's exit code, its last lines of output and the path of `server.log`, and appears as soon as the server exits (#101)
+- Links, install scripts and pages, README and the Docker image (`ghcr.io/alemicali/polpo-zhc`) point at this project. `docs/openapi.json` is up to date (#102)
+- CI: Desktop Check packages the app on Linux, macOS and Windows for desktop changes and starts the bundled server (on Linux also in a clean container without Node) (#101)
+
 ## [0.4.0] — 2026-10-09 — Sandbox, Rooms, Events
 
 Covers everything since 0.3.4 (#44–#97).
