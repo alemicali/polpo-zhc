@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-10 — Docker Images
+
+### Fixed
+- Docker images build again, and are published for the first time in the 0.4 series (`ghcr.io/alemicali/polpo-zhc`, `/server` and `/ui`):
+  - `sharp` is now a declared dependency, instead of coming in through an optional peer of Baileys
+  - the UI image builds `@polpo-ai/core`, which the UI imports
+  - the icon subset script resolves the icon packs as the UI's own dependencies (#105)
+- The release notes job runs again: it was skipped whenever the Docker job failed (#105)
+
+### Changed
+- CI: Docker Check builds the server and UI images like the release for dependency and Dockerfile changes, and starts both (#105)
+
 ## [0.4.1] — 2026-10-10 — Desktop Server Fix
 
 ### Fixed
