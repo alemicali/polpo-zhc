@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # OpenPolpo installer — works on macOS, Linux, and WSL
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
-#   wget -qO- https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/alemicali/polpo-zhc/main/install/install.sh | bash
+#   wget -qO- https://raw.githubusercontent.com/alemicali/polpo-zhc/main/install/install.sh | bash
 
 set -euo pipefail
 
@@ -257,10 +257,10 @@ print_next_steps() {
   echo ""
   printf "  ${BOLD}Run with Docker:${RESET}\n"
   echo ""
-  printf "    ${CYAN}docker run -it -p 3000:3000 -v \$(pwd):/workspace lumea-labs/polpo${RESET}\n"
+  printf "    ${CYAN}docker run -it -p 3000:3000 -v \$(pwd):/workspace ghcr.io/alemicali/polpo-zhc${RESET}\n"
   echo ""
   printf "  ${DIM}Documentation: https://docs.polpo.sh${RESET}\n"
-  printf "  ${DIM}GitHub:        https://github.com/lumea-labs/polpo${RESET}\n"
+  printf "  ${DIM}GitHub:        https://github.com/alemicali/polpo-zhc${RESET}\n"
   echo ""
 }
 

@@ -54,12 +54,12 @@ jobs:
 
             <div class="platform">
               <h2>macOS / Linux / WSL</h2>
-              <pre><code>curl -fsSL https://lumea-labs.github.io/polpo/install.sh | bash</code></pre>
+              <pre><code>curl -fsSL https://alemicali.github.io/polpo-zhc/install.sh | bash</code></pre>
             </div>
 
             <div class="platform">
               <h2>Windows (PowerShell)</h2>
-              <pre><code>irm https://lumea-labs.github.io/polpo/install.ps1 | iex</code></pre>
+              <pre><code>irm https://alemicali.github.io/polpo-zhc/install.ps1 | iex</code></pre>
             </div>
 
             <div class="platform">
@@ -69,10 +69,10 @@ jobs:
 
             <div class="platform">
               <h2>Docker</h2>
-              <pre><code>docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo</code></pre>
+              <pre><code>docker run -it -p 3000:3000 -v $(pwd):/workspace ghcr.io/alemicali/polpo-zhc</code></pre>
             </div>
 
-            <p><a href="https://github.com/lumea-labs/polpo">GitHub</a> · <a href="https://docs.polpo.sh">Documentation</a></p>
+            <p><a href="https://github.com/alemicali/polpo-zhc">GitHub</a> · <a href="https://docs.polpo.sh">Documentation</a></p>
           </body>
           </html>
           EOF

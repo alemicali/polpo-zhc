@@ -1,9 +1,9 @@
 # OpenPolpo installer for Windows
 # Usage:
-#   irm https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/alemicali/polpo-zhc/main/install/install.ps1 | iex
 #
 # Or download and run:
-#   Invoke-WebRequest -Uri https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.ps1 -OutFile install.ps1
+#   Invoke-WebRequest -Uri https://raw.githubusercontent.com/alemicali/polpo-zhc/main/install/install.ps1 -OutFile install.ps1
 #   .\install.ps1
 
 $ErrorActionPreference = "Stop"
@@ -194,10 +194,10 @@ function Show-NextSteps {
     Write-Host ""
     Write-Host "  Run with Docker:" -ForegroundColor White
     Write-Host ""
-    Write-Host "    docker run -it -p 3000:3000 -v ${PWD}:/workspace lumea-labs/polpo" -ForegroundColor Cyan
+    Write-Host "    docker run -it -p 3000:3000 -v ${PWD}:/workspace ghcr.io/alemicali/polpo-zhc" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Documentation: https://docs.polpo.sh" -ForegroundColor DarkGray
-    Write-Host "  GitHub:        https://github.com/lumea-labs/polpo" -ForegroundColor DarkGray
+    Write-Host "  GitHub:        https://github.com/alemicali/polpo-zhc" -ForegroundColor DarkGray
     Write-Host ""
 }
 

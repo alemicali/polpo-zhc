@@ -24,7 +24,7 @@ Install: `npx polpo-ai` (zero-install) or `npm install -g @polpo-ai/polpo` (glob
 
 ## Code
 
-- [GitHub Repository](https://github.com/lumea-labs/polpo): Source code, issues, contributing guide
+- [GitHub Repository](https://github.com/alemicali/polpo-zhc): Source code, issues, contributing guide
 - [npm Package](https://www.npmjs.com/package/@polpo-ai/polpo): Published package
 
 ## Optional

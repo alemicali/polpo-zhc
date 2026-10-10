@@ -49,11 +49,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/lumea-labs/polpo.git",
+    "url": "https://github.com/alemicali/polpo-zhc.git",
     "directory": "packages/client-sdk"
   },
-  "homepage": "https://github.com/lumea-labs/polpo/tree/main/packages/client-sdk",
+  "homepage": "https://github.com/alemicali/polpo-zhc/tree/main/packages/client-sdk",
   "bugs": {
-    "url": "https://github.com/lumea-labs/polpo/issues"
+    "url": "https://github.com/alemicali/polpo-zhc/issues"
   }
 }

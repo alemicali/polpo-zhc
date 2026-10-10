@@ -24,7 +24,158 @@
         "description": "API key passed as a Bearer token. Configure via the apiKeys field in polpo.json or the POLPO_API_KEY environment variable."
       }
     },
-    "schemas": {},
+    "schemas": {
+      "PipelineStep": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "loop": {
+                "type": "string",
+                "minLength": 1
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "loop"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "parallel": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PipelineStep"
+                },
+                "minItems": 1
+              },
+              "join": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "any"
+                    ]
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  }
+                ]
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "parallel"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "switch": {
+                "type": "object",
+                "properties": {
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "when": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/PipelineStep"
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "when",
+                        "steps"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "default": {
+                    "type": "object",
+                    "properties": {
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/PipelineStep"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "steps"
+                    ]
+                  }
+                },
+                "required": [
+                  "cases"
+                ]
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "switch"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "human": {
+                "type": "string",
+                "minLength": 1
+              },
+              "output": {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "nullable": true
+                  }
+                }
+              },
+              "notify": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "when": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "human"
+            ]
+          }
+        ]
+      }
+    },
     "parameters": {}
   },
   "paths": {
@@ -434,6 +585,17 @@
                   "project": {
                     "type": "string",
                     "description": "Deprecated. Ignored."
+                  },
+                  "compact": {
+                    "type": "object",
+                    "properties": {
+                      "focus": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "What the summary should pay particular attention to."
+                      }
+                    },
+                    "description": "Compact the session's context now instead of answering: the earlier conversation is summarized (as when the window fills) and the checkpoint is saved for the next turns. Requires x-session-id of an existing session. Returns { compaction } without calling the model for an answer."
                   }
                 },
                 "required": [
@@ -4804,6 +4966,93 @@
                     "minimum": 0,
                     "exclusiveMinimum": true
                   },
+                  "runtime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "loops": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "systemPrompt": {
+                          "type": "string"
+                        },
+                        "tools": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "maxTurns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "stopWhen": {
+                          "type": "object",
+                          "properties": {
+                            "expression": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "expression"
+                          ]
+                        },
+                        "output": {
+                          "type": "object",
+                          "properties": {
+                            "schema": {
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "pipeline": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "sequential",
+                          "parallel"
+                        ]
+                      },
+                      "context": {
+                        "type": "string",
+                        "enum": [
+                          "shared"
+                        ]
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/PipelineStep"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "steps"
+                    ]
+                  },
                   "identity": {
                     "type": "object",
                     "properties": {
@@ -4881,6 +5130,12 @@
                   },
                   "browserProfile": {
                     "type": "string"
+                  },
+                  "sandbox": {
+                    "nullable": true
+                  },
+                  "compaction": {
+                    "nullable": true
                   }
                 },
                 "required": [
@@ -5163,6 +5418,99 @@
                   },
                   "reasoning": {
                     "type": "string"
+                  },
+                  "sandbox": {
+                    "nullable": true
+                  },
+                  "compaction": {
+                    "nullable": true
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "loops": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "systemPrompt": {
+                          "type": "string"
+                        },
+                        "tools": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "maxTurns": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "stopWhen": {
+                          "type": "object",
+                          "properties": {
+                            "expression": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "expression"
+                          ]
+                        },
+                        "output": {
+                          "type": "object",
+                          "properties": {
+                            "schema": {
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "pipeline": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "sequential",
+                          "parallel"
+                        ]
+                      },
+                      "context": {
+                        "type": "string",
+                        "enum": [
+                          "shared"
+                        ]
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/PipelineStep"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "steps"
+                    ]
                   },
                   "browserProfile": {
                     "type": "string"
@@ -6164,6 +6512,32 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid skill name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "Skill already exists",
             "content": {
@@ -7098,6 +7472,28 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid skill name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -8914,6 +9310,12 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "sandbox": {
+                    "nullable": true
+                  },
+                  "compaction": {
+                    "nullable": true
+                  },
                   "orchestratorModel": {
                     "anyOf": [
                       {
@@ -9119,8 +9521,15 @@
                     ]
                   },
                   "webhookUrl": {
-                    "type": "string",
-                    "format": "uri"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "to": {
                     "type": "array",
@@ -9156,14 +9565,32 @@
                     "type": "string"
                   },
                   "url": {
-                    "type": "string",
-                    "format": "uri"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "headers": {
                     "type": "object",
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "inboundSecret": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 16
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "vapidPublicKey": {
                     "type": "string"
@@ -9210,7 +9637,69 @@
                       },
                       "sessionIdleMinutes": {
                         "type": "integer",
-                        "minimum": 1
+                        "minimum": 0
+                      },
+                      "sessionMode": {
+                        "type": "string",
+                        "enum": [
+                          "per-peer",
+                          "shared"
+                        ]
+                      },
+                      "agentSessions": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "properties": {
+                            "sessionMode": {
+                              "type": "string",
+                              "enum": [
+                                "per-peer",
+                                "shared"
+                              ]
+                            },
+                            "sessionIdleMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "agent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "replyTo": {
+                        "type": "object",
+                        "properties": {
+                          "channel": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "chatId": {
+                            "type": "string"
+                          },
+                          "echoInbound": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "channel"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "groupReplies": {
+                        "type": "string",
+                        "enum": [
+                          "mentions",
+                          "intent"
+                        ]
+                      },
+                      "intentThreshold": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
                       }
                     },
                     "additionalProperties": false
@@ -9240,6 +9729,28 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid channel config (or a masked secret that cannot be restored)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -10618,6 +11129,435 @@
         }
       }
     },
+    "/api/v1/peers/pairings": {
+      "get": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "List pending pairing requests",
+        "responses": {
+          "200": {
+            "description": "Pending pairing requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gateway not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/peers/pairings/{code}/reject": {
+      "post": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "Reject pairing",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pairing rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown code or gateway not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/peers/invites": {
+      "post": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "Create invite link",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "channel",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gateway not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/peers/invites/{token}": {
+      "get": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "Get invite status",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "token",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "channel",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invite status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown invite or gateway not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/peers/telegram/verify": {
+      "post": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "Verify Telegram bot token",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "channel",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "botToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bot identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or rejected token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/peers/telegram/detect-chat": {
+      "post": {
+        "tags": [
+          "Peers"
+        ],
+        "summary": "Detect Telegram chat",
+        "description": "Long-polls getUpdates (up to `timeout` seconds) on a bot that is not configured yet and returns the chats that wrote to it. Call again with `offset` to keep waiting.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "botToken": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "offset": {
+                    "type": "integer"
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "required": [
+                  "botToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chats seen and the next offset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Telegram error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bot already polled by a configured channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/peers/link": {
       "post": {
         "tags": [
@@ -11250,6 +12190,1426 @@
         }
       }
     },
+    "/api/v1/storage": {
+      "get": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "List storage buckets",
+        "description": "Registered buckets with grants, whether credentials are set (never their values) and mount status.",
+        "responses": {
+          "200": {
+            "description": "Storage entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Register a storage bucket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "s3",
+                      "local"
+                    ],
+                    "default": "s3"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": "string"
+                  },
+                  "bucket": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "prefix": {
+                    "type": "string"
+                  },
+                  "pathStyle": {
+                    "type": "boolean"
+                  },
+                  "driver": {
+                    "type": "string",
+                    "enum": [
+                      "rclone",
+                      "mountpoint-s3"
+                    ],
+                    "default": "rclone"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "writes",
+                          "full"
+                        ]
+                      },
+                      "maxSizeMb": {
+                        "type": "integer",
+                        "minimum": 64,
+                        "maximum": 1048576
+                      },
+                      "maxAgeHours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8760
+                      }
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "grants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "agent": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "read",
+                            "write"
+                          ]
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "writeBack": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "manual"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "access"
+                      ]
+                    },
+                    "default": []
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "owner": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "owner",
+                      "service"
+                    ]
+                  },
+                  "sandboxCredentials": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "owner": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "owner",
+                      "service"
+                    ]
+                  },
+                  "temporaryCredentials": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "r2"
+                            ]
+                          },
+                          "accountId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "parentAccessKeyId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "token": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "accountId",
+                          "parentAccessKeyId"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "sts"
+                            ]
+                          },
+                          "roleArn": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "endpoint": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "roleArn"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
+                  },
+                  "volume": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "mounted",
+                          "hydrated"
+                        ],
+                        "default": "mounted"
+                      },
+                      "access": {
+                        "type": "string",
+                        "enum": [
+                          "read-only",
+                          "read-write"
+                        ],
+                        "default": "read-write"
+                      },
+                      "writeBack": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "manual"
+                        ]
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "slug"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}": {
+      "get": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Get a storage bucket",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Storage entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Update a storage bucket",
+        "description": "Changing mount settings or the main vault entry remounts the bucket.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "s3",
+                      "local"
+                    ],
+                    "default": "s3"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": "string"
+                  },
+                  "bucket": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "prefix": {
+                    "type": "string"
+                  },
+                  "pathStyle": {
+                    "type": "boolean"
+                  },
+                  "driver": {
+                    "type": "string",
+                    "enum": [
+                      "rclone",
+                      "mountpoint-s3"
+                    ],
+                    "default": "rclone"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "writes",
+                          "full"
+                        ]
+                      },
+                      "maxSizeMb": {
+                        "type": "integer",
+                        "minimum": 64,
+                        "maximum": 1048576
+                      },
+                      "maxAgeHours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8760
+                      }
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "grants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "agent": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "read",
+                            "write"
+                          ]
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "writeBack": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "manual"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "access"
+                      ]
+                    },
+                    "default": []
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "owner": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "owner",
+                      "service"
+                    ]
+                  },
+                  "sandboxCredentials": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "owner": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "service": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "owner",
+                      "service"
+                    ]
+                  },
+                  "temporaryCredentials": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "r2"
+                            ]
+                          },
+                          "accountId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "parentAccessKeyId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "token": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "accountId",
+                          "parentAccessKeyId"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "sts"
+                            ]
+                          },
+                          "roleArn": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "endpoint": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "roleArn"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
+                  },
+                  "volume": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "mounted",
+                          "hydrated"
+                        ],
+                        "default": "mounted"
+                      },
+                      "access": {
+                        "type": "string",
+                        "enum": [
+                          "read-only",
+                          "read-write"
+                        ],
+                        "default": "read-write"
+                      },
+                      "writeBack": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "manual"
+                        ]
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "slug"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Remove a storage bucket",
+        "description": "Unmounts it. The bucket, its files and the vault entries are not touched.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/test": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Test a storage connection",
+        "description": "Lists at most one object with the stored credentials.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/mount": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Mount a storage bucket",
+        "description": "Mounts (or remounts) the bucket on this server.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/unmount": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Unmount a storage bucket",
+        "description": "Unmounts the bucket on this server.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/import": {
+      "post": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Copy a folder into the bucket",
+        "description": "Copies a folder of the project (path relative to the working directory) into the bucket, under an optional prefix, in the background. Dependencies (node_modules, .venv) and .git are skipped; the folder is not touched.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/import/{job}": {
+      "get": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Folder copy status",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "job",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/{id}/status": {
+      "get": {
+        "tags": [
+          "Storage"
+        ],
+        "summary": "Mount status of a storage bucket",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Storage id or slug"
+            },
+            "required": true,
+            "description": "Storage id or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mount status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vault/entries": {
       "post": {
         "tags": [
@@ -11359,6 +13719,28 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -11474,6 +13856,28 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -11620,6 +14024,28 @@
               }
             }
           },
+          "400": {
+            "description": "Reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "Vault entry not found",
             "content": {
@@ -11715,6 +14141,28 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -11852,6 +14300,29 @@
                                 "type": "string"
                               },
                               "oauthFlow": {
+                                "type": "string"
+                              },
+                              "custom": {
+                                "type": "boolean"
+                              },
+                              "configured": {
+                                "type": "boolean"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "keySource": {
+                                "type": "string",
+                                "enum": [
+                                  "vault",
+                                  "env",
+                                  "none"
+                                ]
+                              },
+                              "hasVaultKey": {
+                                "type": "boolean"
+                              },
+                              "keyHint": {
                                 "type": "string"
                               }
                             },

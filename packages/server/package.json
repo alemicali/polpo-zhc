@@ -31,7 +31,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lumea-labs/polpo",
+    "url": "https://github.com/alemicali/polpo-zhc",
     "directory": "packages/server"
   },
   "keywords": [
