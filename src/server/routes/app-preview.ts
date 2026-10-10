@@ -5,7 +5,8 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
-import { chromium, type Browser, type Page } from "playwright-core";
+// chromium is loaded when a preview runs: the server starts without playwright-core (desktop sidecar)
+import type { Browser, Page } from "playwright-core";
 import type { CodingSessionState, CodingSessionStore } from "../../core/coding-session-store.js";
 import type { CodeServerManager, CodeServerTheme } from "../code-server.js";
 
@@ -181,6 +182,7 @@ async function withPreviewPage<T>(
   operation: (page: Page) => Promise<T>,
 ): Promise<T> {
   const localUrl = await resolveLocalPreviewUrl(rawUrl);
+  const { chromium } = await import("playwright-core");
   const browser = await chromium.launch({
     executablePath: process.env.POLPO_CHROMIUM_EXECUTABLE || "/usr/bin/google-chrome",
     headless: true,
@@ -218,6 +220,7 @@ async function getInspectionPage(rawUrl: string, viewport: { width: number; heig
   let pending = inspectionSessions.get(key);
   if (!pending) {
     pending = (async () => {
+      const { chromium } = await import("playwright-core");
       const browser = await chromium.launch({
         executablePath: process.env.POLPO_CHROMIUM_EXECUTABLE || "/usr/bin/google-chrome",
         headless: true,

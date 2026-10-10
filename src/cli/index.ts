@@ -8,22 +8,17 @@ if (major < 20) {
   process.exit(1);
 }
 
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import { mkdir, access, readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST, getPolpoDir } from "../core/constants.js";
+import { POLPO_PACKAGE_VERSION } from "../core/version.js";
 
 /** Upper bound for a graceful shutdown (systemd's default stop timeout is 90s). */
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
-// Read version from package.json at build time fallback
-const __dirname_cli = dirname(fileURLToPath(import.meta.url));
-const pkgPath = resolve(__dirname_cli, "..", "..", "package.json");
-const PKG_VERSION = existsSync(pkgPath)
-  ? JSON.parse(readFileSync(pkgPath, "utf-8")).version
-  : "0.0.0";
+const PKG_VERSION = POLPO_PACKAGE_VERSION;
 
 // Load .env files from process.cwd() (project-local, then .polpo/.env).
 // NOTE: This runs at module top-level, before --dir is parsed. When --dir differs
