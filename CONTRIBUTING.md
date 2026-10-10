@@ -18,8 +18,8 @@ Be respectful. We're building something fun and useful together. Harassment, tro
 
 ```bash
 # Fork the repository on GitHub, then:
-git clone https://github.com/<your-username>/polpo.git
-cd polpo
+git clone https://github.com/<your-username>/polpo-zhc.git
+cd polpo-zhc
 pnpm install
 ```
 
@@ -74,7 +74,7 @@ polpo/
 
 ### Reporting Bugs
 
-Open a [GitHub Issue](https://github.com/lumea-labs/polpo/issues/new) with:
+Open a [GitHub Issue](https://github.com/alemicali/polpo-zhc/issues/new) with:
 
 1. **What happened** — describe the bug clearly
 2. **What you expected** — what should have happened instead
@@ -83,7 +83,7 @@ Open a [GitHub Issue](https://github.com/lumea-labs/polpo/issues/new) with:
 
 ### Suggesting Features
 
-Open a [GitHub Issue](https://github.com/lumea-labs/polpo/issues/new) with the `enhancement` label. Describe the use case, not just the solution. We're open to ideas but want to keep the core focused.
+Open a [GitHub Issue](https://github.com/alemicali/polpo-zhc/issues/new) with the `enhancement` label. Describe the use case, not just the solution. We're open to ideas but want to keep the core focused.
 
 ### Submitting Pull Requests
 
@@ -172,7 +172,7 @@ Releases are managed by maintainers. We follow semver:
 
 ## Questions?
 
-Open a [Discussion](https://github.com/lumea-labs/polpo/discussions) or reach out in issues. We're friendly.
+Open a [Discussion](https://github.com/alemicali/polpo-zhc/discussions) or reach out in issues. We're friendly.
 
 ---
 

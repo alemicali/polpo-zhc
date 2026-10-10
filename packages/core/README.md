@@ -1,6 +1,6 @@
 # @polpo-ai/core
 
-Pure business logic, types, schemas, and store interfaces for the [Polpo](https://github.com/lumea-labs/polpo) AI agent orchestration framework.
+Pure business logic, types, schemas, and store interfaces for the [Polpo](https://github.com/alemicali/polpo-zhc) AI agent orchestration framework.
 
 ## Installation
 
