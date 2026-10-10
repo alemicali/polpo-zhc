@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
@@ -116,7 +116,8 @@
     "pdf-lib": "^1.17.1",
     "playwright-core": "^1.52.0",
     "postgres": "^3.4.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
