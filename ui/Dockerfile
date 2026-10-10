@@ -7,18 +7,21 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches/ patches/
+COPY packages/core/package.json packages/core/
 COPY packages/client-sdk/package.json packages/client-sdk/
 COPY packages/react-sdk/package.json packages/react-sdk/
 COPY ui/package.json ui/
 COPY website/package.json website/
 RUN pnpm install --frozen-lockfile --filter ui... --ignore-scripts
 
+COPY packages/core/ packages/core/
 COPY packages/client-sdk/ packages/client-sdk/
 COPY packages/react-sdk/ packages/react-sdk/
 COPY ui/ ui/
 
 ARG VITE_POLPO_API_URL=""
-RUN pnpm --filter @polpo-ai/sdk build \
+RUN pnpm --filter @polpo-ai/core build \
+    && pnpm --filter @polpo-ai/sdk build \
     && pnpm --filter @polpo-ai/react build \
     && VITE_POLPO_API_URL="$VITE_POLPO_API_URL" pnpm --filter ui build
 

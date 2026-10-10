@@ -1,0 +1,71 @@
+name: Docker Check
+
+# Builds the server and UI images the way the release does (linux/amd64, not pushed) and starts
+# them: the server must answer /health with the package version, the UI must serve its page.
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'Dockerfile'
+      - 'ui/Dockerfile'
+      - 'docker/**'
+      - '.dockerignore'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'packages/*/package.json'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/docker-check.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: polpo-server:check
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+
+      - name: Build UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ui/Dockerfile
+          load: true
+          tags: polpo-ui:check
+          cache-from: type=gha,scope=ui
+          cache-to: type=gha,mode=max,scope=ui
+
+      - name: Start the server image
+        run: |
+          EXPECTED="$(node -p "require('./package.json').version")"
+          docker run -d --name polpo -p 3890:3890 polpo-server:check
+          for i in $(seq 1 60); do
+            BODY="$(curl -sf http://127.0.0.1:3890/api/v1/health || true)"
+            [[ -n "$BODY" ]] && break
+            sleep 1
+          done
+          docker logs polpo
+          echo "health: $BODY"
+          echo "$BODY" | grep -q "\"version\":\"$EXPECTED\"" || { echo "expected version $EXPECTED"; exit 1; }
+
+      - name: Start the UI image
+        run: |
+          docker run -d --name polpo-ui -p 8080:80 polpo-ui:check
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/ -o page.html && break; sleep 1; done
+          docker logs polpo-ui
+          grep -qi "<html" page.html || { echo "the UI image did not serve its page"; exit 1; }
