@@ -7,7 +7,7 @@
     "name": "Lumea Labs",
     "email": "hello@polpo.ai"
   },
-  "homepage": "https://github.com/lumea-labs/polpo",
+  "homepage": "https://github.com/alemicali/polpo-zhc",
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
@@ -131,8 +131,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "lumea-labs",
-      "repo": "polpo"
+      "owner": "alemicali",
+      "repo": "polpo-zhc"
     }
   }
 }

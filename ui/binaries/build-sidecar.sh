@@ -17,9 +17,12 @@ fi
 echo "Building polpo-server sidecar..."
 
 cd "$REPO_ROOT"
+# the binary has no package.json on disk: its version is defined at compile time
+POLPO_VERSION="$(node -p "require('./package.json').version")"
 # --compile-autoload-package-json: without it the binary ignores package.json "main"/"exports"
 # of the external packages and cannot load them
 bun build dist/cli/index.js --compile \
+  --define "POLPO_VERSION=\"$POLPO_VERSION\"" \
   --compile-autoload-package-json \
   --external chromium-bidi \
   --external playwright-core \
