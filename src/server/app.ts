@@ -81,6 +81,7 @@ import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
 import { withEventOrigin, currentEventOrigin } from "../core/events.js";
+import { POLPO_PACKAGE_VERSION } from "../core/version.js";
 
 export interface AppOptions {
   apiKeys?: string[];
@@ -154,7 +155,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // ── Public routes (no auth) ───────────────────────────────────────────
 
-  app.route("/api/v1/health", healthRoutes());
+  app.route("/api/v1/health", healthRoutes({ version: POLPO_PACKAGE_VERSION }));
 
   // Inbound webhook channels authenticate with their own secret (e.g. iOS Shortcuts).
   app.route("/api/v1/channels", webhookInboundRoutes({

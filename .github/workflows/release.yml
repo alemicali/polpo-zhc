@@ -141,14 +141,10 @@ jobs:
           name: desktop-build
 
       # OS-specific sidecar
-      - name: Build sidecar (Unix)
-        if: matrix.platform != 'win'
+      # The binary plus node_modules with playwright-core and this platform's sharp, checked to load
+      - name: Build sidecar
         run: bash ui/binaries/build-sidecar.sh
-
-      - name: Build sidecar (Windows)
-        if: matrix.platform == 'win'
-        run: bun build dist/cli/index.js --compile --external chromium-bidi --external playwright-core --external playwright --outfile ui/binaries/polpo-server.exe
-        shell: pwsh
+        shell: bash
 
       # Package
       - name: Package Electron app

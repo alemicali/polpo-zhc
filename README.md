@@ -16,7 +16,7 @@
 
 <p align="center">
   <img alt="npm" src="https://img.shields.io/npm/v/@polpo-ai/polpo?style=flat-square&color=blue" />
-  <img alt="license" src="https://img.shields.io/github/license/lumea-labs/polpo?style=flat-square" />
+  <img alt="license" src="https://img.shields.io/github/license/alemicali/polpo-zhc?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ESM-blue?style=flat-square" />
 </p>
@@ -68,13 +68,13 @@ npm install -g @polpo-ai/polpo    # or: pnpm add -g @polpo-ai/polpo
 ### One-line installer (macOS / Linux / WSL)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lumea-labs/polpo/main/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/alemicali/polpo-zhc/main/install/install.sh | bash
 ```
 
 ### Docker
 
 ```bash
-docker run -it -p 3000:3000 -v $(pwd):/workspace lumea-labs/polpo
+docker run -it -p 3000:3000 -v $(pwd):/workspace ghcr.io/alemicali/polpo-zhc
 ```
 
 ## Quick Start
@@ -103,8 +103,8 @@ polpo serve        # HTTP API + Web UI at http://localhost:3000
 ### Docker
 
 ```bash
-docker pull ghcr.io/lumea-labs/polpo:latest
-docker run -it -v $(pwd):/workspace ghcr.io/lumea-labs/polpo:latest
+docker pull ghcr.io/alemicali/polpo-zhc:latest
+docker run -it -v $(pwd):/workspace ghcr.io/alemicali/polpo-zhc:latest
 ```
 
 ## What your agents can do
@@ -122,8 +122,8 @@ Full docs at [docs.polpo.sh](https://docs.polpo.sh) — configuration, API refer
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding standards, and PR guidelines.
 
 ```bash
-git clone https://github.com/lumea-labs/polpo.git
-cd polpo
+git clone https://github.com/alemicali/polpo-zhc.git
+cd polpo-zhc
 pnpm install
 pnpm run build
 pnpm run test -- --run

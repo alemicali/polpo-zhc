@@ -28,9 +28,9 @@ const getHealthRoute = createRoute({
 
 /**
  * Health check routes.
- * GET /health — server status, version, uptime.
+ * GET /health — server status, version (the running server's, when given), uptime.
  */
-export function healthRoutes(): OpenAPIHono {
+export function healthRoutes(opts: { version?: string } = {}): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.openapi(getHealthRoute, (c) => {
@@ -38,7 +38,7 @@ export function healthRoutes(): OpenAPIHono {
       ok: true,
       data: {
         status: "ok",
-        version: "0.1.0",
+        version: opts.version ?? "unknown",
         uptime: Math.round((Date.now() - startedAt) / 1000),
       },
     });

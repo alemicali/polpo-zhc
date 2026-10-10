@@ -3,7 +3,6 @@ import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
-import { chromium } from "playwright-core";
 import { z } from "zod";
 import { normalizeAppTags, type AppDomain, type AppDomainRecord, type AppRegistryStore, type RegisteredApp } from "@polpo-ai/core/app-registry";
 import type { AppRuntimeManager } from "../app-runtime-manager.js";
@@ -264,6 +263,8 @@ export async function captureAppScreenshot(app: RegisteredApp, polpoDir: string,
   }
   let browser;
   try {
+    // loaded on use: the server starts without playwright-core (desktop sidecar)
+    const { chromium } = await import("playwright-core");
     browser = await chromium.launch({
       executablePath: process.env.POLPO_CHROMIUM_EXECUTABLE || "/usr/bin/google-chrome",
       headless: true,

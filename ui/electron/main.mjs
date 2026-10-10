@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog } from "electron";
 
 import { spawn } from "node:child_process";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createWriteStream } from "node:fs";
 import { homedir } from "node:os";
 import http from "node:http";
 
@@ -98,9 +98,10 @@ function checkServerHealth() {
   });
 }
 
-async function waitForServer(maxRetries = 30) {
+async function waitForServer(maxRetries = 30, exited = () => false) {
   for (let i = 0; i < maxRetries; i++) {
     if (await checkServerHealth()) return true;
+    if (exited()) return false;
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
@@ -143,31 +144,57 @@ async function ensureServer(workDir) {
 
   console.log("[Polpo] Starting server:", binary);
   console.log("[Polpo] Working directory:", workDir);
+  // The server's external packages (playwright-core, sharp) ship next to it in node_modules:
+  // found through NODE_PATH wherever Polpo was started from.
+  const modulesDir = join(dirname(binary), "node_modules");
+  const nodePath = [modulesDir, process.env.NODE_PATH].filter(Boolean).join(delimiter);
+  const logPath = join(app.getPath("logs"), "server.log");
+  mkdirSync(dirname(logPath), { recursive: true });
+  const log = createWriteStream(logPath, { flags: "a" });
+  log.write(`\n--- ${new Date().toISOString()} ${binary} serve -d ${workDir}\n`);
+  let output = "";
+  const keep = (data) => {
+    log.write(data);
+    output = (output + data).slice(-4000);
+  };
+
   serverProcess = spawn(binary, ["serve", "-p", String(SERVER_PORT), "-d", workDir], {
+    cwd: workDir,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
+    env: { ...process.env, NODE_PATH: nodePath },
   });
 
   serverProcess.stdout.on("data", (data) => {
     process.stdout.write(`[server] ${data}`);
+    keep(data);
   });
 
   serverProcess.stderr.on("data", (data) => {
     process.stderr.write(`[server] ${data}`);
+    keep(data);
   });
 
+  let exitCode = null;
   serverProcess.on("exit", (code) => {
     console.log(`[Polpo] Server exited with code ${code}`);
+    exitCode = code ?? -1;
+    serverProcess = null;
+  });
+  serverProcess.on("error", (err) => {
+    keep(`${err.message}\n`);
+    exitCode = -1;
     serverProcess = null;
   });
 
-  // 3. Wait for server to be healthy
-  const ready = await waitForServer(30);
+  // 3. Wait for server to be healthy (stop early if it exits)
+  const ready = await waitForServer(30, () => exitCode !== null);
   if (!ready) {
-    console.error("[Polpo] Server failed to start within 15s");
+    console.error("[Polpo] Server failed to start");
+    const reason = exitCode !== null ? `The Polpo server exited with code ${exitCode}.` : "The Polpo server did not start in time.";
+    const lastLines = output.trim().split(/\r?\n/).slice(-12).join("\n");
     dialog.showErrorBox(
       "Server Start Failed",
-      "Polpo server did not start in time. Check logs for details."
+      `${reason}\n\n${lastLines || "(no output)"}\n\nFull log: ${logPath}`
     );
     return false;
   }

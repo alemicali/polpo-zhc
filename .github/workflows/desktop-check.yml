@@ -1,0 +1,116 @@
+name: Desktop Check
+
+# Packages the desktop app on each OS (as the release does, without publishing) and starts the
+# bundled server the way the app starts it: from another folder, with NODE_PATH on the shipped
+# node_modules. On Linux it also runs in a clean container without Node.
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'ui/electron/**'
+      - 'ui/binaries/**'
+      - 'ui/package.json'
+      - 'src/cli/**'
+      - 'src/core/version.ts'
+      - 'packages/server/src/routes/health.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/desktop-check.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build packages and server
+        run: |
+          pnpm --filter @polpo-ai/vault-crypto build
+          pnpm --filter @polpo-ai/core build
+          pnpm --filter @polpo-ai/drizzle build
+          pnpm --filter @polpo-ai/server build
+          pnpm --filter @polpo-ai/sdk build
+          ./node_modules/.bin/tsc
+          pnpm --filter @polpo-ai/react build
+
+      - name: Build UI
+        run: VITE_POLPO_API_URL=http://localhost:3890 pnpm exec vite build
+        working-directory: ui
+
+      - name: Build sidecar
+        run: bash ui/binaries/build-sidecar.sh
+
+      - name: Package (unpacked, unsigned)
+        run: pnpm exec electron-builder --dir --publish never
+        working-directory: ui
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Start the packaged server
+        run: |
+          EXPECTED="$(node -p "require('./package.json').version")"
+          SERVER="$(find ui/release -type f \( -name polpo-server -o -name polpo-server.exe \) | head -1)"
+          test -n "$SERVER" || { echo "polpo-server not found in the package"; find ui/release -maxdepth 4; exit 1; }
+          RESOURCES="$(cd "$(dirname "$SERVER")" && pwd)"
+          SERVER="$RESOURCES/$(basename "$SERVER")"
+          test -d "$RESOURCES/node_modules/playwright-core" && test -d "$RESOURCES/node_modules/sharp" \
+            || { echo "node_modules missing next to the server"; ls -la "$RESOURCES"; exit 1; }
+          NM="$RESOURCES/node_modules"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then NM="$(cygpath -w "$NM")"; fi
+          WORK="$(mktemp -d)"
+          cd "$WORK"
+          NODE_PATH="$NM" "$SERVER" serve -p 3990 -d "$WORK" > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            BODY="$(curl -sf http://127.0.0.1:3990/api/v1/health || true)"
+            [[ -n "$BODY" ]] && break
+            sleep 1
+          done
+          cat server.log
+          echo "health: $BODY"
+          echo "$BODY" | grep -q "\"version\":\"$EXPECTED\"" || { echo "expected version $EXPECTED"; exit 1; }
+
+      # The Linux server again, in a clean container: no Node, nothing from the runner
+      - name: Start the packaged server in a clean container
+        if: matrix.platform == 'linux'
+        run: |
+          EXPECTED="$(node -p "require('./package.json').version")"
+          RESOURCES="$(cd ui/release/linux-unpacked/resources && pwd)"
+          docker run -d --name polpo --network host -v "$RESOURCES:/opt/polpo:ro" -e NODE_PATH=/opt/polpo/node_modules \
+            debian:bookworm-slim sh -c 'mkdir -p /tmp/work && cd /tmp/work && exec /opt/polpo/polpo-server serve -p 3991 -d /tmp/work'
+          for i in $(seq 1 60); do
+            BODY="$(curl -sf http://127.0.0.1:3991/api/v1/health || true)"
+            [[ -n "$BODY" ]] && break
+            sleep 1
+          done
+          docker logs polpo
+          echo "health: $BODY"
+          echo "$BODY" | grep -q "\"version\":\"$EXPECTED\"" || { echo "expected version $EXPECTED"; exit 1; }
