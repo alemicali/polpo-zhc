@@ -101,6 +101,13 @@
         "filter": [
           "polpo-server*"
         ]
+      },
+      {
+        "from": "binaries/node_modules",
+        "to": "node_modules",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

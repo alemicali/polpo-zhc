@@ -10,7 +10,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import sharp from "sharp";
 
 export interface BotProfileAgent {
   name: string;
@@ -58,6 +57,8 @@ export function readAvatar(avatarPath: string, roots: string[]): Buffer | undefi
 
 /** Square JPEG, as setMyProfilePhoto only accepts static .JPG photos. */
 export async function toProfileJpeg(image: Buffer): Promise<Buffer> {
+  // loaded on use: sharp is native, the server starts without it (desktop sidecar)
+  const { default: sharp } = await import("sharp");
   return sharp(image).rotate().resize(PHOTO_SIZE, PHOTO_SIZE, { fit: "cover" }).flatten({ background: "#ffffff" }).jpeg({ quality: 90 }).toBuffer();
 }
 
