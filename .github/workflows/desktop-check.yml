@@ -81,6 +81,7 @@ jobs:
           SERVER="$(find ui/release -type f \( -name polpo-server -o -name polpo-server.exe \) | head -1)"
           test -n "$SERVER" || { echo "polpo-server not found in the package"; find ui/release -maxdepth 4; exit 1; }
           RESOURCES="$(cd "$(dirname "$SERVER")" && pwd)"
+          SERVER="$RESOURCES/$(basename "$SERVER")"
           test -d "$RESOURCES/node_modules/playwright-core" && test -d "$RESOURCES/node_modules/sharp" \
             || { echo "node_modules missing next to the server"; ls -la "$RESOURCES"; exit 1; }
           NM="$RESOURCES/node_modules"
