@@ -1552,7 +1552,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           const response = await piStream.result();
           await recordResponseUsage(response);
           messages.push(response);
-          finalText += turnText;
+          // the text of each step (between tool calls) is its own paragraph, not glued to the last one
+          finalText = finalText.trim() && turnText.trim() ? `${finalText.trimEnd()}\n\n${turnText.trimStart()}` : finalText + turnText;
 
           const toolCalls = response.content.filter(
             (cc: any): cc is { type: "toolCall"; id: string; name: string; arguments: Record<string, any> } =>

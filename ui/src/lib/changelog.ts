@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-14-drive-routine",
+    date: "2026-10-14",
+    kind: "improved",
+    title: "Agenti con una routine",
+    summary: "Gli agenti con uno scopo si costruiscono una routine e la adattano ai loro obiettivi e ai loro task.",
+    body: [
+      "Un agente con uno scopo ora si costruisce una **routine**: i momenti fissi che servono ai suoi obiettivi, come un check-in al mattino, la chiusura a fine giornata o il piano della settimana.",
+      "",
+      "- La imposta alla prima riflessione, senza duplicare quello che fa già.",
+      "- La rivede ogni settimana e quando cambiano i suoi obiettivi o i suoi **task**, che ora vede quando riflette.",
+      "- Nella scheda **Goals** i momenti ricorrenti hanno l'etichetta *Routine*.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-13-desktop-tasks",
     date: "2026-10-13",
     kind: "fixed",

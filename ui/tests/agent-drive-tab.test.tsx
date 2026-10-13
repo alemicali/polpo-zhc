@@ -62,6 +62,7 @@ test("shows purpose, self-portrait, intentions to approve and reflections; appro
   expect(text).toContain("Happy birthday Grazia! 🎉");
   expect(text).toContain("Why: Grazia's birthday");
   expect(text).toContain("cron 0 20 * * 1,3,5 (Europe/Rome) → Alessio");
+  expect(text).toContain("Routinecron 0 20 * * 1,3,5");
   expect(text).toContain("Planned wishes for Grazia.");
   expect(text).toContain("(daily, weekly review)");
   // goals by horizon, the week goal under the long one, closed ones apart

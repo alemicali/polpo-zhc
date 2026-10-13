@@ -91,7 +91,7 @@ function IntentionRow({ intention, busy, onConfirm, onCancel }: { intention: Int
       <div className="flex flex-wrap items-center gap-2">
         {intention.state === "proposed"
           ? <Badge className="text-[10px]">Waiting for your yes</Badge>
-          : <Badge variant="outline" className="text-[10px]">Planned</Badge>}
+          : <Badge variant="outline" className="text-[10px]">{intention.cron || intention.everyMinutes > 0 ? "Routine" : "Planned"}</Badge>}
         <span className="text-muted-foreground">{schedule(intention)} → {intention.target?.name ?? intention.target?.chatId ?? "its chat"}</span>
         <span className="ml-auto flex gap-1">
           {intention.state === "proposed" && (

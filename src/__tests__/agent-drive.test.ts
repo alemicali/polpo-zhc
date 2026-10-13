@@ -342,3 +342,32 @@ describe("goals: cascade, plan tree, review rhythm", () => {
     expect(manager.listJournal("coach")[0]!.reviews).toEqual(["quarter", "month", "week", "day"]);
   });
 });
+
+describe("routine and tasks", () => {
+  it("the chat prompt separates its routine (recurring) from what is planned once", async () => {
+    const routine = await checks.create({ sessionId: "s", agent: "coach", prompt: "End-of-day check-in with Alessio", everyMinutes: 0, cron: "30 21 * * *", timezone: "Europe/Rome", why: "close the food log every day" });
+    const once = await checks.create({ sessionId: "s", agent: "coach", prompt: "", message: "Auguri Grazia!", everyMinutes: 0, firstRunAt: "2026-10-14T07:30:00Z", why: "birthday" });
+    const prompt = drivePrompt(agents[0]!, "me", [routine, once]);
+    const routinePart = prompt.slice(prompt.indexOf("### Your routine (recurring)"), prompt.indexOf("### Planned once"));
+    expect(routinePart).toContain(`${routine.id} cron "30 21 * * *"`);
+    expect(routinePart).not.toContain(once.id);
+    expect(prompt.slice(prompt.indexOf("### Planned once"))).toContain(`${once.id} Wednesday 2026-10-14 09:30 (Europe/Rome)`);
+    expect(prompt).toContain("- Keep a routine: the recurring moments your purpose, responsibilities, goals and tasks need");
+  });
+
+  it("reflections see its routine and its open Polpo tasks; the first one sets up the routine", async () => {
+    const withTasks = new DriveManager({
+      ...(manager as any).deps,
+      tasks: async () => [{ id: "t1", title: "Update the weekly meal plan", status: "in_progress", group: "Nutrition" }],
+    });
+    withTasks.setRunner(runner);
+    await checks.create({ sessionId: "s", agent: "coach", prompt: "Morning weigh-in reminder", everyMinutes: 0, cron: "0 10 * * *", timezone: "Europe/Rome" });
+    runner.mockResolvedValue({ text: "Set up." });
+    await withTasks.reflect("coach", "first");
+    const prompt = runner.mock.calls[0]![0].prompt as string;
+    expect(prompt).toContain("Then set up your routine");
+    expect(prompt).toMatch(/--- your routine \(recurring checks\) ---\n- chk_\S+ cron "0 10 \* \* \*" → its chat: Morning weigh-in reminder/);
+    expect(prompt).toContain("--- your open tasks in Polpo (assigned to you) ---\n- t1 [in_progress] Update the weekly meal plan (Nutrition)");
+    withTasks.dispose();
+  });
+});

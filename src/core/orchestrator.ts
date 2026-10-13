@@ -1204,6 +1204,9 @@ export class Orchestrator extends TypedEmitter {
       inRoom: (agent, room) => room.agents?.includes(agent) || [...this.channelGateways.entries()].some(([key, gateway]) =>
         this.config?.settings.notifications?.channels?.[key]?.gateway?.agent === agent && gateway.isIn(room.id)),
       checks: this.conversationCheckMgr,
+      tasks: async (agent) => (await this.registry.getAllTasks())
+        .filter((t) => t.assignTo === agent && t.status !== "done" && t.status !== "failed")
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, ...(t.group ? { group: t.group } : {}) })),
       store: new FileDriveStore(this.polpoDir),
       createReflectionSession: (agent) => this.sessionStore.create(`Reflection: ${agent}`, agent, { scope: `reflection:${agent}` }),
       emit: (event, payload) => this.emit(event, payload),

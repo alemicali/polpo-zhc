@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] — 2026-10-14 — Routine
+
+### Added
+- **Drive: a routine of its own.** An agent with a drive keeps a routine: the recurring moments its purpose, responsibilities, goals and tasks need (a morning check-in, an end-of-day review, a weekly plan), as recurring checks with a `why`.
+  - It sets the routine up at its first reflection, keeping the checks it already has.
+  - It reviews the routine at the weekly review and whenever its goals or tasks change.
+  - Its chats show the routine apart from what is planned once.
+- **Drive: its Polpo tasks.** Reflections now see the agent's open Polpo tasks (assigned to it), so its plan and routine follow its work.
+- **UI:** recurring intentions are marked "Routine" in the Goals tab.
+
+### Fixed
+- Replies of tool-using turns (channels, check runs, reflections) glued the text of each step together ("Now the plan.Now today's…"). Each step's text is now its own paragraph.
+
 ## [0.4.8] — 2026-10-13 — Drive
 
 ### Added

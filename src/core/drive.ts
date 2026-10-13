@@ -240,6 +240,14 @@ export class FileDriveStore {
   }
 }
 
+/** A Polpo task assigned to the agent, as its reflections see it. */
+export interface AgentTaskSummary {
+  id: string;
+  title: string;
+  status: string;
+  group?: string;
+}
+
 /** One reflection: a turn of the agent's reflection session with this prompt. */
 export type ReflectionRunner = (input: { agent: AgentConfig; sessionId: string; prompt: string; signal: AbortSignal }) => Promise<{ text: string } | "deferred">;
 
@@ -250,6 +258,8 @@ export interface DriveDeps {
   /** The agent takes part in this group room (its bot is in it, or it is one of the room's agents). */
   inRoom(agent: string, room: Room): boolean;
   checks?: ConversationCheckManager;
+  /** Its open Polpo tasks (assigned to it), for its reflections. */
+  tasks?(agent: string): Promise<AgentTaskSummary[]>;
   store: FileDriveStore;
   /** Creates the agent's reflection session. */
   createReflectionSession(agent: string): Promise<string>;
@@ -457,7 +467,9 @@ export class DriveManager {
       current.sessionId = runSessionId;
       // the first reflection sets everything up: all the horizons at once
       const reviews: ReviewCadence[] = trigger === "first" ? ["quarter", "month", "week", "day"] : reviewsDue ?? [];
-      const prompt = reflectionPrompt(agent, { trigger, material: text, count, now, self: this.deps.store.getSelf(agentName), reviews, plan: this.deps.store.listPlan(agentName) });
+      const tasks = await this.deps.tasks?.(agentName).catch(() => []) ?? [];
+      const routine = (await this.intentions(agentName)).filter(isRoutine);
+      const prompt = reflectionPrompt(agent, { trigger, material: text, count, now, self: this.deps.store.getSelf(agentName), reviews, plan: this.deps.store.listPlan(agentName), tasks, routine });
       const result = await this.runner({ agent, sessionId: runSessionId, prompt, signal: controller.signal });
       if (result === "deferred") return undefined;
       const lastReviews = { ...state.lastReviews };
@@ -498,6 +510,11 @@ function localNow(now: Date, timezone?: string): string {
   } catch {
     return now.toISOString();
   }
+}
+
+/** A recurring check: part of the agent's routine (cron or every N minutes). */
+export function isRoutine(check: Pick<ConversationCheck, "cron" | "everyMinutes">): boolean {
+  return !!check.cron || check.everyMinutes > 0;
 }
 
 function describeIntention(check: ConversationCheck, timezone?: string): string {
@@ -564,6 +581,9 @@ export function drivePrompt(agent: AgentConfig, self: string, intentions: readon
     "  schedule for yourself (schedule_check with instructions and why, without to: the result stays with you).",
     "- Track progress (progress, notes) and review on a rhythm: every day, and weekly, monthly, quarterly (your daily",
     "  reflections tell you when). Letting go of a goal that no longer serves is part of pursuing goals well.",
+    "- Keep a routine: the recurring moments your purpose, responsibilities, goals and tasks need (a morning check-in, an",
+    "  end-of-day review, a weekly plan, a recurring reminder) as recurring checks (schedule_check with cron and why), one per",
+    "  moment, never duplicated. Review it at your weekly review and whenever your goals or tasks change: add, move or drop moments.",
     "- Grow: ask what you could do more or better and what you lack; study it with your tools (search, read, try) and write",
     "  what you learn down as skills of your own (list_my_skills, create_my_skill, update_my_skill).",
     "- Other people's goals (a person's, a group's: owner) are theirs. Support their autonomy: ask what they want and why,",
@@ -572,7 +592,8 @@ export function drivePrompt(agent: AgentConfig, self: string, intentions: readon
     "  progress public in a group. With a group: shared specific goals, everyone's contribution visible, short regular",
     "  check-ins (what moved, what blocks, next step), celebrate wins together.",
     ...(openPlan.length ? ["", "### Your plan (open goals and steps)", ...describePlanTree(openPlan)] : []),
-    ...(intentions.length ? ["", "### Your open intentions", ...intentions.slice(0, 15).map((c) => describeIntention(c, timezone))] : []),
+    ...(intentions.some(isRoutine) ? ["", "### Your routine (recurring)", ...intentions.filter(isRoutine).slice(0, 15).map((c) => describeIntention(c, timezone))] : []),
+    ...(intentions.some((c) => !isRoutine(c)) ? ["", "### Planned once", ...intentions.filter((c) => !isRoutine(c)).slice(0, 15).map((c) => describeIntention(c, timezone))] : []),
   ].join("\n");
 }
 
@@ -615,8 +636,9 @@ const REVIEW: Record<ReviewCadence, string> = {
   month: "Monthly review: how did last month's goals go against the quarter's (score them, say why)? Set this month's goals "
     + "(horizon month, 3–5, measurable) under the quarter's.",
   week: "Weekly review: get clear (close or update every open item), get current (score last week's goals: done, partly, not, and "
-    + "why), get creative (what could you do differently?). Set this week's 3–5 goals (horizon week) under the month's. Check in "
-    + "with the people or groups whose goals you support: what moved, what blocks, the next step (lightly, supportively).",
+    + "why), get creative (what could you do differently?). Set this week's 3–5 goals (horizon week) under the month's. Review your "
+    + "routine against your goals and tasks (add, move, drop recurring moments). Check in with the people or groups whose goals you "
+    + "support: what moved, what blocks, the next step (lightly, supportively).",
   day: "Daily planning: what moved yesterday and what did not (and why)? Choose today's 1–3 priorities (horizon day) under this "
     + "week's goals, important before urgent; for each key action decide when and how (an if-then plan) and schedule what needs a moment.",
 };
@@ -625,6 +647,7 @@ const REVIEW: Record<ReviewCadence, string> = {
 export function reflectionPrompt(agent: AgentConfig, input: {
   trigger: ReflectionTrigger; material: string; count: number; now: Date; self: string;
   reviews?: readonly ReviewCadence[]; plan?: readonly PlanItem[];
+  tasks?: readonly AgentTaskSummary[]; routine?: readonly ConversationCheck[];
 }): string {
   const reviews = input.reviews ?? [];
   const named = reviews.filter((r) => r !== "day").map((r) => `${r === "week" ? "weekly" : r === "month" ? "monthly" : "quarterly"} review`);
@@ -643,20 +666,27 @@ export function reflectionPrompt(agent: AgentConfig, input: {
     "Nobody is waiting for an answer here: this is your own time to think, as yourself, about your purpose, your goals and the people around you.",
     input.self.trim() ? "" : "You have no self-portrait yet: write it first (update_self).",
     input.trigger === "first"
-      ? "Set up: break your purpose and goals down into long-term (6–12 months), quarter, month, week and today goals, measurable where you can, and the first steps (add_plan_item with horizon and parent)."
+      ? "Set up: break your purpose and goals down into long-term (6–12 months), quarter, month, week and today goals, measurable where you can, and the first steps (add_plan_item with horizon and parent). Then set up your routine: the recurring moments your responsibilities and goals need (schedule_check with cron and why), keeping the recurring checks you already have instead of duplicating them."
       : "",
     "1. Make sense of what happened (below): who said what, what it means for them and for your purpose, what is coming up.",
     "   Also think of the date: is today or tomorrow someone's important day, a holiday, the day of something you know about?",
     "2. Decide, as a thoughtful person with your purpose would — often the right choice is to do nothing:",
     "   write now (send_message to a group or person), plan for later (schedule_check with why, to and when), or drop or",
     "   change intentions that no longer make sense (list_checks all=true, cancel_check). Don't plan what you already planned.",
-    "3. Work on your goals: update progress and status in your plan; take a step now if it fits (study with your tools and write",
-    "   what you learn as your own skill), or schedule a work session for yourself for bigger steps.",
+    "3. Work on your goals and your tasks: update progress and status in your plan; take a step now if it fits (study with your",
+    "   tools and write what you learn as your own skill), or schedule a work session for yourself for bigger steps. Keep your",
+    "   routine in line with your goals and tasks.",
     ...order.filter((r) => reviews.includes(r)).map((r) => `   - ${REVIEW[r]}`),
     "4. Keep durable facts about people in memory (memory_get, memory_update) and your self-portrait current (update_self).",
     "End with one or two lines for your journal: what you decided and why.",
     "",
     plan.length ? `--- your plan (open goals and steps) ---\n${describePlanTree(plan, 60).join("\n")}\n` : "--- your plan is empty ---\n",
+    input.routine?.length
+      ? `--- your routine (recurring checks) ---\n${input.routine.slice(0, 20).map((c) => describeIntention(c, agent.identity?.timezone)).join("\n")}\n`
+      : "--- you have no routine yet ---\n",
+    input.tasks?.length
+      ? `--- your open tasks in Polpo (assigned to you) ---\n${input.tasks.slice(0, 30).map((t) => `- ${t.id} [${t.status}] ${t.title}${t.group ? ` (${t.group})` : ""}`).join("\n")}\n`
+      : "",
     input.material.trim()
       ? `--- since your last reflection ("You" = you, "Them" = the person in a private chat) ---\n${input.material}`
       : "--- nothing new was said since your last reflection ---",
