@@ -14,6 +14,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { Command } from "commander";
 import { DEFAULT_SERVER_PORT, DEFAULT_SERVER_HOST, getPolpoDir } from "../core/constants.js";
 import { POLPO_PACKAGE_VERSION } from "../core/version.js";
+import { RUNNER_COMMAND } from "../core/runner-command.js";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
+
+// pi-ai loads each provider's OAuth flow through a variable import() that a compiled
+// binary cannot resolve (the desktop app's Bun sidecar failed every "Login with
+// subscription" with "Cannot find module './anthropic.js'"). Register the flows
+// statically instead; under Node this only loads them up front.
+registerBunOAuthFlows();
 
 /** Upper bound for a graceful shutdown (systemd's default stop timeout is 90s). */
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -248,7 +256,10 @@ const serveAction = async (opts: any) => {
       workDir,
       apiKeys,
       corsOrigins,
-      autoStart: hasConfig,
+      // Always: the supervisor only starts once the orchestrator is initialized. With
+      // `hasConfig` here, a server started in setup mode (first run) never ran tasks
+      // after the dashboard's setup completed, until it was restarted.
+      autoStart: true,
     });
 
     // Graceful shutdown: without this Node exits immediately on SIGTERM,
@@ -632,8 +643,14 @@ registerProjectsCommand(program);
 registerCloudStatusCommand(program);
 registerCloudLogsCommand(program);
 
-// Non-blocking update check — prints notice at exit if a new version exists
-const printUpdateNotice = startUpdateCheck(PKG_VERSION);
-process.on("exit", printUpdateNotice);
+if (process.argv[2] === RUNNER_COMMAND) {
+  // A task run (see NodeSpawner): in a compiled binary there is no runner.js on disk to start,
+  // so the server starts itself with this hidden command. The runner reads --config and exits.
+  await import("../core/runner.js");
+} else {
+  // Non-blocking update check — prints notice at exit if a new version exists
+  const printUpdateNotice = startUpdateCheck(PKG_VERSION);
+  process.on("exit", printUpdateNotice);
 
-program.parse();
+  program.parse();
+}

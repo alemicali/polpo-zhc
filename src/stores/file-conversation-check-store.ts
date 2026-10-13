@@ -35,11 +35,11 @@ export class FileConversationCheckStore implements ConversationCheckStore {
 
   async createCheck(input: NewConversationCheck): Promise<ConversationCheck> {
     const now = new Date();
-    const { firstRunAt, ...fields } = input;
+    const { firstRunAt, proposed, ...fields } = input;
     const check: ConversationCheck = {
       ...fields,
       id: `chk_${nanoid(12)}`,
-      state: "active",
+      state: proposed ? "proposed" : "active",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       nextRunAt: firstRunAt ?? new Date(now.getTime() + input.everyMinutes * 60_000).toISOString(),

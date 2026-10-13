@@ -192,6 +192,7 @@ export function agentRoutes(getDeps: () => {
       browserProfile: body.browserProfile,
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
       ...(body.learning !== undefined && { learning: body.learning }),
+      ...(body.drive !== undefined && { drive: body.drive }),
     }, teamName);
 
     return c.json({ ok: true, data: { added: true } }, 201);
@@ -487,6 +488,7 @@ export function agentRoutes(getDeps: () => {
       ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
       ...(body.learning !== undefined && { learning: body.learning }),
+      ...(body.drive !== undefined && { drive: body.drive }),
       ...(body.maxTurns !== undefined && { maxTurns: body.maxTurns }),
       ...(body.maxConcurrency !== undefined && { maxConcurrency: body.maxConcurrency }),
       ...(body.runtime !== undefined && { runtime: body.runtime }),

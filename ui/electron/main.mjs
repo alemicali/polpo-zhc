@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
 
 import { spawn } from "node:child_process";
 import { resolve, dirname, join, delimiter } from "node:path";
@@ -251,6 +251,7 @@ function createWindow() {
   console.log("[Polpo] indexPath:", indexPath);
   console.log("[Polpo] indexPath exists:", existsSync(indexPath));
   if (SMOKE_RESULT) watchSmokeTest(mainWindow);
+  openLinksInBrowser(mainWindow);
   mainWindow.loadFile(indexPath);
 
   // Open DevTools in development / debug
@@ -260,6 +261,24 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+}
+
+/**
+ * Web pages go to the default browser, not a bare Electron window: provider logins
+ * (window.open of the OAuth page) need the real browser, with its saved sessions and
+ * passkeys, and some providers refuse embedded browsers. The app itself stays on file://.
+ */
+function openLinksInBrowser(win) {
+  const external = (url) => /^(https?|mailto):/i.test(url);
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (external(url)) shell.openExternal(url).catch(() => {});
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith("file:")) return;
+    event.preventDefault();
+    if (external(url)) shell.openExternal(url).catch(() => {});
   });
 }
 

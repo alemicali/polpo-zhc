@@ -48,12 +48,12 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   expect([...dates].sort().reverse()).toEqual(dates);
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
   expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([
-    ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
+    ["2026-10-13", 3], ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
   ]);
   expect(CHANGELOG.find((e) => e.id === "2026-10-06-group-chats")?.cta?.to).toBe("/chat?newGroup=1");
-  // the newest news lead the bar (learning, recurring checks), then group chats and the Telegram news
-  expect(unseenHighlights(CHANGELOG, new Set()).slice(0, 4).map((e) => e.id)).toEqual([
-    "2026-10-12-agent-learning", "2026-10-11-recurring-checks", "2026-10-06-group-chats", "2026-10-06-telegram-groups",
+  // the newest news lead the bar (sending anywhere, learning, recurring checks), then group chats and the Telegram news
+  expect(unseenHighlights(CHANGELOG, new Set()).slice(0, 6).map((e) => e.id)).toEqual([
+    "2026-10-13-agent-drive", "2026-10-13-send-anywhere", "2026-10-12-agent-learning", "2026-10-11-recurring-checks", "2026-10-06-group-chats", "2026-10-06-telegram-groups",
   ]);
   expect(unseenHighlights(CHANGELOG, new Set()).map((e) => e.id)).toEqual(CHANGELOG.filter((e) => e.highlight).map((e) => e.id));
 });

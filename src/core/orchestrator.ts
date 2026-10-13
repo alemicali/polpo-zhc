@@ -14,6 +14,8 @@ import { FileSessionStore } from "../stores/file-session-store.js";
 import { FileChatQueueStore } from "../stores/file-chat-queue-store.js";
 import { FileRoomStore } from "../stores/file-room-store.js";
 import { FileConversationCheckStore } from "../stores/file-conversation-check-store.js";
+import { botOrder, buildChatDirectory, chatTarget, resolveChat, type ChatBot, type ReachableChat } from "./chat-directory.js";
+import type { ConversationCheckTarget } from "@polpo-ai/core";
 import type { SessionStore } from "./session-store.js";
 import { FileCodingSessionStore } from "../stores/file-coding-session-store.js";
 import type { CodingSessionStore } from "./coding-session-store.js";
@@ -95,6 +97,7 @@ import { TaskWatcherManager } from "./task-watcher.js";
 import { BackgroundWaitManager, type BackgroundWaitContinuation } from "./background-wait-manager.js";
 import { ConversationCheckManager, type ConversationCheckRunner } from "./conversation-check-manager.js";
 import { FileLearningStore, LearningManager, type LearningRunner, type LearningSkillPort } from "./learning.js";
+import { DriveManager, FileDriveStore, type ReflectionRunner } from "./drive.js";
 import {
   assignSkillToAgent, createAgentSkill, loadSkillIndex, removeSkill, removeSkillFromIndex, unassignSkillFromAgent, updateSkillIndex,
 } from "../llm/skills.js";
@@ -183,6 +186,8 @@ export class Orchestrator extends TypedEmitter {
   private backgroundWaitMgr?: BackgroundWaitManager;
   private conversationCheckMgr?: ConversationCheckManager;
   private learningMgr?: LearningManager;
+  private driveMgr?: DriveManager;
+  private reflectionRunner?: ReflectionRunner;
   private learningRunner?: LearningRunner;
   private conversationCheckRunner?: ConversationCheckRunner;
   private backgroundWaitContinuation?: BackgroundWaitContinuation;
@@ -487,6 +492,13 @@ export class Orchestrator extends TypedEmitter {
   getConversationCheckManager(): ConversationCheckManager | undefined { return this.conversationCheckMgr; }
   /** Agents learning from their conversations (learning in the agent config). */
   getLearningManager(): LearningManager | undefined { return this.learningMgr; }
+  /** Agents pursuing a purpose on their own initiative (drive in the agent config). */
+  getDriveManager(): DriveManager | undefined { return this.driveMgr; }
+  /** How a reflection runs: a turn of the agent's reflection session (set by the server). */
+  setReflectionRunner(runner: ReflectionRunner): void {
+    this.reflectionRunner = runner;
+    this.driveMgr?.setRunner(runner);
+  }
   /** How a learning review runs: a turn of the agent's review session (set by the server). */
   setLearningRunner(runner: LearningRunner): void {
     this.learningRunner = runner;
@@ -1185,6 +1197,21 @@ export class Orchestrator extends TypedEmitter {
     if (this.learningRunner) this.learningMgr.setRunner(this.learningRunner);
     this.on("message:added", ({ sessionId }) => { void this.learningMgr?.onMessageAdded(sessionId); });
 
+    this.driveMgr = new DriveManager({
+      getAgents: () => this.getAgents(),
+      sessions: this.sessionStore,
+      rooms: this.getRoomStore(),
+      inRoom: (agent, room) => room.agents?.includes(agent) || [...this.channelGateways.entries()].some(([key, gateway]) =>
+        this.config?.settings.notifications?.channels?.[key]?.gateway?.agent === agent && gateway.isIn(room.id)),
+      checks: this.conversationCheckMgr,
+      store: new FileDriveStore(this.polpoDir),
+      createReflectionSession: (agent) => this.sessionStore.create(`Reflection: ${agent}`, agent, { scope: `reflection:${agent}` }),
+      emit: (event, payload) => this.emit(event, payload),
+      log: (level, message) => this.emit("log", { level, message }),
+    });
+    if (this.reflectionRunner) this.driveMgr.setRunner(this.reflectionRunner);
+    this.driveMgr.start();
+
     if (supportsBackgroundWaits(this.taskControlStore)) {
       this.backgroundWaitMgr = new BackgroundWaitManager(this, this.registry, this.taskControlStore);
       await this.backgroundWaitMgr.start();
@@ -1503,12 +1530,55 @@ export class Orchestrator extends TypedEmitter {
   private async deliverCheckReport(check: import("@polpo-ai/core").ConversationCheck, text: string): Promise<void> {
     const message = await this.sessionStore?.addMessage(check.sessionId, "assistant", text).catch(() => undefined);
     if (message) this.emit("message:added", { sessionId: check.sessionId, messageId: message.id, role: "assistant" });
-    const target = check.target;
-    if (!target) return;
-    const poller = this.telegramPollersByChannel.get(target.channel);
-    if (!poller) throw new Error(`Channel "${target.channel}" is not running: the report is only in the chat session`);
-    await poller.sendMarkdown(target.chatId, text, undefined, undefined, target.threadId ? { threadId: target.threadId } : undefined);
-    if (target.conversation) await this.channelGateways.get(target.channel)?.recordConversationReport(target.conversation, text);
+    if (check.target) await this.sendToChat(check.target, text, check.agent);
+  }
+
+  /** The Telegram bots running on this instance, with the agent each speaks as (none = Polpo). */
+  chatBots(): ChatBot[] {
+    const channels = this.config?.settings.notifications?.channels ?? {};
+    return [...this.telegramPollersByChannel.keys()].map((key) => {
+      const gateway = this.channelGateways.get(key);
+      const agent = channels[key]?.gateway?.agent;
+      return { key, ...(agent ? { agent } : {}), ...(gateway ? { isIn: (c: string) => gateway.isIn(c) } : {}) };
+    });
+  }
+
+  /** Every Telegram group, topic and person the bots have met, newest first. */
+  async listChats(): Promise<ReachableChat[]> {
+    const [peers, rooms] = await Promise.all([
+      this.peerStore?.listPeers("telegram").catch(() => []) ?? Promise.resolve([]),
+      this.getRoomStore().listRooms("telegram").catch(() => []),
+    ]);
+    return buildChatDirectory(peers, rooms);
+  }
+
+  /** Where a message for `to` goes (a name or an id from listChats), sent by the asking agent's bot when it can. */
+  async resolveChatTarget(to: string, opts: { agent?: string; topic?: number } = {}): Promise<ConversationCheckTarget> {
+    const bots = this.chatBots();
+    if (bots.length === 0) throw new Error("No Telegram bot is running on this instance");
+    const chat = resolveChat(await this.listChats(), to, opts.topic);
+    const [channel] = botOrder(bots, { channel: "", conversation: chat.kind === "person" ? undefined : chat.id }, opts.agent);
+    return chatTarget(chat, channel!);
+  }
+
+  /**
+   * Send `text` to a Telegram chat: by its bot, or, when Telegram refuses (the bot is not in that
+   * group, the person never wrote to it), by the agent's other bots, then any bot of the instance.
+   * A group's message joins its transcript. Returns the bot that sent it.
+   */
+  async sendToChat(target: ConversationCheckTarget, text: string, agent?: string): Promise<string> {
+    const tried: string[] = [];
+    for (const key of botOrder(this.chatBots(), target, agent)) {
+      const poller = this.telegramPollersByChannel.get(key);
+      if (!poller) continue;
+      tried.push(key);
+      if (!await poller.sendMarkdown(target.chatId, text, undefined, undefined, target.threadId !== undefined ? { threadId: target.threadId } : undefined)) continue;
+      if (target.conversation) await this.channelGateways.get(key)?.recordConversationReport(target.conversation, text);
+      return key;
+    }
+    throw new Error(tried.length
+      ? `Telegram refused the message to ${target.name ?? target.chatId} from every bot (${tried.join(", ")}): add a bot to that group, or ask the person to write to a bot first`
+      : "No Telegram bot is running on this instance");
   }
 
   /**
@@ -1827,6 +1897,7 @@ export class Orchestrator extends TypedEmitter {
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
     this.conversationCheckMgr?.dispose();
+    this.driveMgr?.dispose();
     this.learningMgr?.dispose();
     this.engine?.stop();
   }
@@ -1840,6 +1911,7 @@ export class Orchestrator extends TypedEmitter {
     this.stopped = true;
     this.backgroundWaitMgr?.dispose();
     this.conversationCheckMgr?.dispose();
+    this.driveMgr?.dispose();
     this.learningMgr?.dispose();
     for (const key of [...this.chatWorkspaces.keys()]) await this.closeChatWorkspace(key, "shutdown");
     for (const { guard } of this.chatBrowserGuards.values()) await guard.close().catch(() => undefined);
@@ -1910,6 +1982,7 @@ export class Orchestrator extends TypedEmitter {
     this.scheduler?.dispose();
     this.backgroundWaitMgr?.dispose();
     this.conversationCheckMgr?.dispose();
+    this.driveMgr?.dispose();
     this.learningMgr?.dispose();
     await this.registry.close?.();
     await this.runStore.close();

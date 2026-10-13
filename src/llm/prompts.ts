@@ -4,7 +4,7 @@
 
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
-import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core";
+import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS, todayLine } from "@polpo-ai/core";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
 import { buildModelListingForPrompt, listModels, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
@@ -1078,9 +1078,10 @@ export async function buildChatSystemPrompt(
     `- Recurring on events: "every time a mission completes, notify ops" → add_notification_rule.`,
     `- Mission-scoped: "for this specific mission only, alert me on every checkpoint" → update_mission_notifications.`,
     `- Cron / time-based: "every Monday at 9am send the weekly digest" → create_schedule.`,
-    `- Recurring check in this chat: "every 2 minutes check whether the site answers and tell us if it goes down"`,
-    `  → schedule_check. It reports in the chat it was asked in (a Telegram group or topic too) and stays silent`,
-    `  when there is nothing to report; send_notification and schedules only reach the configured channels.`,
+    `- Messages and reminders to any chat (a Telegram group, topic or person), from wherever you are asked:`,
+    `  now → send_message; later or recurring → schedule_check with to (and every_minutes, cron + timezone, at or`,
+    `  in_minutes; message for a fixed reminder, instructions for work to do at each run). list_chats lists the chats`,
+    `  and their ids. Checks with instructions stay silent when there is nothing to report.`,
     `  Never promise to notify later without one of these tools: nothing happens after this turn.`,
     `- Automation chain with NO message: "when quality:gate:failed, auto-create a fix task" →`,
     `  add_notification_rule with channels:[] + actions:[{type:"create_task", ...}].`,
@@ -1089,7 +1090,8 @@ export async function buildChatSystemPrompt(
     `**Reminders**: When the user asks "remind me in X minutes to do Y", use send_notification`,
     `with delayMs. Example: "remind me in 5 minutes" → send_notification with delayMs=300000,`,
     `title="Reminder", body="<what the user asked>". Always confirm the reminder was set.`,
-    `For recurring reminders in this chat or group, use schedule_check; create_schedule runs missions.`,
+    `For reminders in a chat or group (once or recurring, "every Monday at 9 remind the team group"), use`,
+    `schedule_check with to and message; create_schedule runs missions.`,
     ``,
     `**Task waiting and watchers**: wait_for_task, watch_task, list_watchers, remove_watcher.`,
     `wait_for_task blocks the current tool call until the task reaches targetStatus, or done/failed`,
@@ -1879,8 +1881,20 @@ export async function buildChatSystemPrompt(
     `  ({ learning: { enabled, everyMessages?, idleMinutes?, skills? } }); the agent can also do it itself (set_learning).`,
     `  "What did X learn?" → get_agent_learning; "have X learn now" → review_agent_learning; "undo that" →`,
     `  revert_agent_learning with the change id.`,
-    `- **Recurring checks**: agents have schedule_check too; reports go to the chat or group they were asked in.`,
+    `- **Messages and schedules anywhere**: agents have send_message, list_chats and schedule_check too, with the same`,
+    `  freedom: any group, topic or person the bots have met, once, every N minutes or on a cron, whoever asks and from`,
+    `  wherever. If their own bot is not in that chat another bot of the instance sends it.`,
     `- **Voice replies**: update_agent voiceReplies, or set_voice_replies (theirs or yours).`,
+    `- **Drive** (off by default): an agent with a drive pursues a purpose on its own initiative, among people. It reflects`,
+    `  on its chats and groups (also what it only read) every so often and daily, keeps a self-portrait (its personality,`,
+    `  the people who matter, open threads), and decides by itself when to write, to whom, or what to plan for later`,
+    `  (intentions: scheduled checks with a why), following human customs (birthdays, wishes, check-ins, tact, timing).`,
+    `  It also works on itself like a person with goals: it breaks its purpose into long-term, quarter, month, week and day`,
+    `  goals with measures and steps (its plan), reviews them daily (at dayStartsAt) and weekly, monthly, quarterly, studies`,
+    `  what it lacks and writes its own skills.`,
+    `  Set it with update_agent ({ drive: { enabled, purpose, goals?, autonomy?: "propose" | "balanced" | "act",`,
+    `  reflectEveryMinutes?, dayStartsAt? } }). "What is X up to / what does it plan?" → get_agent_drive; "have X think about it now" →`,
+    `  reflect_agent; proposed intentions wait for a yes → confirm_check or cancel_check.`,
     `- **Reactions**: on Telegram an answer that is a single emoji becomes a reaction on the message.`,
   );
 
@@ -1930,6 +1944,8 @@ export async function buildChatSystemPrompt(
     parts.push(``, skillBlock);
   }
 
+  // last: it changes once a day
+  parts.push(``, todayLine());
   return parts.join("\n");
 }
 

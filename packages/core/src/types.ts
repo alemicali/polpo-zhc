@@ -335,6 +335,34 @@ export interface AgentLearningSettings {
   skills?: boolean;
 }
 
+/**
+ * How freely an agent with a drive acts on its own initiative.
+ * - "propose": it proposes what it would do (messages, plans) and waits for a yes.
+ * - "balanced": it acts on what is clearly in its purpose and low-stakes, and asks first otherwise.
+ * - "act": it acts on its own judgment.
+ */
+export type AgentAutonomy = "propose" | "balanced" | "act";
+
+/**
+ * An agent's drive: a purpose and goals it pursues on its own initiative, among people. It reflects on what happens in
+ * its chats and groups, keeps a self-portrait (its personality, relationships, open threads) that it
+ * carries forward, and decides when to speak, write to someone or plan something for later, by how
+ * much it serves its purpose, how serious and how urgent it is, following human customs.
+ */
+export interface AgentDrive {
+  enabled?: boolean;
+  /** What it lives for, e.g. "be Alessio's health coach". */
+  purpose?: string;
+  /** Concrete goals in service of the purpose. */
+  goals?: string[];
+  /** Default "balanced". */
+  autonomy?: AgentAutonomy;
+  /** Minutes between two reflections when something new happened (also once a day regardless). Default 120. */
+  reflectEveryMinutes?: number;
+  /** When its day starts ("HH:MM" in its timezone): its daily planning, and the weekly, monthly and quarterly reviews. Default "07:30". */
+  dayStartsAt?: string;
+}
+
 export interface AgentConfig {
   name: string;
   /** ISO timestamp of when this agent was created / added to the team. Auto-set by addAgent(). */
@@ -376,6 +404,8 @@ export interface AgentConfig {
   voiceReplies?: VoiceReplyMode;
   /** Learning from its conversations (memory, own skills); off by default. The agent can change it (set_learning). */
   learning?: AgentLearningSettings;
+  /** A purpose it pursues on its own initiative (reflection, intentions, self-portrait); off by default. */
+  drive?: AgentDrive;
   /** Where this agent's tools run (sandbox), set by a person: overrides the instance default. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Runtime profile used by deterministic loop execution. */

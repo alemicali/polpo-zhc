@@ -12,6 +12,7 @@ import { spawn as cpSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { Spawner, SpawnResult } from "../core/spawner.js";
 import type { RunnerConfig } from "../core/types.js";
+import { RUNNER_COMMAND } from "../core/runner-command.js";
 
 export class NodeSpawner implements Spawner {
   private polpoDir: string;
@@ -47,7 +48,10 @@ export class NodeSpawner implements Spawner {
     const runnerPath = useTs ? runnerTs : runnerJs;
 
     let spawnArgs: string[];
-    if (useTs) {
+    if (!existsSync(runnerPath)) {
+      // Compiled binary (desktop app sidecar): the runner is inside this executable.
+      spawnArgs = [process.execPath, RUNNER_COMMAND, "--config", configPath];
+    } else if (useTs) {
       const tsxCli = join(baseDir, "../../node_modules/tsx/dist/cli.mjs");
       spawnArgs = existsSync(tsxCli)
         ? [process.execPath, tsxCli, runnerPath, "--config", configPath]

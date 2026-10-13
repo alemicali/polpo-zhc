@@ -39,4 +39,18 @@ describe("live event bridge", () => {
     ]);
     bridge.dispose();
   });
+
+  it("subscribes once when started again (the server restarts it after a dashboard setup)", () => {
+    const emitter = new TypedEmitter();
+    const bridge = new SSEBridge(emitter as unknown as Orchestrator);
+    const received: string[] = [];
+    bridge.addClient({ id: "test", send: (event) => received.push(event), close: () => undefined });
+    bridge.start();
+    bridge.start();
+
+    emitter.emit("config:reloaded", { timestamp: new Date().toISOString() });
+
+    expect(received).toEqual(["config:reloaded"]);
+    bridge.dispose();
+  });
 });

@@ -98,9 +98,10 @@ export class PolpoServer {
     });
     this.sandboxReaper.start();
 
-    // (Re-)create SSE bridge
-    this.sseBridge?.dispose();
-    this.sseBridge = new SSEBridge(this.orchestrator);
+    // Start the SSE bridge. After a setup from the dashboard, reuse the placeholder bridge:
+    // the routes and the connected browsers hold that instance, and a new bridge would
+    // leave them without events until a restart.
+    if (!this.sseBridge) this.sseBridge = new SSEBridge(this.orchestrator);
     this.sseBridge.start();
 
     console.log("\n  Orchestrator initialized — dashboard is ready.\n");

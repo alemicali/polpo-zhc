@@ -34,6 +34,7 @@ export class SSEBridge {
 
   /** Start listening to all orchestrator events. */
   start(): void {
+    this.disposeFn?.(); // idempotent: never subscribe twice
     const handlers: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
 
     for (const event of ALL_EVENTS) {

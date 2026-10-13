@@ -47,6 +47,7 @@ import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
 import { AgentSandboxTab } from "@/components/agents/agent-sandbox-tab";
 import { AgentLearningTab } from "@/components/agents/agent-learning-tab";
+import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 
@@ -160,6 +161,7 @@ function AgentDetailContent() {
             Memory
           </TabsTrigger>
           <TabsTrigger value="learning">Learning</TabsTrigger>
+          <TabsTrigger value="goals">Goals</TabsTrigger>
           <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
@@ -192,6 +194,10 @@ function AgentDetailContent() {
 
         <TabsContent value="learning" className="mt-4 flex-1 min-h-0">
           <AgentLearningTab />
+        </TabsContent>
+
+        <TabsContent value="goals" className="mt-4 flex-1 min-h-0">
+          <AgentDriveTab />
         </TabsContent>
 
         <TabsContent value="sandbox" className="mt-4 flex-1 min-h-0">

@@ -1,10 +1,12 @@
 /**
- * Conversation checks: recurring work an agent (or Polpo) runs inside a chat it was asked in
- * ("check every 2 minutes whether the site answers and tell us if it goes down").
+ * Conversation checks: work an agent (or Polpo) runs later, once or on a schedule ("check every 2
+ * minutes whether the site answers and tell us if it goes down", "remind the team group every Monday
+ * at 9").
  *
  * Each run is a turn of the check's own chat session (it remembers its earlier runs, and the "nothing
- * to report" answers stay there); the answer is delivered where the check was asked (a Telegram
- * group or topic, a direct chat) and added to that chat session, unless the agent answers
+ * to report" answers stay there), or a fixed message sent as it is; the answer is delivered to the
+ * check's target (any Telegram group, topic or person the bots can reach; by default the chat it was
+ * asked in) and added to the chat session it was asked in, unless the agent answers
  * {@link CHECK_NOTHING_TO_REPORT}.
  */
 
@@ -23,9 +25,12 @@ export interface ConversationCheckTarget {
   threadId?: number;
   /** Conversation id of a group ("telegram:group:<chatId>[:topic:<n>]"): answers join its transcript. */
   conversation?: string;
+  /** Name of the chat (group title or person), for listing. */
+  name?: string;
 }
 
-export type ConversationCheckState = "active" | "ended" | "cancelled";
+/** "proposed": planned by an agent on its own initiative, waiting for a yes before it runs. */
+export type ConversationCheckState = "active" | "proposed" | "ended" | "cancelled";
 
 export interface ConversationCheck {
   id: string;
@@ -37,12 +42,21 @@ export interface ConversationCheck {
   agent?: string;
   /** What to do at every run, in the words of the request. */
   prompt: string;
+  /** Sent as it is at every run, without running the agent (reminders). */
+  message?: string;
+  /** Minutes between runs; 0 when the check follows `cron` or runs once. */
   everyMinutes: number;
+  /** Cron expression (5 fields) for the runs, read in `timezone`. */
+  cron?: string;
+  /** IANA timezone of `cron` (e.g. "Europe/Rome"). */
+  timezone?: string;
   /** Where answers are delivered; absent = only the chat session (web chats). */
   target?: ConversationCheckTarget;
   state: ConversationCheckState;
   /** Who asked for it (person or peer id), for listing. */
   createdBy?: string;
+  /** An agent's own intention (nobody asked): why it plans it, in its words. */
+  why?: string;
   createdAt: string;
   updatedAt: string;
   nextRunAt: string;
@@ -61,9 +75,16 @@ export interface NewConversationCheck {
   sessionId: string;
   agent?: string;
   prompt: string;
+  message?: string;
+  /** Minutes between runs; 0 with `cron`, or for a check that runs once (at `firstRunAt`). */
   everyMinutes: number;
+  cron?: string;
+  timezone?: string;
   target?: ConversationCheckTarget;
   createdBy?: string;
+  why?: string;
+  /** Start as "proposed" (waits for a yes). */
+  proposed?: boolean;
   maxRuns?: number;
   endsAt?: string;
   /** First run; default: one interval from now. */
@@ -81,13 +102,32 @@ export interface ConversationCheckStore {
 }
 
 /**
- * The next state of a check after a run at `at`: next run one interval later, or ended when it ran
- * its last time (maxRuns) or its end time has passed.
+ * The next state of a check after a run at `at`: next run one interval later (or `next`, the next
+ * cron time), or ended when it ran its last time (maxRuns, a check that runs once, a cron with no
+ * next time) or its end time has passed.
  */
-export function afterCheckRun(check: ConversationCheck, at: Date): Pick<ConversationCheck, "runs" | "lastRunAt" | "nextRunAt" | "state"> {
+export function afterCheckRun(check: ConversationCheck, at: Date, next?: Date | null): Pick<ConversationCheck, "runs" | "lastRunAt" | "nextRunAt" | "state"> {
   const runs = check.runs + 1;
-  const nextRunAt = new Date(at.getTime() + check.everyMinutes * 60_000).toISOString();
-  const ended = (check.maxRuns !== undefined && runs >= check.maxRuns)
+  const nextAt = check.cron ? next ?? null : check.everyMinutes > 0 ? new Date(at.getTime() + check.everyMinutes * 60_000) : null;
+  const nextRunAt = (nextAt ?? at).toISOString();
+  const ended = !nextAt
+    || (check.maxRuns !== undefined && runs >= check.maxRuns)
     || (check.endsAt !== undefined && nextRunAt > check.endsAt);
   return { runs, lastRunAt: at.toISOString(), nextRunAt, state: ended ? "ended" : check.state };
+}
+
+/**
+ * Today's date for a prompt ("Today is Tuesday 2026-10-13 (Europe/Rome)."), so "tomorrow at 9" can be
+ * scheduled. Day precision keeps the prompt stable within a day; list_chats tells the exact time.
+ */
+export function todayLine(timezone?: string, now = new Date()): string {
+  let zone = timezone;
+  try { zone ||= Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* the server's */ }
+  try {
+    const date = now.toLocaleDateString("sv-SE", { timeZone: zone });
+    const weekday = now.toLocaleDateString("en-US", { timeZone: zone, weekday: "long" });
+    return `Today is ${weekday} ${date}${zone ? ` (${zone})` : ""}.`;
+  } catch {
+    return `Today is ${now.toISOString().slice(0, 10)} (UTC).`;
+  }
 }

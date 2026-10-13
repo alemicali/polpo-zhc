@@ -16,7 +16,7 @@ export const POLPO_EVENT_NAMES = [
   "quality:threshold:failed", "checkpoint:reached", "checkpoint:resumed", "schedule:triggered",
   "schedule:created", "schedule:completed", "schedule:expired", "notification:sent",
   "notification:failed", "watcher:created", "watcher:fired", "watcher:removed", "action:triggered",
-  "task:direction", "task:retry:blocked", "agent:created", "agent:updated", "agent:removed", "agent:learned",
+  "task:direction", "task:retry:blocked", "agent:created", "agent:updated", "agent:removed", "agent:learned", "agent:reflected",
   "team:created", "team:updated", "team:removed", "assessment:check:started",
   "assessment:check:complete", "approval:rejected", "delay:started", "delay:expired",
   "chat:turn-started", "chat:queue-updated", "room:created", "room:updated", "room:deleted",

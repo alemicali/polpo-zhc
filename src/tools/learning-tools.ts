@@ -1,6 +1,6 @@
 /**
- * Learning tools for an agent chat: set_learning (always), and, while learning with skills is on,
- * list_my_skills / create_my_skill / update_my_skill (only skills the agent created itself).
+ * Learning tools for an agent chat: set_learning (always), and, while learning with skills is on or
+ * with a drive, list_my_skills / create_my_skill / update_my_skill (only skills the agent created itself).
  */
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -70,7 +70,9 @@ export function createLearningTools(ctx: LearningToolContext): AgentTool<any>[] 
       return text(describeLearning(next), { learning: next });
     },
   }];
-  if (!agent.learning?.enabled || agent.learning.skills === false) return tools;
+  // own skills: while learning with skills, or always with a drive (it grows the skills its purpose needs)
+  const ownSkills = (agent.learning?.enabled && agent.learning.skills !== false) || !!agent.drive?.enabled;
+  if (!ownSkills) return tools;
 
   tools.push(
     {

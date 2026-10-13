@@ -372,6 +372,15 @@ const PipelineSchema = z.object({
 
 const AgentLoopsSchema = z.record(z.string().min(1), LoopConfigSchema);
 
+const AgentDriveSchema = z.object({
+  enabled: z.boolean().optional(),
+  purpose: z.string().max(2000).optional(),
+  goals: z.array(z.string().max(500)).max(30).optional(),
+  autonomy: z.enum(["propose", "balanced", "act"]).optional(),
+  reflectEveryMinutes: z.number().int().min(15).optional(),
+  dayStartsAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+}).strict();
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
@@ -398,6 +407,8 @@ export const AddAgentSchema = z.object({
     idleMinutes: z.number().int().min(0).optional(),
     skills: z.boolean().optional(),
   }).strict().optional(),
+  /** A purpose it pursues on its own initiative (reflection, intentions, self-portrait); off by default. */
+  drive: AgentDriveSchema.optional(),
 });
 
 export const UpdateAgentSchema = z.object({
@@ -426,6 +437,8 @@ export const UpdateAgentSchema = z.object({
     idleMinutes: z.number().int().min(0).optional(),
     skills: z.boolean().optional(),
   }).strict().optional(),
+  /** A purpose it pursues on its own initiative (reflection, intentions, self-portrait); off by default. */
+  drive: AgentDriveSchema.optional(),
   runtime: z.string().min(1).optional(),
   loops: AgentLoopsSchema.optional(),
   pipeline: PipelineSchema.optional(),

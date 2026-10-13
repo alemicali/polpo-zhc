@@ -758,6 +758,7 @@ export class TelegramCallbackPoller {
    * Markup (buttons / reply prompt) goes on the last message. If Telegram
    * rejects the HTML, the chunk is resent as plain text instead of being lost.
    * In a group the first message quotes the one it answers (target.replyTo), in its topic.
+   * Returns false when Telegram refused a chunk (e.g. the bot is not in that chat).
    */
   async sendMarkdown(
     chatId: string,
@@ -765,16 +766,15 @@ export class TelegramCallbackPoller {
     buttons?: { text: string; data: string }[][],
     forceReply?: { placeholder?: string },
     target?: TelegramSendTarget,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const chunks = splitMarkdown(markdown);
     for (let i = 0; i < chunks.length; i++) {
       const last = i === chunks.length - 1;
       const where = i === 0 ? target : target && { threadId: target.threadId };
       const sent = await this.sendReply(chatId, markdownToTelegramHtml(chunks[i]), last ? buttons : undefined, last ? forceReply : undefined, true, where);
-      if (!sent) {
-        await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false, where);
-      }
+      if (!sent && !await this.sendReply(chatId, chunks[i], last ? buttons : undefined, last ? forceReply : undefined, false, where)) return false;
     }
+    return true;
   }
 
   private async sendChatAction(chatId: string, action: "typing" | "upload_photo" | "upload_document" = "typing", threadId?: number): Promise<void> {

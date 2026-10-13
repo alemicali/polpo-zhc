@@ -36,9 +36,9 @@ interface LearningState {
   lastReviewAt?: string;
 }
 
-/** Sessions that are not conversations to learn from (the reviews themselves, recurring checks). */
+/** Sessions that are not conversations to learn from (the reviews themselves, recurring checks, reflections). */
 export function isLearningExcluded(scope: string | undefined): boolean {
-  return !!scope && (scope.startsWith("learning:") || scope.startsWith("check:"));
+  return !!scope && (scope.startsWith("learning:") || scope.startsWith("check:") || scope.startsWith("reflection:"));
 }
 
 export const DEFAULT_LEARNING_EVERY = 30;

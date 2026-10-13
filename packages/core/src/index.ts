@@ -214,7 +214,7 @@ export type {
   StorageRegistryChangeEvent, StorageRegistryChangeEmitter, StorageRegistryStore, StorageCredentials,
   StorageCredentialStatus, StorageAccessGrant, StorageVolumeSettings,
 } from "./storage-registry.js";
-export { CHECK_NOTHING_TO_REPORT, MIN_CHECK_INTERVAL_MINUTES, afterCheckRun } from "./conversation-checks.js";
+export { CHECK_NOTHING_TO_REPORT, MIN_CHECK_INTERVAL_MINUTES, afterCheckRun, todayLine } from "./conversation-checks.js";
 export type {
   ConversationCheck, ConversationCheckState, ConversationCheckStore, ConversationCheckTarget, NewConversationCheck,
 } from "./conversation-checks.js";
