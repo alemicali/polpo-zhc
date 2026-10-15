@@ -837,29 +837,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         await agent.continue();
       }
 
-      // Extract final text from the last assistant message
-      const messages = agent.state.messages;
-      let resultText = "";
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg && "role" in msg && msg.role === "assistant" && "content" in msg) {
-          for (const block of msg.content) {
-            if (block.type === "text") {
-              resultText = block.text;
-              break;
-            }
-          }
-          if (resultText) break;
-        }
-      }
-
+      const result = runResult(agent.state.messages);
+      if (result.exitCode !== 0) handle.onTranscript?.({ type: "error", message: result.stderr });
       alive = false;
-      return {
-        exitCode: 0,
-        stdout: resultText,
-        stderr: "",
-        duration: Date.now() - start,
-      };
+      return { ...result, duration: Date.now() - start };
     } catch (err) {
       alive = false;
       const msg = err instanceof Error ? err.message : String(err);
@@ -883,6 +864,27 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   })();
 
   return handle;
+}
+
+/**
+ * The result of a finished agent run, from its messages. A run whose last reply is a provider
+ * error (HTTP 500, the model crashed while loading, a timeout…) failed: the agent ends it with
+ * that error instead of throwing, and it used to count as a success with no output, so the task
+ * was "done" without any work. Otherwise the output is the last text the agent wrote.
+ */
+export function runResult(messages: readonly unknown[]): { exitCode: number; stdout: string; stderr: string } {
+  const last = messages[messages.length - 1] as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+  if (last?.role === "assistant" && last.stopReason === "error") {
+    return { exitCode: 1, stdout: "", stderr: `Model error: ${last.errorMessage || "the model returned an error"}` };
+  }
+  let resultText = "";
+  for (let i = messages.length - 1; i >= 0 && !resultText; i--) {
+    const msg = messages[i] as { role?: string; content?: unknown };
+    if (msg?.role !== "assistant" || !Array.isArray(msg.content)) continue;
+    const text = msg.content.find((block: { type?: string }) => block?.type === "text") as { text?: string } | undefined;
+    if (text?.text) resultText = text.text;
+  }
+  return { exitCode: 0, stdout: resultText, stderr: "" };
 }
 
 // ─── Outcome Collection ─────────────────────────────

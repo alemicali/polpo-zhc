@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
 - A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
+- A task whose model call failed (e.g. Ollama answering HTTP 500 because the model crashed while loading, or a connection error) ended as **done** with no output and no work: the agent ends such a run with an error reply instead of throwing, and the engine counted it as a success. It now fails with the reason (`Model error: …`), so it is retried and then shown as failed.
 
 ## [0.4.9] — 2026-10-14 — Routine
 
