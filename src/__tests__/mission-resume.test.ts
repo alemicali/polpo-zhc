@@ -53,6 +53,21 @@ describe("Mission resume (Orchestrator)", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
+  describe("mission names", () => {
+    it("gives a new mission with a taken name its own name, so runs never share a task group", async () => {
+      const data = JSON.stringify({ tasks: [{ title: "A", description: "a", assignTo: "dev" }] });
+      const first = await orchestrator.saveMission({ name: "report", data });
+      const second = await orchestrator.saveMission({ name: "report", data });
+      const third = await orchestrator.saveMission({ name: "report", data });
+      expect([first.name, second.name, third.name]).toEqual(["report", "report (2)", "report (3)"]);
+
+      await orchestrator.executeMission(first.id);
+      const run = await orchestrator.executeMission(second.id);
+      expect(run.group).toBe("report (2)");
+      expect(run.tasks.every(t => t.group === "report (2)")).toBe(true);
+    });
+  });
+
   describe("getResumableMissions", () => {
     it("returns empty array when no missions exist", async () => {
       expect(await orchestrator.getResumableMissions()).toEqual([]);

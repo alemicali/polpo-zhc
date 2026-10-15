@@ -11,7 +11,7 @@
 // Route factories
 export { taskRoutes } from "./routes/tasks.js";
 export { missionRoutes } from "./routes/missions.js";
-export { playbookRoutes } from "./routes/playbooks.js";
+export { playbookRoutes, withFlowControlDependencies } from "./routes/playbooks.js";
 export { approvalRoutes } from "./routes/approvals.js";
 export { chatRoutes } from "./routes/chat.js";
 export { vaultRoutes } from "./routes/vault.js";

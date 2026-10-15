@@ -86,10 +86,18 @@ export function useMission(missionId: string): UseMissionReturn {
   useEffect(() => {
     if (missionsStale && missionId && !fetchingRef.current) {
       fetchingRef.current = true;
-      client.getMission(missionId)
-        .then((m) => { store.upsertMission(m); })
-        .catch(() => { /* swallow — stale refetch is best-effort */ })
-        .finally(() => { fetchingRef.current = false; });
+      // Clear the flag before fetching (the list hook may not be mounted to clear it), and
+      // fetch again if events marked it stale meanwhile: otherwise only the first event of
+      // a run would refresh the page.
+      void (async () => {
+        try {
+          do {
+            store.clearMissionsStale();
+            store.upsertMission(await client.getMission(missionId));
+          } while (store.getSnapshot().missionsStale);
+        } catch { /* swallow — stale refetch is best-effort */ }
+        finally { fetchingRef.current = false; }
+      })();
     }
   }, [missionsStale, client, store, missionId]);
 

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, Zap, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { config as appConfig } from "@/lib/config";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 
 // ── Types ──
@@ -80,7 +81,12 @@ export function ModelPicker({
           if (!r.ok) return;
           data = r.data as CatalogModel[];
         } else {
-          const r = await fetch("/api/v1/providers/models");
+          // The server's address, not a relative path: the desktop app loads the page from
+          // file:// and the dev UI runs on another port, so "/api/v1/..." never reached it.
+          const r = await fetch(`${appConfig.baseUrl}/api/v1/providers/models`, {
+            headers: appConfig.apiKey ? { Authorization: `Bearer ${appConfig.apiKey}` } : undefined,
+            credentials: "include",
+          });
           const json = await r.json();
           if (!json.ok) return;
           data = json.data as CatalogModel[];

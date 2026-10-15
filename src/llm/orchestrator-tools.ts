@@ -3789,12 +3789,8 @@ async function execAbortMission(polpo: Orchestrator, args: Record<string, unknow
   const missionId = args.missionId as string;
   const mission = await polpo.getMission(missionId);
   if (!mission) return `Error: Mission "${missionId}" not found.`;
-  // abortGroup uses the mission's group name, which is typically the mission ID or name
-  // We need to find the group from active tasks
-  const state = await polpo.getStore().getState();
-  const missionTasks = state.tasks.filter(t => t.group && mission);
-  // Use the mission name as group identifier
-  const count = await polpo.abortGroup(mission.name);
+  // The mission name is its task group; the id keeps other missions with the same name untouched
+  const count = await polpo.abortGroup(mission.name, mission.id);
   return count > 0 ? `Mission "${mission.name}" aborted: ${count} tasks killed/failed.` : `Mission "${mission.name}" — no active tasks to abort.`;
 }
 

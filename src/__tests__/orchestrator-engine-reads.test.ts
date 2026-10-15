@@ -64,6 +64,7 @@ function setup(opts: { evented?: boolean } = {}) {
   const missionExecutor = {
     cleanupCompletedGroups: vi.fn(async (tasks: Task[]) => { cleaned.push(structuredClone(tasks)); }),
     getQualityGates: () => [], getCheckpoints: () => [], getDelays: () => [],
+    restoreCheckpointDefinitions: async () => [],
     getActiveCheckpoints: () => [], getActiveDelays: () => [],
   };
   const taskRunner = {
@@ -227,5 +228,30 @@ describe("OrchestratorEngine.tick mission lookups", () => {
     const spawn = (s.engine as unknown as { runner: { spawnForTask: ReturnType<typeof vi.fn> } }).runner.spawnForTask;
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn.mock.calls[0][0].id).toBe(runnable.id);
+  });
+});
+
+describe("flow control per mission", () => {
+  it("gives a checkpoint only the tasks of its own group, not the same titles of other missions", async () => {
+    const s = setup();
+    await addTask(s.store, { title: "Draft", group: "report", status: "done" });
+    await addTask(s.store, { title: "Publish", group: "report" });
+    await addTask(s.store, { title: "Draft", group: "report (2)" });
+    const seen: Array<{ group: string; tasks: string[] }> = [];
+    Object.assign(s.missionExecutor, {
+      getCheckpoints: () => [{ name: "review", afterTasks: ["Draft"], blocksTasks: ["Publish"] }],
+      getBlockingCheckpoint: vi.fn(async (group: string, _title: string, _id: string, tasks: Task[]) => {
+        seen.push({ group, tasks: tasks.map((t) => `${t.group}/${t.title}`) });
+        return undefined;
+      }),
+    });
+
+    await s.engine.tick();
+
+    expect(seen.map((c) => c.group).sort()).toEqual(["report", "report (2)"]);
+    for (const call of seen) {
+      expect(call.tasks.length).toBeGreaterThan(0);
+      expect(call.tasks.every((t) => t.startsWith(`${call.group}/`))).toBe(true);
+    }
   });
 });

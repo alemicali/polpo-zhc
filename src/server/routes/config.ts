@@ -5,6 +5,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig } from "../security.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
+import { buildLocalProvider, discoverLocalModels } from "../../setup/local-provider.js";
 import { createCliStores } from "../../cli/stores.js";
 import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
@@ -88,6 +89,19 @@ const initializeRoute = createRoute({
               baseUrl: z.string().optional(),
               api: z.enum(["openai-completions", "openai-responses", "anthropic-messages"]).optional(),
             })).optional(),
+            /** A local model server (Ollama, LM Studio, ...) found by POST /config/local-provider/discover. */
+            localProvider: z.object({
+              preset: z.string(),
+              baseUrl: z.string().optional(),
+              models: z.array(z.object({
+                id: z.string().min(1),
+                name: z.string().optional(),
+                contextWindow: z.number().int().positive().optional(),
+                maxTokens: z.number().int().positive().optional(),
+                reasoning: z.boolean().optional(),
+                input: z.array(z.enum(["text", "image"])).optional(),
+              })).min(1),
+            }).optional(),
           }),
         },
       },
@@ -333,6 +347,22 @@ export function publicConfigRoutes(
     });
   });
 
+  // POST /config/local-provider/discover — models served by a local model server.
+  // Before setup only (the wizard); afterwards /providers/custom manages providers.
+  app.post("/local-provider/discover", async (c) => {
+    if (orchestrator.isInitialized) {
+      return c.json({ ok: false, error: "Already initialized — use Settings → Providers." }, 409);
+    }
+    const body = await c.req.json().catch(() => ({})) as { preset?: unknown; baseUrl?: unknown };
+    if (typeof body.preset !== "string") return c.json({ ok: false, error: "preset is required" }, 400);
+    const found = await discoverLocalModels({
+      preset: body.preset,
+      baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+    });
+    if (!found.ok) return c.json({ ok: false, error: found.error }, 400);
+    return c.json({ ok: true, data: { id: found.id, baseUrl: found.baseUrl, ...found.result } });
+  });
+
   // Guard against concurrent initialization
   let initializing = false;
 
@@ -356,11 +386,22 @@ export function publicConfigRoutes(
         return c.json({ ok: false, error: "Admin email is required when instance auth is enabled." }, 400);
       }
 
+      // A local model server becomes a custom provider in polpo.json, and its first model
+      // the default when none was picked.
+      let providers: Record<string, any> | undefined = body.providers;
+      let model: string | undefined = body.model || undefined;
+      if (body.localProvider) {
+        const local = buildLocalProvider(body.localProvider);
+        if (!local.ok) return c.json({ ok: false, error: `Local model server: ${local.error}` }, 400);
+        providers = { ...(providers ?? {}), [local.id]: local.config };
+        model ??= `${local.id}:${local.config.models![0].id}`;
+      }
+
       const config = generatePolpoConfigDefault(org, {
-        model: body.model || undefined,
+        model,
         agentName: body.agentName || undefined,
         agentRole: body.agentRole || undefined,
-        providers: body.providers,
+        providers,
       });
       const teams = config.teams;
 

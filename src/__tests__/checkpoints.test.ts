@@ -655,3 +655,140 @@ describe("Checkpoints", () => {
     });
   });
 });
+
+describe("Missions that share a name (created before names were unique)", () => {
+  let ctx: OrchestratorContext;
+  let missionExec: MissionExecutor;
+  let taskMgr: TaskManager;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "polpo-test-shared-"));
+    ctx = createMockCtx({
+      polpoDir: tmpDir,
+      checkpointStore: new FileCheckpointStore(tmpDir),
+      delayStore: new FileDelayStore(tmpDir),
+    });
+    taskMgr = new TaskManager(ctx);
+    missionExec = new MissionExecutor(ctx, taskMgr, new AgentManager(ctx));
+    await missionExec.ready;
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  /** Saved straight in the store, as before saveMission gave every mission its own name. */
+  const legacyMission = (status: Mission["status"]) =>
+    ctx.registry.saveMission!({ name: "report", data: JSON.stringify({ tasks: [] }), status });
+
+  async function addRunTask(missionId: string, title: string, status: Task["status"]): Promise<Task> {
+    const task = createTestTask({ title, group: "report", missionId, status });
+    (await ctx.registry.getState()).tasks.push(task);
+    return task;
+  }
+
+  it("completes each mission on its own", async () => {
+    const first = await legacyMission("completed");
+    const second = await legacyMission("active");
+    const third = await legacyMission("active");
+    for (const m of [first, second, third]) await addRunTask(m.id, "Draft", "done");
+
+    await missionExec.cleanupCompletedGroups(await ctx.registry.getAllTasks());
+
+    expect((await ctx.registry.getMission!(second.id))?.status).toBe("completed");
+    expect((await ctx.registry.getMission!(third.id))?.status).toBe("completed");
+  });
+
+  it("completes after a restart a mission left active with all its tasks finished", async () => {
+    const stuck = await legacyMission("active");
+    await addRunTask(stuck.id, "Draft", "done");
+
+    const restarted = new MissionExecutor(ctx, taskMgr, new AgentManager(ctx));
+    await restarted.ready;
+    await restarted.cleanupCompletedGroups(await ctx.registry.getAllTasks());
+
+    expect((await ctx.registry.getMission!(stuck.id))?.status).toBe("completed");
+  });
+
+  it("aborts only the given mission, also when it is paused", async () => {
+    const running = await legacyMission("active");
+    const paused = await legacyMission("paused");
+    const runningTask = await addRunTask(running.id, "Publish", "pending");
+    await addRunTask(paused.id, "Publish", "pending");
+
+    await taskMgr.abortGroup("report", paused.id);
+
+    expect((await ctx.registry.getMission!(paused.id))?.status).toBe("cancelled");
+    expect((await ctx.registry.getMission!(running.id))?.status).toBe("active");
+    expect((await ctx.registry.getTask(runningTask.id))?.status).toBe("pending");
+  });
+
+  it("deletes only the tasks of the deleted mission", async () => {
+    const kept = await legacyMission("completed");
+    const deleted = await legacyMission("completed");
+    const keptTask = await addRunTask(kept.id, "Draft", "done");
+    await addRunTask(deleted.id, "Draft", "done");
+
+    await missionExec.deleteMission(deleted.id);
+
+    expect((await ctx.registry.getAllTasks()).map((t) => t.id)).toEqual([keptTask.id]);
+  });
+
+  it("restores the checkpoints of a paused mission from its data after a restart", async () => {
+    const checkpoint: MissionCheckpoint = { name: "review", afterTasks: ["Draft"], blocksTasks: ["Publish"] };
+    expect(missionExec.getCheckpoints("report")).toEqual([]);
+
+    const restored = await missionExec.restoreCheckpointDefinitions("report", JSON.stringify({ tasks: [], checkpoints: [checkpoint] }));
+    expect(restored).toEqual([checkpoint]);
+
+    const restarted = new MissionExecutor(ctx, taskMgr, new AgentManager(ctx));
+    await restarted.ready;
+    expect(restarted.getCheckpoints("report")).toEqual([checkpoint]);
+  });
+});
+
+describe("Delay durations", () => {
+  it("reads ISO 8601 durations case-insensitively and refuses empty or malformed ones", async () => {
+    const { parseISO8601Duration, isValidISO8601Duration } = await import("@polpo-ai/core/iso-duration");
+    expect(parseISO8601Duration("PT1S")).toBe(1000);
+    expect(parseISO8601Duration("PT1s")).toBe(1000);
+    expect(parseISO8601Duration(" pt30m ")).toBe(30 * 60_000);
+    expect(parseISO8601Duration("P1DT2H")).toBe(26 * 3_600_000);
+    for (const bad of ["P", "PT", "1h", "PT1X", "", "soon"]) expect(isValidISO8601Duration(bad)).toBe(false);
+  });
+
+  it("refuses a mission whose delay has a malformed duration", async () => {
+    const { parseMissionDocument } = await import("../core/schemas.js");
+    const doc = {
+      tasks: [{ title: "A", description: "a" }, { title: "B", description: "b", dependsOn: ["A"] }],
+      delays: [{ name: "wait", afterTasks: ["A"], blocksTasks: ["B"], duration: "soon" }],
+    };
+    expect(() => parseMissionDocument(doc)).toThrow(/duration/);
+    expect(() => parseMissionDocument({ ...doc, delays: [{ ...doc.delays[0], duration: "PT1s" }] })).not.toThrow();
+  });
+
+  it("ignores a stored delay it cannot read instead of failing every supervisor tick", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "polpo-test-delay-"));
+    try {
+      await new FileDelayStore(tmpDir).save({
+        definitions: { "report": [{ name: "wait", afterTasks: ["A"], blocksTasks: ["B"], duration: "soon" }] },
+        active: {},
+        expired: [],
+      });
+      const ctx = createMockCtx({ polpoDir: tmpDir, checkpointStore: new FileCheckpointStore(tmpDir), delayStore: new FileDelayStore(tmpDir) });
+      const logs: string[] = [];
+      ctx.emitter.on("log", (e) => logs.push(e.message));
+      const taskMgr = new TaskManager(ctx);
+      const missionExec = new MissionExecutor(ctx, taskMgr, new AgentManager(ctx));
+      await missionExec.ready;
+      const tasks = [createDoneTask("A", { group: "report" }), createPendingTask("B", { group: "report" })];
+
+      await expect(missionExec.getBlockingDelay("report", "B", tasks[1].id, tasks)).resolves.toBeUndefined();
+      await expect(missionExec.getBlockingDelay("report", "B", tasks[1].id, tasks)).resolves.toBeUndefined();
+      expect(logs.filter((m) => m.includes('"wait"'))).toHaveLength(1);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

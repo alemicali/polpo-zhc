@@ -87,7 +87,15 @@ export function useMissions(): UseMissionsReturn {
   useEffect(() => {
     if (missionsStale && !fetchingRef.current) {
       fetchingRef.current = true;
-      fetchMissions().finally(() => { fetchingRef.current = false; });
+      // Fetch again if events marked the list stale while the request was in flight.
+      void (async () => {
+        try {
+          do {
+            store.clearMissionsStale();
+            await fetchMissions();
+          } while (store.getSnapshot().missionsStale);
+        } finally { fetchingRef.current = false; }
+      })();
     }
   }, [missionsStale, fetchMissions]);
 

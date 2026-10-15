@@ -2171,8 +2171,9 @@ export function MissionDetailPage() {
   const { schedules } = useSchedules();
   const { activeDelays: liveDelays } = useActiveDelays();
 
+  // Only this mission's tasks: missions created before names were unique can share a group.
   const groupTasks = useMemo(
-    () => mission ? allTasks.filter(t => t.group === mission.name) : [],
+    () => mission ? allTasks.filter(t => t.group === mission.name && (!t.missionId || t.missionId === mission.id)) : [],
     [allTasks, mission],
   );
 

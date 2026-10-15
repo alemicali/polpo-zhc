@@ -4,7 +4,7 @@ import { join, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
-import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
+import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
 
 interface IndexedRunLog {
   file: string;
@@ -143,12 +143,12 @@ export function agentRoutes(getDeps: () => {
           },
         };
       });
-      const etag = buildETag(quickFingerprint(slim));
+      const etag = buildETag(contentFingerprint(slim));
       if (handleConditional(c, etag)) return c.body(null, 304);
       return c.json({ ok: true, data: slim });
     }
 
-    const etag = buildETag(quickFingerprint(redacted));
+    const etag = buildETag(contentFingerprint(redacted));
     if (handleConditional(c, etag)) return c.body(null, 304);
     return c.json({ ok: true, data: redacted });
   });

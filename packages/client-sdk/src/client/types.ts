@@ -96,6 +96,8 @@ export interface Task {
   description: string;
   assignTo: string;
   group?: string;
+  /** The mission the task belongs to (missions created before names were unique can share a group). */
+  missionId?: string;
   dependsOn: string[];
   status: TaskStatus;
   expectations: TaskExpectation[];

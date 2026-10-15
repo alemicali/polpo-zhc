@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-10-15 — Fixes from DeltaPolpo
+
+Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #133–#137, #144, #145). Thanks!
+
+### Added
+- **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
+
+### Changed
+- A new mission whose name is taken is named `name (2)`, `name (3)`…, so every run of a playbook is its own mission.
+- Task titles must be unique within a mission, no longer across all active tasks, so two runs of one playbook can run at the same time.
+- Abort also cancels a mission paused at a checkpoint, and releases its checkpoints and delays.
+
+### Fixed
+- **Telegram voice notes in private chats are transcribed on arrival**, as in groups, and their words become the message.
+  - **Why:** before, the model got an audio file it cannot hear and had to transcribe it with its tools. Polpo has no speech-to-text key of its own, so it delegated the transcription to an agent as a task. The transcript then lived only in a tool result, so the next message no longer knew what the voice note said ("I don't have the content of the voice message").
+  - **Which key:** the agent's own speech-to-text key (vault, then environment). Polpo uses the environment, else the first agent's key.
+  - **Without a key:** the audio stays attached, as before.
+- Task runs ignored the custom providers of `polpo.json` (local model servers such as Ollama or LM Studio, gateways): their models worked in chat, but tasks failed with "Model not found". The task runner now registers them, with their secrets from the vault.
+- Playbooks could not be run from the dashboard: the run dialog existed but no button opened it. Playbook cards and the playbook page now have a Run button.
+- Playbooks with checkpoints, delays or quality gates could be saved but not run: the blocked tasks lacked the `dependsOn` the mission schema requires, and the run answered a plain-text 500 ("Unexpected token 'I'… is not valid JSON" in the dashboard). The dependencies are now added when the playbook runs, and a run that cannot start answers a JSON 400 and leaves no mission behind.
+- `GET /missions/checkpoints` and `GET /missions/delays` answered "Mission not found": `GET /missions/:missionId` was registered first and took them.
+- A mission paused at a checkpoint lost its pause on restart, and the blocked task was then force-failed as a deadlock: with file storage, checkpoint and delay state was kept in memory only. It is now saved in `.polpo/`, a paused mission is never treated as a deadlock, and missions paused before the fix get their checkpoint back.
+- Running a playbook a second time created a mission with the same name, which is its task group: the new run saw the first run's finished tasks (its checkpoint was reached at once) and was never marked completed. With SQLite storage the second run failed instead.
+- With two missions that have tasks with the same titles in progress (e.g. two runs of one playbook), a checkpoint, delay or quality gate could be skipped: they looked for their tasks by title across all missions. They now look only at their own mission's tasks.
+- Missions that share a name never completed, and Abort and Resume had no effect on them: completion, abort and the mission page went by the shared group and always found the first mission. They now work per mission, and missions left active with all their tasks finished are completed on the next start. Deleting one of them no longer deletes the other missions' tasks.
+- The mission page refreshed the mission only on the first change of a run: nothing cleared the "missions stale" flag when the missions list was not mounted. Checkpoint events now also update the mission status (paused / active), and an abort refreshes it.
+- The Approvals page went blank (counters back to 0) at every refresh: `useApprovals` showed the loading state on every refetch. It now does so only on the first load.
+- The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
+- A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
+- **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
+
 ## [0.4.9] — 2026-10-14 — Routine
 
 ### Added

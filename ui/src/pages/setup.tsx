@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { AuthStep } from "@/components/shared/provider-auth";
 import type { Provider } from "@/components/shared/provider-auth";
 import { ModelPicker } from "@/components/shared/model-picker";
+import { LocalModelStep, NoToolsBadge, type LocalProviderChoice } from "@/components/setup/local-model-step";
 
 // ── Types ──
 
@@ -495,12 +496,59 @@ function ModelStep({
   onSelect,
   configuredProviders,
   providerSources,
+  localProvider,
+  selectedModel,
 }: {
   onSelect: (model: string) => void;
   configuredProviders: string[];
   providerSources: Record<string, string>;
+  localProvider: LocalProviderChoice | null;
+  selectedModel: string;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(selectedModel || null);
+
+  if (localProvider) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Choose your model</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Models served by {localProvider.label}. This model powers the orchestrator and your first agent.
+            Pick one that supports tool calling.
+          </p>
+          {localProvider.models.some((m) => m.tools === false) && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+              Models marked “no tools” can chat but cannot run agent tasks.
+            </p>
+          )}
+        </div>
+        <div className="max-h-64 space-y-1.5 overflow-y-auto">
+          {localProvider.models.map((m) => {
+            const spec = `${localProvider.id}:${m.id}`;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => { setSelected(spec); onSelect(spec); }}
+                className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${selected === spec ? "border-primary bg-primary/5" : "border-border hover:bg-accent/50"}`}
+              >
+                <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate font-mono text-sm">{m.id}</span>
+                {m.tools === false && <NoToolsBadge />}
+                {m.contextWindow && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{Math.round(m.contextWindow / 1000)}k context</span>}
+                {selected === spec && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+              </button>
+            );
+          })}
+        </div>
+        {configuredProviders.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Cloud providers you connected stay available; you can switch models later in Settings.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <ModelPicker
@@ -587,6 +635,9 @@ export function SetupPage() {
   const [authBootstrapOnly, setAuthBootstrapOnly] = useState(false);
   const [authEnabled, setAuthEnabled] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
+  // Local (offline) model server chosen in the provider step, saved as a custom provider on completion.
+  const [localProvider, setLocalProvider] = useState<LocalProviderChoice | null>(null);
+  const [providerMode, setProviderMode] = useState<"cloud" | "local">("cloud");
 
   const STEPS = [
     ...(authBootstrapOnly ? [] : [{ id: "project", icon: FolderOpen, label: "Project" }]),
@@ -598,7 +649,7 @@ export function SetupPage() {
     ]),
   ];
   const currentStep = STEPS[step]?.id ?? "agent";
-  const hasConfiguredProvider = providers.some((p) => p.hasKey);
+  const hasConfiguredProvider = providers.some((p) => p.hasKey) || !!localProvider;
   const canGoNext =
     (currentStep !== "project" || !!workDir) &&
     (currentStep !== "access" || isValidEmail(adminEmail)) &&
@@ -686,6 +737,9 @@ export function SetupPage() {
           agentName: agentName || "agent-1",
           agentRole: agentRole || "founder",
           adminEmail: authEnabled ? adminEmail.trim() : undefined,
+          localProvider: localProvider
+            ? { preset: localProvider.preset, baseUrl: localProvider.baseUrl, models: localProvider.models }
+            : undefined,
         }),
       });
       if (result.ok) {
@@ -780,18 +834,47 @@ export function SetupPage() {
                     onChangeEmail={setAdminEmail}
                   />
                 )}
-                {currentStep === "provider" && (
-                  <AuthStep
-                    providers={providers}
-                    onKeySave={handleSaveKey}
-                    onOAuthComplete={refreshProviders}
-                    onOAuthActiveChange={setOauthActive}
-                    onDisconnect={handleDisconnect}
+                {currentStep === "provider" && providerMode === "local" && (
+                  <LocalModelStep
                     apiFetch={api}
+                    value={localProvider}
+                    onChange={(choice) => {
+                      setLocalProvider(choice);
+                      // Default model: the first one the server lists.
+                      setSelectedModel(choice ? `${choice.id}:${choice.models[0].id}` : "");
+                    }}
+                    onBack={() => setProviderMode("cloud")}
                   />
+                )}
+                {currentStep === "provider" && providerMode === "cloud" && (
+                  <>
+                    {localProvider && (
+                      <button
+                        type="button"
+                        onClick={() => setProviderMode("local")}
+                        className="mb-4 flex w-full items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 text-left text-sm"
+                      >
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                        <span className="font-medium">{localProvider.label}</span>
+                        <span className="text-xs text-muted-foreground">local · {localProvider.models.length} models</span>
+                        <span className="ml-auto text-xs text-primary">Change</span>
+                      </button>
+                    )}
+                    <AuthStep
+                      providers={providers}
+                      onKeySave={handleSaveKey}
+                      onOAuthComplete={refreshProviders}
+                      onOAuthActiveChange={setOauthActive}
+                      onDisconnect={handleDisconnect}
+                      apiFetch={api}
+                      onChooseLocal={() => setProviderMode("local")}
+                    />
+                  </>
                 )}
                 {currentStep === "model" && (
                   <ModelStep
+                    localProvider={localProvider}
+                    selectedModel={selectedModel}
                     onSelect={setSelectedModel}
                     configuredProviders={providers.filter((p) => p.hasKey).map((p) => p.name)}
                     providerSources={Object.fromEntries(

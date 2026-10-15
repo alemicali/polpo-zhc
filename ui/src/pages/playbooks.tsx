@@ -143,13 +143,13 @@ function ParamField({
 
 // ── Run playbook dialog ──
 
-function RunPlaybookDialog({
+export function RunPlaybookDialog({
   playbook,
   open,
   onOpenChange,
   onRun,
 }: {
-  playbook: PlaybookInfo;
+  playbook: Pick<PlaybookInfo, "name" | "description" | "parameters">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRun: (name: string, params: Record<string, string | number | boolean>) => Promise<void>;
@@ -265,9 +265,11 @@ function RunPlaybookDialog({
 function PlaybookCard({
   playbook,
   onClick,
+  onRun,
 }: {
   playbook: PlaybookInfo;
   onClick: () => void;
+  onRun: () => void;
 }) {
   const params = playbook.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
@@ -298,6 +300,14 @@ function PlaybookCard({
                   {requiredParams.length} required
                 </Badge>
               )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto h-7 gap-1.5 text-xs"
+                onClick={(e) => { e.stopPropagation(); onRun(); }}
+              >
+                <Play className="h-3.5 w-3.5 text-teal-400" /> Run
+              </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
               {playbook.description}
@@ -452,6 +462,7 @@ export function PlaybooksPage() {
                 key={w.name}
                 playbook={w}
                 onClick={() => navigate(`/playbooks/${encodeURIComponent(w.name)}`)}
+                onRun={() => setRunTarget(w)}
               />
             ))}
           </div>

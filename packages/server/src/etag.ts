@@ -45,6 +45,13 @@ export function quickFingerprint(items: ReadonlyArray<unknown>): string {
   return createHash("md5").update(parts.join("|")).digest("hex").slice(0, 16);
 }
 
+/** Fingerprint of the full content. For small lists whose rows change without
+ *  a timestamp (agent configs have no `updatedAt`), where quickFingerprint
+ *  would keep the same ETag after an edit and clients would get a stale 304. */
+export function contentFingerprint(value: unknown): string {
+  return createHash("md5").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+}
+
 /** Build an ETag string in the standard quoted-hex form. */
 export function buildETag(hash: string): string {
   return `"${hash}"`;

@@ -27,6 +27,7 @@ import {
   Keyboard,
   Loader2,
   LogIn,
+  Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -85,6 +86,7 @@ export function AuthStep({
   onOAuthActiveChange,
   onDisconnect,
   apiFetch,
+  onChooseLocal,
 }: {
   providers: Provider[];
   onKeySave: (provider: string, key: string) => Promise<boolean>;
@@ -92,6 +94,8 @@ export function AuthStep({
   onOAuthActiveChange?: (active: boolean) => void;
   onDisconnect?: (provider: string) => Promise<void>;
   apiFetch: ApiFetch;
+  /** When set, offers a third option: a local (offline) model server. */
+  onChooseLocal?: () => void;
 }) {
   type AuthMode = "choose" | "add" | "oauth" | "apikey";
   const [mode, setMode] = useState<AuthMode>("choose");
@@ -206,6 +210,22 @@ export function AuthStep({
                   </p>
                 </div>
               </button>
+              {onChooseLocal && (
+                <button
+                  onClick={onChooseLocal}
+                  className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+                >
+                  <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Server className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">Local model (offline)</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Ollama, LM Studio, vLLM or any OpenAI-compatible server. No account or API key.
+                    </p>
+                  </div>
+                </button>
+              )}
             </div>
           </div>
           {confirmDialog}
@@ -316,6 +336,22 @@ export function AuthStep({
                 </p>
               </div>
             </button>
+            {onChooseLocal && (
+              <button
+                onClick={onChooseLocal}
+                className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
+              >
+                <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <Server className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">Local model (offline)</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Ollama, LM Studio, vLLM or any OpenAI-compatible server.
+                  </p>
+                </div>
+              </button>
+            )}
           </div>
         </div>
         {confirmDialog}

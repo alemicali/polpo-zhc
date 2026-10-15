@@ -881,7 +881,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     deleteMission: (id: string) => o.deleteMission(id),
     executeMission: (id: string) => o.executeMission(id),
     resumeMission: (id: string, opts?: any) => o.resumeMission(id, opts),
-    abortGroup: (group: string) => o.abortGroup(group),
+    abortGroup: (group: string, missionId?: string) => o.abortGroup(group, missionId),
     getActiveCheckpoints: () => o.getActiveCheckpoints(),
     resumeCheckpointByMissionId: (mid: string, cp: string) => o.resumeCheckpointByMissionId(mid, cp),
     getActiveDelays: () => o.getActiveDelays(),
@@ -977,6 +977,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    deleteMission: (id: string) => o.deleteMission(id),
     onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
   // Backward-compat: keep /templates as alias
@@ -984,6 +985,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     playbookStore: o.getPlaybookStore(),
     saveMission: (opts: any) => o.saveMission(opts),
     executeMission: (id: string) => o.executeMission(id),
+    deleteMission: (id: string) => o.deleteMission(id),
     onRun: (name: string, missionId: string, params: string[]) => o.emit("playbook:run", { name, missionId, params }),
   })));
 

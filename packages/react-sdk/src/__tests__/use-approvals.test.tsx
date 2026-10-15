@@ -51,6 +51,17 @@ describe("useApprovals", () => {
     });
   });
 
+  it("keeps the list on screen while refetching (no loading state after the first load)", async () => {
+    const { result } = renderHook(() => useApprovals(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    (client.getApprovals as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise(() => {}));
+    act(() => result.current.refetch());
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.approvals).toHaveLength(3);
+  });
+
   it("loading is an alias for isLoading", async () => {
     const { result } = renderHook(() => useApprovals(), { wrapper });
 

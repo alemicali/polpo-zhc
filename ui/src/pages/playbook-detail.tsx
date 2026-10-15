@@ -14,7 +14,9 @@ import {
   ListChecks,
   FileJson,
   Bot,
+  Play,
 } from "lucide-react";
+import { RunPlaybookDialog } from "@/pages/playbooks";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { usePlaybooks } from "@polpo-ai/react";
@@ -67,7 +69,20 @@ function ParamCard({ param }: { param: PlaybookParameter }) {
 export function PlaybookDetailPage() {
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
-  const { getPlaybook } = usePlaybooks();
+  const { getPlaybook, runPlaybook } = usePlaybooks();
+  const [runOpen, setRunOpen] = useState(false);
+
+  // Runs the playbook: it becomes a mission, opened right away.
+  const handleRun = async (playbookName: string, params: Record<string, string | number | boolean>) => {
+    try {
+      const result = await runPlaybook(playbookName, params);
+      toast.success(`Playbook "${playbookName}" started — ${result.tasks} task${result.tasks !== 1 ? "s" : ""} created`);
+      navigate(`/missions/${result.mission.id}`);
+    } catch (e) {
+      toast.error(`Run failed: ${(e as Error).message}`);
+      throw e;
+    }
+  };
 
   // The fetched playbook is tagged with the name it was loaded for, so a
   // route change shows the loader without resetting state in the effect.
@@ -155,6 +170,23 @@ export function PlaybookDetailPage() {
           <p className="text-xs text-muted-foreground mt-0.5">{playbook.description}</p>
         </div>
 
+        <Button
+          size="sm"
+          className="shrink-0 gap-1.5"
+          disabled={taskDefs.length === 0}
+          title={taskDefs.length === 0 ? "The playbook has no tasks" : "Run the playbook"}
+          onClick={() => setRunOpen(true)}
+        >
+          <Play className="h-3.5 w-3.5" /> Run
+        </Button>
+        {runOpen && (
+          <RunPlaybookDialog
+            playbook={{ name: playbook.name, description: playbook.description, parameters: params }}
+            open={true}
+            onOpenChange={(open) => { if (!open) setRunOpen(false); }}
+            onRun={handleRun}
+          />
+        )}
 
       </div>
 

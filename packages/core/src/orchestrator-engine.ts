@@ -91,10 +91,12 @@ export interface MissionExecutorPort {
   cleanupCompletedGroups(tasks: Task[]): Promise<void>;
   getQualityGates(group: string): MissionQualityGate[];
   getCheckpoints(group: string): MissionCheckpoint[];
+  restoreCheckpointDefinitions(group: string, missionData: string | undefined): Promise<MissionCheckpoint[]>;
   getBlockingCheckpoint(group: string, taskTitle: string, taskId: string, allTasks: Task[]): Promise<{ checkpoint: MissionCheckpoint; reachedAt: string } | undefined>;
   getDelays(group: string): MissionDelay[];
   getBlockingDelay(group: string, taskTitle: string, taskId: string, allTasks: Task[]): Promise<{ delay: MissionDelay; startedAt: string; expiresAt: string } | undefined>;
   getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }>;
+  releaseGroupFlow(group: string): Promise<void>;
   getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }>;
   resumeCheckpoint(group: string, checkpointName: string): Promise<boolean>;
   // Atomic mission data operations
@@ -339,11 +341,24 @@ export class OrchestratorEngine {
       return lookup;
     };
     const readyList: Task[] = [];
+    // Gates, checkpoints and delays name their tasks by title: match them only within the
+    // task's own group, or another mission with the same titles (e.g. a second run of the same
+    // playbook) decides whether this one's checkpoint was reached.
+    const tasksByGroup = new Map<string, Task[]>();
+    const tasksOfGroup = (group: string): Task[] => {
+      let list = tasksByGroup.get(group);
+      if (!list) { list = tasks.filter(t => t.group === group); tasksByGroup.set(group, list); }
+      return list;
+    };
+    // A paused mission waits for a person (checkpoint), it is not a deadlock.
+    let waitingOnPausedMission = false;
     for (const task of pending) {
       let isReady = true;
       if (task.group) {
         const mission = await lookupMission(task as Task & { group: string });
         if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) { isReady = false; }
+        const missionPaused = mission?.status === "paused";
+        if (missionPaused) waitingOnPausedMission = true;
 
         // Check quality gates — task may be blocked by a gate even if deps are done
         if (isReady && this.qualityController) {
@@ -354,21 +369,25 @@ export class OrchestratorEngine {
               task.title,
               task.id,
               gates,
-              tasks,
+              tasksOfGroup(task.group),
             );
             if (blocking) isReady = false; // Blocked by quality gate
           }
         }
 
-        // Check checkpoints — task may be blocked by a checkpoint awaiting human resume
-        if (isReady) {
-          const checkpoints = this.missionExec.getCheckpoints(task.group);
+        // Check checkpoints — task may be blocked by a checkpoint awaiting human resume.
+        // Also for paused missions: after a restart this re-activates the checkpoint that
+        // paused them, so it can be seen and resumed again.
+        if (isReady || missionPaused) {
+          const checkpoints = missionPaused
+            ? await this.missionExec.restoreCheckpointDefinitions(task.group, mission?.data)
+            : this.missionExec.getCheckpoints(task.group);
           if (checkpoints.length > 0) {
             const blockingCp = await this.missionExec.getBlockingCheckpoint(
               task.group,
               task.title,
               task.id,
-              tasks,
+              tasksOfGroup(task.group),
             );
             if (blockingCp) isReady = false; // Blocked by checkpoint
           }
@@ -382,7 +401,7 @@ export class OrchestratorEngine {
               task.group,
               task.title,
               task.id,
-              tasks,
+              tasksOfGroup(task.group),
             );
             if (blockingDelay) isReady = false; // Blocked by delay
           }
@@ -402,7 +421,7 @@ export class OrchestratorEngine {
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
     const hasActiveDelays = this.missionExec.getActiveDelays().length > 0;
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays) {
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
       if (this.deadlockResolver) {
         // Async resolution already in progress — wait for next tick
         if (this.deadlockResolver.isResolving()) return false;
@@ -559,11 +578,13 @@ export class OrchestratorEngine {
   async killTask(taskId: string): Promise<boolean> { return this.taskMgr.killTask(taskId); }
   async deleteTask(taskId: string): Promise<boolean> { return this.ctx.registry.removeTask(taskId); }
 
-  async abortGroup(group: string): Promise<number> {
-    const count = await this.taskMgr.abortGroup(group);
+  async abortGroup(group: string, missionId?: string): Promise<number> {
+    const count = await this.taskMgr.abortGroup(group, missionId);
+    // An aborted mission no longer waits at its checkpoints or delays.
+    await this.missionExec.releaseGroupFlow(group);
     // Clean up any schedule tied to this mission group — resolve via task.missionId first
     const groupTasks = (await this.ctx.registry.getAllTasks()).filter(t => t.group === group);
-    const mid = groupTasks.find(t => t.missionId)?.missionId;
+    const mid = missionId ?? groupTasks.find(t => t.missionId)?.missionId;
     const mission = mid ? await this.ctx.registry.getMission?.(mid) : await this.ctx.registry.getMissionByName?.(group);
     if (mission) this.scheduler?.unregisterMission(mission.id);
     return count;

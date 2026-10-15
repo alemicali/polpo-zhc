@@ -1640,6 +1640,44 @@ export class ChannelGateway {
   static LEASE_WAIT_MS = 10 * 60 * 1000;
 
   /**
+   * The vault whose speech-to-text key a turn uses: the agent's own (then the environment). Polpo has
+   * no vault: the environment, else the first agent's vault with a speech-to-text key.
+   */
+  private async speechVault(agent: string | undefined): Promise<ReturnType<typeof resolveAgentVault> | undefined> {
+    const store = this.orchestrator.getVaultStore();
+    if (agent) return resolveAgentVault(await loadAgentVaultEntries(store, agent));
+    if (process.env.OPENAI_API_KEY || process.env.DEEPGRAM_API_KEY) return undefined;
+    for (const a of await this.orchestrator.getAgents()) {
+      const vault = resolveAgentVault(await loadAgentVaultEntries(store, a.name));
+      if (vault.getKey("openai", "key") || vault.getKey("deepgram", "key")) return vault;
+    }
+    return undefined;
+  }
+
+  /**
+   * A turn's voice notes and audio, transcribed: the words go into the message text and the audio is
+   * dropped; what cannot be transcribed (no key, an error) stays attached for the agent's own tools.
+   */
+  private async transcribeTurnAudio(text: string, attachments: InboundAttachment[], agent: string | undefined): Promise<{ text: string; attachments: InboundAttachment[] }> {
+    if (!attachments.some((a) => a.kind === "voice" || a.kind === "audio")) return { text, attachments };
+    const vault = await this.speechVault(agent).catch(() => undefined);
+    const lines: string[] = [];
+    const kept: InboundAttachment[] = [];
+    for (const a of attachments) {
+      if (a.kind !== "voice" && a.kind !== "audio") { kept.push(a); continue; }
+      const label = a.kind === "voice" ? "voice message" : "audio";
+      const speech = await transcribeSpeech(a.data, a.filename, vault).catch((err: unknown) => {
+        this.log("warn", `transcription of a ${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+      if (speech?.text) lines.push(`[${label}, transcribed: "${speech.text}"]`);
+      else kept.push(a);
+    }
+    if (lines.length === 0) return { text, attachments };
+    return { text: [...lines, text.trim()].filter(Boolean).join("\n"), attachments: kept };
+  }
+
+  /**
    * Turn through the host's chat pipeline (agent-direct, or orchestrator when
    * agent is undefined). The pipeline persists both messages and attachments.
    */
@@ -1652,9 +1690,12 @@ export class ChannelGateway {
         : "Attachments are not supported on this instance yet. Please send text.";
     }
 
-    const attachments = msg.attachments ?? [];
-    const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
+    const tooLarge = (msg.attachments ?? []).find(a => a.data.length > MAX_ATTACHMENT_BYTES);
     if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
+    // Voice notes are heard on arrival: their words join the message, so they stay in the conversation
+    // (a model cannot listen to an audio file, and a transcript kept only in a tool result is lost next turn).
+    const heard = await this.transcribeTurnAudio(msg.text, msg.attachments ?? [], agent);
+    const attachments = heard.attachments;
 
     // The whole conversation: compaction keeps it within the window and reuses its checkpoint,
     // which a sliding window of recent messages would invalidate at every turn.
@@ -1664,7 +1705,7 @@ export class ChannelGateway {
     const messages: ChannelChatRequest["messages"] = history
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
-    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
+    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(heard.text, attachments.slice(0, 5)) : heard.text });
 
     if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
     const { text, files = [] } = await runner({ agent, sessionId, messages, origin: this.checkTarget(msg) });

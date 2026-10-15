@@ -90,6 +90,13 @@ export class PolpoStore {
     this.notify();
   }
 
+  /** Acknowledge a `missionsStale` signal before refetching, so later events mark it again. */
+  clearMissionsStale(): void {
+    if (!this.state.missionsStale) return;
+    this.state = { ...this.state, missionsStale: false };
+    this.notify();
+  }
+
   /** Upsert a single mission into the store without replacing the entire map. */
   upsertMission(mission: Mission): void {
     const prev = this.state.missions.get(mission.id);

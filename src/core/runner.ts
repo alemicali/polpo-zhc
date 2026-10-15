@@ -23,6 +23,7 @@ import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
+import { registerRunnerProviders } from "./runner-providers.js";
 import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
@@ -227,6 +228,9 @@ async function main(): Promise<void> {
     // Same vault as the server: the database's vault table, or .polpo/vault.enc in file mode.
     let vaultStore: VaultStore | undefined = drizzleVaultStore;
     if (!vaultStore) try { vaultStore = new EncryptedVaultStore(config.polpoDir); } catch { /* vault unavailable */ }
+
+    // Custom providers from polpo.json (local model servers, gateways), as the server registers them.
+    registerRunnerProviders(config.polpoDir, vaultStore);
 
     // Remote sandbox (Daytona, E2B): this process creates the VM, so it needs the provider's
     // settings (they travel with the resolved sandbox: the key's vault reference, region…) and

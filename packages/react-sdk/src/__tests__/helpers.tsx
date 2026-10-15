@@ -112,6 +112,16 @@ export function createMockStore(initialState?: Partial<StoreState>): PolpoStore 
       state = { ...state, missions: new Map(missions.map((m) => [m.id, m])), missionsStale: false };
       listeners.forEach((l) => l());
     },
+    clearMissionsStale: () => {
+      if (!state.missionsStale) return;
+      state = { ...state, missionsStale: false };
+      listeners.forEach((l) => l());
+    },
+    /** Test helper: what an SSE event such as mission:saved does to the real store. */
+    markMissionsStale: () => {
+      state = { ...state, missionsStale: true };
+      listeners.forEach((l) => l());
+    },
     upsertMission: (mission: Mission) => {
       const missions = new Map(state.missions);
       missions.set(mission.id, mission);

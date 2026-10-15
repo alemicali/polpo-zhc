@@ -324,6 +324,10 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       return { ...next, missions };
     }
 
+    // Aborting cancels the mission (also when it was paused at a checkpoint): refetch it.
+    case "mission:aborted":
+      return { ...next, missionsStale: true };
+
     // ── Approval gates ──────────────────────────────────────
 
     case "approval:requested":
@@ -361,9 +365,21 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
 
     // ── Checkpoints ─────────────────────────────────────────
 
+    // A checkpoint pauses its mission and resuming it makes it active again: update the
+    // status right away and refetch, or mission pages keep showing the old state.
     case "checkpoint:reached":
-    case "checkpoint:resumed":
-      return next;
+    case "checkpoint:resumed": {
+      const { missionId } = data as { missionId?: string };
+      const existing = missionId ? state.missions.get(missionId) : undefined;
+      if (!existing || !missionId) return { ...next, missionsStale: true };
+      const missions = new Map(state.missions);
+      missions.set(missionId, {
+        ...existing,
+        status: (event === "checkpoint:reached" ? "paused" : "active") as MissionStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      return { ...next, missions, missionsStale: true };
+    }
 
     // ── Delays ────────────────────────────────────────────────
 

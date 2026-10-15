@@ -27,6 +27,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-15-deltapolpo-fixes",
+    date: "2026-10-15",
+    kind: "fixed",
+    title: "Missioni, playbook e modelli locali: tante correzioni",
+    summary: "Playbook che partono, missioni che si chiudono, dashboard che si aggiorna e modelli locali, anche nel setup.",
+    body: [
+      "- **Modelli locali**: i task degli agenti usano anche i provider personalizzati (Ollama, LM Studio, gateway), non solo la chat. Al primo avvio puoi scegliere un *modello locale (offline)*, senza account né chiavi.",
+      "- **Playbook**: c'è il pulsante **Run**, e partono anche quelli con checkpoint e attese.",
+      "- **Missioni**: ogni lancio di un playbook è una missione a sé; le pause ai checkpoint sopravvivono al riavvio; le missioni si chiudono e si interrompono correttamente.",
+      "- **Un'attesa scritta male** (come `PT1s`) non blocca più tutte le missioni.",
+      "- **Dashboard**: la pagina della missione e le Approvazioni si aggiornano da sole, e la lista agenti mostra subito le modifiche.",
+      "- **App desktop**: la lista dei modelli in *Aggiungi agente* non è più vuota.",
+      "- **Vocali su Telegram in privato**: vengono trascritti appena arrivano, come nei gruppi, e il testo resta nella conversazione. Prima Polpo poteva \"perdere\" il contenuto del vocale al messaggio successivo.",
+      "",
+      "Grazie a **DeltaM128**, che ha trovato e corretto gran parte di questi problemi.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-14-drive-routine",
     date: "2026-10-14",
     kind: "improved",

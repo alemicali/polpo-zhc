@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
+import { isValidISO8601Duration } from "./iso-duration.js";
 
 // ── Loop Contract Schemas ────────────────────────────────────────────
 
@@ -172,7 +173,8 @@ export const missionDelaySchema = z.object({
   name: z.string().min(1, "delay requires a name"),
   afterTasks: z.array(z.string().min(1)).min(1, "delay requires at least one task in afterTasks"),
   blocksTasks: z.array(z.string().min(1)).min(1, "delay requires at least one task in blocksTasks"),
-  duration: z.string().min(1, "delay requires a duration (ISO 8601, e.g. PT2H, PT30M, P1D)"),
+  duration: z.string().min(1, "delay requires a duration (ISO 8601, e.g. PT2H, PT30M, P1D)")
+    .refine(isValidISO8601Duration, { message: "delay duration must be ISO 8601, e.g. PT30S, PT30M, PT2H, P1D" }),
   message: z.string().optional(),
   notifyChannels: z.array(z.string().min(1)).optional(),
 });

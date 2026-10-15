@@ -7,6 +7,35 @@ import {
 } from "../playbook-utils.js";
 
 /**
+ * A task blocked by a checkpoint, delay or quality gate must also depend on that gate's
+ * afterTasks, or the mission is refused. Playbooks written by hand or by an agent often
+ * lack those dependencies: add them when the playbook runs.
+ */
+export function withFlowControlDependencies(data: string): string {
+  let mission: { tasks?: Array<{ title?: string; dependsOn?: string[] }>; [k: string]: unknown };
+  try { mission = JSON.parse(data); } catch { return data; }
+  if (!Array.isArray(mission.tasks)) return data;
+  const tasks = mission.tasks;
+  let changed = false;
+  for (const kind of ["checkpoints", "delays", "qualityGates"]) {
+    const gates = mission[kind];
+    if (!Array.isArray(gates)) continue;
+    for (const gate of gates as Array<{ afterTasks?: string[]; blocksTasks?: string[] }>) {
+      for (const blocked of gate.blocksTasks ?? []) {
+        const task = tasks.find((t) => t.title === blocked);
+        if (!task) continue;
+        const deps = new Set(task.dependsOn ?? []);
+        for (const after of gate.afterTasks ?? []) {
+          if (after !== blocked && !deps.has(after)) { deps.add(after); changed = true; }
+        }
+        task.dependsOn = [...deps];
+      }
+    }
+  }
+  return changed ? JSON.stringify(mission) : data;
+}
+
+/**
  * Playbook routes — discover, inspect, and execute reusable mission playbooks.
  *
  * All persistence goes through PlaybookStore (injected via getDeps()).
@@ -17,6 +46,8 @@ export function playbookRoutes(getDeps: () => {
   executeMission: (id: string) => Promise<any>;
   /** Called when a playbook is run, with its mission and the names of the parameters given. */
   onRun?: (name: string, missionId: string, params: string[]) => void;
+  /** Removes a mission that could not start. */
+  deleteMission?: (missionId: string) => Promise<unknown>;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -140,6 +171,7 @@ export function playbookRoutes(getDeps: () => {
 
     // Instantiate
     const instance = instantiatePlaybook(playbook, validation.resolved);
+    instance.data = withFlowControlDependencies(instance.data);
 
     // Save as mission and execute
     const mission = await deps.saveMission({
@@ -149,7 +181,16 @@ export function playbookRoutes(getDeps: () => {
     });
 
     deps.onRun?.(name, mission.id, Object.keys(params));
-    const result = await deps.executeMission(mission.id);
+    let result;
+    try {
+      result = await deps.executeMission(mission.id);
+    } catch (err) {
+      // An invalid mission (e.g. a checkpoint without the matching dependsOn) must not surface as a
+      // bare 500 the dashboard cannot parse, nor leave a mission behind that can never start.
+      await deps.deleteMission?.(mission.id).catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: `The playbook cannot run: ${message}`, code: "INVALID_MISSION", details: [message] }, 400);
+    }
 
     return c.json({
       ok: true,

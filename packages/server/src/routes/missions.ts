@@ -375,7 +375,7 @@ export function missionRoutes(getDeps: () => {
   deleteMission: (id: string) => Promise<boolean>;
   executeMission: (id: string) => Promise<any>;
   resumeMission: (id: string, opts?: any) => Promise<any>;
-  abortGroup: (group: string) => Promise<number>;
+  abortGroup: (group: string, missionId?: string) => Promise<number>;
   getActiveCheckpoints: () => any;
   resumeCheckpointByMissionId: (missionId: string, checkpointName: string) => Promise<boolean>;
   getActiveDelays: () => any;
@@ -450,6 +450,21 @@ export function missionRoutes(getDeps: () => {
     return c.json({ ok: true, data: await deps.getResumableMissions() });
   });
 
+  // Static paths before GET /missions/:missionId, which would otherwise take
+  // "checkpoints" and "delays" for mission ids ("Mission not found").
+
+  // GET /missions/checkpoints — list all active checkpoints
+  app.openapi(listCheckpointsRoute, (c) => {
+    const deps = getDeps();
+    return c.json({ ok: true, data: deps.getActiveCheckpoints() });
+  });
+
+  // GET /missions/delays — list active delays
+  app.openapi(listDelaysRoute, (c) => {
+    const deps = getDeps();
+    return c.json({ ok: true, data: deps.getActiveDelays() });
+  });
+
   // GET /missions/:missionId — get mission by ID
   app.openapi(getMissionRoute, async (c) => {
     const deps = getDeps();
@@ -519,12 +534,6 @@ export function missionRoutes(getDeps: () => {
     return c.json({ ok: true, data: result });
   });
 
-  // GET /missions/checkpoints — list all active checkpoints
-  app.openapi(listCheckpointsRoute, (c) => {
-    const deps = getDeps();
-    return c.json({ ok: true, data: deps.getActiveCheckpoints() });
-  });
-
   // POST /missions/:missionId/checkpoints/:checkpointName/resume — resume a checkpoint
   app.openapi(resumeCheckpointRoute, async (c) => {
     const deps = getDeps();
@@ -544,7 +553,7 @@ export function missionRoutes(getDeps: () => {
     if (!mission) {
       return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
-    const count = await deps.abortGroup(mission.name);
+    const count = await deps.abortGroup(mission.name, missionId);
     return c.json({ ok: true, data: { aborted: count } }, 200);
   });
 
@@ -637,12 +646,6 @@ export function missionRoutes(getDeps: () => {
     } catch (e: any) {
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
     }
-  });
-
-  // GET /missions/delays — list active delays
-  app.openapi(listDelaysRoute, (c) => {
-    const deps = getDeps();
-    return c.json({ ok: true, data: deps.getActiveDelays() });
   });
 
   // POST /missions/:missionId/delays — add delay (data-level)

@@ -52,10 +52,12 @@ export class TaskManager {
     // Apply any modifications from hooks
     const hookData = hookResult.data;
 
-    // Enforce unique title among active (non-terminal) tasks
+    // Enforce unique title among active (non-terminal) tasks of the same group: missions refer to
+    // their tasks by title, while two runs of one playbook (separate groups) reuse the same titles.
     const existingTasks = await this.ctx.registry.getAllTasks();
     const duplicate = existingTasks.find(
-      t => t.title === hookData.title && t.status !== "done" && t.status !== "failed",
+      t => t.title === hookData.title && (t.group ?? undefined) === (hookData.group ?? undefined)
+        && t.status !== "done" && t.status !== "failed",
     );
     if (duplicate) {
       throw new Error(
@@ -320,9 +322,13 @@ export class TaskManager {
     return true;
   }
 
-  async abortGroup(group: string): Promise<number> {
+  /**
+   * Kill a mission group's unfinished tasks and cancel its mission. With `missionId`, only that
+   * mission's tasks: missions created before names were unique can share a group.
+   */
+  async abortGroup(group: string, missionId?: string): Promise<number> {
     const tasks = await this.ctx.registry.getAllTasks();
-    const groupTasks = tasks.filter(t => t.group === group);
+    const groupTasks = tasks.filter(t => t.group === group && (!missionId || !t.missionId || t.missionId === missionId));
     let count = 0;
     for (const task of groupTasks) {
       if (task.status === "done" || task.status === "failed") continue;
@@ -330,11 +336,12 @@ export class TaskManager {
       count++;
     }
     // Resolve mission via task.missionId (direct FK) first, fallback to group name
-    const mid = groupTasks.find(t => t.missionId)?.missionId;
+    const mid = missionId ?? groupTasks.find(t => t.missionId)?.missionId;
     const mission = mid
       ? await this.ctx.registry.getMission?.(mid)
       : await this.ctx.registry.getMissionByName?.(group);
-    if (mission && mission.status === "active") {
+    // A mission paused at a checkpoint can be aborted too.
+    if (mission && (mission.status === "active" || mission.status === "paused")) {
       await this.ctx.registry.updateMission?.(mission.id, { status: "cancelled" });
     }
     this.ctx.emitter.emit("mission:aborted", { missionId: mission?.id, name: mission?.name, group, killedTasks: count });

@@ -37,14 +37,17 @@ export function useApprovals(status?: ApprovalStatus): UseApprovalsReturn {
     setFetchCount((c) => c + 1);
   }, []);
 
+  // isLoading covers the first load only: refetches on every approval event keep the current
+  // list on screen instead of blanking the page (and its counters) until the answer arrives.
   useEffect(() => {
     if (!client) return;
-    setIsLoading(true);
+    let cancelled = false;
     client
       .getApprovals(status)
-      .then(setApprovals)
+      .then((list) => { if (!cancelled) setApprovals(list); })
       .catch(() => {})
-      .finally(() => setIsLoading(false));
+      .finally(() => { if (!cancelled) setIsLoading(false); });
+    return () => { cancelled = true; };
   }, [client, status, fetchCount]);
 
   // Auto-refetch when new approval events arrive
