@@ -31,6 +31,7 @@ import { type ContextCheckpointStore } from "../context-checkpoint.js";
 import { createSessionCompaction } from "../session-compactor.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
 import { todayLine, type ConversationCheckTarget } from "@polpo-ai/core/conversation-checks";
+import { checkToolCalls, type ToolArgumentsValidator } from "../tool-arguments.js";
 
 const DEFAULT_MAX_TURNS = 200;
 
@@ -476,6 +477,8 @@ export interface CompletionRouteDeps {
     executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive?: (name: string) => boolean;
   }>;
+  /** Checks a tool call's arguments against its schema (validateToolArguments from pi-ai). Without it nothing is checked. */
+  validateToolArguments?: ToolArgumentsValidator;
   /** LLM streaming function (streamSimple from pi-ai). */
   streamLLM: (model: any, opts: { systemPrompt: string; messages: any[]; tools: any[] }, streamOpts: any) => any;
   /** One-shot completion (completeSimple from pi-ai): writes compaction summaries. Without it the deterministic extract is used. */
@@ -1131,6 +1134,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             for (const call of toolCalls) {
               ensureToolSegment(segmentsAccum, call.id);
             }
+            // Arguments that do not match the tool's schema: the call is neither run nor previewed.
+            const invalidCalls = checkToolCalls(effectiveTools, toolCalls, deps.validateToolArguments);
 
             if (toolCalls.length === 0) {
               // The model is done — unless the user steered meanwhile: then the turn goes on.
@@ -1150,7 +1155,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             // NB: render_widget is NOT interactive — viene eseguito normalmente
             // nel for-loop sotto, emettendo widget_render come side-effect e
             // permettendo N widget per turn invece di uno solo.
-            const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+            const interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name) && !invalidCalls.has(tc.id));
             // Tool-call ids handled inline (per ora vuoto — niente skipIds da
             // questa branch dopo lo spostamento di render_widget al for-loop).
             const skipIds = new Set<string>();
@@ -1361,7 +1366,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 continue;
               }
 
-              const result = await effectiveToolExecutor(call.name, call.arguments, {
+              const result = invalidCalls.get(call.id) ?? await effectiveToolExecutor(call.name, call.arguments, {
                 signal: abortController.signal,
                 turnId,
                 toolCallId: call.id,
@@ -1562,6 +1567,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for (const call of toolCalls) {
             ensureToolSegment(segmentsAccum, call.id);
           }
+          // Arguments that do not match the tool's schema: the call is neither run nor previewed.
+          const invalidCalls = checkToolCalls(effectiveTools, toolCalls, deps.validateToolArguments);
 
           if (toolCalls.length === 0) {
             // ended without a word (often right after tools): ask once for the answer
@@ -1576,7 +1583,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
           // Check for interactive tools. Orchestrator has its full preview/input
           // set; agent-direct mode only gets UI-side tools supplied by deps.
-          let interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name));
+          let interactiveCall = toolCalls.find((tc: any) => isInteractiveFn?.(tc.name) && !invalidCalls.has(tc.id));
           // Tool-call ids that have already been handled inline (e.g. failed widget
           // validation) and must NOT be re-executed by the trailing for-loop.
           const skipIds = new Set<string>();
@@ -1839,7 +1846,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for (const call of toolCalls) {
             if (skipIds.has(call.id)) continue;
             ensureToolSegment(segmentsAccum, call.id);
-            const result = await effectiveToolExecutor(call.name, call.arguments, {
+            const result = invalidCalls.get(call.id) ?? await effectiveToolExecutor(call.name, call.arguments, {
               signal: c.req.raw.signal,
               turnId: completionId,
               toolCallId: call.id,
