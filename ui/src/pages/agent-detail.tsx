@@ -16,18 +16,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  AlertTriangle,
   Bot,
   Brain,
   Loader2,
   ArrowLeft,
   RefreshCw,
   ChevronRight,
+  Workflow,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 // Provider + context hook
 import { AgentDetailProvider } from "@/components/agents/agent-detail-provider";
 import { useAgentDetail } from "@/components/agents/agent-detail-context";
 import { cn } from "@/lib/utils";
+import { pipelineWarnings } from "@/lib/pipeline-edit";
 
 // Sidebar cards
 import { AgentHeroCard } from "@/components/agents/agent-hero-card";
@@ -50,6 +53,7 @@ import { AgentLearningTab } from "@/components/agents/agent-learning-tab";
 import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
+import { AgentPipelineTab } from "@/components/agents/agent-pipeline-tab";
 
 // ── Breadcrumb ──
 
@@ -123,6 +127,7 @@ function AgentDetailContent() {
   // ?tab=credentials opens a tab directly (e.g. from a vault picker's "add it" link)
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") ?? "overview";
+  const pipelineWarning = agent.pipeline ? pipelineWarnings(agent.pipeline).join("\n") : "";
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -160,6 +165,15 @@ function AgentDetailContent() {
             <Brain className="h-3.5 w-3.5 mr-1" />
             Memory
           </TabsTrigger>
+          <TabsTrigger value="pipeline">
+            <Workflow className="h-3.5 w-3.5 mr-1" />
+            Pipeline
+            {pipelineWarning && (
+              <span title={pipelineWarning} className="ml-1 text-amber-500">
+                <AlertTriangle className="h-3.5 w-3.5" />
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="learning">Learning</TabsTrigger>
           <TabsTrigger value="goals">Goals</TabsTrigger>
           <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
@@ -190,6 +204,10 @@ function AgentDetailContent() {
 
         <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
           <AgentMemoryTab />
+        </TabsContent>
+
+        <TabsContent value="pipeline" className="mt-4 flex-1 min-h-0">
+          <AgentPipelineTab />
         </TabsContent>
 
         <TabsContent value="learning" className="mt-4 flex-1 min-h-0">
