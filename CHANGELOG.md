@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The bash tool failed for every command on Windows** ("uv_spawn '/bin/bash' ENOENT"): the local workspace always ran `/bin/bash -c <command>`. On Windows it now uses Git for Windows' bash (from the usual install folders, or next to `git` on PATH; never `System32\bash.exe`, the WSL launcher), else `cmd.exe`; `POLPO_SHELL` picks another bash-compatible shell. Commands no longer open a console window. Linux and macOS are unchanged.
+
 ## [0.4.10] — 2026-10-15 — Fixes from DeltaPolpo
 
 Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #133–#137, #144, #145). Thanks!
