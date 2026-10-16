@@ -752,6 +752,7 @@ export class MissionExecutor {
         group,
         missionId,
         maxDuration: t.maxDuration,
+        maxRetries: t.maxRetries,
         retryPolicy: t.retryPolicy,
         notifications: t.notifications,
         sideEffects: t.sideEffects,
