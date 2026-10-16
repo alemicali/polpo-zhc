@@ -8,6 +8,9 @@
  * Client (runner): connects, sends a single JSON message, disconnects.
  * Fire-and-forget — if the socket is unreachable, the orchestrator's
  * polling fallback will pick up the result.
+ *
+ * Pipeline human steps are request/response instead: the runner half-closes
+ * after sending, the orchestrator writes one JSON reply and closes.
  */
 
 import { createServer, createConnection, type Server } from "node:net";
@@ -46,12 +49,47 @@ export interface SandboxEventMessage {
   event: Record<string, unknown> & { kind: string };
 }
 
+/** A pipeline `human` step asks for a decision (creates an approval request). */
+export interface PipelineHumanRequestMessage {
+  type: "pipeline_human_request";
+  /** Chosen by the runner so that retries are idempotent. */
+  requestId: string;
+  runId: string;
+  taskId: string;
+  agentName: string;
+  step: string;
+  notify?: string[];
+  context: Record<string, unknown>;
+}
+
+/** The runner polls the decision of a pipeline `human` step. */
+export interface PipelineHumanStatusMessage {
+  type: "pipeline_human_status";
+  requestId: string;
+}
+
+/** The pipeline no longer waits for this decision (run cancelled, parallel join decided). */
+export interface PipelineHumanCancelMessage {
+  type: "pipeline_human_cancel";
+  requestId: string;
+}
+
+export type PipelineHumanMessage = PipelineHumanRequestMessage | PipelineHumanStatusMessage | PipelineHumanCancelMessage;
+
+export interface PipelineHumanReply {
+  ok: boolean;
+  error?: string;
+  status?: "pending" | "approved" | "rejected" | "timeout";
+  note?: string;
+}
+
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
   polpoDir: string,
   onRunComplete: (runId: string, taskId: string, status: string) => void,
   onNetworkDenied?: (msg: NetworkDeniedMessage) => void,
   onSandboxEvent?: (msg: SandboxEventMessage) => void,
+  onPipelineHuman?: (msg: PipelineHumanMessage) => Promise<PipelineHumanReply>,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -62,9 +100,25 @@ export function startNotificationServer(
 
   const server = createServer((conn) => {
     let buffer = "";
+    let answered = false;
     conn.setEncoding("utf-8");
-    conn.on("data", (chunk) => { buffer += chunk; });
+    conn.on("data", (chunk) => {
+      buffer += chunk;
+      // Request/response messages arrive as one line on an open connection
+      // (named pipes on Windows cannot half-close): answer and close.
+      const newline = buffer.indexOf("\n");
+      if (answered || newline < 0) return;
+      let msg: { type?: string };
+      try { msg = JSON.parse(buffer.slice(0, newline)); } catch { return; }
+      if (msg.type !== "pipeline_human_request" && msg.type !== "pipeline_human_status" && msg.type !== "pipeline_human_cancel") return;
+      answered = true;
+      const reply = onPipelineHuman
+        ? onPipelineHuman(msg as PipelineHumanMessage).catch((err): PipelineHumanReply => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+        : Promise.resolve<PipelineHumanReply>({ ok: false, error: "Pipeline human steps are not supported by this server" });
+      void reply.then((r) => conn.end(JSON.stringify(r) + "\n"));
+    });
     conn.on("end", () => {
+      if (answered) return;
       try {
         const msg = JSON.parse(buffer.trim()) as RunCompleteMessage | NetworkDeniedMessage | SandboxEventMessage;
         if (msg.type === "run_complete") {
@@ -74,7 +128,7 @@ export function startNotificationServer(
         } else if (msg.type === "sandbox_event") {
           onSandboxEvent?.(msg);
         }
-      } catch { /* malformed message — ignore */ }
+      } catch { /* handler error — ignore */ }
     });
     conn.on("error", () => { /* broken pipe — ignore */ });
   });
@@ -117,6 +171,34 @@ export function notifySandboxEvent(socketPath: string, msg: Omit<SandboxEventMes
     conn.on("error", () => { /* orchestrator not listening */ });
     conn.end(JSON.stringify({ type: "sandbox_event", ...msg } satisfies SandboxEventMessage) + "\n");
   } catch { /* ignore */ }
+}
+
+/**
+ * Client-side: send a pipeline human-step message and wait for the reply.
+ * Rejects when the orchestrator is unreachable or does not answer in time.
+ */
+export function askPipelineHuman(socketPath: string, msg: PipelineHumanMessage, timeoutMs = 10_000): Promise<PipelineHumanReply> {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let done = false;
+    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); fn(); } };
+    const conn = createConnection(socketPath);
+    const timer = setTimeout(() => finish(() => { conn.destroy(); reject(new Error("Orchestrator did not answer")); }), timeoutMs);
+    const settle = () => finish(() => {
+      conn.destroy();
+      try { resolve(JSON.parse(buffer.trim()) as PipelineHumanReply); }
+      catch { reject(new Error(buffer ? "Malformed reply from orchestrator" : "Orchestrator closed the connection without answering")); }
+    });
+    conn.setEncoding("utf-8");
+    conn.on("data", (chunk) => {
+      buffer += chunk;
+      if (buffer.includes("\n")) settle();
+    });
+    conn.on("end", settle);
+    conn.on("error", (err) => finish(() => reject(err)));
+    // Keep the connection open (no end()): the reply comes back on it.
+    conn.write(JSON.stringify(msg) + "\n");
+  });
 }
 
 /**
