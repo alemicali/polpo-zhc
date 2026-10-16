@@ -12,12 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #133–#137, #144, #145). Thanks!
 
 ### Added
+- **Checks can find what the task saved:** `test` and `script` expectations run with `POLPO_OUTPUT_DIR` set to the task's output folder, and `file_exists` paths may start with `$POLPO_OUTPUT_DIR/`. The folder of a run (`output/<mission run>/<NN> - <task>/`) is not known when the expectation is written.
 - **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
 
 ### Changed
 - A new mission whose name is taken is named `name (2)`, `name (3)`…, so every run of a playbook is its own mission.
 - Task titles must be unique within a mission, no longer across all active tasks, so two runs of one playbook can run at the same time.
 - Abort also cancels a mission paused at a checkpoint, and releases its checkpoints and delays.
+- **Task outputs are saved by run and by task, with readable names.** Each task now has its own folder under `output/` in the agents' working directory: `output/<mission run>/<NN> - <task title>/` for the tasks of a mission (the run name is already unique, e.g. `report (2)`, and the number follows the order of the tasks in the mission) and `output/tasks/<task title> - <id>/` for a task outside a mission. Before, each task got `.polpo/output/<task id>/`, a hidden folder named by an id that agents hardly used: a file the task named without a folder (`save it in report.md`) landed in the working directory, where every run overwrote the previous one and the files of all missions mixed. Now:
+  - the agent is told that such a file goes in its output folder, and to create or edit files elsewhere only when the task is about them (e.g. a source file of the project), so coding tasks work as before;
+  - the task message also gives the exact path of each new file its description names (`save it in report.md` → `output/report (2)/02 - Write report/report.md`): small local models follow a concrete path, not a rule. Names of files that already exist in the working directory, or that the tasks it depends on produced, are left out (they are files to edit or to read);
+  - a task that depends on others is told where their folders are and which files they contain, so `read data.md` finds the file the previous task saved;
+  - the mission page has an **Output** button (the run's folder) and the task page an **Output folder** card, both opening the Files page there (`/files?workspacePath=…`, relative to the agents' workspace).
 
 ### Fixed
 - **Telegram voice notes in private chats are transcribed on arrival**, as in groups, and their words become the message.

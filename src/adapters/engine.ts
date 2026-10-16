@@ -39,7 +39,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
-import { join, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
@@ -336,13 +336,18 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
 
   // Output directory for task deliverables
   if (outputDir) {
+    // Relative to the working directory when inside it: the path the agent's tools take as is.
+    const rel = relative(cwd, outputDir);
+    const shown = rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.replace(/\\/g, "/") : outputDir;
     parts.push(
       "",
       "## Output Directory",
-      `Your task output directory is: ${outputDir}`,
-      "Write all deliverable files (reports, images, data exports, etc.) to this directory.",
+      `Your task output directory is: ${shown}`,
+      "Save the files you deliver there (reports, images, data exports, etc.): it keeps them apart from the files of other tasks and other runs.",
+      `A file the task names without a folder (e.g. "save the result in report.md") goes in this directory: write ${shown}/report.md, not report.md.`,
+      "Create or edit files elsewhere only when the task is about those files (e.g. a source file of the project).",
       "When you register an outcome with register_outcome, use paths inside this directory.",
-      "This directory is pre-created and writable. Other tasks have separate output directories.",
+      "This directory is pre-created and writable. Every task has its own output directory.",
     );
   }
 
@@ -462,14 +467,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       || lc.startsWith("search_") || lc.startsWith("whatsapp_") || lc.startsWith("phone_");
   }) ?? false;
 
-  // Derive output directory from context (per-task output dir for deliverables)
-  const outputDir = ctx?.outputDir;
+  // Derive output directory from context (per-task output dir for deliverables). Normalized:
+  // the core joins it with "/", and the comparisons below expect the platform's separators.
+  const outputDir = ctx?.outputDir ? resolve(ctx.outputDir) : undefined;
 
   // Build effective allowed paths, preserving the resolveAllowedPaths default behavior.
   //
   // When allowedPaths is NOT configured (the common case), we leave it undefined so
-  // resolveAllowedPaths defaults to [cwd]. But outputDir (.polpo/output/<taskId>)
-  // may live outside cwd when settings.workDir points to a subdirectory, so we
+  // resolveAllowedPaths defaults to [cwd]. But outputDir (output/<mission>/<task>/ under
+  // the agents' working directory) may live elsewhere when set up differently, so we
   // must add it explicitly in that case.
   //
   // When allowedPaths IS configured, we append outputDir so the agent can write

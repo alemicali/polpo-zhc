@@ -114,6 +114,7 @@ import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-st
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
 import { resolveToolOutputDir } from "../tools/tool-output.js";
+import { listOutputFiles } from "./output-files.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
@@ -1027,6 +1028,8 @@ export class Orchestrator extends TypedEmitter {
         if (!existsSync(logPath)) return null;
         return readFileSync(logPath, "utf-8");
       },
+      listOutputFiles: (dir) => listOutputFiles(dir),
+      fileExists: async (path) => existsSync(path),
       notifySocketPath: getSocketPath(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"

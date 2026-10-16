@@ -978,10 +978,15 @@ export function FilesPage() {
       .then(json => {
         if (json.ok) {
           setRoots(json.data.roots);
+          const workspace = json.data.roots.find((r: RootDir) => r.id === "workspace");
+          // ?workspacePath= is relative to the agents' workspace (e.g. a task's output folder),
+          // which is not always the project root
+          const inWorkspace = searchParams.get("workspacePath");
           // If we're at "." and there's a workspace root, navigate there by default
           const wp = searchParams.get("path");
-          if (!wp || wp === ".") {
-            const workspace = json.data.roots.find((r: RootDir) => r.id === "workspace");
+          if (workspace && inWorkspace) {
+            setSearchParams({ path: workspace.path === "." ? inWorkspace : `${workspace.path}/${inWorkspace}` }, { replace: true });
+          } else if (!wp || wp === ".") {
             if (workspace) setSearchParams({ path: workspace.path }, { replace: true });
           }
         }
