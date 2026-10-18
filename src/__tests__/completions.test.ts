@@ -132,6 +132,15 @@ test("model failures emit a terminal SSE error instead of a success", async () =
   expect(body).not.toContain('[DONE]');
 });
 
+test("the inline model error is marked as an error, so voice clients never speak it", async () => {
+  setStreamImpl(() => mockStream([{ type: "error", reason: "error", error: { errorMessage: "Could not process image" } }] as any, mockTextResponse("")));
+  const res = await postCompletions({ stream: true, messages: [{ role: "user", content: "QA error mark" }] }, { "x-session-id": "new" });
+  const chunks = await parseSSE(res) as any[];
+  const inline = chunks.find((c) => typeof c.choices?.[0]?.delta?.content === "string" && c.choices[0].delta.content.includes("Could not process image"));
+  expect(inline).toBeDefined();
+  expect(inline.choices[0].error).toBe(true);
+});
+
 test("mobile multimodal request persists an attachment receipt readable from another client", async () => {
   setStreamImpl(() => mockTextStream("Attachment received."));
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA3sAAAAASUVORK5CYII=";

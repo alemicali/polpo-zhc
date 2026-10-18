@@ -1115,7 +1115,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               }
               finalText += `\n\nError: ${streamError}`;
               appendTextSegment(segmentsAccum, `\n\nError: ${streamError}`);
-              await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }));
+              await emit(sseChunk(completionId, { content: `\n\nError: ${streamError}` }, null, { error: true }));
               throw new Error(streamError);
             }
 

@@ -50,6 +50,8 @@ import { skillRoutes } from "./routes/skills.js";
 import { authRoutes } from "./routes/auth.js";
 import { instanceAuthRoutes } from "./routes/instance-auth.js";
 import { webhookInboundRoutes } from "./routes/webhook-inbound.js";
+import { voiceInboundRoutes } from "./routes/voice-inbound.js";
+import { channelTurnPrompt } from "./channel-turn-prompt.js";
 import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
@@ -166,6 +168,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     isInitialized: () => !!orchestrator?.isInitialized,
     getChannelConfig: (name) => orchestrator?.getConfig()?.settings?.notifications?.channels?.[name],
     getAdapter: (name) => orchestrator?.getWebhookGateway(name),
+  }));
+  // Voice channels: a speaker's voice provider asks for the next words, OpenAI-style (streamed).
+  app.route("/api/v1/channels", voiceInboundRoutes({
+    isInitialized: () => !!orchestrator?.isInitialized,
+    getChannelConfig: (name) => orchestrator?.getConfig()?.settings?.notifications?.channels?.[name],
+    getAdapter: (name) => orchestrator?.getVoiceGateway(name),
+    abortTurn: (turnId) => { streamRegistry.abort(turnId); },
   }));
 
   // Config status + initialize — always available so setup wizard works
@@ -532,8 +541,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     completeLLM: completeSimpleWithAuth as any,
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
-    // only Telegram turns carry an origin (see ChannelGateway.checkTarget)
-    channelTurnPrompt: () => `## Channel\nThis turn comes from Telegram: your answer is sent as a Telegram message. ${reactionHint()}`,
+    // Telegram and voice turns carry an origin (see ChannelGateway.checkTarget)
+    channelTurnPrompt: (origin) =>
+      channelTurnPrompt(o.getConfig()?.settings?.notifications?.channels?.[origin.channel]?.type, reactionHint()),
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
@@ -773,6 +783,29 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     }
     // Only the agents' workspace is shareable — never the project root (.polpo holds config and tokens).
     return interpretChannelCompletion(payload?.choices?.[0], [o.getAgentWorkDir()]);
+  });
+
+  // Voice channels: the same pipeline, streamed, so the speaker talks while the agent writes.
+  o?.setChannelChatStreamRunner(async ({ agent, sessionId, messages, origin }) => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-session-id": sessionId,
+      ...(origin ? { [CHAT_ORIGIN_HEADER]: encodeURIComponent(JSON.stringify(origin)) } : {}),
+      // a barge-in just stopped the previous answer: its lease is released at once
+      "x-polpo-lease-wait": String(15 * 1000),
+      ...internalCallHeaders(),
+    };
+    if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+    const response = await completionApp.request(new Request("http://polpo.internal/", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ stream: true, ...(agent ? { agent } : {}), messages }),
+    }));
+    if (!response.ok || !response.body) {
+      const payload = await response.json().catch(() => null) as any;
+      throw new Error(payload?.error?.message ?? payload?.error ?? `Agent chat failed (${response.status})`);
+    }
+    return { body: response.body, turnId: response.headers.get("x-turn-id") ?? undefined };
   });
 
   // /compact from a messaging channel: the same completion route, asked to compact instead of answering

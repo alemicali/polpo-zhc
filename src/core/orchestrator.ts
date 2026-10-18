@@ -75,12 +75,13 @@ import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
 import { syncTelegramBotProfile } from "../notifications/telegram-bot-profile.js";
 import type { ApprovalCallbackResolver } from "../notifications/channels/telegram.js";
-import { ChannelGateway, type ChannelChatRunner, type ChannelCompactRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
+import { ChannelGateway, type ChannelChatRunner, type ChannelChatStreamRunner, type ChannelCompactRunner, type ReplyRouteEvent } from "../notifications/channel-gateway.js";
 import { GroupIntentArbiter } from "../notifications/group-intent.js";
 import { POLPO, RoomEngine } from "../rooms/room-engine.js";
 import { TelegramAgentRelay, type RelayBot } from "../rooms/telegram-relay.js";
 import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapter.js";
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
+import { VoiceGatewayAdapter } from "../notifications/voice-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
@@ -206,6 +207,7 @@ export class Orchestrator extends TypedEmitter {
   private telegramPollersByChannel = new Map<string, TelegramCallbackPoller>();
   /** Inbound webhook channels (HTTP clients such as iOS Shortcuts) by channel name. */
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
+  private voiceGateways = new Map<string, { gateway: ChannelGateway; adapter: VoiceGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppMessageStore;
   private peerStore?: PeerStore;
@@ -213,6 +215,7 @@ export class Orchestrator extends TypedEmitter {
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
+  private channelChatStreamRunner?: ChannelChatStreamRunner;
   private channelCompactRunner?: ChannelCompactRunner;
   private contextCheckpointStore?: ContextCheckpointStore;
   private configWatcher?: FSWatcher;
@@ -246,16 +249,23 @@ export class Orchestrator extends TypedEmitter {
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
     return channelName
       ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway
+        ?? this.voiceGateways.get(channelName)?.gateway
       : this.channelGateway;
   }
   /** Inbound adapter of a webhook channel with gateway.enableInbound. */
   getWebhookGateway(channelName: string): WebhookGatewayAdapter | undefined {
     return this.webhookGateways.get(channelName)?.adapter;
   }
+  /** Inbound adapter of a voice channel (smart speaker) with gateway.enableInbound. */
+  getVoiceGateway(channelName: string): VoiceGatewayAdapter | undefined {
+    return this.voiceGateways.get(channelName)?.adapter;
+  }
   getTelegramBotUsernames(): Map<string, string> { return this.telegramBotUsernames; }
   /** Agent-direct chat for messaging channels, provided by the server host. */
   getChannelChatRunner(): ChannelChatRunner | undefined { return this.channelChatRunner; }
   setChannelChatRunner(runner: ChannelChatRunner): void { this.channelChatRunner = runner; }
+  getChannelChatStreamRunner(): ChannelChatStreamRunner | undefined { return this.channelChatStreamRunner; }
+  setChannelChatStreamRunner(runner: ChannelChatStreamRunner): void { this.channelChatStreamRunner = runner; }
   /** Where chat sessions keep their compaction checkpoint (database when configured, files otherwise). */
   // ── Sandboxes for chats (Polpo and agents): one workspace per interlocutor, closed when idle ──
 
@@ -1140,6 +1150,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startVoiceGateways();
 
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
@@ -2132,6 +2143,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startVoiceGateways();
 
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
@@ -2506,6 +2518,31 @@ export class Orchestrator extends TypedEmitter {
       this.webhookGateways.set(key, { gateway, adapter: new WebhookGatewayAdapter(gateway) });
       const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
       this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
+    }
+  }
+
+  /**
+   * One gateway per voice channel (smart speaker behind its voice bridge) with
+   * gateway.enableInbound. The bridge authenticates with the channel secret, but every
+   * device must still be allowed: the DM policy defaults to "allowlist".
+   */
+  private startVoiceGateways(): void {
+    this.voiceGateways.clear();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "voice" || !channelConfig.gateway?.enableInbound) continue;
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: { dmPolicy: "allowlist", ...channelConfig.gateway } },
+        approvalResolver: this.createApprovalResolver(),
+        key,
+      });
+      this.voiceGateways.set(key, { gateway, adapter: new VoiceGatewayAdapter(gateway) });
+      const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+      this.emit("log", { level: "info", message: `Voice channel gateway "${key}" ready (${target})` });
     }
   }
 

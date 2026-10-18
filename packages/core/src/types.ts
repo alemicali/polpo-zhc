@@ -1063,7 +1063,7 @@ export interface ApprovalRequest {
 // === Channel Gateway & Peer Identity ===
 
 /** Supported messaging channel types for inbound message routing. */
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook";
+export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook" | "voice";
 
 /**
  * Peer identity — represents a person talking to the bot from a messaging channel.
@@ -1201,7 +1201,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push" | "voice";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -1211,15 +1211,15 @@ export interface NotificationChannelConfig {
   to?: string[];
   /** Email: provider ("smtp" | "resend" | "sendgrid"). */
   provider?: string;
-  /** API key (direct value or "${ENV_VAR}" reference). */
+  /** API key (direct value or "${ENV_VAR}" reference). Voice: bearer token of the voice bridge. */
   apiKey?: string;
   /** Telegram: bot token. */
   botToken?: string;
-  /** Telegram: chat ID. */
+  /** Telegram: chat ID. Voice: default device id (MAC) for notifications. */
   chatId?: string;
   /** WhatsApp: credentials directory path (relative to .polpo/). Defaults to "whatsapp-profiles/default". */
   profileDir?: string;
-  /** Webhook: target URL. */
+  /** Webhook: target URL. Voice: base URL of the voice bridge. */
   url?: string;
   /** Webhook: custom headers. */
   headers?: Record<string, string>;

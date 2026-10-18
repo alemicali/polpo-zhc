@@ -32,11 +32,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { nanoid } from "nanoid";
-import { EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, sessionLeases } from "@polpo-ai/server";
+import { EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, sessionLeases, streamRegistry } from "@polpo-ai/server";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { PeerStore } from "../core/peer-store.js";
 import type { SessionStore } from "../core/session-store.js";
 import type { ApprovalCallbackResolver, InboundAttachment } from "./channels/telegram.js";
+import { speakableText } from "./speech.js";
 import type { InboundGroup } from "./telegram-groups.js";
 import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
 import type { ConversationCheckTarget, RoomKind, RoomMessage, RoomStore, VoiceReplyMode } from "@polpo-ai/core";
@@ -105,6 +106,8 @@ interface InboundMessage {
   roomMessageId?: string;
   /** The person wrote with a voice message (voice replies in "voice" mode answer with one). */
   voice?: boolean;
+  /** Stream the agent reply back (voice channels): the reply carries the completion stream. */
+  streamReply?: boolean;
 }
 
 /** A group message that was not addressed to the bot, kept as context for the next turn. */
@@ -138,6 +141,8 @@ export interface GatewayReply {
   deliveredTo?: string;
   /** The reply spoken (voice replies): channels that can send it as a voice message, with the text as caption. */
   voice?: { data: Buffer; mimeType: string; filename: string };
+  /** Streaming reply (InboundMessage.streamReply): the agent turn as it is written. */
+  stream?: ChannelChatStream;
 }
 
 /** What a reply router delivers to the target channel of a conversation pipe. */
@@ -210,6 +215,15 @@ export interface ChannelOutboundFile { path: string; filename: string }
 /** Runs one chat turn and returns the reply. The host persists both messages. */
 export type ChannelChatRunner = (request: ChannelChatRequest) => Promise<{ text: string; files?: ChannelOutboundFile[] }>;
 
+/** A streaming agent turn: the completion stream (OpenAI SSE) and its turn id (to stop it). */
+export interface ChannelChatStream {
+  body: ReadableStream<Uint8Array>;
+  turnId?: string;
+}
+
+/** Runs a channel turn as a stream, for channels that speak while the agent writes (voice). */
+export type ChannelChatStreamRunner = (request: ChannelChatRequest) => Promise<ChannelChatStream>;
+
 /** Compacts a session's context now (manual /compact) and says what it did. */
 export type ChannelCompactRunner = (request: { agent?: string; sessionId: string; messages: ChannelChatRequest["messages"]; focus?: string }) =>
   Promise<{ beforeTokens: number; afterTokens: number; mode: string; removedMessages: number } | null>;
@@ -237,19 +251,8 @@ const ATTACHMENT_LABEL: Record<InboundAttachment["kind"], string> = {
   photo: "a photo", document: "a file", voice: "a voice message", audio: "an audio file", video: "a video",
 };
 
-/** What a voice reply says: the text without markdown, code blocks or link targets, within the TTS limit. */
-export function speakableText(text: string): string {
-  const plain = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "")
-    .replace(/[*_~>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return plain.length > 4000 ? `${plain.slice(0, 3990)}…` : plain;
-}
+
+export { speakableText } from "./speech.js";
 
 /** What a channel says when a turn ended without a reply even after being asked for one. */
 export const NO_REPLY_FALLBACK = (who: string) =>
@@ -532,6 +535,7 @@ export class ChannelGateway {
    * group its transcript. Only Telegram delivers check reports; elsewhere they stay in the session.
    */
   private checkTarget(msg: InboundMessage): ConversationCheckTarget | undefined {
+    if (msg.channel === "voice") return { channel: this.key, chatId: msg.chatId };
     if (msg.channel !== "telegram") return undefined;
     return {
       channel: this.key,
@@ -1629,6 +1633,8 @@ export class ChannelGateway {
       if (!finalText.trim()) this.log("warn", `Polpo ended a turn without a reply (session ${sessionId}, ${finished ? "after a nudge" : "step limit"})`);
       return finalText || NO_REPLY_FALLBACK("Polpo");
     } catch (error) {
+      // A streaming (voice) caller speaks its own apology, in the person's language.
+      if (msg.streamReply) throw error;
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
     } finally {
@@ -1706,6 +1712,17 @@ export class ChannelGateway {
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
     messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(heard.text, attachments.slice(0, 5)) : heard.text });
+
+    if (msg.streamReply) {
+      const streamRunner = this.orchestrator.getChannelChatStreamRunner?.();
+      if (streamRunner) {
+        // Barge-in: new words from the person stop the answer still being spoken in this conversation.
+        const running = streamRegistry.getActiveTurnForSession(sessionId);
+        if (running) streamRegistry.abort(running);
+        const stream = await streamRunner({ agent, sessionId, messages, origin: this.checkTarget(msg) });
+        return { text: "", stream };
+      }
+    }
 
     if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
     const { text, files = [] } = await runner({ agent, sessionId, messages, origin: this.checkTarget(msg) });

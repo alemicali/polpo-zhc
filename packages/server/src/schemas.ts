@@ -485,7 +485,7 @@ const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
   allowMasked ? z.union([schema, MaskedSecret]) : schema;
 
 const channelConfigSchema = (allowMasked: boolean) => z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push", "voice"]),
   // Slack
   webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email

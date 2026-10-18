@@ -10,6 +10,7 @@ import { SlackChannel } from "./channels/slack.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { EmailChannel } from "./channels/email.js";
 import { WebhookChannel } from "./channels/webhook.js";
+import { VoiceChannel } from "./channels/voice.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
 import { PushChannel } from "./channels/push.js";
 import { ExpoPushChannel } from "./channels/expo-push.js";
@@ -736,6 +737,8 @@ export class NotificationRouter {
         return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
+      case "voice":
+        return new VoiceChannel(config);
       case "push":
         if (!this.polpoDir) throw new Error("Push channel requires polpoDir (pass it via init())");
         return new PushChannel(config, this.polpoDir);
