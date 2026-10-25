@@ -20,11 +20,23 @@ The connector exposes a small set of tools designed for what people do, rather t
 | `list_artifacts`, `get_artifact`, `create_artifact` | Documents, html dashboards and designs, diagrams. |
 | `list_data_sources`, `query_data` | Structured data. |
 | `list_approvals`, `resolve_approval` | Decide on requests that wait for a person. |
+| `show_agent` | An agent's card: in Claude and ChatGPT an interactive card (see below), elsewhere text. |
 | `list_files`, `search_files`, `read_file` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `write_file`, `manage_file` | Create or replace a file (text or base64), make folders, rename, delete. |
 | `list_operations`, `call_operation` | Every REST operation of the server (more than 300), for anything else. |
 
 Read-only tools are marked as such (`readOnlyHint`); `call_operation`, `resolve_approval`, `write_file` and `manage_file` are marked destructive, so clients ask before running them.
+
+## The agent card (MCP App)
+
+In hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) (Claude on the web, Desktop and mobile; ChatGPT; VS Code), `show_agent` renders an interactive card in the conversation. Ask, for example, "how is the health coach doing?".
+
+- **Inline:** whether the agent is working, the task at hand, today's results, what it plans next and its main goal. **Open** goes full screen; **Ask for an update** writes a message in the chat, so the model asks the agent.
+- **Full screen:** tabs for overview, tasks, goals and routine; the agent's proposed intentions can be confirmed or cancelled there.
+
+The card is a `ui://polpo/agent-card.html` resource: one HTML document that loads nothing from elsewhere, styled with the host's variables. Its own tools (`agent_card_refresh`, `agent_intention_decide`) are visible only to the card, not to the model. Hosts ask the person before showing an app the first time.
+
+The widget's source is in `widgets/agent-card/`; after changing it, run `pnpm run build:widgets` (a test checks the generated module is up to date).
 
 ## Setup
 
