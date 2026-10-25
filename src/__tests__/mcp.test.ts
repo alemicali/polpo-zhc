@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleMcpRequest, matchesOperationPath, type ApiResponse, type McpDeps } from "../server/mcp.js";
+import { describeMcpMessages, handleMcpRequest, matchesOperationPath, type ApiResponse, type McpDeps } from "../server/mcp.js";
 
 const OPENAPI = {
   paths: {
@@ -186,5 +186,21 @@ describe("the agent card (MCP App)", () => {
     const res = (await call({ api, version: "1" }, "agent_intention_decide", { agent: "coach", id: "chk_1", action: "confirm" })).body.result;
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/drive/coach/intentions/chk_1/confirm")).toBe(true);
     expect(res.structuredContent.agent.name).toBe("coach");
+  });
+});
+
+describe("MCP request log", () => {
+  it("one line per message, without contents: the client, whether it shows apps, the tools and resources used", () => {
+    expect(describeMcpMessages({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
+      protocolVersion: "2026-07-28", clientInfo: { name: "claude-ai", version: "0.1.0" },
+      capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } },
+    } })).toEqual(["initialize claude-ai 0.1.0 (protocol 2026-07-28; apps: text/html;profile=mcp-app)"]);
+    expect(describeMcpMessages([
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "show_agent", arguments: { agent: "secret stuff" } } },
+      { jsonrpc: "2.0", id: 3, method: "resources/read", params: { uri: "ui://polpo/agent-card.html" } },
+      { jsonrpc: "2.0", id: 4, method: "tools/list" },
+    ])).toEqual(["tools/call show_agent", "resources/read ui://polpo/agent-card.html", "tools/list"]);
+    expect(describeMcpMessages(null)).toEqual([]);
   });
 });

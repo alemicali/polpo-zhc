@@ -28,6 +28,8 @@ export interface McpDeps {
   /** A call to the instance's own HTTP API (a path from the server root, e.g. /api/v1/tasks), in process; a FormData body goes as multipart, anything else as JSON. */
   api: (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<ApiResponse>;
   version: string;
+  /** Logs one line per MCP message (no contents). */
+  log?: (line: string) => void;
   /** Every route the server has registered (method, path with :params): the ones the OpenAPI document does not describe are reachable too. */
   routes?: () => Array<{ method: string; path: string }>;
 }
@@ -568,8 +570,34 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
   return server;
 }
 
+/** One line per MCP message, without contents: who connects (and whether it shows apps), which tools and resources it uses. */
+export function describeMcpMessages(body: unknown): string[] {
+  const messages = Array.isArray(body) ? body : [body];
+  const out: string[] = [];
+  for (const m of messages as Array<{ method?: unknown; params?: Record<string, unknown> } | null>) {
+    if (!m || typeof m.method !== "string" || m.method.startsWith("notifications/")) continue;
+    const p = m.params ?? {};
+    if (m.method === "initialize") {
+      const info = p.clientInfo as { name?: string; version?: string } | undefined;
+      const ext = (p.capabilities as { extensions?: Record<string, { mimeTypes?: string[] }> } | undefined)?.extensions?.["io.modelcontextprotocol/ui"];
+      out.push(`initialize ${info?.name ?? "?"} ${info?.version ?? ""} (protocol ${String(p.protocolVersion ?? "?")}; apps: ${ext ? (ext.mimeTypes ?? []).join(",") || "yes" : "no"})`);
+    } else if (m.method === "tools/call") {
+      out.push(`tools/call ${String(p.name)}`);
+    } else if (m.method === "resources/read") {
+      out.push(`resources/read ${String(p.uri)}`);
+    } else {
+      out.push(m.method);
+    }
+  }
+  return out;
+}
+
 /** Handle one MCP request (Streamable HTTP, stateless, JSON responses). */
 export async function handleMcpRequest(request: Request, deps: McpDeps): Promise<Response> {
+  if (deps.log && request.method === "POST") {
+    const lines = describeMcpMessages(await request.clone().json().catch(() => null));
+    for (const line of lines) deps.log(line);
+  }
   const server = createPolpoMcpServer(deps);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
