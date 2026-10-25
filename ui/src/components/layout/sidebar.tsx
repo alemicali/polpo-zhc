@@ -22,7 +22,7 @@ import {
   Store,
   ExternalLink,
   Database,
-  ChartNoAxesCombined,
+  Shapes,
   BrainCircuit,
   Radio,
 } from "lucide-react";
@@ -77,7 +77,7 @@ const nav: NavSection[] = [
       { to: "/files", icon: FolderOpen, label: "Files" },
       { to: "/apps", icon: Boxes, label: "Apps" },
       { to: "/data", icon: Database, label: "Data" },
-      { to: "/views", icon: ChartNoAxesCombined, label: "Views" },
+      { to: "/artifacts", icon: Shapes, label: "Artifacts" },
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },

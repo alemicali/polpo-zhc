@@ -25,3 +25,27 @@ export function isInternalCall(value: string | undefined | null): boolean {
   for (let i = 0; i < SECRET.length; i++) diff |= value.charCodeAt(i) ^ SECRET.charCodeAt(i);
   return diff === 0;
 }
+
+/**
+ * A separate marker for API calls the server makes on behalf of an already authenticated client
+ * (the MCP endpoint calling the REST API in process): the auth middlewares accept it, but it grants
+ * none of the internal completion headers above. A per-process secret, like the one above.
+ */
+export const TRUSTED_API_CALL_HEADER = "x-polpo-trusted-call";
+
+const TRUSTED_SECRET: string = (() => {
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+})();
+
+export function trustedApiCallHeaders(): Record<string, string> {
+  return { [TRUSTED_API_CALL_HEADER]: TRUSTED_SECRET };
+}
+
+export function isTrustedApiCall(value: string | undefined | null): boolean {
+  if (!value || value.length !== TRUSTED_SECRET.length) return false;
+  let diff = 0;
+  for (let i = 0; i < TRUSTED_SECRET.length; i++) diff |= value.charCodeAt(i) ^ TRUSTED_SECRET.charCodeAt(i);
+  return diff === 0;
+}

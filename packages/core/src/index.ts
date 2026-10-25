@@ -221,3 +221,13 @@ export type {
 
 export { isVaultRef, normalizeVaultRef, describeVaultRef, resolveVaultRef, pickCredential, CREDENTIAL_NAMES } from "./vault-ref.js";
 export type { VaultRef } from "./vault-ref.js";
+
+// Artifacts: documents, dashboards, designs, diagrams
+export {
+  ARTIFACT_TYPES, ARTIFACT_KINDS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_VERSIONS,
+  isArtifactType, artifactContentProblem, summarizeArtifact, matchesArtifactFilter,
+  applyArtifactPatch, buildArtifact, applyArtifactEdits,
+} from "./artifacts.js";
+export type {
+  Artifact, ArtifactType, ArtifactVersion, ArtifactSummary, NewArtifact, ArtifactPatch, ArtifactFilter, ArtifactStore,
+} from "./artifacts.js";

@@ -269,6 +269,10 @@
     "./conversation-checks": {
       "types": "./dist/conversation-checks.d.ts",
       "import": "./dist/conversation-checks.js"
+    },
+    "./artifacts": {
+      "types": "./dist/artifacts.d.ts",
+      "import": "./dist/artifacts.js"
     }
   },
   "sideEffects": false,

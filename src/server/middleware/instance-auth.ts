@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "../auth/instance-auth.js";
+import { isTrustedApiCall, TRUSTED_API_CALL_HEADER } from "@polpo-ai/server";
 
 type PolpoDirRef = string | (() => string);
 
@@ -13,6 +14,8 @@ export function instanceAuthMiddleware(polpoDir: PolpoDirRef, apiKeys: string[] 
   return async (c, next) => {
     if (!isInstanceAuthEnabled()) return next();
     if (hasValidApiKey(c.req.raw, apiKeys)) return next();
+    // calls the server makes for an authenticated MCP client
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) return next();
     const session = validateSession(resolvePolpoDir(polpoDir), getCookie(c, AUTH_COOKIE_NAME));
     if (!session) {
       return c.json({ ok: false, error: "Login required", code: "AUTH_REQUIRED" }, 401);
@@ -23,7 +26,7 @@ export function instanceAuthMiddleware(polpoDir: PolpoDirRef, apiKeys: string[] 
   };
 }
 
-function hasValidApiKey(req: Request, apiKeys: string[]): boolean {
+export function hasValidApiKey(req: Request, apiKeys: string[]): boolean {
   if (apiKeys.length === 0) return false;
   const xApiKey = req.headers.get("x-api-key");
   const auth = req.headers.get("authorization");

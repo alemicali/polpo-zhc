@@ -22,7 +22,7 @@ import {
   MousePointerClick,
   CalendarClock,
   Database,
-  ChartNoAxesCombined,
+  Shapes,
   BrainCircuit,
   Radio,
 } from "lucide-react";
@@ -57,7 +57,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
       { to: "/coding", icon: Code2, label: "Coding" },
       { to: "/apps", icon: Boxes, label: "Apps" },
       { to: "/data", icon: Database, label: "Data" },
-      { to: "/views", icon: ChartNoAxesCombined, label: "Views" },
+      { to: "/artifacts", icon: Shapes, label: "Artifacts" },
       { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
       { to: "/terminal", icon: Terminal, label: "Terminal" },
       { to: "/browser", icon: AppWindow, label: "App Preview" },

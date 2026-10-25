@@ -46,6 +46,8 @@ import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 import { createDataAgentTools } from "../tools/data-tools.js";
+import { createArtifactAgentTools } from "../tools/artifact-tools.js";
+import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { inkRegistry } from "../core/ink-config.js";
@@ -792,6 +794,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
       if (ctx?.polpoDir) {
         allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+        const artifactPolpoDir = ctx.polpoDir;
+        allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
       }
