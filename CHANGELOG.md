@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Full screen:** tabs for overview (self-portrait, goals, latest reflections), tasks (with filters), goals (the tree with progress) and routine, where the agent's proposals are confirmed or cancelled. The tab in view goes to the model's context.
   - **Native look:** the host's style variables (light and dark, its font), a transparent background, skeletons while loading, safe areas and 44px targets on mobile, no menus or inline scrolling.
   - **One live card per agent:** when the card is shown again in a conversation, older copies grey out.
+  - **Claude** reads a connector's apps when it is connected: reconnect the connector after an update that adds or changes apps.
+  - **Log:** one `[polpo/mcp]` line per MCP message, without contents (the client and whether it shows apps, the tools and resources it uses).
   - **Self-contained:** the widget (`widgets/agent-card`, built with the MCP Apps SDK into one HTML document by `pnpm run build:widgets`) loads nothing from other origins. Its refresh and decide tools are visible only to it.
 
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector

@@ -36,6 +36,8 @@ In hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/ov
 
 The card is a `ui://polpo/agent-card.html` resource: one HTML document that loads nothing from elsewhere, styled with the host's variables. Its own tools (`agent_card_refresh`, `agent_intention_decide`) are visible only to the card, not to the model. Hosts ask the person before showing an app the first time.
 
+Claude reads the apps of a connector when it is connected: after updating Polpo to a version with new or changed apps, disconnect and connect the connector again (Settings → Connectors), or the tool answers with text only.
+
 The widget's source is in `widgets/agent-card/`; after changing it, run `pnpm run build:widgets` (a test checks the generated module is up to date).
 
 ## Setup
