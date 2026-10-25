@@ -720,6 +720,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized. Complete setup first." }, 503);
     return withEventOrigin({ source: "api", by: "mcp" }, () => handleMcpRequest(c.req.raw, {
       version: POLPO_PACKAGE_VERSION,
+      log: (line) => console.log(`[polpo/mcp] ${line}`),
       routes: () => app.routes,
       api: async (method, path, body, headers) => {
         const form = body instanceof FormData;
