@@ -36,7 +36,7 @@ import {
   FolderOpen,
   Hash,
   Asterisk,
-
+  AlertTriangle,
 } from "lucide-react";
 import { usePlaybooks } from "@polpo-ai/react";
 import type {
@@ -164,6 +164,8 @@ export function RunPlaybookDialog({
     return init;
   });
   const [running, setRunning] = useState(false);
+  // Why the last run was refused: shown in the dialog until the next try (a toast is gone in seconds)
+  const [runError, setRunError] = useState<string | null>(null);
 
   const setValue = (name: string, val: string) => {
     setValues((prev) => ({ ...prev, [name]: val }));
@@ -176,6 +178,7 @@ export function RunPlaybookDialog({
 
   const handleRun = async () => {
     setRunning(true);
+    setRunError(null);
     try {
       // Convert values to proper types
       const resolved: Record<string, string | number | boolean> = {};
@@ -188,8 +191,8 @@ export function RunPlaybookDialog({
       }
       await onRun(playbook.name, resolved);
       onOpenChange(false);
-    } catch {
-      // error handled by caller
+    } catch (e) {
+      setRunError((e as Error).message.replace(/^The playbook cannot run: /, "").replace(/^Invalid mission document: /, ""));
     } finally {
       setRunning(false);
     }
@@ -222,6 +225,19 @@ export function RunPlaybookDialog({
                 onChange={(v) => setValue(p.name, v)}
               />
             ))}
+          </div>
+        )}
+
+        {runError && (
+          <div role="alert" className="flex items-start gap-2 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="min-w-0 space-y-1">
+              <p className="font-medium">The playbook cannot run</p>
+              <ul className="list-disc space-y-0.5 pl-4">
+                {runError.split("; ").map((issue) => <li key={issue} className="break-words">{issue}</li>)}
+              </ul>
+              <p className="text-rose-300/80">Fix it in the Editor tab and save, then run again.</p>
+            </div>
           </div>
         )}
 
