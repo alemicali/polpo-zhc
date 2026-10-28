@@ -120,6 +120,15 @@ describe("runCheck", () => {
     expect(result.message).toContain("exist");
   });
 
+  it("file_exists: a Windows absolute path is not joined to the working directory", async () => {
+    const fs = createMockFS();
+    fs.exists.mockResolvedValue(true);
+    const deps = makeDeps({ fs });
+    const exp: TaskExpectation = { type: "file_exists", paths: ["C:\\data\\x.csv", "D:/data/y.csv", "\\\\server\\share\\z.csv", "rel/w.md"] };
+    await coreRunCheck(deps, exp, "C:\\p");
+    expect(fs.exists.mock.calls.map((c) => c[0])).toEqual(["C:\\data\\x.csv", "D:/data/y.csv", "\\\\server\\share\\z.csv", "C:\\p/rel/w.md"]);
+  });
+
   it("script: returns passed on success", async () => {
     const shell = createMockShell({ resolve: { stdout: "ok", stderr: "", exitCode: 0 } });
     const deps = makeDeps({ shell });
