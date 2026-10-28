@@ -144,11 +144,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Global middleware
   app.use("*", errorMiddleware());
-  // Rate limit API routes only (not static assets)
-  app.use("/api/*", rateLimitMiddleware());
-  app.use("/v1/*", rateLimitMiddleware());
 
-  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id"];
+  // CORS before the rate limit: a 429 without CORS headers reaches a page on another origin as a
+  // bare "Failed to fetch", and its Retry-After cannot be read.
+  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id", "retry-after"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
@@ -166,6 +165,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       credentials: true,
     }));
   }
+
+  // Rate limit API routes only (not static assets)
+  app.use("/api/*", rateLimitMiddleware());
+  app.use("/v1/*", rateLimitMiddleware());
 
   // ── Public routes (no auth) ───────────────────────────────────────────
 

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A page on another origin saw a rate-limited request as "Failed to fetch"**: the rate limit answered 429 before the CORS headers were added, so the browser hid the answer and its `Retry-After`. CORS now runs first (preflight requests no longer count against the limit) and `Retry-After` is exposed.
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added
