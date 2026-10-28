@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, withHostCopy, writeBytes } from "./tool-fs.js";
 import { ensureSandboxBrowser, shellIsRemote } from "./browser-tools.js";
 import { PDF_RENDER_DRIVER } from "./pdf-render-driver.js";
@@ -223,7 +223,7 @@ function createPdfCreateTool(cwd: string, sandbox: string[], fs: FileSystem, she
       }
 
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "pdf_create");
+      assertWriteAllowed(filePath, sandbox, "pdf_create");
 
       // Default margins
       const defaultMargin = { top: "20mm", right: "15mm", bottom: "25mm", left: "15mm" };
@@ -351,7 +351,7 @@ function createPdfMergeTool(cwd: string, sandbox: string[], fs: FileSystem): Age
     parameters: PdfMergeSchema,
     async execute(_id, params) {
       const outputPath = resolve(cwd, params.output);
-      assertPathAllowed(outputPath, sandbox, "pdf_merge");
+      assertWriteAllowed(outputPath, sandbox, "pdf_merge");
 
       try {
         const { PDFDocument } = await import("pdf-lib");

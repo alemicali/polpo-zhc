@@ -13,7 +13,7 @@ import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed, isPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed, isPathAllowed } from "./path-sandbox.js";
 import { offloadToolOutput, offloadHint, resolveToolOutputDir, saveToolOutput } from "./tool-output.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
@@ -111,7 +111,7 @@ function createWriteTool(cwd: string, sandbox: string[], fs: FileSystem): AgentT
     parameters: WriteSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "write");
+      assertWriteAllowed(filePath, sandbox, "write");
       await fs.mkdir(dirname(filePath));
       await fs.writeFile(filePath, params.content);
       return {
@@ -138,7 +138,7 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
     parameters: EditSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "edit");
+      assertWriteAllowed(filePath, sandbox, "edit");
       const content = await fs.readFile(filePath);
       const occurrences = content.split(params.old_text).length - 1;
       if (occurrences === 0) {

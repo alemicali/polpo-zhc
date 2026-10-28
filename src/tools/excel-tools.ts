@@ -16,7 +16,7 @@ import { resolve, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, writeBytes, writeText } from "./tool-fs.js";
 
 /** An exceljs workbook loaded from the bytes of an .xlsx file (read through the tools' FileSystem). */
@@ -203,7 +203,7 @@ function createExcelWriteTool(cwd: string, sandbox: string[], fs: FileSystem): A
     parameters: ExcelWriteSchema,
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "excel_write");
+      assertWriteAllowed(filePath, sandbox, "excel_write");
 
       const ext = extname(filePath).toLowerCase();
 

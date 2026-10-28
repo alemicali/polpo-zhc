@@ -716,7 +716,7 @@ export interface RunnerConfig {
   task: Task;
   polpoDir: string;
   cwd: string;
-  /** Per-task output directory (.polpo/output/<taskId>/). Agents should write deliverables here. */
+  /** Per-task output directory (output/<mission run>/<NN> - <task title>/, see output-paths.ts). Agents should write deliverables here. */
   outputDir: string;
   storage?: "file" | "sqlite" | "postgres";
   /** PostgreSQL connection URL (for storage: "postgres"). */
