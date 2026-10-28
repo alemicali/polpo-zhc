@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **On Windows, `test` and `script` expectations and metrics ran in `cmd.exe`**, while the agents' commands run in Git's bash: a check written for bash (`test -f …`, `grep -q …`) always failed there. They now run in the same bash (cmd.exe only when Git's bash is missing); Linux and macOS are unchanged.
+- **On Windows, a command stopped for its timeout kept running** (the bash tool, checks): only the shell was ended, and the program it had started went on, keeping the run waiting until it finished by itself. Now the msys process groups of Git's bash are ended (the programs it runs are linked to it there, not in the Windows process tree, so `taskkill /T` alone misses them), then the Windows tree; a stopped command no longer waits for its output to close. A runner the supervisor kills on Windows (task timeout, unresponsive agent) takes the commands it started with it.
+- **The bash tool failed for every command on Windows** ("uv_spawn '/bin/bash' ENOENT"): the local workspace always ran `/bin/bash -c <command>`. On Windows it now uses Git for Windows' bash (from the usual install folders, or next to `git` on PATH; never `System32\bash.exe`, the WSL launcher), else `cmd.exe`; `POLPO_SHELL` picks another bash-compatible shell. Commands no longer open a console window. Linux and macOS are unchanged.
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added
