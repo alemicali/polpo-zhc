@@ -11,8 +11,10 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskStore } from "./task-store.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext, ModelConfig } from "./types.js";
 import { setAssessment } from "./types.js";
+import { taskOutputPath, taskPosition } from "./output-paths.js";
 import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
+import { isScriptTask } from "./script-task.js";
 
 // ── File System Ports ────────────────────────────────────────────────────
 // These optional ports allow the shell to inject Node.js file system operations
@@ -82,6 +84,13 @@ export class AssessmentOrchestrator {
       }
     } catch { /* best effort — don't fail assessment if log parsing fails */ }
 
+    // The task's output folder (output-paths.ts), for checks that look at what it saved
+    let missionData: string | undefined;
+    if (task.missionId) {
+      try { missionData = (await this.ctx.registry.getMission?.(task.missionId))?.data; } catch { /* deleted */ }
+    }
+    const outputDir = `${this.ctx.agentWorkDir.replace(/[\\/]+$/, "")}/${taskOutputPath(task, taskPosition(missionData, task.title))}`;
+
     return {
       taskTitle: task.title,
       taskDescription: task.originalDescription ?? task.description,
@@ -95,6 +104,7 @@ export class AssessmentOrchestrator {
       toolsSummary: toolsSummary || undefined,
       executionSummary,
       outcomes: outcomes?.length ? outcomes : undefined,
+      outputDir,
     };
   }
 
@@ -169,7 +179,8 @@ export class AssessmentOrchestrator {
     // Question detection: intercept before assessment
     const maxQRounds = this.ctx.config.settings.maxQuestionRounds ?? 2;
     const questionRounds = task.questionRounds ?? 0;
-    if (result.exitCode === 0 && questionRounds < maxQRounds) {
+    // a script prints what it prints: it never asks a question
+    if (result.exitCode === 0 && questionRounds < maxQRounds && !isScriptTask(task)) {
       // Get activity from RunStore for richer heuristic
       const run = await this.ctx.runStore.getRunByTaskId(taskId);
       const activity = run?.activity;
@@ -431,8 +442,9 @@ export class AssessmentOrchestrator {
             globalScore: assessment.globalScore,
             message: reasons.join(", "),
           });
-          // Execution OK but review failed → check if estimated expectations can be corrected
-          if (result.exitCode === 0) {
+          // Execution OK but review failed → check if estimated expectations can be corrected.
+          // A script task has no agent to fix its work: it is run again (retryOrFail).
+          if (result.exitCode === 0 && !isScriptTask(task)) {
             const autoCorrect = this.ctx.config.settings.autoCorrectExpectations !== false;
             const hasEstimatedFailures = this.hasEstimatedFailures(task, assessment);
 
@@ -731,6 +743,8 @@ export class AssessmentOrchestrator {
   private async fixOrRetry(taskId: string, _task: Task, result: TaskResult): Promise<void> {
     const current = await this.ctx.registry.getTask(taskId);
     if (!current) return;
+    // a fix prompt needs an agent to read it: a script task is run again instead
+    if (isScriptTask(current)) return this.retryOrFail(taskId, _task, result);
 
     // Side-effects guard: block automatic fix/retry for tasks with irreversible actions.
     // The task transitions to awaiting_approval so a human can decide whether to re-execute.
@@ -793,11 +807,12 @@ export class AssessmentOrchestrator {
       this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
       // Preserve original description and prepare retry prompt for when approval comes
-      if (!current.originalDescription) {
+      // (a script task runs its command again: its description stays)
+      if (!current.originalDescription && !isScriptTask(current)) {
         await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
       await this.ctx.registry.updateTask(taskId, {
-        description: buildSideEffectRetryPrompt(current, result),
+        ...(isScriptTask(current) ? {} : { description: buildSideEffectRetryPrompt(current, result) }),
         phase: "execution",
       });
       await this.ctx.registry.transition(taskId, "awaiting_approval");
@@ -820,17 +835,20 @@ export class AssessmentOrchestrator {
       const policy = current.retryPolicy ?? this.ctx.config.settings.defaultRetryPolicy;
       const nextAttempt = current.retries + 1;
 
+      // A script task runs the same command again: no retry prompt, no other agent to escalate to
+      const scripted = isScriptTask(current);
+
       // Save original description before first retry
-      if (!current.originalDescription) {
+      if (!current.originalDescription && !scripted) {
         await this.ctx.registry.updateTask(taskId, { originalDescription: current.description });
       }
 
       // Check if we should escalate to a different agent
       // fallbackAgent resolution: explicit policy > agent.reportsTo (org chart)
       let assignTo = current.assignTo;
-      const currentAgent = await this.ctx.agentStore.getAgent(current.assignTo);
+      const currentAgent = scripted ? undefined : await this.ctx.agentStore.getAgent(current.assignTo);
       const effectiveFallback = policy?.fallbackAgent ?? currentAgent?.reportsTo;
-      if (policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
+      if (!scripted && policy?.escalateAfter !== undefined && nextAttempt >= policy.escalateAfter) {
         if (effectiveFallback) {
           const fallback = await this.ctx.agentStore.getAgent(effectiveFallback);
           if (fallback) {
@@ -847,7 +865,7 @@ export class AssessmentOrchestrator {
       await this.ctx.registry.transition(taskId, "failed");
       await this.ctx.registry.transition(taskId, "pending");
       await this.ctx.registry.updateTask(taskId, {
-        description: buildRetryPrompt(current, result),
+        ...(scripted ? {} : { description: buildRetryPrompt(current, result) }),
         assignTo,
         phase: "execution",
         fixAttempts: 0,

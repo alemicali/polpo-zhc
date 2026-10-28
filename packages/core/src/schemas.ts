@@ -195,8 +195,13 @@ export const missionQualityGateSchema = z.object({
 
 const missionTaskSchema = z.object({
   title: z.string().min(1, "task requires a title"),
-  description: z.string().min(1, "task requires a description"),
+  /** Required, except for a script task (it runs its command). */
+  description: z.string().optional(),
   assignTo: z.string().min(1).optional(),
+  /** Script task: Polpo runs this shell command itself instead of an agent (script-task.ts). */
+  script: z.object({
+    command: z.string().refine((c) => c.trim().length > 0, "script task requires a command"),
+  }).optional(),
   dependsOn: z.array(z.string().min(1)).optional(),
   expectations: z.array(z.any()).optional(),
   expectedOutcomes: z.array(z.any()).optional(),
@@ -237,6 +242,13 @@ export const missionDocumentSchema = z.object({
       });
     }
     seen.add(title);
+    if (!doc.tasks[i].script && !doc.tasks[i].description) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "task requires a description",
+        path: ["tasks", i, "description"],
+      });
+    }
   }
 
   // Build task lookup: title → dependsOn set

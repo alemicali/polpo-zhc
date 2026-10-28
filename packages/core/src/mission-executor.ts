@@ -8,6 +8,7 @@ import type { CheckpointStore, CheckpointState } from "./checkpoint-store.js";
 import type { DelayStore, DelayState } from "./delay-store.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
 import { parseISO8601Duration } from "./iso-duration.js";
+import { SCRIPT_ASSIGNEE, scriptTaskDescription } from "./script-task.js";
 
 // ── In-memory fallback stores (no Node.js deps) ─────────────────────────
 
@@ -700,6 +701,7 @@ export class MissionExecutor {
     const allAgents = await this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
+      if (t.script) continue;  // a script task runs its command, no agent (script-task.ts)
       const agentName = t.assignTo || allAgents[0]?.name;
       const agent = allAgents.find(a => a.name === agentName);
       if (agent?.model) {
@@ -744,8 +746,8 @@ export class MissionExecutor {
 
       const task = await this.taskMgr.addTask({
         title: t.title,
-        description: t.description || t.title,
-        assignTo: t.assignTo || (await this.agentMgr.getAgents())[0]?.name || "default",
+        description: t.description || (t.script ? scriptTaskDescription(t.script.command) : t.title),
+        assignTo: t.script ? SCRIPT_ASSIGNEE : t.assignTo || (await this.agentMgr.getAgents())[0]?.name || "default",
         dependsOn: deps,
         expectations,
         expectedOutcomes: t.expectedOutcomes,
