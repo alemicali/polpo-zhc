@@ -5,6 +5,7 @@ import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { buildSystemPrompt, sandboxPromptNote } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -547,6 +548,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return { tools, executor: attributed, isInteractive };
     },
     streamLLM: streamSimpleWithAuth as any,
+    // A tool call whose arguments do not match the tool's schema is returned to the model instead of run.
+    // Only a validation failure counts: if the validator itself fails, the call goes through as before.
+    validateToolArguments: (tool: any, call: any) => {
+      try {
+        return validateToolArguments(tool, call);
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Validation failed")) throw err;
+        return call.arguments;
+      }
+    },
     completeLLM: completeSimpleWithAuth as any,
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
