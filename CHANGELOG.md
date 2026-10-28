@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Agent pipelines run:** an agent with `loops` and a `pipeline` now runs it for every task assigned to it, instead of the contract being only validated and stored. Loops (own instructions, tools, model, turn limit, `stopWhen`, `output.schema`, retried with feedback up to 3 attempts), `parallel` (join all / any / n), `switch`, `when` guards and `human` approvals, with a shared context. Human steps are regular approvals (Approvals page, `/approve`, API); requests left open by a stopped pipeline are closed automatically. The run state travels with `agent:activity` events. See `docs/loops.md`.
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added
