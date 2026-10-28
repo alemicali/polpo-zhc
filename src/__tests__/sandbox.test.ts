@@ -209,6 +209,28 @@ describe("file tools never reach .polpo through a broader grant", () => {
       rmSync(project, { recursive: true, force: true });
     }
   });
+
+  test("protectPolpoDir: the guard the server and every task runner set (see runner-protected-paths.test.ts)", async () => {
+    const { isPathAllowed, protectPolpoDir, setProtectedPaths } = await import("../tools/path-sandbox.js");
+    const project = mkdtempSync(join(tmpdir(), "polpo-guard-"));
+    const polpoDir = join(project, ".polpo");
+    // Without it (a fresh process), the working directory grant reaches everything in .polpo
+    expect(isPathAllowed(join(polpoDir, ".env"), [project])).toBe(true);
+    protectPolpoDir(polpoDir);
+    try {
+      expect(isPathAllowed(join(polpoDir, ".env"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "vault.enc"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "tmp", "run-x.json"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "tmp", "tool-output", "dev", "out.txt"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "skills", "s", "SKILL.md"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "playbooks", "p", "playbook.json"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "output", "t1", "report.md"), [project, join(polpoDir, "output", "t1")])).toBe(true);
+      expect(isPathAllowed(join(project, "output", "m", "01 - t", "report.md"), [project])).toBe(true);
+    } finally {
+      setProtectedPaths([]);
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("agents are told about their sandbox", () => {

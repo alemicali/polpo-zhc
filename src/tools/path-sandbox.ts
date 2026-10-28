@@ -65,6 +65,19 @@ export function setProtectedPaths(roots: string[], exceptions: string[] = []): v
   protectedExceptions = exceptions.map((e) => canonicalPath(e));
 }
 
+/**
+ * Protect a project's .polpo in this process; offloaded tool outputs, skills and playbooks stay
+ * reachable. The state is per process: the server calls this at init, and so must every task
+ * runner (a separate process, see NodeSpawner) before it builds the agent's tools.
+ */
+export function protectPolpoDir(polpoDir: string): void {
+  setProtectedPaths([polpoDir], [
+    join(polpoDir, "tmp", "tool-output"),
+    join(polpoDir, "skills"),
+    join(polpoDir, "playbooks"),
+  ]);
+}
+
 function within(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 }

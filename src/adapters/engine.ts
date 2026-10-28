@@ -42,6 +42,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools } from "../tools/system-tools.js";
+import { canonicalPath } from "../tools/path-sandbox.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
@@ -480,12 +481,16 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // BUG FIX: Previously, `agentConfig.allowedPaths ?? []` turned undefined into [],
   // producing [outputDir] as the ONLY allowed path — locking the agent out of its
   // own working directory.
+  //
+  // .polpo is protected (path-sandbox.ts): the cwd grant does not reach an outputDir inside it
+  // (older layout, chat outputs), so such an outputDir is granted explicitly too.
+  const outputInPolpo = !!outputDir && (canonicalPath(outputDir) + sep).startsWith(canonicalPath(polpoDir) + sep);
   let effectiveAllowedPaths: string[] | undefined;
   if (agentConfig.allowedPaths) {
     // Explicit sandbox — append outputDir so deliverables are always writable
     effectiveAllowedPaths = [...agentConfig.allowedPaths, ...(outputDir ? [outputDir] : [])];
-  } else if (outputDir && !outputDir.startsWith(cwd + sep) && outputDir !== cwd) {
-    // No explicit sandbox, but outputDir is outside cwd — add both
+  } else if (outputDir && ((!outputDir.startsWith(cwd + sep) && outputDir !== cwd) || outputInPolpo)) {
+    // No explicit sandbox, but outputDir is outside cwd or inside .polpo — add both
     effectiveAllowedPaths = [cwd, outputDir];
   } else {
     // No explicit sandbox, outputDir under cwd (or absent) — let resolveAllowedPaths default to [cwd]
