@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A `dependsOn` on a task listed after it was dropped in silence**, so the task started at once, in parallel with the one it should have waited for: the tasks were created in the listed order, and a dependency not yet created had no id to point to. They are now created dependencies first (the listed order is kept otherwise, and the output folders keep their numbers). A `dependsOn` naming a task that does not exist, or a cycle (`A` → `B` → `A`, which would never start), is now refused with a message that names the task; renaming a task in a mission keeps the `dependsOn`, checkpoints, delays and quality gates that point to it.
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added

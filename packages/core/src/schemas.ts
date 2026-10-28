@@ -245,6 +245,27 @@ export const missionDocumentSchema = z.object({
     taskDeps.set(t.title, new Set(t.dependsOn ?? []));
   }
 
+  // dependsOn must name tasks of this mission, without cycles (a cycle would never start)
+  for (let i = 0; i < doc.tasks.length; i++) {
+    for (const dep of doc.tasks[i].dependsOn ?? []) {
+      if (!taskDeps.has(dep)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `dependsOn references unknown task "${dep}"`,
+          path: ["tasks", i, "dependsOn"],
+        });
+      }
+    }
+  }
+  const cycle = findDependencyCycle(taskDeps);
+  if (cycle) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `dependsOn forms a cycle: ${cycle.map(t => `"${t}"`).join(" → ")}`,
+      path: ["tasks", doc.tasks.findIndex(t => t.title === cycle[0]), "dependsOn"],
+    });
+  }
+
   // Validate flow-control elements: blocksTasks must have dependsOn including afterTasks
   const validateFlowControl = (
     kind: "checkpoints" | "delays" | "qualityGates",
@@ -291,6 +312,51 @@ export const missionDocumentSchema = z.object({
 });
 
 export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;
+
+/** A dependency cycle as titles, first repeated at the end (`a → b → a`), or undefined. Unknown titles are skipped. */
+function findDependencyCycle(deps: Map<string, Set<string>>): string[] | undefined {
+  const state = new Map<string, "visiting" | "done">();
+  const stack: string[] = [];
+  const visit = (title: string): string[] | undefined => {
+    if (state.get(title) === "done") return undefined;
+    if (state.get(title) === "visiting") return [...stack.slice(stack.indexOf(title)), title];
+    state.set(title, "visiting");
+    stack.push(title);
+    for (const dep of deps.get(title) ?? []) {
+      if (!deps.has(dep)) continue;
+      const cycle = visit(dep);
+      if (cycle) return cycle;
+    }
+    stack.pop();
+    state.set(title, "done");
+    return undefined;
+  };
+  for (const title of deps.keys()) {
+    const cycle = visit(title);
+    if (cycle) return cycle;
+  }
+  return undefined;
+}
+
+/**
+ * The tasks in an order where every task comes after the ones it depends on, keeping the
+ * document's order otherwise. A document may list a task before its dependency.
+ */
+export function dependencyOrder<T extends { title: string; dependsOn?: string[] }>(tasks: T[]): T[] {
+  const placed = new Set<string>();
+  const known = new Set(tasks.map(t => t.title));
+  const ordered: T[] = [];
+  let pending = [...tasks];
+  while (pending.length > 0) {
+    const ready = pending.filter(t => (t.dependsOn ?? []).every(d => placed.has(d) || !known.has(d)));
+    // a cycle (rejected by the schema): keep the rest as listed rather than loop
+    const next = ready.length > 0 ? ready[0]! : pending[0]!;
+    ordered.push(next);
+    placed.add(next.title);
+    pending = pending.filter(t => t !== next);
+  }
+  return ordered;
+}
 
 /**
  * Parse and validate a mission JSON document strictly.
