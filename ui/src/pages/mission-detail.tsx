@@ -71,6 +71,7 @@ import { useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { useLocalState } from "./coding/use-local-state";
+import { PausedCheckpoints } from "@/components/paused-checkpoints";
 import {
   parseMissionData,
   type MissionCheckpointDef,
@@ -2204,18 +2205,21 @@ export function MissionDetailPage() {
   }
 
   return (
-    <MissionDetailView
-      mission={mission}
-      report={report}
-      groupTasks={groupTasks}
-      liveDelays={liveDelays}
-      scheduleEntry={scheduleEntry}
-      variant="page"
-      navigate={navigate}
-      onBack={() => navigate("/missions")}
-      onExecute={executeMission}
-      onResume={() => resumeMission()}
-      onAbort={abortMission}
-    />
+    <div className="flex flex-1 min-h-0 flex-col gap-3">
+      <PausedCheckpoints missionId={mission.id} missionName={mission.name} />
+      <MissionDetailView
+        mission={mission}
+        report={report}
+        groupTasks={groupTasks}
+        liveDelays={liveDelays}
+        scheduleEntry={scheduleEntry}
+        variant="page"
+        navigate={navigate}
+        onBack={() => navigate("/missions")}
+        onExecute={executeMission}
+        onResume={() => resumeMission()}
+        onAbort={abortMission}
+      />
+    </div>
   );
 }
