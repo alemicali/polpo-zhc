@@ -84,6 +84,7 @@ Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
 - A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
+- **The mission graph disappeared when a run paused at a checkpoint** (nodes and connections gone, only the background left). On every status update the graph was rebuilt with new node objects that had lost the size React Flow had measured; React Flow hides a node of unknown size and measures it again only when its size changes. Task cards change size with their status, so they came back, but at a checkpoint nothing changed size and the whole graph stayed hidden. The rebuilt nodes now keep their measured size (mission page).
 
 ## [0.4.9] — 2026-10-14 — Routine
 
