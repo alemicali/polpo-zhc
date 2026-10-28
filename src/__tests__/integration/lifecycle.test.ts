@@ -9,7 +9,12 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...original,
     spawn: (_cmd: string, _args: string[], _opts: any) => {
-      const child = { pid: Math.floor(Math.random() * 90000) + 10000, unref: () => {} };
+      // a child that starts: NodeSpawner waits for its "spawn" event before it returns
+      const child = {
+        pid: Math.floor(Math.random() * 90000) + 10000,
+        unref: () => {},
+        once: (event: string, listener: () => void) => { if (event === "spawn") queueMicrotask(listener); return child; },
+      };
       return child;
     },
   };
