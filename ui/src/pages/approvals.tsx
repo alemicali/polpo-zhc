@@ -42,6 +42,7 @@ import { useAsyncAction } from "@/hooks/use-polpo";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Link } from "react-router-dom";
 import { JsonBlock } from "@/components/json-block";
 
 // ── Status styling ──
@@ -201,6 +202,13 @@ function RejectDialog({
 
 // ── Approval card ──
 
+/** Payload of the approval that stands for a mission paused at a checkpoint. */
+interface CheckpointPayload { kind: "checkpoint"; message?: string; afterTasks?: string[]; blocksTasks?: string[]; failedTasks?: string[] }
+
+function isCheckpointPayload(payload: unknown): payload is CheckpointPayload {
+  return typeof payload === "object" && payload !== null && (payload as { kind?: unknown }).kind === "checkpoint";
+}
+
 function ApprovalCard({
   request,
   onApprove,
@@ -215,6 +223,7 @@ function ApprovalCard({
   const cfg = approvalStatusConfig[request.status];
   const StatusIcon = cfg.icon;
   const isPending = request.status === "pending";
+  const checkpoint = isCheckpointPayload(request.payload) ? request.payload : undefined;
 
   return (
     <Card className={cn(
@@ -263,9 +272,11 @@ function ApprovalCard({
                 </Tooltip>
               )}
               {request.missionId && (
-                <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
-                  Mission {request.missionId.slice(0, 8)}
-                </Badge>
+                <Link to={`/missions/${request.missionId}`}>
+                  <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0 hover:bg-secondary/70">
+                    Mission {request.missionId.slice(0, 8)}
+                  </Badge>
+                </Link>
               )}
               <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                 <Clock className="h-2.5 w-2.5" />
@@ -286,6 +297,21 @@ function ApprovalCard({
                   Resolved {formatDistanceToNow(new Date(request.resolvedAt), { addSuffix: true })}
                 </span>
               </div>
+            )}
+
+            {/* A checkpoint: what to check, and what approving lets start */}
+            {checkpoint && (
+              <p className="text-xs text-muted-foreground mt-2">
+                {checkpoint.message ? `${checkpoint.message} · ` : ""}
+                After: {checkpoint.afterTasks?.join(", ") || "—"} · Approve to start: {checkpoint.blocksTasks?.join(", ") || "—"}
+                {isPending && " · Reject aborts the mission"}
+              </p>
+            )}
+            {/* The checkpoint is reached also when tasks before it failed */}
+            {checkpoint?.failedTasks && checkpoint.failedTasks.length > 0 && (
+              <p className="text-xs font-medium text-red-400 mt-1">
+                Failed in this run: {checkpoint.failedTasks.join(", ")}. Approving resumes the mission; it does not redo them.
+              </p>
             )}
 
             {/* Note */}
