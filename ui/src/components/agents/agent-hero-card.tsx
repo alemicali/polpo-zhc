@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
+import { EditAgentButton } from "./agent-edit-sheet";
 
 export function AgentHeroCard() {
   const { state: { agent, process, teamColorIndex, isRefreshing }, actions: { refetch } } = useAgentDetail();
@@ -128,8 +129,9 @@ export function AgentHeroCard() {
           )}
         </div>
 
-        {/* Refresh */}
-        <div className="pt-1">
+        {/* Edit + refresh */}
+        <div className="pt-1 space-y-1.5">
+          <EditAgentButton className="w-full text-xs" />
           <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch} disabled={isRefreshing}>
             <RefreshCw className={cn("h-3 w-3 mr-1.5", isRefreshing && "animate-spin")} />
             {isRefreshing ? "Refreshing" : "Refresh"}

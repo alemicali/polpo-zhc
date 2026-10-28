@@ -60,11 +60,19 @@ Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #
 
 ### Added
 - **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
+- **Agent pipelines run:** an agent with `loops` and a `pipeline` now runs it for every task assigned to it, instead of the contract being only validated and stored. Loops (own instructions, tools, model, turn limit, `stopWhen`, `output.schema`, retried with feedback up to 3 attempts), `parallel` (join all / any / n), `switch`, `when` guards and `human` approvals, with a shared context. Human steps are regular approvals (Approvals page, `/approve`, API); requests left open by a stopped pipeline are closed automatically. The run state travels with `agent:activity` events. See `docs/loops.md`.
+- **Pipeline editor** (Agents → an agent → Pipeline): define the agent's loops and its pipeline as a top-down flow. Insert loops, parallel branches, switches and human approvals with the "+" on the arrows, edit them in a side panel, and see problems (unknown loops, empty branches, duplicate approval names) on the nodes; they block saving. `PATCH /agents/:name` accepts `pipeline: null` to remove the pipeline and rejects pipelines that reference unknown loops.
+- **Live pipeline view** (Tasks → a task → Pipeline): for tasks of an agent with a pipeline, each step is colored by its state (running, waiting for approval, done, failed, skipped or stopped), with attempts, retry feedback, errors and the shared context. It updates live while the task runs and stays available after it ends.
+- **Checkpoints in the dashboard:** a mission paused at a checkpoint opens an approval request (Approvals page, sidebar badge, history, `/approve`). Approving it resumes the mission; rejecting it aborts the mission. The mission page shows the pause with an "Approve and continue" button. Resuming, aborting or deleting the mission closes the request. Before, a paused mission could be resumed only through the API.
+- **Mission actions:** a Delete button, with confirmation, on the mission page, and Abort also on a mission paused at a checkpoint.
+- **Playbook graph editor** (Playbooks → a playbook → Editor): add tasks, checkpoints and delays, connect them by dragging, edit them in a side panel, and save. Cycles are refused, renaming or deleting a task updates every reference, and saving adds the `dependsOn` that checkpoints and delays require. A **New playbook** button creates an empty playbook and opens it in the editor.
+- **Edit an agent from its page:** an Edit button opens a panel with the agent's role, team, manager, model (with "Use project default"), reasoning, turn and parallel-task limits, additional instructions, built-in tools and tool categories, skills, identity (display name, title, company, email, timezone, tone, personality, bio, responsibilities) and advanced settings (allowed folders, email domains, browser profile, Telegram voice replies). Before, the agent page only showed the configuration.
 
 ### Changed
 - A new mission whose name is taken is named `name (2)`, `name (3)`…, so every run of a playbook is its own mission.
 - Task titles must be unique within a mission, no longer across all active tasks, so two runs of one playbook can run at the same time.
 - Abort also cancels a mission paused at a checkpoint, and releases its checkpoints and delays.
+- `PATCH /agents/:name`: an empty value removes an optional text field (`model`, `role`, `systemPrompt`, `reasoning`, `browserProfile`, identity fields); e.g. `model: ""` makes the agent use the project default again.
 
 ### Fixed
 - **Telegram voice notes in private chats are transcribed on arrival**, as in groups, and their words become the message.
@@ -82,7 +90,7 @@ Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #
 - The mission page refreshed the mission only on the first change of a run: nothing cleared the "missions stale" flag when the missions list was not mounted. Checkpoint events now also update the mission status (paused / active), and an abort refreshes it.
 - The Approvals page went blank (counters back to 0) at every refresh: `useApprovals` showed the loading state on every refetch. It now does so only on the first load.
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
-- A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
+- A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, the playbook editor flags it, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
 
 ## [0.4.9] — 2026-10-14 — Routine
