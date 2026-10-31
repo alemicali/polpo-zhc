@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Log:** one `[polpo/mcp]` line per MCP message, without contents (the client and whether it shows apps, the tools and resources it uses).
   - **Self-contained:** the widget (`widgets/agent-card`, built with the MCP Apps SDK into one HTML document by `pnpm run build:widgets`) loads nothing from other origins. Its refresh and decide tools are visible only to it.
 
+### Fixed
+- **A long chat compacted again at every turn.** When a session's saved context checkpoint stopped matching the conversation (for example after a change of model), the new checkpoint was never saved: the save expected "no checkpoint yet" and the store refused it. From then on, every message summarized the whole conversation again: hundreds of thousands of tokens per turn, sometimes past the 90-second limit. A checkpoint that no longer fits is now replaced, so the next turns reuse it. The server logs why a checkpoint was not reused (`[polpo/compaction]`).
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added
