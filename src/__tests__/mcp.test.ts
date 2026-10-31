@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleMcpRequest, matchesOperationPath, type ApiResponse, type McpDeps } from "../server/mcp.js";
+import { describeMcpMessages, handleMcpRequest, matchesOperationPath, type ApiResponse, type McpDeps } from "../server/mcp.js";
 
 const OPENAPI = {
   paths: {
@@ -22,6 +22,13 @@ function fakeApi() {
       { id: "t2", title: "Log meals", status: "in_progress", assignTo: "coach", updatedAt: "2026-10-25" },
     ] });
     if (path === "/api/v1/tasks/t9/retry") return reply(404, { ok: false, error: "Task not found" });
+    if (path === "/api/v1/drive/coach") return reply(200, { ok: true, data: {
+      drive: { enabled: true }, self: "I help Ada eat well.",
+      plan: [{ id: "g1", title: "Eat vegetables every day", horizon: "month", status: "doing", progress: 40 }],
+      intentions: [{ id: "chk_1", prompt: "wish Grazia a happy birthday", why: "Happy birthday to Grazia", state: "proposed", nextRunAt: "2026-10-26T07:30:00.000Z", everyMinutes: 0 }],
+      journal: [],
+    } });
+    if (path === "/api/v1/drive/coach/intentions/chk_1/confirm") return reply(200, { ok: true, data: { intention: { id: "chk_1", state: "active" } } });
     if (path === "/api/v1/chat/sessions/s1/messages") return reply(200, { ok: true, data: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }] });
     if (path === "/v1/chat/completions") return reply(200, { choices: [{ message: { content: "Done: 2 tasks planned." } }] }, { "x-session-id": "s1" });
     return reply(200, { ok: true, data: { echoed: { method, path, body } } });
@@ -53,6 +60,7 @@ describe("Polpo MCP server", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "ask_polpo", "chat_with_agent", "list_agents", "list_tasks", "get_task", "create_task", "list_missions", "get_mission",
       "list_artifacts", "get_artifact", "create_artifact", "list_data_sources", "query_data", "list_approvals", "resolve_approval",
+      "show_agent", "agent_card_refresh", "agent_intention_decide",
       "list_files", "search_files", "read_file", "write_file", "manage_file",
       "list_operations", "call_operation",
     ]);
@@ -130,5 +138,69 @@ describe("routes without an OpenAPI description", () => {
     expect(listed).toBe("GET /artifacts\nPOST /artifacts/{id}/restore/{version}");
     await call(deps, "call_operation", { method: "POST", path: "/artifacts/art_1/restore/2" });
     expect(calls.at(-1)!.path).toBe("/api/v1/artifacts/art_1/restore/2");
+  });
+});
+
+describe("the agent card (MCP App)", () => {
+  it("show_agent links to a ui:// resource; the card's own tools are only for its UI", async () => {
+    const { api } = fakeApi();
+    const tools = (await rpc({ api, version: "1" }, "tools/list")).body.result.tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string; visibility?: string[] } } }>;
+    const show = tools.find((t) => t.name === "show_agent")!;
+    expect(show._meta?.ui?.resourceUri).toBe("ui://polpo/agent-card.html");
+    expect(show._meta?.ui?.visibility).toBeUndefined();
+    expect(tools.find((t) => t.name === "agent_card_refresh")!._meta?.ui?.visibility).toEqual(["app"]);
+    expect(tools.find((t) => t.name === "agent_intention_decide")!._meta?.ui?.visibility).toEqual(["app"]);
+  });
+
+  it("serves the widget as one HTML document with the MCP App mime type", async () => {
+    const { api } = fakeApi();
+    const deps = { api, version: "1" };
+    const list = (await rpc(deps, "resources/list")).body.result.resources as Array<{ uri: string; mimeType: string }>;
+    expect(list).toContainEqual(expect.objectContaining({ uri: "ui://polpo/agent-card.html", mimeType: "text/html;profile=mcp-app" }));
+    const read = (await rpc(deps, "resources/read", { uri: "ui://polpo/agent-card.html" })).body.result.contents[0];
+    expect(read.mimeType).toBe("text/html;profile=mcp-app");
+    expect(read.text).toMatch(/^<!doctype html>/);
+    expect(read.text).toContain('<meta name="color-scheme" content="light dark">');
+    // nothing loaded from elsewhere: no external scripts or stylesheets
+    expect(read.text).not.toMatch(/<script[^>]+src=|<link[^>]+href=/);
+    expect(read._meta.ui).toMatchObject({ prefersBorder: false, csp: { resourceDomains: ["https://assets.claude.ai"] } });
+  });
+
+  it("show_agent returns text for the model and the card for the UI", async () => {
+    const { api } = fakeApi();
+    const res = (await call({ api, version: "1" }, "show_agent", { agent: "Coach" })).body.result;
+    expect(res.content[0].text).toContain("coach — Health coach: waiting for a person.");
+    expect(res.content[0].text).toContain("Next: 2026-10-26T07:30:00.000Z — Happy birthday to Grazia (proposed, to confirm).");
+    expect(res.structuredContent).toMatchObject({
+      agent: { name: "coach", role: "Health coach" },
+      current: { id: "t2", active: true },
+      goal: { title: "Eat vegetables every day", progress: 40 },
+      next: { id: "chk_1", proposed: true },
+      key: { createdAt: expect.any(Number), seq: expect.any(Number) },
+    });
+    expect((await call({ api, version: "1" }, "show_agent", { agent: "nobody" })).body.result).toMatchObject({ isError: true });
+  });
+
+  it("the UI confirms an intention and gets the card back", async () => {
+    const { api, calls } = fakeApi();
+    const res = (await call({ api, version: "1" }, "agent_intention_decide", { agent: "coach", id: "chk_1", action: "confirm" })).body.result;
+    expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/drive/coach/intentions/chk_1/confirm")).toBe(true);
+    expect(res.structuredContent.agent.name).toBe("coach");
+  });
+});
+
+describe("MCP request log", () => {
+  it("one line per message, without contents: the client, whether it shows apps, the tools and resources used", () => {
+    expect(describeMcpMessages({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
+      protocolVersion: "2026-07-28", clientInfo: { name: "claude-ai", version: "0.1.0" },
+      capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } },
+    } })).toEqual(["initialize claude-ai 0.1.0 (protocol 2026-07-28; apps: text/html;profile=mcp-app)"]);
+    expect(describeMcpMessages([
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "show_agent", arguments: { agent: "secret stuff" } } },
+      { jsonrpc: "2.0", id: 3, method: "resources/read", params: { uri: "ui://polpo/agent-card.html" } },
+      { jsonrpc: "2.0", id: 4, method: "tools/list" },
+    ])).toEqual(["tools/call show_agent", "resources/read ui://polpo/agent-card.html", "tools/list"]);
+    expect(describeMcpMessages(null)).toEqual([]);
   });
 });
