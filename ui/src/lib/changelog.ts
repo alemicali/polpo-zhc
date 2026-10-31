@@ -27,8 +27,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "2026-10-25-mcp-agent-card",
-    date: "2026-10-25",
+    id: "2026-10-31-compaction-loop",
+    date: "2026-10-31",
+    kind: "fixed",
+    title: "Le chat lunghe non si ricompattano più a ogni messaggio",
+    summary: "Dopo la prima compattazione, una chat lunga riassumeva di nuovo tutta la conversazione a ogni giro: ora riusa il riassunto.",
+    body: [
+      "Quando una chat diventa troppo lunga, Polpo ne riassume l'inizio e salva il riassunto per i messaggi successivi.",
+      "",
+      "Se il riassunto salvato non valeva più, per esempio dopo un cambio di modello, quello nuovo non veniva salvato: così **ogni messaggio** riassumeva di nuovo tutta la conversazione. Erano centinaia di migliaia di token a giro, a volte oltre il limite di tempo.",
+      "",
+      "Ora il riassunto vecchio viene sostituito e i messaggi successivi lo riusano. Le risposte nelle chat lunghe tornano veloci.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-10-31-mcp-agent-card",
+    date: "2026-10-31",
     kind: "new",
     title: "La scheda dell'agente dentro Claude e ChatGPT",
     summary: "Chiedi a Claude come sta andando un agente: risponde con una scheda interattiva di Polpo.",
