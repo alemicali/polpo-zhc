@@ -27,8 +27,8 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "2026-10-25-mcp-agent-card",
-    date: "2026-10-25",
+    id: "2026-10-31-mcp-agent-card",
+    date: "2026-10-31",
     kind: "new",
     title: "La scheda dell'agente dentro Claude e ChatGPT",
     summary: "Chiedi a Claude come sta andando un agente: risponde con una scheda interattiva di Polpo.",

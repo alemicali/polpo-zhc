@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
+
 ### Added
 - **The agent card, an MCP App:** in Claude, ChatGPT and other hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the `show_agent` tool shows an interactive card in the conversation; other clients get the same as text.
   - **Inline:** whether the agent is working, the task at hand, today (done, failed, waiting for a person), what it plans next and its main goal with its progress. Two actions: **Open** (full screen) and **Ask for an update** (a chat message, so the model talks to the agent).
