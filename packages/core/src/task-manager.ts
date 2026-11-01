@@ -27,6 +27,8 @@ export class TaskManager {
     notifications?: ScopedNotificationRules;
     sideEffects?: boolean;
     draft?: boolean;
+    /** Retries for this task (e.g. a mission task's maxRetries); default: settings.maxRetries. */
+    maxRetries?: number;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
 
@@ -79,7 +81,7 @@ export class TaskManager {
       expectations,
       expectedOutcomes: hookData.expectedOutcomes,
       metrics: [],
-      maxRetries: this.ctx.config.settings.maxRetries,
+      maxRetries: opts.maxRetries ?? this.ctx.config.settings.maxRetries,
       maxDuration: hookData.maxDuration,
       retryPolicy: hookData.retryPolicy,
       notifications: hookData.notifications,

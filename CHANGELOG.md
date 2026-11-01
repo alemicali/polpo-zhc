@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A mission or playbook task's `maxRetries` was ignored:** every task got the project's `settings.maxRetries` (3 by default), so a task meant to fail at once (`maxRetries: 0`) was retried three times. The task now keeps its own value; `POST /tasks` accepts `maxRetries` too.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added

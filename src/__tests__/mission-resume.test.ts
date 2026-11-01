@@ -53,6 +53,20 @@ describe("Mission resume (Orchestrator)", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
+  describe("task retries", () => {
+    it("a mission task keeps its own maxRetries; the others get the project setting", async () => {
+      const data = JSON.stringify({ tasks: [
+        { title: "A", description: "a", assignTo: "dev", maxRetries: 0 },
+        { title: "B", description: "b", assignTo: "dev" },
+      ] });
+      const mission = await orchestrator.saveMission({ name: "retries", data });
+      const { tasks } = await orchestrator.executeMission(mission.id);
+      const byTitle = Object.fromEntries(tasks.map((t) => [t.title, t.maxRetries]));
+      expect(byTitle.A).toBe(0);
+      expect(byTitle.B).toBe(orchestrator.getConfig()!.settings.maxRetries);
+    });
+  });
+
   describe("mission names", () => {
     it("gives a new mission with a taken name its own name, so runs never share a task group", async () => {
       const data = JSON.stringify({ tasks: [{ title: "A", description: "a", assignTo: "dev" }] });
