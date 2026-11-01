@@ -11,6 +11,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
+import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
+import { agentCardText, buildAgentCard, type AgentCard } from "./mcp-agent-card.js";
+import { AGENT_CARD_HTML } from "./mcp-widgets.generated.js";
 
 export interface ApiResponse {
   status: number;
@@ -25,6 +28,8 @@ export interface McpDeps {
   /** A call to the instance's own HTTP API (a path from the server root, e.g. /api/v1/tasks), in process; a FormData body goes as multipart, anything else as JSON. */
   api: (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<ApiResponse>;
   version: string;
+  /** Logs one line per MCP message (no contents). */
+  log?: (line: string) => void;
   /** Every route the server has registered (method, path with :params): the ones the OpenAPI document does not describe are reachable too. */
   routes?: () => Array<{ method: string; path: string }>;
 }
@@ -106,6 +111,37 @@ function decodeText(bytes: Uint8Array): string | null {
     return null;
   }
 }
+
+/** The agent card's UI (an MCP App): one HTML document, served as a ui:// resource. */
+export const AGENT_CARD_URI = "ui://polpo/agent-card.html";
+let cardSeq = 0;
+
+/** An agent's card from the instance's API (agent, tasks, drive). */
+async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; card: AgentCard } | { ok: false; error: string }> {
+  const agents = unwrap(await deps.api("GET", "/api/v1/agents"));
+  if (!agents.ok) return agents;
+  const list = (agents.data as AgentCardAgent[]) ?? [];
+  const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
+  if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
+  const [tasks, drive] = await Promise.all([
+    deps.api("GET", "/api/v1/tasks").then(unwrap),
+    deps.api("GET", `/api/v1/drive/${encodeURIComponent(agent.name)}`).then(unwrap),
+  ]);
+  const card = buildAgentCard({
+    agent,
+    tasks: tasks.ok ? (tasks.data as Parameters<typeof buildAgentCard>[0]["tasks"]) ?? [] : [],
+    ...(drive.ok ? { drive: drive.data as Parameters<typeof buildAgentCard>[0]["drive"] } : {}),
+    now: new Date(),
+    key: { createdAt: Date.now(), seq: ++cardSeq },
+  });
+  return { ok: true, card };
+}
+type AgentCardAgent = Parameters<typeof buildAgentCard>[0]["agent"];
+
+const cardResult = (card: AgentCard) => ({
+  content: [{ type: "text" as const, text: agentCardText(card) }],
+  structuredContent: card as unknown as Record<string, unknown>,
+});
 
 interface Operation { method: string; path: string; summary: string; tags: string[] }
 
@@ -327,6 +363,56 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
       decision === "approve" ? { resolvedBy: "mcp", ...(note ? { note } : {}) } : { resolvedBy: "mcp", feedback: note });
   });
 
+  // ── The agent card: an MCP App (interactive UI in Claude, ChatGPT…; text elsewhere) ──
+
+  registerAppResource(server, "Agent card", AGENT_CARD_URI, {
+    description: "An agent's card: status, the task at hand, today, what is next, its main goal; full screen, its tasks, goals and routine.",
+  }, async () => ({
+    contents: [{
+      uri: AGENT_CARD_URI,
+      mimeType: RESOURCE_MIME_TYPE,
+      text: AGENT_CARD_HTML,
+      // everything is in the document; the host's font (Claude) is the only origin it loads from
+      _meta: { ui: { prefersBorder: false, csp: { resourceDomains: ["https://assets.claude.ai"] } } },
+    }],
+  }));
+
+  registerAppTool(server, "show_agent", {
+    title: "Show an agent",
+    description: "Show one agent's card: whether it is working, the task at hand, today's results, what it plans next "
+      + "and its main goal; it opens to its tasks, goals and routine. Use it when the person asks about an agent (list_agents for names).",
+    inputSchema: { agent: z.string().min(1).describe("Agent name") },
+    annotations: readOnly,
+    _meta: { ui: { resourceUri: AGENT_CARD_URI } },
+  }, async ({ agent }) => {
+    const r = await loadAgentCard(deps, agent);
+    return r.ok ? cardResult(r.card) : fail(r.error);
+  });
+
+  registerAppTool(server, "agent_card_refresh", {
+    title: "Refresh an agent card",
+    description: "The agent card's own refresh (called by its UI).",
+    inputSchema: { agent: z.string().min(1) },
+    annotations: readOnly,
+    _meta: { ui: { resourceUri: AGENT_CARD_URI, visibility: ["app"] } },
+  }, async ({ agent }) => {
+    const r = await loadAgentCard(deps, agent);
+    return r.ok ? cardResult(r.card) : fail(r.error);
+  });
+
+  registerAppTool(server, "agent_intention_decide", {
+    title: "Confirm or cancel an agent's plan",
+    description: "From the agent card: confirm an intention the agent proposed, or cancel one (called by its UI).",
+    inputSchema: { agent: z.string().min(1), id: z.string().min(1), action: z.enum(["confirm", "cancel"]) },
+    annotations: { ...writes, destructiveHint: true },
+    _meta: { ui: { resourceUri: AGENT_CARD_URI, visibility: ["app"] } },
+  }, async ({ agent, id, action }) => {
+    const done = unwrap(await deps.api("POST", `/api/v1/drive/${encodeURIComponent(agent)}/intentions/${encodeURIComponent(id)}/${action}`));
+    if (!done.ok) return fail(done.error);
+    const r = await loadAgentCard(deps, agent);
+    return r.ok ? cardResult(r.card) : text(`${action}: ${id} done.`);
+  });
+
   // ── Files: the instance's workspace, .polpo and volumes, as in the dashboard's Files page ──
 
   server.registerTool("list_files", {
@@ -484,8 +570,34 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
   return server;
 }
 
+/** One line per MCP message, without contents: who connects (and whether it shows apps), which tools and resources it uses. */
+export function describeMcpMessages(body: unknown): string[] {
+  const messages = Array.isArray(body) ? body : [body];
+  const out: string[] = [];
+  for (const m of messages as Array<{ method?: unknown; params?: Record<string, unknown> } | null>) {
+    if (!m || typeof m.method !== "string" || m.method.startsWith("notifications/")) continue;
+    const p = m.params ?? {};
+    if (m.method === "initialize") {
+      const info = p.clientInfo as { name?: string; version?: string } | undefined;
+      const ext = (p.capabilities as { extensions?: Record<string, { mimeTypes?: string[] }> } | undefined)?.extensions?.["io.modelcontextprotocol/ui"];
+      out.push(`initialize ${info?.name ?? "?"} ${info?.version ?? ""} (protocol ${String(p.protocolVersion ?? "?")}; apps: ${ext ? (ext.mimeTypes ?? []).join(",") || "yes" : "no"})`);
+    } else if (m.method === "tools/call") {
+      out.push(`tools/call ${String(p.name)}`);
+    } else if (m.method === "resources/read") {
+      out.push(`resources/read ${String(p.uri)}`);
+    } else {
+      out.push(m.method);
+    }
+  }
+  return out;
+}
+
 /** Handle one MCP request (Streamable HTTP, stateless, JSON responses). */
 export async function handleMcpRequest(request: Request, deps: McpDeps): Promise<Response> {
+  if (deps.log && request.method === "POST") {
+    const lines = describeMcpMessages(await request.clone().json().catch(() => null));
+    for (const line of lines) deps.log(line);
+  }
   const server = createPolpoMcpServer(deps);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
