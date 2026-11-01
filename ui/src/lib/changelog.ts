@@ -27,6 +27,37 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-10-31-compaction-loop",
+    date: "2026-10-31",
+    kind: "fixed",
+    title: "Le chat lunghe non si ricompattano più a ogni messaggio",
+    summary: "Dopo la prima compattazione, una chat lunga riassumeva di nuovo tutta la conversazione a ogni giro: ora riusa il riassunto.",
+    body: [
+      "Quando una chat diventa troppo lunga, Polpo ne riassume l'inizio e salva il riassunto per i messaggi successivi.",
+      "",
+      "Se il riassunto salvato non valeva più, per esempio dopo un cambio di modello, quello nuovo non veniva salvato: così **ogni messaggio** riassumeva di nuovo tutta la conversazione. Erano centinaia di migliaia di token a giro, a volte oltre il limite di tempo.",
+      "",
+      "Ora il riassunto vecchio viene sostituito e i messaggi successivi lo riusano. Le risposte nelle chat lunghe tornano veloci.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-10-31-mcp-agent-card",
+    date: "2026-10-31",
+    kind: "new",
+    title: "La scheda dell'agente dentro Claude e ChatGPT",
+    summary: "Chiedi a Claude come sta andando un agente: risponde con una scheda interattiva di Polpo.",
+    body: [
+      "Con il connettore MCP, quando chiedi di un agente Claude e ChatGPT mostrano la sua **scheda** direttamente nella chat:",
+      "",
+      "- se sta lavorando, il task in corso e il bilancio di oggi;",
+      "- la prossima cosa in programma e l'obiettivo principale, con l'avanzamento;",
+      "- **Apri** la porta a schermo intero, con task, obiettivi e routine: le proposte dell'agente si confermano o si annullano da lì;",
+      "- **Chiedi un aggiornamento** fa parlare Claude con l'agente.",
+      "",
+      "Segue il tema chiaro o scuro di Claude e funziona anche da telefono.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-25-artifacts",
     date: "2026-10-25",
     kind: "new",
