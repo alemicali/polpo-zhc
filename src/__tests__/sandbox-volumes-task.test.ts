@@ -12,7 +12,8 @@ function harness(opts: { agentVolumes?: unknown; missionVolumes?: unknown; grant
   const volumeCalls: any[] = [];
   const ctx = {
     emitter,
-    polpoDir: "/tmp/polpo-test",
+    polpoDir: "/tmp/polpo-test/.polpo",
+    agentWorkDir: "/tmp/polpo-test",
     config: { settings: {} },
     hooks: { runBeforeSync: () => ({ cancelled: false }) },
     agentStore: { getAgent: async () => ({ name: "dev", sandbox: { provider: "e2b", volumes: opts.agentVolumes } }) },

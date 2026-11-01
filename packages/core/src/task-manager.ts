@@ -3,6 +3,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
+import { taskOutputPath, taskPosition } from "./output-paths.js";
 import type { TaskDirection } from "./task-control-store.js";
 
 /**
@@ -239,6 +240,13 @@ export class TaskManager {
       }
     } catch { /* best effort */ }
 
+    // The task's output folder, as on its first assessment: checks on $POLPO_OUTPUT_DIR look there
+    let missionData: string | undefined;
+    if (task.missionId) {
+      try { missionData = (await this.ctx.registry.getMission?.(task.missionId))?.data; } catch { /* deleted */ }
+    }
+    const outputDir = `${this.ctx.agentWorkDir.replace(/[\\/]+$/, "")}/${taskOutputPath(task, taskPosition(missionData, task.title))}`;
+
     const reviewContext: ReviewContext = {
       taskTitle: task.title,
       taskDescription: task.originalDescription ?? task.description,
@@ -252,6 +260,7 @@ export class TaskManager {
       toolsSummary: toolsSummary || undefined,
       executionSummary,
       outcomes: outcomes?.length ? outcomes : undefined,
+      outputDir,
     };
 
     try {
