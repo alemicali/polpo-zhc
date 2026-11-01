@@ -372,6 +372,25 @@ const PipelineSchema = z.object({
 
 const AgentLoopsSchema = z.record(z.string().min(1), LoopConfigSchema);
 
+/** Loop names referenced by `loop` steps anywhere in a pipeline. */
+export function pipelineLoopRefs(steps: unknown[]): string[] {
+  const refs: string[] = [];
+  const walk = (list: unknown[]) => {
+    for (const step of list) {
+      if (!step || typeof step !== "object") continue;
+      const s = step as Record<string, any>;
+      if (typeof s.loop === "string") refs.push(s.loop);
+      if (Array.isArray(s.parallel)) walk(s.parallel);
+      if (s.switch) {
+        for (const c of s.switch.cases ?? []) walk(c.steps ?? []);
+        if (s.switch.default) walk(s.switch.default.steps ?? []);
+      }
+    }
+  };
+  walk(steps);
+  return refs;
+}
+
 const AgentDriveSchema = z.object({
   enabled: z.boolean().optional(),
   purpose: z.string().max(2000).optional(),
@@ -441,7 +460,8 @@ export const UpdateAgentSchema = z.object({
   drive: AgentDriveSchema.optional(),
   runtime: z.string().min(1).optional(),
   loops: AgentLoopsSchema.optional(),
-  pipeline: PipelineSchema.optional(),
+  /** null removes the pipeline: the agent then runs tasks as a single session again. */
+  pipeline: PipelineSchema.nullable().optional(),
   browserProfile: z.string().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
