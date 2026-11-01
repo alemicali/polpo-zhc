@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A mission or playbook task's `maxRetries` was ignored:** every task got the project's `settings.maxRetries` (3 by default), so a task meant to fail at once (`maxRetries: 0`) was retried three times. The task now keeps its own value; `POST /tasks` accepts `maxRetries` too.
 
+## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
+
+### Added
+- **The agent card, an MCP App:** in Claude, ChatGPT and other hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the `show_agent` tool shows an interactive card in the conversation; other clients get the same as text.
+  - **Inline:** whether the agent is working, the task at hand, today (done, failed, waiting for a person), what it plans next and its main goal with its progress. Two actions: **Open** (full screen) and **Ask for an update** (a chat message, so the model talks to the agent).
+  - **Full screen:** tabs for overview (self-portrait, goals, latest reflections), tasks (with filters), goals (the tree with progress) and routine, where the agent's proposals are confirmed or cancelled. The tab in view goes to the model's context.
+  - **Native look:** the host's style variables (light and dark, its font), a transparent background, skeletons while loading, safe areas and 44px targets on mobile, no menus or inline scrolling.
+  - **One live card per agent:** when the card is shown again in a conversation, older copies grey out.
+  - **Claude** reads a connector's apps when it is connected: reconnect the connector after an update that adds or changes apps.
+  - **Log:** one `[polpo/mcp]` line per MCP message, without contents (the client and whether it shows apps, the tools and resources it uses).
+  - **Self-contained:** the widget (`widgets/agent-card`, built with the MCP Apps SDK into one HTML document by `pnpm run build:widgets`) loads nothing from other origins. Its refresh and decide tools are visible only to it.
+
+### Fixed
+- **A long chat compacted again at every turn.** When a session's saved context checkpoint stopped matching the conversation (for example after a change of model), the new checkpoint was never saved: the save expected "no checkpoint yet" and the store refused it. From then on, every message summarized the whole conversation again: hundreds of thousands of tokens per turn, sometimes past the 90-second limit. A checkpoint that no longer fits is now replaced, so the next turns reuse it. The server logs why a checkpoint was not reused (`[polpo/compaction]`).
+
 ## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
 
 ### Added
