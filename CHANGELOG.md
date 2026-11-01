@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Line numbers copied from `read` into files.** The read tool shows each line as `<n><TAB><text>`, and agents of every size copied those numbers into what they wrote (with the tab, a space, the escape `\t`, a dot or nothing, sometimes with `\n` written instead of the line breaks), so a file ended up with numbers that were never in it. `write` and `edit` now refuse content whose every line starts with consecutive line numbers, with text after them on most lines (a file of numbers, one per line, is data), with an error that says why; `keep_line_numbers: true` lets a file whose lines really are numbered through. An `edit` whose `old_text` carries the numbers says so instead of a bare "not found", and the read tool's description says the numbers are not part of the file.
+- **The glob tool found nothing for patterns with a folder** (`docs/report.md`, `src/**/*.ts`), and nothing at all on Windows without bash: it ran `find -name`, which matches file names only, through a Unix shell. It now walks the files itself (`src/tools/glob-files.ts`, on the FileSystem port, so remote sandboxes too), with `*`, `**`, `?`, `{a,b}` and `[abc]`; `node_modules` and `.git` are walked only when the pattern names them.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
