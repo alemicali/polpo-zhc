@@ -126,6 +126,8 @@ import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
+import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
+import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
@@ -3442,6 +3444,7 @@ function ChatMessages() {
                               | { type: "tools"; tools: ToolCallInfo[] }
                               | { type: "widget"; widget: WidgetRenderData; key: string }
                               | { type: "widget-pending"; tool: ToolCallInfo }
+                              | { type: "artifact"; artifactId: string; updated: boolean; key: string }
                             > = [];
                             const widgetsArr = msg.widgets ?? [];
                             let widgetCounter = 0;
@@ -3456,7 +3459,12 @@ function ChatMessages() {
                                   groups.push({ type: "thinking", content: seg.content });
                                 }
                               } else if (seg.type === "tool") {
-                                if (seg.tool.name === "render_widget") {
+                                // an artifact made or changed here: a card that opens it beside the chat
+                                const madeArtifact = (seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") && seg.tool.state === "completed"
+                                  ? artifactIdOf(seg.tool.result) : undefined;
+                                if (madeArtifact) {
+                                  groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
+                                } else if (seg.tool.name === "render_widget") {
                                   // Inline widget: trova il widget corrispondente
                                   // in widgets[] (per-occorrenza) e renderizzalo
                                   // qui, NON in fondo al messaggio. Se non c'è
@@ -3503,6 +3511,9 @@ function ChatMessages() {
                               }
                               if (g.type === "widget") {
                                 return <WidgetCard key={`w-${g.key}`} widget={g.widget} />;
+                              }
+                              if (g.type === "artifact") {
+                                return <ArtifactChatCard key={`a-${g.key}`} artifactId={g.artifactId} updated={g.updated} />;
                               }
                               if (g.type === "widget-pending") {
                                 // Loader skeleton dedicato — il modello

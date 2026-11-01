@@ -26,7 +26,7 @@ import {
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
 import { sessionLeases } from "../session-lease.js";
-import { INTERNAL_CALL_HEADER, isInternalCall } from "../internal-call.js";
+import { INTERNAL_CALL_HEADER, isInternalCall, isTrustedApiCall, TRUSTED_API_CALL_HEADER } from "../internal-call.js";
 import { type ContextCheckpointStore } from "../context-checkpoint.js";
 import { createSessionCompaction } from "../session-compactor.js";
 import type { TokenUsageRecord } from "@polpo-ai/core/token-usage";
@@ -571,8 +571,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
   const handleCompletion = async (c: any, lease: TurnLease): Promise<any> => {
     const deps = getDeps();
 
-    // ── Auth ──
-    if (apiKeys && apiKeys.length > 0) {
+    // ── Auth ── (calls the server makes for an authenticated MCP client carry the trusted marker)
+    if (apiKeys && apiKeys.length > 0 && !isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
       const auth = c.req.header("Authorization");
       const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
       if (!token || !apiKeys.includes(token)) {

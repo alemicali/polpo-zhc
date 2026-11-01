@@ -23,7 +23,7 @@ export { stateRoutes } from "./routes/state.js";
 export { healthRoutes } from "./routes/health.js";
 export { completionRoutes, CHAT_ORIGIN_HEADER, EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, type CompletionRouteDeps, type TokenUsageRecord } from "./routes/completions.js";
 export { checkToolCalls, invalidArgumentsResult, type ToolArgumentsValidator } from "./tool-arguments.js";
-export { contextCheckpointProjection, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointStore } from "./context-checkpoint.js";
+export { contextCheckpointProjection, inspectContextCheckpoint, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointInspection, type ContextCheckpointStore } from "./context-checkpoint.js";
 export { createSessionCompaction, type SessionCompaction, type SessionCompactorOptions } from "./session-compactor.js";
 export { agentRoutes } from "./routes/agents.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
@@ -34,7 +34,7 @@ export { attachmentRoutes } from "./routes/attachments.js";
 export { countsRoutes } from "./routes/counts.js";
 export { streamRegistry, type PendingSteer, type SteerResult } from "./stream-registry.js";
 export { sessionLeases, MAX_LEASE_MS } from "./session-lease.js";
-export { internalCallHeaders, isInternalCall, INTERNAL_CALL_HEADER } from "./internal-call.js";
+export { internalCallHeaders, isInternalCall, INTERNAL_CALL_HEADER, trustedApiCallHeaders, isTrustedApiCall, TRUSTED_API_CALL_HEADER } from "./internal-call.js";
 export { TurnScheduler, SessionBusyError, createTurnScheduler, type TurnSchedulerDeps, type TurnOutcome, type TurnStartReason, type CarriedSteer, type SendNowResult } from "./turn-scheduler.js";
 
 // Dependency types

@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.4.9",
+  "version": "0.5.1",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
@@ -54,7 +54,9 @@
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",
-    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths');process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})\""
+    "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths');process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})\"",
+    "build:widgets": "node widgets/build.mjs",
+    "typecheck:widgets": "./node_modules/.bin/tsc -p widgets/tsconfig.json"
   },
   "keywords": [
     "ai",
@@ -83,6 +85,8 @@
     "@earendil-works/pi-ai": "^1.0.4",
     "@hono/node-server": "^1.19.9",
     "@hono/zod-openapi": "^1.2.2",
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@polpo-ai/core": "workspace:^0.3.12",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",
@@ -127,6 +131,7 @@
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^3.2.4",
     "concurrently": "^9.2.1",
+    "esbuild": "^0.27.3",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Tool calls whose arguments did not match the tool's schema were run or previewed anyway: e.g. a local model putting the mission name inside `data` produced a mission preview without a name. The chat now checks every call against its schema (pi-ai's validator) before running or previewing it; a call that does not match is returned to the model with the reason, so it can call the tool again in the same turn. An object or array parameter passed as a JSON string is still accepted, as before.
+
+## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
+
+### Added
+- **The agent card, an MCP App:** in Claude, ChatGPT and other hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the `show_agent` tool shows an interactive card in the conversation; other clients get the same as text.
+  - **Inline:** whether the agent is working, the task at hand, today (done, failed, waiting for a person), what it plans next and its main goal with its progress. Two actions: **Open** (full screen) and **Ask for an update** (a chat message, so the model talks to the agent).
+  - **Full screen:** tabs for overview (self-portrait, goals, latest reflections), tasks (with filters), goals (the tree with progress) and routine, where the agent's proposals are confirmed or cancelled. The tab in view goes to the model's context.
+  - **Native look:** the host's style variables (light and dark, its font), a transparent background, skeletons while loading, safe areas and 44px targets on mobile, no menus or inline scrolling.
+  - **One live card per agent:** when the card is shown again in a conversation, older copies grey out.
+  - **Claude** reads a connector's apps when it is connected: reconnect the connector after an update that adds or changes apps.
+  - **Log:** one `[polpo/mcp]` line per MCP message, without contents (the client and whether it shows apps, the tools and resources it uses).
+  - **Self-contained:** the widget (`widgets/agent-card`, built with the MCP Apps SDK into one HTML document by `pnpm run build:widgets`) loads nothing from other origins. Its refresh and decide tools are visible only to it.
+
+### Fixed
+- **A long chat compacted again at every turn.** When a session's saved context checkpoint stopped matching the conversation (for example after a change of model), the new checkpoint was never saved: the save expected "no checkpoint yet" and the store refused it. From then on, every message summarized the whole conversation again: hundreds of thousands of tokens per turn, sometimes past the 90-second limit. A checkpoint that no longer fits is now replaced, so the next turns reuse it. The server logs why a checkpoint was not reused (`[polpo/compaction]`).
+
+## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
+
+### Added
+- **Artifacts** replace Views: one concept for what agents and people make to look at and keep.
+  - **Types:**
+    - `doc` (Markdown);
+    - `html`, one self-contained page with a kind: dashboard, design, app, report, page;
+    - `svg` (a drawing) and `mermaid` (a diagram);
+    - `view`, the former data views, still shown and working.
+  - **Data in html artifacts:** the page runs isolated, in a sandbox without same-origin and with a strict CSP: no network except a few CDNs for libraries. It reads the instance's data sources through a `polpo` bridge with the **rights of its author**: an agent's artifact sees only the sources and fields that agent is granted. The bridge offers:
+    - `polpo.sources()`, `polpo.describe(id)`, `polpo.query({...})` and `polpo.sql(id, …)` (read-only);
+    - `polpo.onRefresh(fn)`, called every `refreshSeconds` and when a data source changes;
+    - `polpo.theme` / `polpo.onTheme`.
+  - **Versions:** every change keeps the previous content with its author and note, and any version can be restored.
+  - **Tools:** `artifact_create`, `artifact_update` (whole content, or find/replace edits), `artifact_get` (also earlier versions), `artifact_list`, `artifact_delete`.
+    - Polpo has all of them; agents get them with `artifact_*` in allowedTools (a new "Artifacts" category in the Tools tab).
+    - Agents change only their own artifacts.
+    - `navigate_to` gains `artifacts` / `artifact`.
+  - **API:** `GET/POST /artifacts`, `GET/PATCH/DELETE /artifacts/:id`, `POST /artifacts/:id/restore/:version`, `POST /artifacts/:id/data` (the bridge). The event is `artifact:changed`. Storage is the `artifacts` table (SQLite/Postgres migrations) or `.polpo/artifacts/` in file mode.
+  - **UI:**
+    - an **Artifacts** section (replacing Views in every menu) with a gallery by type and search;
+    - a viewer with live content, versions and restore, source, data reload, full screen and download;
+    - in the chat, a card for each artifact made or changed, which opens it next to the conversation.
+
+- **Polpo as an MCP connector:** every server is also an MCP server at `/mcp` (Streamable HTTP, stateless), so Claude Code, Codex, Claude Desktop, Cursor and other MCP clients can use the instance.
+  - **Tools:** 22 tools for what people do (`ask_polpo` delegates anything to Polpo; `chat_with_agent`; tasks, missions, artifacts, data, approvals; files: `list_files`, `search_files`, `read_file` with text by line ranges and images and PDFs as they are, `write_file`, `manage_file` to make folders, rename and delete) plus `list_operations` / `call_operation`, which reach every REST operation of the server (more than 300). There is not one tool per endpoint, to keep the model's context small. Read-only and destructive tools (`call_operation`, `resolve_approval`, `write_file`, `manage_file`) are annotated.
+  - **Authentication:** the API key as `Authorization: Bearer` or `X-API-Key`, or **OAuth 2.1**, so it can be added as a custom connector in Claude (web, Desktop, mobile) and ChatGPT.
+    - **Discovery:** a `401` with the protected-resource pointer, then RFC 9728 and RFC 8414 metadata.
+    - **Client registration:** Client ID Metadata Documents or Dynamic Client Registration.
+    - **Codes:** authorization code with PKCE S256 only, `iss` in the response, loopback redirects on any port for Claude Code.
+    - **Consent page:** signed in to the dashboard, or with the API key or MCP key; it has a session-bound CSRF token.
+    - **Tokens:** 1-hour access tokens and 30-day refresh tokens rotated at every use, stored hashed in `.polpo/oauth.json`; `/oauth/revoke`.
+    - **Public URL:** the `X-Forwarded-*` headers when behind a proxy, or `POLPO_PUBLIC_URL`, which may carry a path (a proxy that mounts Polpo under `/name`) and applies to requests through its host.
+  - **Publishing only the connector:** `POLPO_MCP_KEY` opens `/mcp` and the consent page without putting an API key on the dashboard and REST API, so an instance can expose `/mcp`, `/oauth` and the discovery documents (for example with Tailscale Funnel) and keep the rest private. Since these endpoints can be public, open client registration is capped (200 clients; ones holding tokens are kept), and client metadata documents are fetched only from public addresses.
+  - **Same rules:** the tools call the server's own REST API in process.
+  - **stdio:** `polpo mcp --url <server> --api-key <key>` runs the same tools over stdio for clients that start a process.
+  - **Setup guide:** `docs/mcp.md`.
+- The API key middleware also accepts `Authorization: Bearer <key>`, not only `X-API-Key`.
+
+### Changed
+- Polpo's prompt now says when to make an artifact (documents, dashboards on real data, designs, diagrams) and keeps `render_widget` for small throwaway visuals in the chat. The old prompts contradicted each other on views vs widgets.
+- `data_create_view` / `data_update_view` are deprecated in favor of html dashboards. `/views` redirects to the artifacts of type view.
+- In the Artifacts section the former data views are marked **Legacy**: they have no tab of their own and a note says to make html dashboards instead.
+
+### Fixed
+- A data view shown in the dashboard queried its sources as an administrator, so an agent's view could show data that agent is not granted. As an artifact, a view's data bridge uses its author's rights.
+
+## [0.4.10] — 2026-10-15 — Fixes from DeltaPolpo
+
+Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #133–#137, #144, #145). Thanks!
+
 ### Added
 - **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
 
@@ -16,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Abort also cancels a mission paused at a checkpoint, and releases its checkpoints and delays.
 
 ### Fixed
+- **Telegram voice notes in private chats are transcribed on arrival**, as in groups, and their words become the message.
+  - **Why:** before, the model got an audio file it cannot hear and had to transcribe it with its tools. Polpo has no speech-to-text key of its own, so it delegated the transcription to an agent as a task. The transcript then lived only in a tool result, so the next message no longer knew what the voice note said ("I don't have the content of the voice message").
+  - **Which key:** the agent's own speech-to-text key (vault, then environment). Polpo uses the environment, else the first agent's key.
+  - **Without a key:** the audio stays attached, as before.
 - Task runs ignored the custom providers of `polpo.json` (local model servers such as Ollama or LM Studio, gateways): their models worked in chat, but tasks failed with "Model not found". The task runner now registers them, with their secrets from the vault.
 - Playbooks could not be run from the dashboard: the run dialog existed but no button opened it. Playbook cards and the playbook page now have a Run button.
 - Playbooks with checkpoints, delays or quality gates could be saved but not run: the blocked tasks lacked the `dependsOn` the mission schema requires, and the run answered a plain-text 500 ("Unexpected token 'I'… is not valid JSON" in the dashboard). The dependencies are now added when the playbook runs, and a run that cannot start answers a JSON 400 and leaves no mission behind.
@@ -29,7 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
 - A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
-- Tool calls whose arguments did not match the tool's schema were run or previewed anyway: e.g. a local model putting the mission name inside `data` produced a mission preview without a name. The chat now checks every call against its schema (pi-ai's validator) before running or previewing it; a call that does not match is returned to the model with the reason, so it can call the tool again in the same turn. An object or array parameter passed as a JSON string is still accepted, as before.
 
 ## [0.4.9] — 2026-10-14 — Routine
 

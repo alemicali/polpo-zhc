@@ -22,7 +22,7 @@ export const POLPO_EVENT_NAMES = [
   "chat:turn-started", "chat:queue-updated", "room:created", "room:updated", "room:deleted",
   "room:message", "room:typing", "background-wait:created", "background-wait:ready",
   "background-wait:running", "background-wait:completed", "background-wait:failed",
-  "background-wait:cancelled", "app:changed", "data-source:changed", "data-view:changed",
+  "background-wait:cancelled", "app:changed", "data-source:changed", "data-view:changed", "artifact:changed",
   "skill:changed", "brain:changed", "token-usage:recorded", "config:reloaded", "gateway:started",
   "gateway:stopped", "peer:paired", "peer:message", "peer:blocked", "peer:presence",
   "file:changed", "task:retried", "task:killed", "task:force-failed", "task:outcome",

@@ -181,6 +181,7 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "background-wait:cancelled": { label: "Background wait cancelled", description: "The background wait was cancelled.", category: "background", placeholders: ["wait"] },
   "app:changed": { label: "App changed", description: "An app was created, updated, deleted or its runtime changed.", category: "registry", placeholders: ["appId", "action", "resourceId"] },
   "data-source:changed": { label: "Data source changed", description: "A data source was created, updated, deleted or got new data.", category: "registry", placeholders: ["sourceId", "action"] },
+  "artifact:changed": { label: "Artifact changed", description: "An artifact (document, dashboard, design, diagram) was created, updated or deleted.", category: "registry", placeholders: ["artifactId", "action", "title"] },
   "data-view:changed": { label: "Data view changed", description: "A data view was created, updated or deleted.", category: "registry", placeholders: ["viewId", "action"] },
   "skill:changed": { label: "Skill changed", description: "A skill was created, updated, deleted, installed or (un)assigned.", category: "registry", placeholders: ["scope", "action", "skillName", "agentName"] },
   "brain:changed": { label: "Company brain changed", description: "An item of the company brain was created, updated or deleted.", category: "registry", placeholders: ["action", "subjectType", "subjectId"] },
