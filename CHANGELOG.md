@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **On Windows, `file_exists` expectations on an absolute path always failed** (`C:\data\x.csv`, `C:/data/x.csv`, `\\server\share\x.csv`): the check read a Windows absolute path as relative to the working directory and looked for it there.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added

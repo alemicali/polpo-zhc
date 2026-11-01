@@ -24,7 +24,8 @@ function pathJoin(...parts: string[]): string {
 
 /** Resolve a possibly-relative path against a base directory. */
 function pathResolve(base: string, relative: string): string {
-  if (relative.startsWith("/")) return relative;
+  // absolute: /x, and on Windows C:\x, C:/x or \\server\share ($POLPO_OUTPUT_DIR is one there)
+  if (relative.startsWith("/") || /^[A-Za-z]:[\\/]/.test(relative) || relative.startsWith("\\\\")) return relative;
   return pathJoin(base, relative);
 }
 
