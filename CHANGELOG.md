@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Task outputs are saved by run and by task, with readable names.** Each task now has its own folder under `output/` in the agents' working directory: `output/<mission run>/<NN> - <task title>/` for the tasks of a mission (the run name is already unique, e.g. `report (2)`, and the number follows the order of the tasks in the mission) and `output/tasks/<task title> - <id>/` for a task outside a mission. Before, each task got `.polpo/output/<task id>/`, a hidden folder named by an id that agents hardly used: a file the task named without a folder (`save it in report.md`) landed in the working directory, where every run overwrote the previous one and the files of all missions mixed. Now:
+  - the agent is told that such a file goes in its output folder, and to create or edit files elsewhere only when the task is about them (e.g. a source file of the project), so coding tasks work as before;
+  - the task message also gives the exact path of each new file its description names (`save it in report.md` → `output/report (2)/02 - Write report/report.md`): small local models follow a concrete path, not a rule. Names of files that already exist in the working directory, or that the tasks it depends on produced, are left out (they are files to edit or to read);
+  - a task that depends on others is told where their folders are and which files they contain, so `read data.md` finds the file the previous task saved;
+  - the mission page has an **Output** button (the run's folder) and the task page an **Output folder** card, both opening the Files page there (`/files?workspacePath=…`, relative to the agents' workspace).
+
+### Fixed
+- **An agent could overwrite the files of the tasks before it**: its file tools reached all of `output/` through the working directory grant, so an agent told to correct the drafts of a previous task wrote its corrections over them, and the originals were gone. In a task run, the output folders of the other tasks are now read-only: the agent reads them, but `write`, `edit` and the tools that save a file (Excel, Word, PDF, images, video, speech, downloads, email attachments, screenshots) refuse a path there and name the agent's own output folder, so it can write the file again in the right place. The agent's prompt says so too. The project's other files are writable as before; `bash` commands are not covered.
+
+### Security
+- **Task agents could read and write the project's `.polpo` folder.** The file tools keep agents out of `.polpo` (configuration, `.env`, vault, sessions, storage mounts), but the guard was only switched on in the server process. Tasks run in a separate runner process, where it was off: an agent with the default access (its working directory) could read `.polpo/.env` or the vault file and write anywhere in `.polpo`. The runner now sets the same guard before building the agent's tools, with the same exceptions (offloaded tool outputs, skills, playbooks). A task output folder that lies inside `.polpo` stays writable: it is now granted explicitly.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added

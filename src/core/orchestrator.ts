@@ -114,11 +114,12 @@ import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-st
 import type { ContextCheckpointStore } from "@polpo-ai/core/context-checkpoint";
 import { databaseStoresFor } from "./storage.js";
 import { resolveToolOutputDir } from "../tools/tool-output.js";
+import { listOutputFiles } from "./output-files.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
-import { setProtectedPaths } from "../tools/path-sandbox.js";
+import { protectPolpoDir } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
@@ -834,11 +835,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Agents' file tools never reach .polpo through a broader grant (config, .env, sessions,
     // vault, storage mounts); granted paths inside it (task output, mounts) stay reachable.
-    setProtectedPaths([this.polpoDir], [
-      join(this.polpoDir, "tmp", "tool-output"),
-      join(this.polpoDir, "skills"),
-      join(this.polpoDir, "playbooks"),
-    ]);
+    protectPolpoDir(this.polpoDir);
 
     // Apply provider overrides from config
     if (this.config.providers) {
@@ -1027,6 +1024,8 @@ export class Orchestrator extends TypedEmitter {
         if (!existsSync(logPath)) return null;
         return readFileSync(logPath, "utf-8");
       },
+      listOutputFiles: (dir) => listOutputFiles(dir),
+      fileExists: async (path) => existsSync(path),
       notifySocketPath: getSocketPath(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"

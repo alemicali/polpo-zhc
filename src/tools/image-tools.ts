@@ -27,7 +27,7 @@ import { resolve, extname } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 
@@ -190,7 +190,7 @@ function createGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, vaul
     parameters: ImageGenerateSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "image_generate");
+      assertWriteAllowed(filePath, sandbox, "image_generate");
 
       try {
         return await generateFal(fs, filePath, params, vault, signal);
@@ -312,7 +312,7 @@ function createVideoGenerateTool(cwd: string, sandbox: string[], fs: FileSystem,
     parameters: VideoGenerateSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "video_generate");
+      assertWriteAllowed(filePath, sandbox, "video_generate");
 
       try {
         return await generateVideo(fs, filePath, params, vault, signal);

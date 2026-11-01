@@ -24,6 +24,8 @@ import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./no
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { registerRunnerProviders } from "./runner-providers.js";
+import { protectOtherTaskOutputs, protectPolpoDir } from "../tools/path-sandbox.js";
+import { OUTPUT_ROOT } from "@polpo-ai/core";
 import type { VaultStore } from "./vault-store.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import type { TaskControlStore, TaskDirection } from "./task-control-store.js";
@@ -195,6 +197,12 @@ async function createStores(config: RunnerConfig): Promise<RunnerStores> {
 async function main(): Promise<void> {
   const isDbMode = process.argv.includes("--run-id");
   const config = isDbMode ? await readConfigFromDb() : readConfigFromFile();
+  // Same guard as the server (Orchestrator.init): this process has its own copy of it, and without
+  // this call the agent's file tools reached .polpo (.env, config, vault, sessions) through cwd.
+  protectPolpoDir(config.polpoDir);
+  // The other tasks' output folders are read-only for this agent: it reads its dependencies'
+  // deliverables, it does not overwrite them.
+  if (config.outputDir) protectOtherTaskOutputs(join(config.cwd, OUTPUT_ROOT), config.outputDir);
   const { runStore, taskControlStore, logStore, vaultStore: drizzleVaultStore, whatsappStore: dbWhatsAppStore } = await createStores(config);
   const actLog = new RunActivityLog(config.polpoDir, config.runId, config.taskId, config.agent.name);
 

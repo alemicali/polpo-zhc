@@ -37,7 +37,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 // Re-export with concrete generic to avoid "requires 1 type argument" errors
 type ToolResult = AgentToolResult<any>;
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, withHostTempDir, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 
@@ -346,7 +346,7 @@ function createSpeakTool(cwd: string, sandbox: string[], fs: FileSystem, vault?:
     parameters: AudioSpeakSchema,
     async execute(_id, params, signal) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "audio_speak");
+      assertWriteAllowed(filePath, sandbox, "audio_speak");
 
       const provider = params.provider ?? "openai";
 

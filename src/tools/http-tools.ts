@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertWriteAllowed } from "./path-sandbox.js";
 import { assertUrlAllowed } from "./ssrf-guard.js";
 import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
 import { toolFs, writeBytes } from "./tool-fs.js";
@@ -178,7 +178,7 @@ function createHttpDownloadTool(cwd: string, sandbox: string[], fs: FileSystem):
       }
 
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "http_download");
+      assertWriteAllowed(filePath, sandbox, "http_download");
 
       try {
         const controller = new AbortController();
