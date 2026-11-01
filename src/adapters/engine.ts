@@ -41,7 +41,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
-import { createSystemTools, createAllTools } from "../tools/system-tools.js";
+import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
@@ -63,22 +63,35 @@ import { inkRegistry } from "../core/ink-config.js";
  * Mirrors the orchestrator-side `describeAgentCapabilities()` in prompts.ts
  * but is more detailed — written for the agent itself, not the orchestrator.
  */
-function describeToolsForAgent(agent: AgentConfig): string {
+/**
+ * Whether the agent gets a core or Ink tool: createAllTools keeps only those named in
+ * `allowedTools` (wildcards expanded), all of them without a list. The prompt names only these,
+ * or an agent limited to the file tools believes it has bash and makes up having used it.
+ */
+export function grantsTool(agent: AgentConfig, name: string): boolean {
+  if (!agent.allowedTools) return true;
+  return expandToolWildcards(agent.allowedTools, ALL_EXTENDED_TOOL_NAMES).some((a) => a.toLowerCase() === name);
+}
+
+export function describeToolsForAgent(agent: AgentConfig): string {
   const lines: string[] = ["## Available Tools", ""];
 
-  // --- Core tools (always present) ---
+  // --- Core tools: the ones the agent gets (vault_get/vault_list come with every agent) ---
+  const core: Array<[string, string]> = [
+    ["read", "- `read` — read file contents (supports offset/limit for large files)"],
+    ["write", "- `write` — create or overwrite files"],
+    ["edit", "- `edit` — surgical string replacement in files (preferred over rewriting entire files)"],
+    ["bash", "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output"],
+    ["glob", "- `glob` — find files by pattern (e.g. `**/*.ts`)"],
+    ["grep", "- `grep` — search file contents by regex"],
+    ["ls", "- `ls` — list directory contents"],
+    ["http_fetch", "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)"],
+    ["http_download", "- `http_download` — download files from URLs"],
+    ["register_outcome", "- `register_outcome` — declare task deliverables (files, URLs, text, data)"],
+  ];
   lines.push(
-    "**Core (always available):**",
-    "- `read` — read file contents (supports offset/limit for large files)",
-    "- `write` — create or overwrite files",
-    "- `edit` — surgical string replacement in files (preferred over rewriting entire files)",
-    "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output",
-    "- `glob` — find files by pattern (e.g. `**/*.ts`)",
-    "- `grep` — search file contents by regex",
-    "- `ls` — list directory contents",
-    "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)",
-    "- `http_download` — download files from URLs",
-    "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
+    "**Core:**",
+    ...core.filter(([name]) => grantsTool(agent, name)).map(([, line]) => line),
     "- `vault_get` — retrieve stored credentials/secrets",
     "- `vault_list` — list available vault entries",
   );
@@ -246,25 +259,33 @@ function describeToolsForAgent(agent: AgentConfig): string {
     lines.push(...extended);
   }
 
-  // --- Ink Hub tools (always available when polpoDir exists) ---
-  lines.push(
-    "",
-    "**Ink Hub (package registry — always available):**",
-    "- `ink_search` — search the Ink Hub for available packages (playbooks, agents, companies)",
-    "- `ink_browse` — list packages currently installed in this project",
-    `- \`ink_add\` — install packages from a GitHub source (e.g. '${inkRegistry()}')`,
-    "- `ink_remove` — remove an installed registry source and uninstall its packages",
-    "- `ink_update` — update installed registries by pulling the latest from git",
-    "Use ink tools to find and install reusable playbooks, agent configs, and company setups.",
-    `The official registry is '${inkRegistry()}'.`,
-  );
+  // --- Ink Hub tools (when polpoDir exists, filtered like the core tools) ---
+  const ink: Array<[string, string]> = [
+    ["ink_search", "- `ink_search` — search the Ink Hub for available packages (playbooks, agents, companies)"],
+    ["ink_browse", "- `ink_browse` — list packages currently installed in this project"],
+    ["ink_add", `- \`ink_add\` — install packages from a GitHub source (e.g. '${inkRegistry()}')`],
+    ["ink_remove", "- `ink_remove` — remove an installed registry source and uninstall its packages"],
+    ["ink_update", "- `ink_update` — update installed registries by pulling the latest from git"],
+  ];
+  const inkLines = ink.filter(([name]) => grantsTool(agent, name)).map(([, line]) => line);
+  if (inkLines.length > 0) {
+    lines.push(
+      "",
+      "**Ink Hub (package registry):**",
+      ...inkLines,
+      "Use ink tools to find and install reusable playbooks, agent configs, and company setups.",
+      `The official registry is '${inkRegistry()}'.`,
+    );
+  }
 
   // --- Guidance ---
   lines.push(
     "",
     "**IMPORTANT:** ALWAYS prefer your available tools over shell commands, npm installs, or manual workarounds.",
     "For example: use `email_send` not `curl`; use `pdf_read` not `pip install PyPDF2`; use `excel_read` not `npm install xlsx`.",
-    "If a task requires a capability you don't have listed above, use `bash` as a fallback.",
+    grantsTool(agent, "bash")
+      ? "If a task requires a capability you don't have listed above, use `bash` as a fallback."
+      : "You have only the tools listed above: no shell (`bash`) and no other tools. Never say you used a tool you do not have; if the task needs one, say so in your result.",
   );
 
   return lines.join("\n");
@@ -331,7 +352,7 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
     "",
     "## Working Directory",
     `Your working directory is: ${cwd}`,
-    "All file tools (read, write, edit, glob, grep, ls) and bash resolve paths relative to this directory.",
+    `All file tools (read, write, edit, glob, grep, ls)${grantsTool(agent, "bash") ? " and bash" : ""} resolve paths relative to this directory.`,
     "Use relative paths from here — do NOT prepend the workspace directory name to your paths.",
     "For example, if your cwd is /data/project/workspace, use `brand/file.html` NOT `workspace/brand/file.html`.",
   );
@@ -364,9 +385,9 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
 }
 
 /**
- * Build the user prompt from task data.
+ * Build the user prompt from task data. The bash rules only go to an agent that has bash.
  */
-function buildPrompt(task: Task): string {
+export function buildPrompt(task: Task, hasBash = true): string {
   const parts = [`Task: ${task.title}`, ``, task.description];
   if (task.expectations.length > 0) {
     parts.push(``, `Acceptance criteria:`);
@@ -385,18 +406,24 @@ function buildPrompt(task: Task): string {
     `- You MUST terminate after completing your work. Never block indefinitely.`,
     `- Your session has a timeout. If you hang, you will be killed and the task will fail.`,
     ``,
-    `CRITICAL — Bash tool rules:`,
-    `- The bash tool has a default timeout of 30 seconds. Commands that exceed it are killed.`,
-    `- For long commands (npm install, builds, etc.), pass an explicit timeout: {"command": "...", "timeout": 120000}`,
-    `- NEVER run a server or long-lived process in the foreground. It will block forever and kill your session.`,
-    `- To start a background server, ALWAYS use this exact pattern:`,
-    `  {"command": "nohup python3 server.py > /tmp/server.log 2>&1 & echo \"PID=$!\"", "timeout": 5000}`,
-    `  Then verify separately: {"command": "sleep 2 && curl -s --max-time 5 http://127.0.0.1:PORT/", "timeout": 10000}`,
-    `- NEVER combine server start + verification in one command (e.g. "cmd & sleep 2 && lsof" WILL hang).`,
-    `- NEVER use "lsof" or "netstat" to check if a server is running. Use "curl" instead.`,
-    `- NEVER use "tail -f", "watch", or any command that runs forever.`,
-    `- If a command times out, do NOT retry the same command. Analyze why it hung and fix the approach.`,
-    ``,
+  );
+  if (hasBash) {
+    parts.push(
+      `CRITICAL — Bash tool rules:`,
+      `- The bash tool has a default timeout of 30 seconds. Commands that exceed it are killed.`,
+      `- For long commands (npm install, builds, etc.), pass an explicit timeout: {"command": "...", "timeout": 120000}`,
+      `- NEVER run a server or long-lived process in the foreground. It will block forever and kill your session.`,
+      `- To start a background server, ALWAYS use this exact pattern:`,
+      `  {"command": "nohup python3 server.py > /tmp/server.log 2>&1 & echo \"PID=$!\"", "timeout": 5000}`,
+      `  Then verify separately: {"command": "sleep 2 && curl -s --max-time 5 http://127.0.0.1:PORT/", "timeout": 10000}`,
+      `- NEVER combine server start + verification in one command (e.g. "cmd & sleep 2 && lsof" WILL hang).`,
+      `- NEVER use "lsof" or "netstat" to check if a server is running. Use "curl" instead.`,
+      `- NEVER use "tail -f", "watch", or any command that runs forever.`,
+      `- If a command times out, do NOT retry the same command. Analyze why it hung and fix the approach.`,
+      ``,
+    );
+  }
+  parts.push(
     `CRITICAL — Outcome tracking:`,
     `When you produce artifacts (files, reports, data), the orchestrator attaches them to`,
     `task-done notifications (Telegram, Slack, etc.) and approval reviews.`,
@@ -820,7 +847,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       if (ctx?.continuation) {
         const continuationPrompt = ctx.resumeMessages?.length
           ? ctx.continuation.message
-          : `${buildPrompt(task)}\n\n[Human direction]\n${ctx.continuation.message}`;
+          : `${buildPrompt(task, grantsTool(agentConfig, "bash"))}\n\n[Human direction]\n${ctx.continuation.message}`;
         const continuationMessage: AgentMessage = {
           role: "user",
           content: [{ type: "text", text: continuationPrompt }],
@@ -829,7 +856,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         directionAcks.set(continuationMessage, ctx.continuation.directionIds);
         await agent.prompt(continuationMessage);
       } else {
-        await agent.prompt(buildPrompt(task));
+        await agent.prompt(buildPrompt(task, grantsTool(agentConfig, "bash")));
       }
 
       // "Context too long" from the provider: compact harder and continue once.

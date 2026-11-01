@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **An agent limited to some tools was told it had all the core ones**: the agent's prompt listed read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome and the vault tools as "always available", and the Ink tools too, whatever its `allowedTools`. An agent limited to the file tools tried `bash` ("Tool bash not found") or wrote that it had run a command it never could. The prompt now names only the tools the agent gets, with the same filter that creates them (the vault tools come with every agent); an agent without `bash` is told it has no shell and not to claim tools it does not have, and the bash rules are left out of its task message.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
