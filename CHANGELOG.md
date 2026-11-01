@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Agent pipelines run:** an agent with `loops` and a `pipeline` now runs it for every task assigned to it, instead of the contract being only validated and stored. Loops (own instructions, tools, model, turn limit, `stopWhen`, `output.schema`, retried with feedback up to 3 attempts), `parallel` (join all / any / n), `switch`, `when` guards and `human` approvals, with a shared context. Human steps are regular approvals (Approvals page, `/approve`, API); requests left open by a stopped pipeline are closed automatically. The run state travels with `agent:activity` events. See `docs/loops.md`.
+- **Pipeline editor** (Agents → an agent → Pipeline): define the agent's loops and its pipeline as a top-down flow. Insert loops, parallel branches, switches and human approvals with the "+" on the arrows, edit them in a side panel, and see problems (unknown loops, empty branches, duplicate approval names) on the nodes; they block saving. `PATCH /agents/:name` accepts `pipeline: null` to remove the pipeline and rejects pipelines that reference unknown loops.
+- **Live pipeline view** (Tasks → a task → Pipeline): for tasks of an agent with a pipeline, each step is colored by its state (running, waiting for approval, done, failed, skipped or stopped), with attempts, retry feedback, errors and the shared context. It updates live while the task runs and stays available after it ends.
+- **Checkpoints in the dashboard:** a mission paused at a checkpoint opens an approval request (Approvals page, sidebar badge, history, `/approve`). Approving it resumes the mission; rejecting it aborts the mission. The mission page shows the pause with an "Approve and continue" button. Resuming, aborting or deleting the mission closes the request. Before, a paused mission could be resumed only through the API.
+- **Mission actions:** a Delete button, with confirmation, on the mission page, and Abort also on a mission paused at a checkpoint.
+- **Playbook graph editor** (Playbooks → a playbook → Editor): add tasks, checkpoints and delays, connect them by dragging, edit them in a side panel, and save. Cycles are refused, renaming or deleting a task updates every reference, and saving adds the `dependsOn` that checkpoints and delays require. A **New playbook** button creates an empty playbook and opens it in the editor.
+
+### Fixed
+- **Playbook editor connections can be removed and moved.** A connection between two nodes could only be removed by selecting it and pressing Delete, and nothing showed it was selected (its colour hid the selection), so it looked impossible to change. A selected connection is now highlighted and shows a × button that removes it; a connection under the pointer lights up and is easier to hit; and its ends can be dragged to another node to move it (refused, keeping the old one, if the new one would create a cycle).
+- **The mission graph disappeared when a run paused at a checkpoint** (nodes and connections gone, only the background left). On every status update the graph was rebuilt with new node objects that had lost the size React Flow had measured; React Flow hides a node of unknown size and measures it again only when its size changes. Task cards change size with their status, so they came back, but at a checkpoint nothing changed size and the whole graph stayed hidden. The rebuilt nodes now keep their measured size (mission page and playbook editor).
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
