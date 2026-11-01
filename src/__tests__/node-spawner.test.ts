@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerConfig } from "../core/types.js";
 
-const spawnMock = vi.hoisted(() => vi.fn(() => ({ pid: 4242, unref: () => undefined })));
+// A child that starts: NodeSpawner waits for its "spawn" event before it returns.
+const spawnMock = vi.hoisted(() => vi.fn(() => {
+  const child = {
+    pid: 4242,
+    unref: () => undefined,
+    once: (event: string, listener: () => void) => { if (event === "spawn") queueMicrotask(listener); return child; },
+  };
+  return child;
+}));
 // When set, the runner script (runner.js / runner.ts) is missing, as inside a compiled binary.
 const runnerMissing = vi.hoisted(() => ({ value: false }));
 

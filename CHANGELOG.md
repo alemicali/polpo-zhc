@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A runner that could not start ended the whole server** (for example a project folder longer than Windows' 260 characters, or one that no longer exists): the start error came as an event nobody listened to. The task now fails with the reason and the working folder, and the server keeps running.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
