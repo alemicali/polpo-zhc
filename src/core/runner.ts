@@ -17,6 +17,8 @@ import { basename, extname, join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
+import { spawnPipeline, hasPipeline } from "../adapters/pipeline.js";
+import { createHumanRelay } from "./pipeline/human-relay.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
@@ -353,7 +355,21 @@ async function main(): Promise<void> {
       resumeMessages: checkpoint?.messages,
       continuation,
     };
-    handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
+    // Agents with a deterministic pipeline run it step by step (docs/loops.md);
+    // every other agent runs the task as a single engine session.
+    handle = hasPipeline(config.agent)
+      ? spawnPipeline(config.agent, config.task, config.cwd, spawnCtx, {
+          requestHuman: config.notifySocket
+            ? createHumanRelay({
+                socketPath: config.notifySocket,
+                runId: config.runId,
+                taskId: config.taskId,
+                agentName: config.agent.name,
+                log: (message) => actLog.logEvent("pipeline", { message }),
+              })
+            : async () => { throw new Error("Human steps need a local Polpo server (no notification socket)"); },
+        })
+      : spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => {
       actLog.logTranscript(entry);
