@@ -75,3 +75,44 @@ test("web plain text and mobile text-part history reuse the same prefix", async 
   expect(next.messages[0].content).toContain("Context checkpoint");
   expect(next.messages[1]).toEqual(history[1]);
 });
+
+test("a stale checkpoint is replaced: the next turn reuses the new one instead of compacting everything again", async () => {
+  const { store } = await setup();
+  const { createSessionCompaction, inspectContextCheckpoint } = await import("@polpo-ai/server");
+  const model = { provider: "test", id: "small", contextWindow: 4_000, maxTokens: 400 };
+  const history = Array.from({ length: 200 }, (_, i) => message(`turn ${i}: ${"words about meals and plans ".repeat(16)}`));
+  // a checkpoint left by another model (scope) for this session
+  const old = await contextCheckpointProjection(store, "chat", "another-model", history);
+  await old.remember(history.slice(0, 10), message("marker"));
+  expect((await inspectContextCheckpoint(store, "chat", "small-model", history)).rejected).toBe("made for another model or session");
+
+  const turn = (messages: any[]) => createSessionCompaction({
+    model, settings: {}, systemPrompt: () => "You are a coach.", tools: () => [],
+    original: messages, sessionId: "chat", scope: "small-model", store,
+  });
+  const first = await (await turn(history)).prepare([...history]);
+  expect(first.info).toMatchObject({ compactionCount: 1 });
+  expect((await store.load("chat"))?.scope).toBe("small-model");
+
+  // next turn: two more messages; the checkpoint is reused, nothing is compacted again
+  const next = [...history, message("how did lunch go?"), message("fine, salad")];
+  const inspection = await inspectContextCheckpoint(store, "chat", "small-model", next);
+  expect(inspection.rejected).toBeUndefined();
+  expect(inspection.checkpoint?.covered).toBeGreaterThan(0);
+  const second = await (await turn(next)).prepare([...next]);
+  expect(second.info).toBeNull();
+  expect(String(second.messages[0].content)).toContain("Context checkpoint");
+});
+
+test("inspection says why a checkpoint is not reused", async () => {
+  const { store } = await setup();
+  const { inspectContextCheckpoint } = await import("@polpo-ai/server");
+  const history = [message("a"), message("b"), message("c"), message("d")];
+  await (await contextCheckpointProjection(store, "chat", "model", history)).remember(history.slice(0, 3), message("marker"));
+  expect((await inspectContextCheckpoint(store, "chat", "model", history.slice(0, 2))).rejected).toBe("it covers 3 messages, the conversation has 2");
+  expect((await inspectContextCheckpoint(store, "chat", "model", [history[1], history[0], ...history.slice(2)])).rejected).toBe("message 1 of the 3 it covers is in another position (user)");
+  expect((await inspectContextCheckpoint(store, "chat", "model", [history[0], message("edited"), ...history.slice(2)])).rejected).toBe("message 2 of the 3 it covers changed (user)");
+  const ok = await inspectContextCheckpoint(store, "chat", "model", history);
+  expect(ok.rejected).toBeUndefined();
+  expect(ok.storedRevision).toBe(ok.checkpoint?.revision);
+});
