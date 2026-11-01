@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A context-full error from Ollama or llama.cpp was not recognized** ("request (16384 tokens) exceeds the available context size"), so the task failed instead of compacting its conversation and retrying once, as it does for the other providers' overflow errors.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
