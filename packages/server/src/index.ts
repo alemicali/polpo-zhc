@@ -22,7 +22,7 @@ export { watcherRoutes } from "./routes/watchers.js";
 export { stateRoutes } from "./routes/state.js";
 export { healthRoutes } from "./routes/health.js";
 export { completionRoutes, CHAT_ORIGIN_HEADER, EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, type CompletionRouteDeps, type TokenUsageRecord } from "./routes/completions.js";
-export { contextCheckpointProjection, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointStore } from "./context-checkpoint.js";
+export { contextCheckpointProjection, inspectContextCheckpoint, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointInspection, type ContextCheckpointStore } from "./context-checkpoint.js";
 export { createSessionCompaction, type SessionCompaction, type SessionCompactorOptions } from "./session-compactor.js";
 export { agentRoutes } from "./routes/agents.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
