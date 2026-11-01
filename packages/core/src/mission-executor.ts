@@ -3,7 +3,7 @@ import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome } from "./types.js";
 import type { QualityController } from "./quality-controller.js";
-import { sanitizeExpectations, parseMissionDocument, type MissionDocumentParsed } from "./schemas.js";
+import { sanitizeExpectations, parseMissionDocument, dependencyOrder, type MissionDocumentParsed } from "./schemas.js";
 import type { CheckpointStore, CheckpointState } from "./checkpoint-store.js";
 import type { DelayStore, DelayState } from "./delay-store.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
@@ -727,7 +727,8 @@ export class MissionExecutor {
     // Create tasks with dependency resolution
     const titleToId = new Map<string, string>();
     const tasks: Task[] = [];
-    for (const t of doc.tasks) {
+    // A task may be listed before one it depends on: create dependencies first, or the id is unknown
+    for (const t of dependencyOrder(doc.tasks)) {
       const deps = (t.dependsOn || [])
         .map((title: string) => titleToId.get(title))
         .filter((id: string | undefined): id is string => !!id);
@@ -952,6 +953,15 @@ export class MissionExecutor {
       throw new Error(`Task title "${updates.title}" already exists in this mission`);
     }
     doc.tasks[idx] = { ...doc.tasks[idx], ...updates } as MissionDocumentParsed["tasks"][number];
+    // A rename keeps the links to the task: dependsOn of the others and the flow-control lists
+    if (updates.title && updates.title !== taskTitle) {
+      const rename = (titles: string[]) => titles.map(t => (t === taskTitle ? updates.title! : t));
+      for (const t of doc.tasks) if (t.dependsOn) t.dependsOn = rename(t.dependsOn);
+      for (const fc of [...(doc.qualityGates ?? []), ...(doc.checkpoints ?? []), ...(doc.delays ?? [])]) {
+        fc.afterTasks = rename(fc.afterTasks);
+        fc.blocksTasks = rename(fc.blocksTasks);
+      }
+    }
     return this.persistMissionData(missionId, doc, { section: "task", action: "updated", item: taskTitle });
   }
 
