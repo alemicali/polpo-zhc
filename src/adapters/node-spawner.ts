@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { Spawner, SpawnResult } from "../core/spawner.js";
 import type { RunnerConfig } from "../core/types.js";
 import { RUNNER_COMMAND } from "../core/runner-command.js";
+import { killProcessTree } from "../sandbox/local-shell.js";
 
 export class NodeSpawner implements Spawner {
   private polpoDir: string;
@@ -90,6 +91,8 @@ export class NodeSpawner implements Spawner {
 
   kill(pid: number): void {
     if (pid <= 0) return;
+    // Windows has no SIGTERM to handle: end the runner and every command it started at once
+    if (process.platform === "win32" && killProcessTree(pid)) return;
     try {
       process.kill(pid, "SIGTERM");
       setTimeout(() => {

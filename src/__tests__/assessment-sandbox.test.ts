@@ -26,7 +26,8 @@ describe("assessment commands and the task's sandbox", () => {
   test("no sandbox or local: run on this machine as before", async () => {
     for (const sb of [undefined, sandbox("local")]) {
       const assess = sandboxedAssessFn({ getRunByTaskId: runWith(sb) });
-      const result = await assess(task([{ type: "test", command: `cat ${polpoDir}/secret.txt` }]), cwd);
+      // quoted: on Windows the path has backslashes, and checks run in bash there too
+      const result = await assess(task([{ type: "test", command: `cat "${polpoDir}/secret.txt"` }]), cwd);
       expect(result.checks[0]!.passed).toBe(true);
     }
   });

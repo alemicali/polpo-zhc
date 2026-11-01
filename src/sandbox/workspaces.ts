@@ -15,6 +15,7 @@ import type {
   EffectiveSandbox, ExecOptions, ExecResult, StorageMountSpec, Workspace, WorkspaceEntry, WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
 import { startNetworkProxy, type NetworkDenial, type NetworkProxy } from "./net-proxy.js";
+import { killProcessTree, localShell } from "./local-shell.js";
 
 /** Output kept in memory per stream; the bash tool offloads anything big to a file anyway. */
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024;
@@ -97,7 +98,7 @@ export abstract class HostFsWorkspace implements Workspace {
 export function run(argv: string[], opts: ExecOptions & { env: Record<string, string>; cwd?: string }): Promise<ExecResult> {
   const started = Date.now();
   return new Promise((resolveRun) => {
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -109,19 +110,39 @@ export function run(argv: string[], opts: ExecOptions & { env: Record<string, st
     };
     child.stdout.on("data", collect("out"));
     child.stderr.on("data", collect("err"));
-    const kill = () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); } };
+    // the whole tree: the shell and what it started
+    let killed = false;
+    const kill = () => {
+      killed = true;
+      if (process.platform === "win32" && child.pid && killProcessTree(child.pid)) return;
+      try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+    };
     const timer = opts.timeoutMs ? setTimeout(() => { timedOut = true; kill(); }, opts.timeoutMs) : undefined;
     opts.signal?.addEventListener("abort", kill, { once: true });
     if (opts.stdin !== undefined) child.stdin.end(opts.stdin); else child.stdin.end();
+    let settled = false;
+    const finish = (result: ExecResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolveRun(result);
+    };
     child.on("error", (error) => {
-      if (timer) clearTimeout(timer);
-      resolveRun({ exitCode: 127, stdout, stderr: `${stderr}${error.message}`, durationMs: Date.now() - started });
+      finish({ exitCode: 127, stdout, stderr: `${stderr}${error.message}`, durationMs: Date.now() - started });
     });
-    child.on("close", (code, signal) => {
-      if (timer) clearTimeout(timer);
+    const done = (code: number | null, signal: NodeJS.Signals | null) => {
       const exitCode = code ?? (signal ? 128 + 9 : 1);
       if (timedOut && !stderr) stderr = `Command timed out after ${opts.timeoutMs}ms`;
-      resolveRun({ exitCode: timedOut && exitCode === 0 ? 124 : exitCode, stdout, stderr, ...(timedOut ? { timedOut } : {}), durationMs: Date.now() - started });
+      finish({ exitCode: timedOut && exitCode === 0 ? 124 : exitCode, stdout, stderr, ...(timedOut ? { timedOut } : {}), durationMs: Date.now() - started });
+    };
+    child.on("close", done);
+    // A stopped command ends when the shell exits: a program it left behind may keep the output
+    // open (seen with Git's bash on Windows), and the run must not wait for it.
+    child.on("exit", (code, signal) => {
+      if (!killed) return;
+      child.stdout.destroy();
+      child.stderr.destroy();
+      done(code, signal);
     });
   });
 }
@@ -131,7 +152,8 @@ export class LocalWorkspace extends HostFsWorkspace {
   readonly provider = "local" as const;
   constructor(opts: HostWorkspaceOptions, private readonly baseEnv: () => Record<string, string>) { super(opts); }
   exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
-    return run(["/bin/bash", "-c", command], { ...opts, cwd: opts.cwd ?? this.root, env: { ...this.baseEnv(), ...(opts.env ?? {}) } });
+    // /bin/bash, or Git's bash / cmd.exe on Windows (local-shell.ts)
+    return run(localShell().argv(command), { ...opts, cwd: opts.cwd ?? this.root, env: { ...this.baseEnv(), ...(opts.env ?? {}) } });
   }
 }
 

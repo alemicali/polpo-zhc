@@ -36,7 +36,7 @@ import {
   FolderOpen,
   Hash,
   Asterisk,
-
+  Plus,
 } from "lucide-react";
 import { usePlaybooks } from "@polpo-ai/react";
 import type {
@@ -45,6 +45,7 @@ import type {
 } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 
 // ── Parameter type badge colors ──
 
@@ -363,10 +364,113 @@ function PlaybookCard({
 
 // ── Main page ──
 
+// ── New playbook dialog ──
+
+/** Playbook names are kebab-case slugs (validated by the server). */
+function toSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "") // drop accents: "Ricerca città" → "ricerca-citta"
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+function NewPlaybookDialog({
+  open,
+  onOpenChange,
+  existing,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  existing: string[];
+  onCreate: (name: string, description: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const name = toSlug(title);
+  const taken = existing.includes(name);
+  const canCreate = !!name && !taken && !!description.trim() && !creating;
+
+  const submit = async () => {
+    if (!canCreate) return;
+    setCreating(true);
+    try {
+      await onCreate(name, description.trim());
+      setTitle("");
+      setDescription("");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Workflow className="h-4 w-4 text-primary" />
+            New playbook
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Name</label>
+            <Input
+              autoFocus
+              placeholder="Weekly report"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="h-9 text-sm"
+            />
+            <p className={cn("text-[11px]", taken ? "text-destructive" : "text-muted-foreground")}>
+              {name ? (taken ? `A playbook named "${name}" already exists` : <>Saved as <code className="font-mono">{name}</code></>) : "Letters, numbers and dashes"}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Description</label>
+            <Textarea
+              placeholder="What this workflow does"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="min-h-[70px] text-sm"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            The playbook opens in the graph editor, where you add tasks, checkpoints and delays and connect them.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" className="gap-1.5" disabled={!canCreate} onClick={submit}>
+            {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            Create
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PlaybooksPage() {
   const navigate = useNavigate();
-  const { playbooks, loading, refetch, runPlaybook } = usePlaybooks();
+  const { playbooks, loading, refetch, runPlaybook, savePlaybook } = usePlaybooks();
   const [search, setSearch] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+
+  // An empty playbook, opened straight in the graph editor.
+  const handleCreate = async (name: string, description: string) => {
+    try {
+      await savePlaybook({ name, description, mission: { name, tasks: [] }, parameters: [] });
+      setNewOpen(false);
+      toast.success(`Playbook "${name}" created`);
+      navigate(`/playbooks/${encodeURIComponent(name)}?tab=editor`);
+    } catch (e) {
+      toast.error(`Could not create the playbook: ${(e as Error).message}`);
+    }
+  };
 
   // Run dialog state
   const [runTarget, setRunTarget] = useState<PlaybookInfo | null>(null);
@@ -430,6 +534,11 @@ export function PlaybooksPage() {
         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refetch}>
           <RefreshCw className="h-3.5 w-3.5" />
         </Button>
+
+        <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          New playbook
+        </Button>
       </div>
 
       {/* Playbook list */}
@@ -445,8 +554,12 @@ export function PlaybooksPage() {
             <p className="text-xs mt-1 text-center max-w-sm">
               {playbooks.length === 0 ? (
                 <>
-                  Playbooks are parameterized mission definitions.
-                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
+                  Playbooks are reusable workflows: tasks for your agents, connected in a graph.
+                  <span className="mt-3 block">
+                    <Button size="sm" className="gap-1.5" onClick={() => setNewOpen(true)}>
+                      <Plus className="h-3.5 w-3.5" /> New playbook
+                    </Button>
+                  </span>
                 </>
               ) : (
                 "Try adjusting your search"
@@ -468,6 +581,13 @@ export function PlaybooksPage() {
           </div>
         </ScrollArea>
       )}
+
+      <NewPlaybookDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        existing={playbooks.map((p) => p.name)}
+        onCreate={handleCreate}
+      />
 
       {/* Run dialog */}
       {runTarget && (

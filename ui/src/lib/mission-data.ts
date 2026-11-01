@@ -6,6 +6,8 @@ export interface MissionTaskDef {
   title: string;
   description?: string;
   assignTo?: string;
+  /** Script task: Polpo runs this shell command itself, no agent (assignTo is unused). */
+  script?: { command: string };
   dependsOn?: string[];
   group?: string;
   expectations?: {
