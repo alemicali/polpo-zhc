@@ -1,9 +1,10 @@
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskResult, RunnerConfig } from "./types.js";
+import type { Mission, Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
 import { normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
+import { bareFileNames, taskOutputPath, taskPosition } from "./output-paths.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
 
@@ -14,6 +15,9 @@ function pathJoin(...parts: string[]): string {
     .filter(Boolean)
     .join("/");
 }
+
+/** Files of a dependency listed in the prompt; the folder path shows the rest. */
+const MAX_LISTED_OUTPUT_FILES = 20;
 
 /** Return the directory portion of a path. */
 function pathDirname(p: string): string {
@@ -104,6 +108,76 @@ export class TaskRunner {
       await this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
     }
+  }
+
+  /** Output folder of a task, relative to the agents' working directory (see output-paths.ts). */
+  private async outputPathOf(task: Task, missionData?: string): Promise<string> {
+    let data = missionData;
+    if (data === undefined && task.missionId) {
+      try { data = (await this.ctx.registry.getMission?.(task.missionId))?.data; } catch { /* deleted */ }
+    }
+    return taskOutputPath(task, taskPosition(data, task.title));
+  }
+
+  /**
+   * The output folders (and their files) of the tasks this one depends on. Each task saves in its
+   * own folder, so a file the description names without a folder ("read data.md") is in one of them.
+   */
+  private async dependencyOutputs(task: Task, missionData: string | undefined): Promise<{ block?: string; files: string[] }> {
+    const allFiles: string[] = [];
+    if (!task.dependsOn?.length) return { files: allFiles };
+    const all = await this.ctx.registry.getAllTasks();
+    const lines: string[] = [];
+    let example: string | undefined;
+    for (const depId of task.dependsOn) {
+      const dep = all.find((t) => t.id === depId);
+      if (!dep) continue;
+      const folder = await this.outputPathOf(dep, dep.missionId && dep.missionId === task.missionId ? missionData : undefined);
+      let files: string[] = [];
+      try { files = (await this.ctx.listOutputFiles?.(pathJoin(this.ctx.agentWorkDir, folder))) ?? []; } catch { /* not created */ }
+      allFiles.push(...files);
+      example ??= files[0];
+      const shown = files.slice(0, MAX_LISTED_OUTPUT_FILES);
+      const more = files.length > shown.length ? `, … (${files.length - shown.length} more)` : "";
+      lines.push(`- "${dep.title}": ${folder}/${shown.length ? ` — ${shown.join(", ")}${more}` : " (no files)"}`);
+      // Files the task registered outside its folder (e.g. it wrote them in the working directory)
+      const elsewhere = (dep.outcomes ?? [])
+        .map((o) => o.path)
+        .filter((p): p is string => !!p && !p.replace(/\\/g, "/").includes(`${folder}/`));
+      if (elsewhere.length) lines.push(`  also registered: ${elsewhere.join(", ")}`);
+    }
+    if (lines.length === 0) return { files: allFiles };
+    const block = [
+      "<dependency-outputs>",
+      "Files saved by the tasks this one depends on (paths relative to your working directory):",
+      ...lines,
+      `A file this task names without a folder (e.g. "read ${example ?? "data.md"}") is one of these: read it from there.`,
+      "</dependency-outputs>",
+    ].join("\n");
+    return { block, files: allFiles };
+  }
+
+  /**
+   * Where this task saves its files, with the exact path of each new file its description names
+   * without a folder ("save it in report.md"): small models follow a concrete path, not a rule.
+   * Names of files that already exist in the working directory (a project file to edit) or that
+   * the tasks it depends on produced (inputs to read) are not outputs and are left out.
+   */
+  private async outputFolderBlock(task: Task, folder: string, dependencyFiles: string[]): Promise<string> {
+    const inputs = new Set(dependencyFiles.map((f) => f.slice(f.lastIndexOf("/") + 1).toLowerCase()));
+    const outputs: string[] = [];
+    for (const name of bareFileNames(task.description)) {
+      if (inputs.has(name.toLowerCase())) continue;
+      let exists = false;
+      try { exists = (await this.ctx.fileExists?.(pathJoin(this.ctx.agentWorkDir, name))) ?? false; } catch { /* unknown */ }
+      if (!exists) outputs.push(`${folder}/${name}`);
+    }
+    return [
+      "<output-folder>",
+      `Save the files this task produces in its own folder: ${folder}/`,
+      ...(outputs.length ? ["The task names these files without a folder: save them exactly here", ...outputs.map((p) => `- ${p}`)] : []),
+      "</output-folder>",
+    ].join("\n");
   }
 
   private async recoverInterruptedDirections(run: RunRecord): Promise<boolean> {
@@ -504,8 +578,19 @@ export class TaskRunner {
 
     const runId = nanoid();
 
-    // Create per-task output directory for deliverables
-    const outputDir = pathJoin(this.ctx.polpoDir, "output", task.id);
+    // The mission this task belongs to (its goal, its order of tasks, its sandbox), if any
+    let mission: Mission | undefined;
+    if (task.missionId || task.group) {
+      try {
+        mission = task.missionId
+          ? await this.ctx.registry.getMission?.(task.missionId)
+          : await this.ctx.registry.getMissionByName?.(task.group!);
+      } catch { /* best effort — mission may have been deleted */ }
+    }
+
+    // Output folder for deliverables: output/<mission run>/<NN> - <task title>/ (see output-paths.ts)
+    const outputFolder = taskOutputPath(task, taskPosition(mission?.data, task.title));
+    const outputDir = pathJoin(this.ctx.agentWorkDir, outputFolder);
 
     // Inject context into task description for agent awareness.
     // Context is prepended using XML-like tags that the agent prompt can reference.
@@ -529,10 +614,6 @@ export class TaskRunner {
     // 2. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
     if (task.group) {
       try {
-        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
-        const mission = task.missionId
-          ? await this.ctx.registry.getMission?.(task.missionId)
-          : await this.ctx.registry.getMissionByName?.(task.group);
         const missionParts: string[] = [];
 
         // Original user prompt that generated this mission (the "why")
@@ -560,6 +641,13 @@ export class TaskRunner {
       } catch { /* best effort — mission may have been deleted */ }
     }
 
+    // 3. Where the tasks this one depends on saved their files (each task has its own output folder)
+    const dependencyOutputs = await this.dependencyOutputs(task, mission?.data);
+    if (dependencyOutputs.block) contextParts.push(dependencyOutputs.block);
+
+    // 4. Its own output folder, with the path of each new file the description names
+    contextParts.push(await this.outputFolderBlock(task, outputFolder, dependencyOutputs.files));
+
     if (contextParts.length > 0) {
       taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
     }
@@ -569,12 +657,9 @@ export class TaskRunner {
     // The mission document holds both levels: `sandbox` for the mission, and per task.
     let missionSandbox: SandboxSettings | undefined;
     let taskSandbox: SandboxSettings | undefined;
-    if (task.missionId || task.group) {
+    if (mission) {
       try {
-        const mission = task.missionId
-          ? await this.ctx.registry.getMission?.(task.missionId)
-          : await this.ctx.registry.getMissionByName?.(task.group!);
-        const doc = mission?.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
+        const doc = mission.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
         missionSandbox = normalizeSandboxSettings(doc?.sandbox);
         taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
       } catch { /* a mission document without a sandbox section */ }

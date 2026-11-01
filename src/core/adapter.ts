@@ -61,7 +61,7 @@ export interface SpawnContext {
   compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */
   polpoDir: string;
-  /** Per-task output directory (.polpo/output/<taskId>/). Agents write deliverables here. */
+  /** Per-task output directory (output/<mission run>/<NN> - <task title>/, see output-paths.ts). Agents write deliverables here. */
   outputDir?: string;
   /** Email domain allowlist — restricts email_send tool to these domains. */
   emailAllowedDomains?: string[];

@@ -11,6 +11,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskStore } from "./task-store.js";
 import type { Task, TaskResult, AssessmentResult, TaskExpectation, ReviewContext, ModelConfig } from "./types.js";
 import { setAssessment } from "./types.js";
+import { taskOutputPath, taskPosition } from "./output-paths.js";
 import { buildFixPrompt, buildRetryPrompt, buildSideEffectFixPrompt, buildSideEffectRetryPrompt, buildJudgePrompt, type JudgeVerdict, type JudgeCorrection } from "./assessment-prompts.js";
 import { looksLikeQuestion, classifyAsQuestion } from "./question-detector.js";
 
@@ -82,6 +83,13 @@ export class AssessmentOrchestrator {
       }
     } catch { /* best effort — don't fail assessment if log parsing fails */ }
 
+    // The task's output folder (output-paths.ts), for checks that look at what it saved
+    let missionData: string | undefined;
+    if (task.missionId) {
+      try { missionData = (await this.ctx.registry.getMission?.(task.missionId))?.data; } catch { /* deleted */ }
+    }
+    const outputDir = `${this.ctx.agentWorkDir.replace(/[\\/]+$/, "")}/${taskOutputPath(task, taskPosition(missionData, task.title))}`;
+
     return {
       taskTitle: task.title,
       taskDescription: task.originalDescription ?? task.description,
@@ -95,6 +103,7 @@ export class AssessmentOrchestrator {
       toolsSummary: toolsSummary || undefined,
       executionSummary,
       outcomes: outcomes?.length ? outcomes : undefined,
+      outputDir,
     };
   }
 
