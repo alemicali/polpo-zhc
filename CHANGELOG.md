@@ -99,6 +99,7 @@ Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
 - A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
+- **A playbook that cannot run says why, and which task to fix.** The reason was shown only in a toast that disappears in seconds, and it named fields by index (`tasks.0.description: task requires a description`). The Run dialog now keeps the reasons on screen until the next try, and they name the task, checkpoint or delay (`task "test" (tasks.0).description: task requires a description`).
 
 ## [0.4.9] — 2026-10-14 — Routine
 
