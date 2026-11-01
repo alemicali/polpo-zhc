@@ -13,7 +13,7 @@ import {
   type CompactionSettings,
 } from "@polpo-ai/core";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
-import { loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpointStore } from "./context-checkpoint.js";
+import { inspectContextCheckpoint, saveContextCheckpoint, type ContextCheckpointStore } from "./context-checkpoint.js";
 
 export interface SessionCompactorOptions {
   /** The conversation's model (window, provider). */
@@ -44,8 +44,13 @@ export interface SessionCompaction {
 }
 
 export async function createSessionCompaction(opts: SessionCompactorOptions): Promise<SessionCompaction> {
-  const checkpoint = await loadContextCheckpoint(opts.store, opts.sessionId, opts.scope, opts.original).catch(() => null);
-  let revision = checkpoint?.revision ?? null;
+  const inspection = await inspectContextCheckpoint(opts.store, opts.sessionId, opts.scope, opts.original)
+    .catch(() => ({ checkpoint: null, storedRevision: null, rejected: undefined }));
+  const checkpoint = inspection.checkpoint;
+  if (inspection.rejected) console.warn(`[polpo/compaction] session ${opts.sessionId}: checkpoint not reused, ${inspection.rejected}; the next compaction replaces it`);
+  // A stored checkpoint that no longer fits is replaced, not kept: saving against "none" would be
+  // refused forever (compare-and-swap) and every turn would compact the whole conversation again.
+  let revision = checkpoint?.revision ?? inspection.storedRevision;
   let savedFacts = 0;
   let lastProjectedCount = 0;
 
