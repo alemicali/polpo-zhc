@@ -28,7 +28,8 @@ describe("NodeShell", () => {
     // The shell kills itself: no normal exit, execa reports signal + undefined exitCode.
     const r = await shell.execute("kill -KILL $$", { cwd: tmpdir() });
     expect(r.exitCode).not.toBe(0);
-    expect(r.stderr).not.toBe("");
+    // Windows has no signals: Git's bash ends with an exit code (2304, SIGKILL << 8) and no message
+    if (process.platform !== "win32") expect(r.stderr).not.toBe("");
   });
 
   it("does not let a killed command pass test/script expectations", async () => {
