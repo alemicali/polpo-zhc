@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt } from "../adapters/engine.js";
+import { buildSystemPrompt, buildPrompt, grantsTool } from "../adapters/engine.js";
 import { createTestAgent } from "./fixtures.js";
 import type { AgentConfig } from "../core/types.js";
 
@@ -251,5 +251,34 @@ describe("buildSystemPrompt — full combo", () => {
     expect(respIdx).toBeLessThan(toneIdx);
     expect(toneIdx).toBeLessThan(persIdx);
     expect(persIdx).toBeLessThan(orgIdx);
+  });
+});
+
+// ─── Available tools ─────────────────────────────────
+
+describe("buildSystemPrompt — available tools", () => {
+  const files = ["read", "write", "edit", "glob", "grep", "ls", "register_outcome"];
+  const task = { title: "t", description: "d", expectations: [] } as never;
+  const listed = (prompt: string, tool: string) => prompt.includes(`- \`${tool}\``);
+
+  it("names only the tools the agent gets: an agent limited to the file tools is not told it has bash", () => {
+    const agent = createTestAgent({ name: "dev", allowedTools: files });
+    const prompt = buildSystemPrompt(agent, CWD);
+    for (const t of files) expect(listed(prompt, t)).toBe(true);
+    for (const t of ["bash", "http_fetch", "http_download", "ink_search", "ink_add"]) expect(listed(prompt, t)).toBe(false);
+    expect(listed(prompt, "vault_list")).toBe(true); // every agent gets the vault tools
+    expect(prompt).toContain("no shell (`bash`)");
+    expect(prompt).not.toContain("use `bash` as a fallback");
+    expect(prompt).toContain("All file tools (read, write, edit, glob, grep, ls) resolve paths");
+    expect(buildPrompt(task, grantsTool(agent, "bash"))).not.toContain("Bash tool rules");
+  });
+
+  it("without a list the agent gets the core set, bash included; a wildcard grants what it matches", () => {
+    const prompt = buildSystemPrompt(createTestAgent({ name: "dev" }), CWD);
+    for (const t of ["bash", "http_fetch", "ink_search"]) expect(listed(prompt, t)).toBe(true);
+    expect(prompt).toContain("use `bash` as a fallback");
+    expect(buildPrompt(task)).toContain("Bash tool rules");
+    expect(grantsTool(createTestAgent({ name: "dev", allowedTools: ["read", "ink_*"] }), "ink_add")).toBe(true);
+    expect(grantsTool(createTestAgent({ name: "dev", allowedTools: ["READ"] }), "read")).toBe(true);
   });
 });

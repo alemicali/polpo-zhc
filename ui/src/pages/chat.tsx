@@ -4213,7 +4213,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             multiple
             globalDrop
             maxFiles={5}
-            maxFileSize={10 * 1024 * 1024}
+            maxFileSize={15 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
             className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >

@@ -180,7 +180,8 @@ describe("local workspace", () => {
     mkdirSync(root, { recursive: true });
     const ws = new LocalWorkspace({ root, sandbox: { provider: "local", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] } }, () => ({ PATH: "/usr/bin:/bin" }));
     const result = await ws.exec("pwd; env | grep -c DATABASE_URL || true");
-    expect(result.stdout).toContain(root);
+    // The folder name: Git bash on Windows prints the path as /tmp/… or /c/Users/…
+    expect(result.stdout).toContain(root.split(/[\\/]/).pop()!);
     expect(result.stdout.trim().endsWith("0")).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
