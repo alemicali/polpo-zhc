@@ -22,6 +22,8 @@ import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, resolveEnvFromVault } from "../vault/env-from-vault.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { createInkTools, ALL_INK_TOOL_NAMES } from "./ink-tools.js";
+import { copiedLineNumbersError, hasCopiedLineNumbers, hasEscapedLineBreaks, refuseLineNumbers, withoutLineNumbers } from "./line-number-guard.js";
+import { globFiles } from "./glob-files.js";
 
 const MAX_READ_LINES = 500;
 const MAX_OUTPUT_BYTES = 30_000;
@@ -40,7 +42,8 @@ function createReadTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
   return {
     name: "read",
     label: "Read File",
-    description: "Read the contents of a file. Returns line-numbered text. For large files, use offset and limit to read specific sections.",
+    description: "Read the contents of a file. Returns line-numbered text: each line is shown as <number><TAB><text>. "
+      + "The numbers are not part of the file: never copy them into write or edit. For large files, use offset and limit to read specific sections.",
     parameters: ReadSchema,
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
@@ -101,6 +104,7 @@ function capReadResult(filePath: string, lines: string[], offset: number, total:
 const WriteSchema = Type.Object({
   path: Type.String({ description: "Absolute or relative path to write to" }),
   content: Type.String({ description: "File content to write" }),
+  keep_line_numbers: Type.Optional(Type.Boolean({ description: "Set only when every line really starts with a line number that belongs in the file (e.g. a numbered list): content that looks copied from read with its line numbers is refused otherwise" })),
 });
 
 function createWriteTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof WriteSchema> {
@@ -112,6 +116,12 @@ function createWriteTool(cwd: string, sandbox: string[], fs: FileSystem): AgentT
     async execute(_toolCallId, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "write");
+      if (refuseLineNumbers(params.content, params.keep_line_numbers)) {
+        return {
+          content: [{ type: "text", text: copiedLineNumbersError("write", "the content", hasEscapedLineBreaks(params.content)) }],
+          details: { path: filePath, error: "copied_line_numbers" },
+        };
+      }
       await fs.mkdir(dirname(filePath));
       await fs.writeFile(filePath, params.content);
       return {
@@ -128,6 +138,7 @@ const EditSchema = Type.Object({
   path: Type.String({ description: "Absolute or relative path to the file to edit" }),
   old_text: Type.String({ description: "Exact text to find and replace (must be unique in the file)" }),
   new_text: Type.String({ description: "Replacement text" }),
+  keep_line_numbers: Type.Optional(Type.Boolean({ description: "Set only when every line of new_text really starts with a line number that belongs in the file" })),
 });
 
 function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof EditSchema> {
@@ -142,8 +153,13 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
       const content = await fs.readFile(filePath);
       const occurrences = content.split(params.old_text).length - 1;
       if (occurrences === 0) {
+        // Often old_text was copied from read with its line numbers, which are not in the file
+        const bare = withoutLineNumbers(params.old_text);
+        const hint = bare !== params.old_text && bare.trim() && content.includes(bare)
+          ? " It starts with line numbers like the ones the read tool shows: they are not part of the file. Use the text without them."
+          : "";
         return {
-          content: [{ type: "text", text: `Error: old_text not found in ${filePath}` }],
+          content: [{ type: "text", text: `Error: old_text not found in ${filePath}.${hint}` }],
           details: { path: filePath, error: "not_found" },
         };
       }
@@ -151,6 +167,13 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTo
         return {
           content: [{ type: "text", text: `Error: old_text found ${occurrences} times in ${filePath}. Must be unique.` }],
           details: { path: filePath, error: "not_unique", count: occurrences },
+        };
+      }
+      // A file whose lines really are numbered (old_text found with its numbers) is edited as is
+      if (!hasCopiedLineNumbers(params.old_text) && refuseLineNumbers(params.new_text, params.keep_line_numbers)) {
+        return {
+          content: [{ type: "text", text: copiedLineNumbersError("edit", "new_text", hasEscapedLineBreaks(params.new_text)) }],
+          details: { path: filePath, error: "copied_line_numbers" },
         };
       }
       const updated = content.replace(params.old_text, params.new_text);
@@ -244,7 +267,7 @@ const GlobSchema = Type.Object({
   path: Type.Optional(Type.String({ description: "Directory to search in (default: cwd)" })),
 });
 
-function createGlobTool(cwd: string, sandbox: string[], shell: Shell): AgentTool<typeof GlobSchema> {
+function createGlobTool(cwd: string, sandbox: string[], fs: FileSystem): AgentTool<typeof GlobSchema> {
   return {
     name: "glob",
     label: "Find Files",
@@ -253,34 +276,14 @@ function createGlobTool(cwd: string, sandbox: string[], shell: Shell): AgentTool
     async execute(_toolCallId, params) {
       const searchDir = params.path ? resolve(cwd, params.path) : cwd;
       assertPathAllowed(searchDir, sandbox, "glob");
-      try {
-        const result = await shell.execute(
-          `find ${JSON.stringify(searchDir)} -type f -name ${JSON.stringify(params.pattern)} 2>/dev/null | head -200`,
-          { cwd, timeout: 10_000 },
-        );
-        const output = result.stdout.trim();
-        if (!output) {
-          const fallback = await shell.execute(
-            `cd ${JSON.stringify(searchDir)} && ls -1 ${JSON.stringify(params.pattern)} 2>/dev/null | head -200`,
-            { cwd, timeout: 10_000 },
-          );
-          const files = fallback.stdout.trim() ? fallback.stdout.trim().split("\n") : [];
-          return {
-            content: [{ type: "text", text: files.length > 0 ? files.join("\n") : "No files found" }],
-            details: { pattern: params.pattern, count: files.length },
-          };
-        }
-        const files = output.split("\n").map((f: string) => relative(cwd, f));
-        return {
-          content: [{ type: "text", text: files.join("\n") }],
-          details: { pattern: params.pattern, count: files.length },
-        };
-      } catch {
-        return {
-          content: [{ type: "text", text: "No files found" }],
-          details: { pattern: params.pattern, count: 0 },
-        };
-      }
+      // Walked with the FileSystem (no shell: find and ls are missing on Windows, and find -name
+      // never matched a pattern with a "/"); paths relative to the working directory, as before.
+      const matches = await globFiles(fs, searchDir, params.pattern, { canEnter: (dir) => isPathAllowed(dir, sandbox) });
+      const files = matches.map((m) => relative(cwd, join(searchDir, m)).replace(/\\/g, "/"));
+      return {
+        content: [{ type: "text", text: files.length > 0 ? files.join("\n") : "No files found" }],
+        details: { pattern: params.pattern, count: files.length },
+      };
     },
   };
 }
@@ -494,7 +497,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
     bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault, fs: _fs }),
-    glob: () => createGlobTool(cwd, readSandbox, _shell),
+    glob: () => createGlobTool(cwd, readSandbox, _fs),
     grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir, _fs),
     ls: () => createLsTool(cwd, readSandbox, _fs),
   };
