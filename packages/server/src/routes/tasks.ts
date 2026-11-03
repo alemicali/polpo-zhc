@@ -460,6 +460,7 @@ export function taskRoutes(getDeps: () => {
       dependsOn: body.dependsOn,
       group: body.group,
       maxDuration: body.maxDuration,
+      maxRetries: body.maxRetries,
       retryPolicy: body.retryPolicy,
       notifications: body.notifications,
       sideEffects: body.sideEffects,
