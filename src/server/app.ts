@@ -86,6 +86,8 @@ import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
+import { transcribeSpeech } from "../tools/audio-tools.js";
+import { speechVaultFor } from "../notifications/speech-vault.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
@@ -283,8 +285,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     turnScheduler,
     contextCheckpoints: o.getContextCheckpointStore(),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
-    saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
-      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
+    saveUserMessage: (sessionId, content, options) => saveChatUserMessage(o.getSessionStore()!,
+      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content, {
+        transcribe: async (audio, filename) => (await transcribeSpeech(audio, filename, await speechVaultFor(o, options?.agent)))?.text ?? null,
+      }),
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),

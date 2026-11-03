@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Fixes by @DeltaM128 (#149–#183, merged in one batch).
+Most of these fixes are by @DeltaM128 (#149–#183).
 
 ### Security
 - **Task agents could read and write the project's `.polpo` folder.** The file tools keep agents out of `.polpo` (configuration, `.env`, vault, sessions, storage mounts), but the guard was only switched on in the server process. Tasks run in a separate runner process, where it was off: an agent with the default access (its working directory) could read `.polpo/.env` or the vault file and write anywhere in `.polpo`. The runner now sets the same guard before building the agent's tools, with the same exceptions (offloaded tool outputs, skills, playbooks). A task output folder that lies inside `.polpo` stays writable: it is now granted explicitly. (#150)
 
 ### Fixed
+- **Files could not be attached in the chat.** The composer accepts any file (`*/*`), but its check read `*/*` literally and refused every file picked or dropped (pasted images went another way). It now accepts any file, matches extensions, and takes the type from the name when the browser gives none (a Telegram `.ogg` export). The limit is 15 MB, as on the server.
+- **Audio attached in the chat is transcribed**, as Telegram voice notes are: its words join the message (`[audio name.ogg, transcribed: "…"]`), so the model reads them now and in later turns. The file stays attached.
+- **Telegram: replying to a voice note.** A mention of the bot in reply to someone's voice note, photo or file ("@bot what does it say?") brings that media along, even when the bot never received the original. Telegram includes it in the reply. The same holds for a reply to an earlier voice note in a private chat. The bot's own voice replies are not read again.
+- **Telegram: failed polling is logged.** A failed `getUpdates` was ignored, so two programs reading the same bot (`409 Conflict`) lost messages without a trace. It is now logged once every 10 minutes, saying what to do.
 - A task whose model call failed (e.g. Ollama answering HTTP 500 because the model crashed while loading, or a connection error) ended as **done** with no output and no work: the agent ends such a run with an error reply instead of throwing, and the engine counted it as a success. It now fails with the reason (`Model error: …`), so it is retried and then shown as failed. (#149)
 - A run stopped at the turn limit is not a model error: stopping the agent at `maxTurns` ends its last call with an abort error, so the run ends as a normal one (its expectations decide) and its output says `[Stopped at the turn limit (N turns)]`. (#149)
 - Tool calls whose arguments did not match the tool's schema were run or previewed anyway: e.g. a local model putting the mission name inside `data` produced a mission preview without a name. The chat now checks every call against its schema (pi-ai's validator) before running or previewing it; a call that does not match is returned to the model with the reason, so it can call the tool again in the same turn. An object or array parameter passed as a JSON string is still accepted, as before. (#151)
