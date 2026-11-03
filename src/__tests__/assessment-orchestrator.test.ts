@@ -1046,4 +1046,65 @@ describe("AssessmentOrchestrator", () => {
       expect(completeEvents[0].message).toContain("coverage");
     });
   });
+
+  // ── Script tasks (no agent) ──────────────────────
+
+  describe("script tasks", () => {
+    it("failed expectations run the command again: no fix prompt, same description", async () => {
+      const h = createHarness();
+      h.assessFn.mockResolvedValue(createFailingAssessment());
+      const task = await addReviewTask(h, {
+        assignTo: "@script",
+        description: "Run: python fetch.py",
+        maxRetries: 2,
+        expectations: [{ type: "file_exists", paths: ["data.csv"], confidence: "estimated" }],
+      });
+      const fixEvents: any[] = [];
+      const retryEvents: any[] = [];
+      h.emitter.on("task:fix", (e) => fixEvents.push(e));
+      h.emitter.on("task:retry", (e) => retryEvents.push(e));
+
+      h.ao.handleResult(task.id, createOkResult());
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
+      });
+      const updated = (await h.store.getTask(task.id))!;
+      expect(fixEvents).toHaveLength(0);
+      expect(retryEvents).toHaveLength(1);
+      expect(updated.retries).toBe(1);
+      expect(updated.description).toBe("Run: python fetch.py");
+      expect(updated.assignTo).toBe("@script");
+    });
+
+    it("never escalates to an agent", async () => {
+      const h = createHarness();
+      await h.ctx.agentStore.createAgent({ name: "senior-agent" }, h.ctx.config.teams[0].name);
+      const task = await addReviewTask(h, {
+        assignTo: "@script",
+        maxRetries: 3,
+        retryPolicy: { escalateAfter: 1, fallbackAgent: "senior-agent" },
+      });
+
+      h.ao.handleResult(task.id, createFailResult());
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
+      });
+      expect((await h.store.getTask(task.id))!.assignTo).toBe("@script");
+    });
+
+    it("output that looks like a question is not one", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { assignTo: "@script" });
+      await h.runStore.upsertRun(createTestRunRecord({ taskId: task.id, activity: createTestActivity({ toolCalls: 1 }) }));
+
+      h.ao.handleResult(task.id, createOkResult({ stdout: "Continue?" }));
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("done");
+      });
+      expect(classifyAsQuestion).not.toHaveBeenCalled();
+    });
+  });
 });

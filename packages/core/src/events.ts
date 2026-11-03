@@ -41,7 +41,7 @@ export interface PolpoEventMap {
   // Agent lifecycle
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
-  "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
+  "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string; pipeline?: import("./types.js").PipelineRunState };
   "agent:created": { agentName: string; teamName?: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   "agent:updated": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   "agent:removed": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };

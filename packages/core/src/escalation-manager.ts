@@ -2,6 +2,7 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, EscalationPolicy, EscalationLevel } from "./types.js";
 
 import type { ApprovalManager } from "./approval-manager.js";
+import { isScriptTask } from "./script-task.js";
 
 /**
  * Manages the escalation chain when tasks fail repeatedly.
@@ -101,6 +102,15 @@ export class EscalationManager {
     policy: EscalationPolicy,
   ): Promise<void> {
     const targetAgent = level.target;
+    // a script task runs its command, not an agent: there is nobody to hand it to
+    if (isScriptTask(task)) {
+      this.ctx.emitter.emit("log", {
+        level: "info",
+        message: `[escalation] "${task.title}" is a script task — skipping agent level ${level.level}`,
+      });
+      await this.advanceLevel(taskId, task, level, policy);
+      return;
+    }
     if (!targetAgent) {
       this.ctx.emitter.emit("log", {
         level: "warn",

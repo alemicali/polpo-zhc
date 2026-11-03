@@ -465,6 +465,38 @@ export interface AgentSuggestionConfig {
   description?: string;
 }
 
+/** Live state of a pipeline run (see docs/loops.md), carried in the run activity. */
+export type PipelineStepStatus = "running" | "waiting" | "done" | "failed" | "skipped" | "cancelled";
+
+export interface PipelineStepState {
+  kind: "loop" | "parallel" | "switch" | "human";
+  name?: string;
+  status: PipelineStepStatus;
+  /** Current or last attempt of a loop. */
+  attempt?: number;
+  /** Why the previous loop attempt was not accepted. */
+  feedback?: string;
+  error?: string;
+  /** Human steps: the approval request being waited on. */
+  approvalId?: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface PipelineRunState {
+  status: "running" | "completed" | "failed";
+  /** The pipeline as it was when the run started, so the view matches what ran. */
+  pipeline: Pipeline;
+  /** Step states keyed by step path, e.g. "steps.1.switch.cases.0.steps.0". */
+  steps: Record<string, PipelineStepState>;
+  /** Shared context bag (omitted when too large to carry live). */
+  context?: Record<string, unknown>;
+  contextTruncated?: boolean;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
 export interface AgentActivity {
   lastTool?: string;        // last tool the agent used (e.g. "Write", "Edit", "Bash")
   lastFile?: string;        // last file touched
@@ -479,6 +511,8 @@ export interface AgentActivity {
   compactions?: number;
   /** The latest compaction, with the durable facts it found (saved to the agent's memory). */
   lastCompaction?: import("./context-compactor.js").CompactionInfo & { at: string; durableFacts?: string[] };
+  /** Live state of the pipeline, when the agent runs one. */
+  pipeline?: PipelineRunState;
 }
 
 export interface AgentProcess {
@@ -624,6 +658,12 @@ export interface ReviewContext {
   // --- Registered outcomes ---
   /** Explicit outcomes registered by the agent (files, text, URLs, JSON data). */
   outcomes?: TaskOutcome[];
+
+  /**
+   * The task's output folder (absolute). test and script checks get it as POLPO_OUTPUT_DIR, and
+   * file_exists paths may start with $POLPO_OUTPUT_DIR: the folder of a run is not known in advance.
+   */
+  outputDir?: string;
 }
 
 // === Ask User (structured clarification questions) ===
@@ -716,7 +756,7 @@ export interface RunnerConfig {
   task: Task;
   polpoDir: string;
   cwd: string;
-  /** Per-task output directory (.polpo/output/<taskId>/). Agents should write deliverables here. */
+  /** Per-task output directory (output/<mission run>/<NN> - <task title>/, see output-paths.ts). Agents should write deliverables here. */
   outputDir: string;
   storage?: "file" | "sqlite" | "postgres";
   /** PostgreSQL connection URL (for storage: "postgres"). */
@@ -737,6 +777,14 @@ export interface RunnerConfig {
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
   whatsappProfilePath?: string;
+  /** Script task (script-task.ts): the runner runs this command instead of an agent. */
+  script?: {
+    command: string;
+    /** POLPO_OUTPUT_DIR, POLPO_TASK, POLPO_MISSION, POLPO_DEP_<n> (folders of the tasks it depends on). */
+    env: Record<string, string>;
+    /** When the task times out (epoch ms): the command is stopped then, before the run is killed. */
+    deadline?: number;
+  };
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===

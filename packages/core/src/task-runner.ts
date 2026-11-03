@@ -1,9 +1,11 @@
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskResult, RunnerConfig } from "./types.js";
+import type { Mission, Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
 import { normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
+import { bareFileNames, taskOutputPath, taskPosition } from "./output-paths.js";
+import { SCRIPT_ASSIGNEE, isScriptTask, missionTaskScript } from "./script-task.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
 
@@ -14,6 +16,11 @@ function pathJoin(...parts: string[]): string {
     .filter(Boolean)
     .join("/");
 }
+
+/** Files of a dependency listed in the prompt; the folder path shows the rest. */
+const MAX_LISTED_OUTPUT_FILES = 20;
+/** How long past its timeout a script task's run may take to stop its command and report (adapters/script.ts). */
+const SCRIPT_STOP_GRACE_MS = 30_000;
 
 /** Return the directory portion of a path. */
 function pathDirname(p: string): string {
@@ -104,6 +111,81 @@ export class TaskRunner {
       await this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
     }
+  }
+
+  /** How long a task may run (ms, 0 = no limit): its maxDuration, or the instance's taskTimeout. */
+  private timeoutOf(task: Task | undefined): number {
+    return task?.maxDuration ?? this.ctx.config.settings.taskTimeout ?? 30 * 60 * 1000;
+  }
+
+  /** Output folder of a task, relative to the agents' working directory (see output-paths.ts). */
+  private async outputPathOf(task: Task, missionData?: string): Promise<string> {
+    let data = missionData;
+    if (data === undefined && task.missionId) {
+      try { data = (await this.ctx.registry.getMission?.(task.missionId))?.data; } catch { /* deleted */ }
+    }
+    return taskOutputPath(task, taskPosition(data, task.title));
+  }
+
+  /**
+   * The output folders (and their files) of the tasks this one depends on. Each task saves in its
+   * own folder, so a file the description names without a folder ("read data.md") is in one of them.
+   */
+  private async dependencyOutputs(task: Task, missionData: string | undefined): Promise<{ block?: string; files: string[] }> {
+    const allFiles: string[] = [];
+    if (!task.dependsOn?.length) return { files: allFiles };
+    const all = await this.ctx.registry.getAllTasks();
+    const lines: string[] = [];
+    let example: string | undefined;
+    for (const depId of task.dependsOn) {
+      const dep = all.find((t) => t.id === depId);
+      if (!dep) continue;
+      const folder = await this.outputPathOf(dep, dep.missionId && dep.missionId === task.missionId ? missionData : undefined);
+      let files: string[] = [];
+      try { files = (await this.ctx.listOutputFiles?.(pathJoin(this.ctx.agentWorkDir, folder))) ?? []; } catch { /* not created */ }
+      allFiles.push(...files);
+      example ??= files[0];
+      const shown = files.slice(0, MAX_LISTED_OUTPUT_FILES);
+      const more = files.length > shown.length ? `, … (${files.length - shown.length} more)` : "";
+      lines.push(`- "${dep.title}": ${folder}/${shown.length ? ` — ${shown.join(", ")}${more}` : " (no files)"}`);
+      // Files the task registered outside its folder (e.g. it wrote them in the working directory)
+      const elsewhere = (dep.outcomes ?? [])
+        .map((o) => o.path)
+        .filter((p): p is string => !!p && !p.replace(/\\/g, "/").includes(`${folder}/`));
+      if (elsewhere.length) lines.push(`  also registered: ${elsewhere.join(", ")}`);
+    }
+    if (lines.length === 0) return { files: allFiles };
+    const block = [
+      "<dependency-outputs>",
+      "Files saved by the tasks this one depends on (paths relative to your working directory):",
+      ...lines,
+      `A file this task names without a folder (e.g. "read ${example ?? "data.md"}") is one of these: read it from there.`,
+      "</dependency-outputs>",
+    ].join("\n");
+    return { block, files: allFiles };
+  }
+
+  /**
+   * Where this task saves its files, with the exact path of each new file its description names
+   * without a folder ("save it in report.md"): small models follow a concrete path, not a rule.
+   * Names of files that already exist in the working directory (a project file to edit) or that
+   * the tasks it depends on produced (inputs to read) are not outputs and are left out.
+   */
+  private async outputFolderBlock(task: Task, folder: string, dependencyFiles: string[]): Promise<string> {
+    const inputs = new Set(dependencyFiles.map((f) => f.slice(f.lastIndexOf("/") + 1).toLowerCase()));
+    const outputs: string[] = [];
+    for (const name of bareFileNames(task.description)) {
+      if (inputs.has(name.toLowerCase())) continue;
+      let exists = false;
+      try { exists = (await this.ctx.fileExists?.(pathJoin(this.ctx.agentWorkDir, name))) ?? false; } catch { /* unknown */ }
+      if (!exists) outputs.push(`${folder}/${name}`);
+    }
+    return [
+      "<output-folder>",
+      `Save the files this task produces in its own folder: ${folder}/`,
+      ...(outputs.length ? ["The task names these files without a folder: save them exactly here", ...outputs.map((p) => `- ${p}`)] : []),
+      "</output-folder>",
+    ].join("\n");
   }
 
   private async recoverInterruptedDirections(run: RunRecord): Promise<boolean> {
@@ -235,7 +317,6 @@ export class TaskRunner {
    * - Warn at staleThreshold, kill at 2x staleThreshold
    */
   async enforceHealthChecks(): Promise<void> {
-    const defaultTimeout = this.ctx.config.settings.taskTimeout ?? 30 * 60 * 1000;
     const staleThreshold = this.ctx.config.settings.staleThreshold ?? 5 * 60 * 1000;
 
     const activeRuns = await this.ctx.runStore.getActiveRuns();
@@ -255,10 +336,12 @@ export class TaskRunner {
 
       // 1. Task timeout (hard kill)
       const task = await this.ctx.registry.getTask(run.taskId);
-      const timeout = task?.maxDuration ?? defaultTimeout;
+      const timeout = this.timeoutOf(task);
       if (timeout > 0) {
         const elapsed = Date.now() - new Date(run.startedAt).getTime();
-        if (elapsed > timeout) {
+        // a script task stops its command at the deadline itself and reports why: the hard kill waits a little longer
+        const grace = run.config?.script ? SCRIPT_STOP_GRACE_MS : 0;
+        if (elapsed > timeout + grace) {
           this.ctx.emitter.emit("log", { level: "warn", message: `[${run.taskId}] Timed out (${Math.round(elapsed / 1000)}s)` });
           this.ctx.emitter.emit("task:timeout", { taskId: run.taskId, elapsed, timeout });
           if (run.pid > 0) {
@@ -316,6 +399,7 @@ export class TaskRunner {
           tool: r.activity.lastTool,
           file: r.activity.lastFile,
           summary: r.activity.summary,
+          pipeline: r.activity.pipeline,
         });
 
         // Emit file:changed for newly created/edited files
@@ -458,8 +542,87 @@ export class TaskRunner {
     return this.ctx.spawner.isAlive(pid);
   }
 
+  /**
+   * The task's description with the context the agent needs prepended, in XML-like tags the agent
+   * prompt can reference: memory, the mission, the files of the tasks it depends on, its output folder.
+   */
+  private async describeWithContext(task: Task, mission: Mission | undefined, outputFolder: string): Promise<string> {
+    const contextParts: string[] = [];
+
+    // 1. Shared memory (persistent cross-session knowledge, visible to all agents)
+    const sharedMemory = (await this.ctx.memoryStore?.get()) ?? "";
+    if (sharedMemory) {
+      contextParts.push(`<shared-memory>\n${sharedMemory}\n</shared-memory>`);
+    }
+
+    // 1b. Agent-specific memory (private knowledge for the assigned agent)
+    if (task.assignTo) {
+      const agentMem = (await this.ctx.memoryStore?.get(agentMemoryScope(task.assignTo))) ?? "";
+      if (agentMem) {
+        contextParts.push(`<agent-memory agent="${task.assignTo}">\n${agentMem}\n</agent-memory>`);
+      }
+    }
+
+    // 2. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
+    if (task.group) {
+      try {
+        const missionParts: string[] = [];
+
+        // Original user prompt that generated this mission (the "why")
+        if (mission?.prompt) {
+          missionParts.push(`Mission goal: ${mission.prompt}`);
+        }
+
+        // Sibling tasks — just titles and statuses for awareness, not full descriptions
+        const allTasks = await this.ctx.registry.getAllTasks();
+        const siblings = allTasks.filter(t => t.group === task.group && t.id !== task.id);
+        if (siblings.length > 0) {
+          missionParts.push(`Other tasks in this mission:`);
+          for (const s of siblings) {
+            const marker = s.status === "done" ? "[done]"
+              : s.status === "in_progress" ? "[in progress]"
+              : s.status === "failed" ? "[failed]"
+              : "[pending]";
+            missionParts.push(`  ${marker} "${s.title}" → ${s.assignTo}`);
+          }
+        }
+
+        if (missionParts.length > 0) {
+          contextParts.push(`<mission-context>\n${missionParts.join("\n")}\n</mission-context>`);
+        }
+      } catch { /* best effort — mission may have been deleted */ }
+    }
+
+    // 3. Where the tasks this one depends on saved their files (each task has its own output folder)
+    const dependencyOutputs = await this.dependencyOutputs(task, mission?.data);
+    if (dependencyOutputs.block) contextParts.push(dependencyOutputs.block);
+
+    // 4. Its own output folder, with the path of each new file the description names
+    contextParts.push(await this.outputFolderBlock(task, outputFolder, dependencyOutputs.files));
+
+    return contextParts.length > 0 ? contextParts.join("\n\n") + "\n\n" + task.description : task.description;
+  }
+
+  /** Environment of a script task: its output folder and those of the tasks it depends on, in order. */
+  private async scriptEnv(task: Task, mission: Mission | undefined, outputDir: string): Promise<Record<string, string>> {
+    const env: Record<string, string> = { POLPO_OUTPUT_DIR: outputDir, POLPO_TASK: task.title };
+    if (mission?.name) env.POLPO_MISSION = mission.name;
+    if (!task.dependsOn?.length) return env;
+    const all = await this.ctx.registry.getAllTasks();
+    let n = 0;
+    for (const depId of task.dependsOn) {
+      const dep = all.find((t) => t.id === depId);
+      if (!dep) continue;
+      const folder = await this.outputPathOf(dep, dep.missionId && dep.missionId === task.missionId ? mission?.data : undefined);
+      env[`POLPO_DEP_${++n}`] = pathJoin(this.ctx.agentWorkDir, folder);
+    }
+    return env;
+  }
+
   async spawnForTask(task: Task): Promise<void> {
-    const agent = await this.ctx.agentStore.getAgent(task.assignTo);
+    // A script task names no agent: Polpo runs its command (script-task.ts)
+    const scripted = isScriptTask(task);
+    const agent = scripted ? { name: SCRIPT_ASSIGNEE } : await this.ctx.agentStore.getAgent(task.assignTo);
     if (!agent) {
       this.ctx.emitter.emit("log", { level: "error", message: `No agent "${task.assignTo}" for task "${task.title}"` });
       await this.ctx.registry.transition(task.id, "assigned");
@@ -504,64 +667,37 @@ export class TaskRunner {
 
     const runId = nanoid();
 
-    // Create per-task output directory for deliverables
-    const outputDir = pathJoin(this.ctx.polpoDir, "output", task.id);
-
-    // Inject context into task description for agent awareness.
-    // Context is prepended using XML-like tags that the agent prompt can reference.
-    const taskWithContext = { ...task };
-    const contextParts: string[] = [];
-
-    // 1. Shared memory (persistent cross-session knowledge, visible to all agents)
-    const sharedMemory = (await this.ctx.memoryStore?.get()) ?? "";
-    if (sharedMemory) {
-      contextParts.push(`<shared-memory>\n${sharedMemory}\n</shared-memory>`);
-    }
-
-    // 1b. Agent-specific memory (private knowledge for the assigned agent)
-    if (task.assignTo) {
-      const agentMem = (await this.ctx.memoryStore?.get(agentMemoryScope(task.assignTo))) ?? "";
-      if (agentMem) {
-        contextParts.push(`<agent-memory agent="${task.assignTo}">\n${agentMem}\n</agent-memory>`);
-      }
-    }
-
-    // 2. Mission context — if this task belongs to a mission, include the mission goal and sibling tasks
-    if (task.group) {
+    // The mission this task belongs to (its goal, its order of tasks, its sandbox), if any
+    let mission: Mission | undefined;
+    if (task.missionId || task.group) {
       try {
-        // Resolve mission via direct ID (preferred) or group name (legacy fallback)
-        const mission = task.missionId
+        mission = task.missionId
           ? await this.ctx.registry.getMission?.(task.missionId)
-          : await this.ctx.registry.getMissionByName?.(task.group);
-        const missionParts: string[] = [];
-
-        // Original user prompt that generated this mission (the "why")
-        if (mission?.prompt) {
-          missionParts.push(`Mission goal: ${mission.prompt}`);
-        }
-
-        // Sibling tasks — just titles and statuses for awareness, not full descriptions
-        const allTasks = await this.ctx.registry.getAllTasks();
-        const siblings = allTasks.filter(t => t.group === task.group && t.id !== task.id);
-        if (siblings.length > 0) {
-          missionParts.push(`Other tasks in this mission:`);
-          for (const s of siblings) {
-            const marker = s.status === "done" ? "[done]"
-              : s.status === "in_progress" ? "[in progress]"
-              : s.status === "failed" ? "[failed]"
-              : "[pending]";
-            missionParts.push(`  ${marker} "${s.title}" → ${s.assignTo}`);
-          }
-        }
-
-        if (missionParts.length > 0) {
-          contextParts.push(`<mission-context>\n${missionParts.join("\n")}\n</mission-context>`);
-        }
+          : await this.ctx.registry.getMissionByName?.(task.group!);
       } catch { /* best effort — mission may have been deleted */ }
     }
 
-    if (contextParts.length > 0) {
-      taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
+    // Output folder for deliverables: output/<mission run>/<NN> - <task title>/ (see output-paths.ts)
+    const outputFolder = taskOutputPath(task, taskPosition(mission?.data, task.title));
+    const outputDir = pathJoin(this.ctx.agentWorkDir, outputFolder);
+
+    // A script task runs its command: no context to inject; the folders it reads and writes
+    // reach it as environment variables (script-task.ts)
+    const taskWithContext = { ...task };
+    let script: RunnerConfig["script"];
+    if (scripted) {
+      const def = missionTaskScript(mission?.data, task.title);
+      if (!def) {
+        const message = `Script task "${task.title}" has no command in its mission document`;
+        this.ctx.emitter.emit("log", { level: "error", message: `[${task.id}] ${message}` });
+        await this.ctx.registry.updateTask(task.id, { result: { exitCode: 1, stdout: "", stderr: message, duration: 0 } }).catch(() => undefined);
+        await this.ctx.registry.transition(task.id, "failed");
+        return;
+      }
+      const timeout = this.timeoutOf(task);
+      script = { command: def.command, env: await this.scriptEnv(task, mission, outputDir), ...(timeout > 0 ? { deadline: Date.now() + timeout } : {}) };
+    } else {
+      taskWithContext.description = await this.describeWithContext(task, mission, outputFolder);
     }
 
     // Sandbox: resolve the cascade instance → agent → mission → task here, where all levels are
@@ -569,12 +705,9 @@ export class TaskRunner {
     // The mission document holds both levels: `sandbox` for the mission, and per task.
     let missionSandbox: SandboxSettings | undefined;
     let taskSandbox: SandboxSettings | undefined;
-    if (task.missionId || task.group) {
+    if (mission) {
       try {
-        const mission = task.missionId
-          ? await this.ctx.registry.getMission?.(task.missionId)
-          : await this.ctx.registry.getMissionByName?.(task.group!);
-        const doc = mission?.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
+        const doc = mission.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
         missionSandbox = normalizeSandboxSettings(doc?.sandbox);
         taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
       } catch { /* a mission document without a sandbox section */ }
@@ -644,6 +777,7 @@ export class TaskRunner {
       ...(volumes.length ? { volumes } : {}),
       whatsappDbPath,
       whatsappProfilePath,
+      ...(script ? { script } : {}),
     };
 
     try {

@@ -56,7 +56,9 @@ import {
   Bell,
   Send,
   History,
+  Workflow,
 } from "lucide-react";
+import { TaskPipelineTab } from "@/components/pipeline-run-view";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
   Dialog,
@@ -80,6 +82,7 @@ import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { outputFolderLink, taskOutputFolder } from "@/lib/output-folders";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -316,11 +319,19 @@ function DimensionScores({ scores }: { scores: DimensionScore[] }) {
 
 function LiveActivityStrip({ process }: { process: AgentProcess }) {
   const { activity } = process;
+  // Pipelines: name the step(s) running or waiting for a person.
+  const pipelineSteps = activity.pipeline
+    ? Object.values(activity.pipeline.steps)
+      .filter((s) => (s.status === "running" || s.status === "waiting") && (s.kind === "loop" || s.kind === "human"))
+      .map((s) => `${s.status === "waiting" ? "waiting for approval" : "loop"} "${s.name}"`)
+    : [];
   if (!activity.lastTool && !activity.lastFile && !activity.summary) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 rounded-lg border border-primary/10">
         <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-        <span className="text-xs text-primary">Running...</span>
+        <span className="text-xs text-primary">
+          {pipelineSteps.length > 0 ? `Pipeline: ${pipelineSteps.join(", ")}` : "Running..."}
+        </span>
       </div>
     );
   }
@@ -853,6 +864,7 @@ export function TaskDetailPage() {
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
   const { agents } = useAgents();
+  const { missions } = useMissions();
   const { progress: assessmentProgress, isAssessing, checks: assessmentChecks } = useAssessmentProgress(taskId ?? "");
 
   // Resolve dependsOn IDs to task titles
@@ -865,6 +877,14 @@ export function TaskDetailPage() {
   }
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
   const agentConfig = task ? agents.find(a => a.name === task.assignTo) : undefined;
+  // Where the task saves its files: output/<mission run>/<NN> - <title>/
+  const outputFolder = task
+    ? taskOutputFolder(task, missions.find(m => m.id === task.missionId || m.name === task.group)?.data)
+    : undefined;
+  // Tasks of agents with a pipeline run it step by step: show the run.
+  const showPipelineTab = !!agentConfig?.pipeline
+    || !!process?.activity.pipeline
+    || !!task?.outcomes?.some((o) => o.producedBy === "pipeline");
   const identity = agentConfig?.identity;
 
   const [actionPending, setActionPending] = useState<string | null>(null);
@@ -942,15 +962,22 @@ export function TaskDetailPage() {
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mt-0.5">
               <CopyableId id={task.id} label="Task ID" />
-              <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
-                <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
-                {identity?.displayName && (
-                  <span className="font-medium text-foreground/80">{identity.displayName}</span>
-                )}
-                <span className={identity?.displayName ? "text-muted-foreground" : ""}>
-                  {identity?.displayName ? `@${task.assignTo}` : task.assignTo}
+              {task.assignTo === "@script" ? (
+                // a script task: Polpo ran its command, there is no agent page to open
+                <span className="flex items-center gap-1.5 text-violet-400" title="Polpo runs this command itself, no agent">
+                  <Terminal className="h-3.5 w-3.5" /> script
                 </span>
-              </Link>
+              ) : (
+                <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+                  <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+                  {identity?.displayName && (
+                    <span className="font-medium text-foreground/80">{identity.displayName}</span>
+                  )}
+                  <span className={identity?.displayName ? "text-muted-foreground" : ""}>
+                    {identity?.displayName ? `@${task.assignTo}` : task.assignTo}
+                  </span>
+                </Link>
+              )}
               {task.group && (
                 <Link to={`/missions`} className="hidden items-center gap-1 hover:text-foreground transition-colors md:flex">
                   <Target className="h-3 w-3" /> {task.group}
@@ -1022,6 +1049,7 @@ export function TaskDetailPage() {
           {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
           <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
           <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
+          {showPipelineTab && <TabsTrigger value="pipeline" className="gap-1.5"><Workflow className="h-3 w-3" /> Pipeline</TabsTrigger>}
           <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
@@ -1628,6 +1656,23 @@ export function TaskDetailPage() {
               {/* ── Right column (2/5): details, expectations, outcomes ── */}
               <div className="lg:col-span-2 space-y-4">
 
+              {/* ── Output folder (the files this task saved) ── */}
+              {outputFolder && (
+                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                  <CardContent className="pt-4 pb-4">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2 flex items-center gap-1">
+                      <FolderOpen className="h-3 w-3" /> Output folder
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate font-mono text-xs" title={outputFolder}>{outputFolder}</code>
+                      <Button variant="outline" size="sm" className="h-7 shrink-0 text-xs" onClick={() => navigate(outputFolderLink(outputFolder))}>
+                        Open
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
                 <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 ">
@@ -2091,6 +2136,12 @@ export function TaskDetailPage() {
         </TabsContent>
 
         {/* Rules tab — applied notification rules for this task */}
+        {showPipelineTab && (
+          <TabsContent value="pipeline" className="mt-4 flex-1 min-h-0">
+            <TaskPipelineTab taskId={task.id} process={process} />
+          </TabsContent>
+        )}
+
         <TabsContent value="rules" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
             <div className="pr-4 space-y-3 max-w-3xl">
