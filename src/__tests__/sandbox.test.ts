@@ -180,7 +180,8 @@ describe("local workspace", () => {
     mkdirSync(root, { recursive: true });
     const ws = new LocalWorkspace({ root, sandbox: { provider: "local", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] } }, () => ({ PATH: "/usr/bin:/bin" }));
     const result = await ws.exec("pwd; env | grep -c DATABASE_URL || true");
-    expect(result.stdout).toContain(root);
+    // The folder name: Git bash on Windows prints the path as /tmp/… or /c/Users/…
+    expect(result.stdout).toContain(root.split(/[\\/]/).pop()!);
     expect(result.stdout.trim().endsWith("0")).toBe(true);
     rmSync(root, { recursive: true, force: true });
   });
@@ -204,6 +205,28 @@ describe("file tools never reach .polpo through a broader grant", () => {
       expect(isPathAllowed(join(polpoDir, "tmp/tool-output/a/out.txt"), allowed)).toBe(true);
       expect(isPathAllowed(join(polpoDir, "skills/s/SKILL.md"), allowed)).toBe(true);
       expect(isPathAllowed(join(project, "..", "elsewhere"), allowed)).toBe(false);
+    } finally {
+      setProtectedPaths([]);
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("protectPolpoDir: the guard the server and every task runner set (see runner-protected-paths.test.ts)", async () => {
+    const { isPathAllowed, protectPolpoDir, setProtectedPaths } = await import("../tools/path-sandbox.js");
+    const project = mkdtempSync(join(tmpdir(), "polpo-guard-"));
+    const polpoDir = join(project, ".polpo");
+    // Without it (a fresh process), the working directory grant reaches everything in .polpo
+    expect(isPathAllowed(join(polpoDir, ".env"), [project])).toBe(true);
+    protectPolpoDir(polpoDir);
+    try {
+      expect(isPathAllowed(join(polpoDir, ".env"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "vault.enc"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "tmp", "run-x.json"), [project])).toBe(false);
+      expect(isPathAllowed(join(polpoDir, "tmp", "tool-output", "dev", "out.txt"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "skills", "s", "SKILL.md"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "playbooks", "p", "playbook.json"), [project])).toBe(true);
+      expect(isPathAllowed(join(polpoDir, "output", "t1", "report.md"), [project, join(polpoDir, "output", "t1")])).toBe(true);
+      expect(isPathAllowed(join(project, "output", "m", "01 - t", "report.md"), [project])).toBe(true);
     } finally {
       setProtectedPaths([]);
       rmSync(project, { recursive: true, force: true });
