@@ -21,7 +21,7 @@ describe("dependsOn in a mission document", () => {
 
   test("an unknown task is an error, not a link dropped in silence", () => {
     expect(() => parseMissionDocument({ tasks: [task("A"), task("B", ["Z"])] }))
-      .toThrow('tasks.1.dependsOn: dependsOn references unknown task "Z"');
+      .toThrow('task "B" (tasks.1).dependsOn: dependsOn references unknown task "Z"');
   });
 
   test("a cycle is an error (its tasks would never start)", () => {
