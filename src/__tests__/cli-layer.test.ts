@@ -148,7 +148,8 @@ describe("CLI layer: task commands", { retry: 2 }, () => {
     expect(idMatch).toBeTruthy();
     const taskId = idMatch![1];
 
-    const { stdout } = await runCLI(registerTaskCommands, ["task", "show", taskId, "-d", dir]);
+    // A task id may start with "-" (nanoid): after "--" Commander takes it as the argument, not an option
+    const { stdout } = await runCLI(registerTaskCommands, ["task", "show", "-d", dir, "--", taskId]);
     expect(stdout).toContain("Show me task");
     expect(stdout).toContain("Status:");
     expect(stdout).toContain("Agent:");
@@ -157,6 +158,11 @@ describe("CLI layer: task commands", { retry: 2 }, () => {
   test("task show — unknown task prints error", async () => {
     const { stderr } = await runCLI(registerTaskCommands, ["task", "show", "nonexistent-xyz", "-d", dir]);
     expect(stderr).toContain("Task not found");
+  });
+
+  test("task show — an id that starts with '-' reaches the command after '--'", async () => {
+    const { stderr } = await runCLI(registerTaskCommands, ["task", "show", "-d", dir, "--", "-starts-with-a-dash"]);
+    expect(stderr).toContain("Task not found: -starts-with-a-dash");
   });
 
   test("task add — error when agent not found", async () => {
@@ -174,7 +180,7 @@ describe("CLI layer: task commands", { retry: 2 }, () => {
     const idMatch = addOut.match(/ID:\s+(\S+)/);
     const taskId = idMatch![1];
 
-    const { stdout } = await runCLI(registerTaskCommands, ["task", "delete", taskId, "-d", dir]);
+    const { stdout } = await runCLI(registerTaskCommands, ["task", "delete", "-d", dir, "--", taskId]);
     expect(stdout).toContain("deleted");
   });
 
