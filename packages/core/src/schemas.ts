@@ -293,6 +293,23 @@ export const missionDocumentSchema = z.object({
 export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;
 
 /**
+ * An issue path a person can place: `tasks.1.description` becomes `task "Write report"
+ * (tasks.1).description`, so the error names the task (or checkpoint, delay…) to fix.
+ */
+function describeIssuePath(raw: unknown, path: PropertyKey[]): string {
+  const dotted = path.map(String).join(".");
+  const [list, index, ...rest] = path;
+  if (typeof list !== "string" || typeof index !== "number") return dotted;
+  const item = (raw as Record<string, unknown> | null)?.[list];
+  const entry = Array.isArray(item) ? item[index] as Record<string, unknown> | undefined : undefined;
+  const label = typeof entry?.title === "string" && entry.title ? entry.title
+    : typeof entry?.name === "string" && entry.name ? entry.name : undefined;
+  if (!label) return dotted;
+  const kind = list === "tasks" ? "task" : list.replace(/s$/, "");
+  return `${kind} "${label}" (${list}.${index})${rest.length ? `.${rest.map(String).join(".")}` : ""}`;
+}
+
+/**
  * Parse and validate a mission JSON document strictly.
  * Returns the validated document or throws with a clear error message.
  */
@@ -300,7 +317,7 @@ export function parseMissionDocument(raw: unknown): MissionDocumentParsed {
   const result = missionDocumentSchema.safeParse(raw);
   if (!result.success) {
     const issues = result.error.issues
-      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .map((i) => `${describeIssuePath(raw, i.path)}: ${i.message}`)
       .join("; ");
     throw new Error(`Invalid mission document: ${issues}`);
   }
