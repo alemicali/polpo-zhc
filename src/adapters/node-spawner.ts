@@ -70,6 +70,13 @@ export class NodeSpawner implements Spawner {
       cwd: this.cwd,
     });
     if (typeof stderrFd === "number") closeSync(stderrFd);
+    // A runner that cannot start (a missing working folder, or on Windows one longer than 260
+    // characters) reports it as an 'error' event: with no listener it ended the whole server.
+    // Wait for the start, so the caller fails the task with the reason instead.
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", (err) => reject(new Error(`${err.message} (working folder: ${this.cwd})`)));
+    });
     child.unref();
 
     return {
