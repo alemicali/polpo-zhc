@@ -4,6 +4,7 @@
  * command): Git for Windows' bash is used when found, else cmd.exe.
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
@@ -41,6 +42,41 @@ export function chooseLocalShell(
   const found = candidates.find((p) => exists(p));
   if (found) return bash(found);
   return { argv: (command) => [env.ComSpec || "cmd.exe", "/d", "/s", "/c", command], name: "cmd.exe" };
+}
+
+/**
+ * Windows: end a process and everything it started. There are no process groups there: killing
+ * the shell alone leaves the command running. Git's bash adds a catch: the programs it runs are
+ * msys processes, linked to it through msys's own process groups, not through the Windows parent
+ * chain `taskkill /T` follows (a `sleep` kept running and kept the output open). So the msys
+ * groups of the Windows descendants are ended first, then the Windows tree.
+ */
+export function killProcessTree(pid: number): boolean {
+  killMsysGroups(pid);
+  const r = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+  return !r.error && r.status === 0;
+}
+
+/** `kill -9` the msys process groups of `pid` and its Windows descendants (Git's bash only). */
+function killMsysGroups(pid: number): void {
+  const shell = localShell();
+  if (shell.name === "cmd.exe") return;
+  const listing = spawnSync("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-Command",
+    "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }",
+  ], { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+  const children = new Map<number, number[]>();
+  for (const line of (listing.stdout ?? "").split(/\r?\n/)) {
+    const [p, parent] = line.trim().split(" ").map(Number);
+    if (!p || parent === undefined || Number.isNaN(parent)) continue;
+    children.set(parent, [...(children.get(parent) ?? []), p]);
+  }
+  const tree = [pid];
+  for (let i = 0; i < tree.length; i++) tree.push(...(children.get(tree[i]!) ?? []).filter((c) => !tree.includes(c)));
+  // msys exposes each process's Windows pid and process group under /proc
+  const script = `for p in /proc/[0-9]*; do w=$(cat "$p/winpid" 2>/dev/null); case " ${tree.join(" ")} " in *" $w "*) kill -9 -- -"$(cat "$p/pgid")" 2>/dev/null;; esac; done; true`;
+  const argv = shell.argv(script);
+  spawnSync(argv[0]!, argv.slice(1), { windowsHide: true, timeout: 15_000 });
 }
 
 let cached: ShellChoice | undefined;
