@@ -18,18 +18,21 @@ import type { Orchestrator } from "../core/orchestrator.js";
 // We dynamically set what streamSimple returns per test via `streamSimpleImpl`.
 let streamSimpleImpl: (...args: unknown[]) => unknown;
 
-async function buildMockPiModule() {
+async function buildMockPiModule(importOriginal: () => Promise<unknown>) {
   const { buildPiAiMock, mockTextStream } = await import("./helpers/mock-llm.js");
   streamSimpleImpl ??= () => mockTextStream("Default mock response.");
   const base = buildPiAiMock((...args: unknown[]) => streamSimpleImpl(...args) as any);
+  // The real argument check: tool calls are validated against their schemas as in production.
+  const { validateToolArguments } = await importOriginal() as { validateToolArguments: unknown };
   return {
     ...base,
+    validateToolArguments,
     streamSimple: (...args: unknown[]) => streamSimpleImpl(...args),
   };
 }
 
-vi.mock("@earendil-works/pi-ai", buildMockPiModule);
-vi.mock("@earendil-works/pi-ai/compat", buildMockPiModule);
+vi.mock("@earendil-works/pi-ai", (importOriginal) => buildMockPiModule(importOriginal));
+vi.mock("@earendil-works/pi-ai/compat", (importOriginal) => buildMockPiModule(importOriginal));
 vi.mock("@earendil-works/pi-ai/providers/all", async () => {
   const { mockModel } = await import("./helpers/mock-llm.js");
   return {
@@ -608,10 +611,57 @@ describe("POST /v1/chat/completions", () => {
   // ── Interactive tools ───────────────────────────────
 
   describe("interactive tools", () => {
+    test("create_mission with arguments that do not match its schema is returned to the model, which retries", async () => {
+      const tasks = [{ title: "Raccogli dati", description: "Scrivi dati.md", assignTo: "agent-1" }];
+      const seen: any[][] = [];
+      let turn = 0;
+      setStreamImpl((_model: unknown, context: any) => {
+        seen.push([...context.messages]);
+        turn += 1;
+        // First the mistake local models make (the name inside data), then a correct call.
+        const msg = turn === 1
+          ? mockToolCallResponse("create_mission", { data: { name: "report-meteo", tasks }, status: "draft" })
+          : mockToolCallResponse("create_mission", { name: "report-meteo", data: JSON.stringify({ tasks }) });
+        return mockStream(mockToolCallStreamEvents(msg), msg);
+      });
+
+      const res = await postCompletions({ messages: [{ role: "user", content: "Crea la mission report-meteo" }], stream: false });
+
+      expect(res.status).toBe(200);
+      const body = await parseJson(res);
+      const choice = (body.choices as any[])[0];
+      expect(choice.finish_reason).toBe("mission_preview");
+      expect(choice.mission_preview.name).toBe("report-meteo");
+      expect(choice.mission_preview.data).toEqual({ tasks });
+      expect(turn).toBe(2);
+      const errorResult = seen[1].find((m: any) => m.role === "toolResult");
+      expect(errorResult.isError).toBe(true);
+      expect(errorResult.content[0].text).toMatch(/do not match its parameters/);
+    });
+
+    test("in streaming mode an invalid call is shown as an error and the model retries", async () => {
+      let turn = 0;
+      setStreamImpl(() => {
+        turn += 1;
+        const msg = turn === 1
+          ? mockToolCallResponse("ask_user", { questions: [{ question: "Which DB?" }] })
+          : mockTextResponse("I will use postgres.");
+        return turn === 1 ? mockStream(mockToolCallStreamEvents(msg), msg) : mockStream(mockTextStreamEvents("I will use postgres.", msg), msg);
+      });
+
+      const res = await postCompletions({ messages: [{ role: "user", content: "Set up the database" }], stream: true });
+      const events = await parseSSE(res);
+
+      const toolEvents = events.map((e: any) => e.choices?.[0]?.tool_call ?? e.tool_call).filter(Boolean);
+      expect(toolEvents.some((t: any) => t.name === "ask_user" && t.state === "error")).toBe(true);
+      expect(events.some((e: any) => e.choices?.[0]?.finish_reason === "ask_user")).toBe(false);
+      expect(turn).toBe(2);
+    });
+
     test("ask_user returns finish_reason='ask_user' in non-streaming mode", async () => {
       setStreamImpl(() => {
         const msg = mockToolCallResponse("ask_user", {
-          questions: [{ question: "Which database?", options: ["postgres", "mysql"] }],
+          questions: [{ id: "database", question: "Which database?", options: [{ label: "postgres" }, { label: "mysql" }] }],
         });
         const events = mockToolCallStreamEvents(msg);
         return mockStream(events, msg);
@@ -633,7 +683,7 @@ describe("POST /v1/chat/completions", () => {
     test("ask_user returns finish_reason='ask_user' in streaming mode", async () => {
       setStreamImpl(() => {
         const msg = mockToolCallResponse("ask_user", {
-          questions: [{ question: "Which DB?" }],
+          questions: [{ id: "db", question: "Which DB?", options: [{ label: "postgres" }, { label: "mysql" }] }],
         });
         return mockStream(mockToolCallStreamEvents(msg), msg);
       });
