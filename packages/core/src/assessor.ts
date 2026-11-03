@@ -73,11 +73,13 @@ export async function runCheck(
   context?: ReviewContext,
   reasoning?: ReasoningLevel,
 ): Promise<CheckResult> {
+  // The task's output folder, unknown when the expectation was written (output-paths.ts)
+  const env = context?.outputDir ? { POLPO_OUTPUT_DIR: context.outputDir } : undefined;
   switch (expectation.type) {
     case "test": {
       const cmd = expectation.command ?? "npm test";
       try {
-        const result = await deps.shell.execute(cmd, { cwd });
+        const result = await deps.shell.execute(cmd, { cwd, env });
         if (result.exitCode !== 0) {
           return { type: "test", passed: false, message: `Test failed: ${cmd}`, details: result.stderr || result.stdout };
         }
@@ -100,7 +102,7 @@ export async function runCheck(
       }
       const missing: string[] = [];
       for (const p of paths) {
-        const resolvedPath = pathResolve(cwd, p);
+        const resolvedPath = pathResolve(cwd, context?.outputDir ? p.replace(/^\$POLPO_OUTPUT_DIR(?=[\\/]|$)/, context.outputDir) : p);
         const exists = await deps.fs.exists(resolvedPath);
         if (!exists) {
           missing.push(p);
@@ -139,7 +141,7 @@ export async function runCheck(
       if (!isMultiLine) {
         // Single-line: execute directly
         try {
-          const result = await deps.shell.execute(cmd, { cwd });
+          const result = await deps.shell.execute(cmd, { cwd, env });
           if (result.exitCode !== 0) {
             return { type: "script", passed: false, message: `Script failed: ${label}`, details: result.stderr || result.stdout };
           }
@@ -154,7 +156,7 @@ export async function runCheck(
         // The shell cannot see polpoDir (sandbox): hand the script over inside the command itself
         const body = Buffer.from(`set -euo pipefail\n\n${cmd}\n`, "utf8").toString("base64");
         try {
-          const result = await deps.shell.execute(`bash -c "$(printf %s '${body}' | base64 -d)"`, { cwd });
+          const result = await deps.shell.execute(`bash -c "$(printf %s '${body}' | base64 -d)"`, { cwd, env });
           if (result.exitCode !== 0) {
             return { type: "script", passed: false, message: `Script failed: ${label}`, details: result.stderr || result.stdout };
           }
@@ -173,7 +175,7 @@ export async function runCheck(
         // set -euo pipefail: fail on first error, like CI/CD
         const scriptContent = `#!/usr/bin/env bash\nset -euo pipefail\n\n${cmd}\n`;
         await deps.fs.writeFile(scriptFile, scriptContent);
-        const result = await deps.shell.execute(`bash "${scriptFile}"`, { cwd });
+        const result = await deps.shell.execute(`bash "${scriptFile}"`, { cwd, env });
         if (result.exitCode !== 0) {
           return {
             type: "script",
