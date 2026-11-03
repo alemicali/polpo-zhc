@@ -15,6 +15,7 @@ import type {
   EffectiveSandbox, ExecOptions, ExecResult, StorageMountSpec, Workspace, WorkspaceEntry, WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
 import { startNetworkProxy, type NetworkDenial, type NetworkProxy } from "./net-proxy.js";
+import { localShell } from "./local-shell.js";
 
 /** Output kept in memory per stream; the bash tool offloads anything big to a file anyway. */
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024;
@@ -97,7 +98,7 @@ export abstract class HostFsWorkspace implements Workspace {
 export function run(argv: string[], opts: ExecOptions & { env: Record<string, string>; cwd?: string }): Promise<ExecResult> {
   const started = Date.now();
   return new Promise((resolveRun) => {
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -131,7 +132,8 @@ export class LocalWorkspace extends HostFsWorkspace {
   readonly provider = "local" as const;
   constructor(opts: HostWorkspaceOptions, private readonly baseEnv: () => Record<string, string>) { super(opts); }
   exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
-    return run(["/bin/bash", "-c", command], { ...opts, cwd: opts.cwd ?? this.root, env: { ...this.baseEnv(), ...(opts.env ?? {}) } });
+    // /bin/bash, or Git's bash / cmd.exe on Windows (local-shell.ts)
+    return run(localShell().argv(command), { ...opts, cwd: opts.cwd ?? this.root, env: { ...this.baseEnv(), ...(opts.env ?? {}) } });
   }
 }
 
