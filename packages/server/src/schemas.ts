@@ -47,6 +47,8 @@ export const CreateTaskSchema = z.object({
   dependsOn: z.array(z.string()).optional(),
   group: z.string().optional(),
   maxDuration: z.number().positive().optional(),
+  /** Retries after a failure. Default: the project's settings.maxRetries. */
+  maxRetries: z.number().int().min(0).optional(),
   retryPolicy: z
     .object({
       escalateAfter: z.number().int().min(0).optional(),

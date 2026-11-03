@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import type { Spawner, SpawnResult } from "../core/spawner.js";
 import type { RunnerConfig } from "../core/types.js";
 import { RUNNER_COMMAND } from "../core/runner-command.js";
+import { killProcessTree } from "../sandbox/local-shell.js";
 
 export class NodeSpawner implements Spawner {
   private polpoDir: string;
@@ -70,6 +71,13 @@ export class NodeSpawner implements Spawner {
       cwd: this.cwd,
     });
     if (typeof stderrFd === "number") closeSync(stderrFd);
+    // A runner that cannot start (a missing working folder, or on Windows one longer than 260
+    // characters) reports it as an 'error' event: with no listener it ended the whole server.
+    // Wait for the start, so the caller fails the task with the reason instead.
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", (err) => reject(new Error(`${err.message} (working folder: ${this.cwd})`)));
+    });
     child.unref();
 
     return {
@@ -90,6 +98,8 @@ export class NodeSpawner implements Spawner {
 
   kill(pid: number): void {
     if (pid <= 0) return;
+    // Windows has no SIGTERM to handle: end the runner and every command it started at once
+    if (process.platform === "win32" && killProcessTree(pid)) return;
     try {
       process.kill(pid, "SIGTERM");
       setTimeout(() => {
