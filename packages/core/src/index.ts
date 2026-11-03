@@ -186,6 +186,7 @@ export { assessTask, runCheck, runMetric, type AssessmentDeps, type CheckProgres
 export { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./assessment-scoring.js";
 export { validateReviewPayload, ReviewPayloadSchema, ReviewScoreSchema, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./assessment-schemas.js";
 export { withRetry, isTransientError, type RetryOptions } from "./retry.js";
+export { OUTPUT_ROOT, safeFolderName, taskOutputPath, missionOutputPath, taskPosition, bareFileNames } from "./output-paths.js";
 
 // ── Sandboxes and storage mounts ────────────────────────────────────────
 export {

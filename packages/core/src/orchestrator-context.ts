@@ -98,6 +98,12 @@ export interface OrchestratorContext {
   /** Read raw JSONL content for a run log (used by TaskRunner timeout diagnosis). */
   readonly readRunLog?: (runId: string) => string | null;
 
+  /** Files inside a task's output folder, relative to it (shown to the tasks that depend on it). */
+  readonly listOutputFiles?: (dir: string) => Promise<string[]>;
+
+  /** Whether a file exists (a name a task mentions may be a project file to edit, not a new output). */
+  readonly fileExists?: (path: string) => Promise<boolean>;
+
   /** UDS path for push-notifying the orchestrator on runner completion. */
   readonly notifySocketPath?: string;
 

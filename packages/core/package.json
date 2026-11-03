@@ -166,6 +166,10 @@
       "types": "./dist/iso-duration.d.ts",
       "import": "./dist/iso-duration.js"
     },
+    "./output-paths": {
+      "types": "./dist/output-paths.d.ts",
+      "import": "./dist/output-paths.js"
+    },
     "./escalation-manager": {
       "types": "./dist/escalation-manager.d.ts",
       "import": "./dist/escalation-manager.js"

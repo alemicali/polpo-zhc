@@ -624,6 +624,12 @@ export interface ReviewContext {
   // --- Registered outcomes ---
   /** Explicit outcomes registered by the agent (files, text, URLs, JSON data). */
   outcomes?: TaskOutcome[];
+
+  /**
+   * The task's output folder (absolute). test and script checks get it as POLPO_OUTPUT_DIR, and
+   * file_exists paths may start with $POLPO_OUTPUT_DIR: the folder of a run is not known in advance.
+   */
+  outputDir?: string;
 }
 
 // === Ask User (structured clarification questions) ===
@@ -716,7 +722,7 @@ export interface RunnerConfig {
   task: Task;
   polpoDir: string;
   cwd: string;
-  /** Per-task output directory (.polpo/output/<taskId>/). Agents should write deliverables here. */
+  /** Per-task output directory (output/<mission run>/<NN> - <task title>/, see output-paths.ts). Agents should write deliverables here. */
   outputDir: string;
   storage?: "file" | "sqlite" | "postgres";
   /** PostgreSQL connection URL (for storage: "postgres"). */
