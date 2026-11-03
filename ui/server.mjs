@@ -1,7 +1,8 @@
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 
@@ -13,7 +14,7 @@ function option(name, fallback) {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
-const root = resolve(option("root", new URL("./dist", import.meta.url).pathname));
+const root = resolve(option("root", fileURLToPath(new URL("./dist", import.meta.url))));
 const host = option("host", process.env.HOST ?? "127.0.0.1");
 const port = Number(option("port", process.env.PORT ?? "4173"));
 const apiUrl = process.env.POLPO_API_URL ?? process.env.VITE_POLPO_API_URL ?? "";
@@ -48,9 +49,10 @@ function runtimeConfig() {
 
 function safePath(pathname) {
   const decoded = decodeURIComponent(pathname);
-  const relative = normalize(decoded).replace(/^([/\\])+/, "");
-  const path = resolve(root, relative);
-  return path === root || path.startsWith(`${root}/`) ? path : null;
+  const path = resolve(root, normalize(decoded).replace(/^([/\\])+/, ""));
+  // relative() uses the platform separator, so this also holds on Windows
+  const inside = relative(root, path);
+  return inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside) ? path : null;
 }
 
 function cacheControl(pathname) {
