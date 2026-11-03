@@ -197,7 +197,10 @@ describe("summary prompt and parsing", () => {
   });
 
   test("recognizes provider overflow errors", () => {
-    for (const message of ["prompt is too long: 1107869 tokens > 1000000 maximum", "This model's maximum context length is 128000 tokens", "context_length_exceeded", "input is too long for requested model"]) {
+    for (const message of ["prompt is too long: 1107869 tokens > 1000000 maximum", "This model's maximum context length is 128000 tokens", "context_length_exceeded", "input is too long for requested model",
+      // Ollama (seen in a task run) and llama.cpp
+      '400: {"message":"request (16384 tokens) exceeds the available context size (16384 tokens), try increasing it"}',
+      "the request exceeds the available context size, try increasing it"]) {
       expect(isContextOverflowError(message)).toBe(true);
     }
     expect(isContextOverflowError("rate limit exceeded")).toBe(false);
