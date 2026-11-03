@@ -82,6 +82,16 @@ describe("Health", () => {
     expect(body.data).toHaveProperty("uptime");
     expect(typeof body.data.uptime).toBe("number");
   });
+
+  test("a rate-limited answer carries the CORS headers, so a page on another origin can read it", async () => {
+    // its own client key: the other tests keep their budget
+    const headers = { Origin: "http://127.0.0.1:5176", "X-Forwarded-For": "cors-rate-limit-test" };
+    let res = await app.request("/api/v1/health", { headers });
+    for (let i = 0; i < 200 && res.status !== 429; i++) res = await app.request("/api/v1/health", { headers });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:5176");
+    expect(res.headers.get("access-control-expose-headers")).toContain("retry-after");
+  });
 });
 
 describe("Files API recursive uploads", () => {
