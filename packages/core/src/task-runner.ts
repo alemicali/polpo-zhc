@@ -316,6 +316,7 @@ export class TaskRunner {
           tool: r.activity.lastTool,
           file: r.activity.lastFile,
           summary: r.activity.summary,
+          pipeline: r.activity.pipeline,
         });
 
         // Emit file:changed for newly created/edited files

@@ -56,7 +56,9 @@ import {
   Bell,
   Send,
   History,
+  Workflow,
 } from "lucide-react";
+import { TaskPipelineTab } from "@/components/pipeline-run-view";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
   Dialog,
@@ -316,11 +318,19 @@ function DimensionScores({ scores }: { scores: DimensionScore[] }) {
 
 function LiveActivityStrip({ process }: { process: AgentProcess }) {
   const { activity } = process;
+  // Pipelines: name the step(s) running or waiting for a person.
+  const pipelineSteps = activity.pipeline
+    ? Object.values(activity.pipeline.steps)
+      .filter((s) => (s.status === "running" || s.status === "waiting") && (s.kind === "loop" || s.kind === "human"))
+      .map((s) => `${s.status === "waiting" ? "waiting for approval" : "loop"} "${s.name}"`)
+    : [];
   if (!activity.lastTool && !activity.lastFile && !activity.summary) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 rounded-lg border border-primary/10">
         <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-        <span className="text-xs text-primary">Running...</span>
+        <span className="text-xs text-primary">
+          {pipelineSteps.length > 0 ? `Pipeline: ${pipelineSteps.join(", ")}` : "Running..."}
+        </span>
       </div>
     );
   }
@@ -865,6 +875,10 @@ export function TaskDetailPage() {
   }
   const process = task ? processes.find(p => p.taskId === task.id) : undefined;
   const agentConfig = task ? agents.find(a => a.name === task.assignTo) : undefined;
+  // Tasks of agents with a pipeline run it step by step: show the run.
+  const showPipelineTab = !!agentConfig?.pipeline
+    || !!process?.activity.pipeline
+    || !!task?.outcomes?.some((o) => o.producedBy === "pipeline");
   const identity = agentConfig?.identity;
 
   const [actionPending, setActionPending] = useState<string | null>(null);
@@ -1022,6 +1036,7 @@ export function TaskDetailPage() {
           {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
           <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
           <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
+          {showPipelineTab && <TabsTrigger value="pipeline" className="gap-1.5"><Workflow className="h-3 w-3" /> Pipeline</TabsTrigger>}
           <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
@@ -2091,6 +2106,12 @@ export function TaskDetailPage() {
         </TabsContent>
 
         {/* Rules tab — applied notification rules for this task */}
+        {showPipelineTab && (
+          <TabsContent value="pipeline" className="mt-4 flex-1 min-h-0">
+            <TaskPipelineTab taskId={task.id} process={process} />
+          </TabsContent>
+        )}
+
         <TabsContent value="rules" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
             <div className="pr-4 space-y-3 max-w-3xl">
