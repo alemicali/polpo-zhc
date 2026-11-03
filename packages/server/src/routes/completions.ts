@@ -460,7 +460,8 @@ export interface CompletionRouteDeps {
   getSessionStore: () => any;
   contextCheckpoints?: ContextCheckpointStore;
   /** Host persists binary parts and links them to the authoritative message id. */
-  saveUserMessage?: (sessionId: string, content: any) => Promise<any>;
+  /** Persists the user message and its attachments (audio is transcribed with the speech key of `agent`, or Polpo's). */
+  saveUserMessage?: (sessionId: string, content: any, options?: { agent?: string }) => Promise<any>;
   resolveAttachmentReferences?: (text: string) => string;
   getStore: () => any;
   emit: (event: string, data: any) => void;
@@ -777,7 +778,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         let userMessage;
         try {
           userMessage = deps.saveUserMessage
-            ? await deps.saveUserMessage(sessionId, lastUserMsg.content)
+            ? await deps.saveUserMessage(sessionId, lastUserMsg.content, { agent: body.agent })
             : await sessionStore.addMessage(sessionId, "user", extractText(lastUserMsg.content));
         } catch (error) {
           return c.json({ error: { message: error instanceof Error ? error.message : "Attachment persistence failed", type: "invalid_request_error", code: "attachment_save_failed" } }, 400 as any);

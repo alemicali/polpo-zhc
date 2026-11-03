@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-03-audio-files",
+    date: "2026-11-03",
+    kind: "fixed",
+    title: "Audio in chat e vocali di Telegram",
+    summary: "Carichi qualsiasi file in chat (anche i vocali .ogg, che vengono trascritti), e rispondere a un vocale su Telegram lo fa ascoltare al bot.",
+    body: [
+      "- **Allegati in chat**: ora puoi caricare qualsiasi file, anche i vocali esportati da Telegram (`.ogg`). Prima il controllo dei tipi li rifiutava.",
+      "- **Audio trascritti**: un audio caricato in chat viene trascritto, come i vocali di Telegram, e le sue parole restano nella conversazione.",
+      "- **Rispondere a un vocale su Telegram**: rispondi a un vocale menzionando il bot (\"@bot cosa dice?\") e il bot lo ascolta, anche se non l'aveva ricevuto. In privato basta rispondere al vocale.",
+      "",
+      "Se nei gruppi il bot non sente i vocali, toglilo e aggiungilo di nuovo al gruppo dopo aver disattivato la privacy mode in BotFather: Telegram applica il cambio solo così.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-31-compaction-loop",
     date: "2026-10-31",
     kind: "fixed",
