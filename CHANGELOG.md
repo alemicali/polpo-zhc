@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Files could not be attached in the chat.** The composer accepts any file (`*/*`), but its check read `*/*` literally and refused every file picked or dropped (pasted images went another way). It now accepts any file, matches extensions, and takes the type from the name when the browser gives none (a Telegram `.ogg` export). The limit is 15 MB, as on the server.
+- **Audio attached in the chat is transcribed**, as Telegram voice notes are: its words join the message (`[audio name.ogg, transcribed: "…"]`), so the model reads them now and in later turns. The file stays attached.
+- **Telegram: replying to a voice note.** A mention of the bot in reply to someone's voice note, photo or file ("@bot what does it say?") brings that media along, even when the bot never received the original. Telegram includes it in the reply. The same holds for a reply to an earlier voice note in a private chat. The bot's own voice replies are not read again.
+- **Telegram: failed polling is logged.** A failed `getUpdates` was ignored, so two programs reading the same bot (`409 Conflict`) lost messages without a trace. It is now logged once every 10 minutes, saying what to do.
+
 ## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
 
 ### Added
