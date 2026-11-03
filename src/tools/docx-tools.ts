@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 
 const MAX_TEXT_OUTPUT = 50_000;
@@ -146,7 +146,7 @@ function createDocxCreateTool(cwd: string, sandbox: string[], fs: FileSystem): A
     parameters: DocxCreateSchema,
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "docx_create");
+      assertWriteAllowed(filePath, sandbox, "docx_create");
 
       try {
         const docxModule = await import("docx");

@@ -21,7 +21,7 @@ import { resolve, basename, join } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, assertWriteAllowed } from "./path-sandbox.js";
 import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";
 import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
@@ -781,7 +781,7 @@ function createEmailDownloadAttachmentTool(fs: FileSystem, vault?: ResolvedVault
 
         // Sandbox check
         if (sandbox) {
-          assertPathAllowed(filePath, sandbox, "email_download_attachment");
+          assertWriteAllowed(filePath, sandbox, "email_download_attachment");
         }
 
         await writeBytes(fs, filePath, buffer);

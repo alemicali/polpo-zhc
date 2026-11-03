@@ -25,7 +25,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { withHostTempDir, writeBytes } from "./tool-fs.js";
 import { assertWebUrl } from "./browser-url-guard.js";
-import { assertPathAllowed, resolveAllowedPaths } from "./path-sandbox.js";
+import { assertWriteAllowed, resolveAllowedPaths } from "./path-sandbox.js";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
@@ -439,7 +439,7 @@ function createBrowserScreenshotTool(exec: BrowserExec, cwd: string, allowedPath
       if (params.path) {
         target = resolve(cwd, params.path);
         // same guard as the file tools (also keeps screenshots out of .polpo)
-        assertPathAllowed(target, resolveAllowedPaths(cwd, allowedPaths), "browser_screenshot");
+        assertWriteAllowed(target, resolveAllowedPaths(cwd, allowedPaths), "browser_screenshot");
         args.push(target);
       }
       if (params.full_page) args.push("--full");

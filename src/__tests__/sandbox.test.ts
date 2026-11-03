@@ -234,6 +234,59 @@ describe("file tools never reach .polpo through a broader grant", () => {
   });
 });
 
+describe("an agent does not overwrite the other tasks' output folders", () => {
+  test("write and edit: own folder and project yes, another task's folder no (read stays allowed)", async () => {
+    const { protectOtherTaskOutputs } = await import("../tools/path-sandbox.js");
+    const { createSystemTools } = await import("../tools/system-tools.js");
+    const project = mkdtempSync(join(tmpdir(), "polpo-outputs-"));
+    const drafts = join(project, "output", "supporto (2)", "04 - scrivi le bozze");
+    const own = join(project, "output", "supporto (2)", "06 - correggi le bozze");
+    mkdirSync(join(drafts, "risposte"), { recursive: true });
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(drafts, "risposte", "T-107.md"), "originale");
+    protectOtherTaskOutputs(join(project, "output"), own);
+    try {
+      const tools = createSystemTools(project, undefined, undefined, own);
+      const tool = (name: string) => tools.find((t) => t.name === name)!;
+      await expect(tool("write").execute("id", { path: join(drafts, "risposte", "T-107.md"), content: "corretta" }))
+        .rejects.toThrow(/outside your own output folder.*06 - correggi le bozze/s);
+      await expect(tool("edit").execute("id", { path: join(drafts, "risposte", "T-107.md"), old_string: "originale", new_string: "corretta" }))
+        .rejects.toThrow(/outside your own output folder/);
+      // the mission folder itself belongs to no task
+      await expect(tool("write").execute("id", { path: join(project, "output", "supporto (2)", "x.md"), content: "x" })).rejects.toThrow(/outside your own output folder/);
+      // a mistyped folder name (seen in a run: "supporto- clienti (3)") is refused too, so no stray folder appears
+      await expect(tool("write").execute("id", { path: join(project, "output", "supporto- (2)", "06 - correggi le bozze", "x.md"), content: "x" })).rejects.toThrow(/outside your own output folder/);
+      expect(readFileSync(join(drafts, "risposte", "T-107.md"), "utf-8")).toBe("originale");
+
+      await tool("write").execute("id", { path: join(own, "risposte", "T-107.md"), content: "corretta" });
+      await tool("write").execute("id", { path: join(project, "notes.md"), content: "progetto" });
+      expect(readFileSync(join(own, "risposte", "T-107.md"), "utf-8")).toBe("corretta");
+      const read = await tool("read").execute("id", { path: join(drafts, "risposte", "T-107.md") });
+      expect(JSON.stringify(read.content)).toContain("originale");
+    } finally {
+      protectOtherTaskOutputs();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("no guard without a task output folder inside the output root", async () => {
+    const { protectOtherTaskOutputs, assertWriteAllowed } = await import("../tools/path-sandbox.js");
+    const project = mkdtempSync(join(tmpdir(), "polpo-outputs-"));
+    const other = join(project, "output", "m", "01 - a", "a.md");
+    try {
+      protectOtherTaskOutputs(join(project, "output"), join(project, ".polpo", "output", "chat", "dev"));
+      expect(() => assertWriteAllowed(other, [project], "write")).not.toThrow();
+      protectOtherTaskOutputs(join(project, "output"), join(project, "output"));
+      expect(() => assertWriteAllowed(other, [project], "write")).not.toThrow();
+      // outside the sandbox it is still the usual error
+      expect(() => assertWriteAllowed(join(project, "..", "x.md"), [project], "write")).toThrow(/outside allowed directories/);
+    } finally {
+      protectOtherTaskOutputs();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("agents are told about their sandbox", () => {
   test("prompt note", async () => {
     const { sandboxPromptNote } = await import("../adapters/engine.js");

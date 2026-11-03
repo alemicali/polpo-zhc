@@ -116,3 +116,34 @@ export function assertPathAllowed(filePath: string, allowedPaths: string[], tool
     );
   }
 }
+
+/**
+ * In a task run, the output root (output/) is read-only except for the task's own folder: an
+ * agent reads what the tasks before it delivered but cannot overwrite it (a fixer writing its
+ * corrections over the drafts it was given). Per process, like the .polpo guard: the task runner
+ * sets it before it builds the agent's tools. Only the current layout is guarded, an output
+ * folder inside the output root; called without one, it clears the guard.
+ */
+let readOnlyOutputRoot: string | undefined;
+let ownOutputDir: string | undefined;
+
+export function protectOtherTaskOutputs(outputRoot?: string, taskOutputDir?: string): void {
+  const root = outputRoot ? canonicalPath(outputRoot) : undefined;
+  const own = taskOutputDir ? canonicalPath(taskOutputDir) : undefined;
+  const guarded = !!root && !!own && own !== root && within(own, root);
+  readOnlyOutputRoot = guarded ? root : undefined;
+  ownOutputDir = guarded ? own : undefined;
+}
+
+/** assertPathAllowed for a tool that creates or changes the file. */
+export function assertWriteAllowed(filePath: string, allowedPaths: string[], toolName: string): void {
+  assertPathAllowed(filePath, allowedPaths, toolName);
+  if (!readOnlyOutputRoot || !ownOutputDir) return;
+  const resolved = canonicalPath(filePath);
+  if (within(resolved, readOnlyOutputRoot) && !within(resolved, ownOutputDir)) {
+    throw new Error(
+      `[sandbox] ${toolName}: "${filePath}" is outside your own output folder. The rest of the output folder holds the other tasks' folders, ` +
+      `which you can read but not change. Write your files in your own output folder: ${ownOutputDir}`,
+    );
+  }
+}
