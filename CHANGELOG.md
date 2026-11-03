@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-11-03 — Fixes from DeltaPolpo, chat attachments and voice notes
+
 Most of these fixes are by @DeltaM128 (#149–#183).
 
 ### Security
