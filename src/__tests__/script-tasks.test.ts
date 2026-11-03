@@ -22,10 +22,10 @@ describe("script task in a mission document", () => {
     const doc = parseMissionDocument({ tasks: [{ title: "Converti", script: { command: "python convert.py" } }] });
     expect(doc.tasks[0].script?.command).toBe("python convert.py");
     expect(() => parseMissionDocument({ tasks: [{ title: "Converti", script: { command: "  " } }] }))
-      .toThrow("tasks.0.script.command: script task requires a command");
+      .toThrow('task "Converti" (tasks.0).script.command: script task requires a command');
     // any other task still needs its description
     expect(() => parseMissionDocument({ tasks: [{ title: "Scrivi" }] }))
-      .toThrow("tasks.0.description: task requires a description");
+      .toThrow('task "Scrivi" (tasks.0).description: task requires a description');
   });
 
   test("its command is read from the mission by title; its description says what it runs", () => {
