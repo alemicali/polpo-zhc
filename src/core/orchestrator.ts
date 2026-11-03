@@ -119,7 +119,7 @@ import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
-import { setProtectedPaths } from "../tools/path-sandbox.js";
+import { protectPolpoDir } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
@@ -835,11 +835,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Agents' file tools never reach .polpo through a broader grant (config, .env, sessions,
     // vault, storage mounts); granted paths inside it (task output, mounts) stay reachable.
-    setProtectedPaths([this.polpoDir], [
-      join(this.polpoDir, "tmp", "tool-output"),
-      join(this.polpoDir, "skills"),
-      join(this.polpoDir, "playbooks"),
-    ]);
+    protectPolpoDir(this.polpoDir);
 
     // Apply provider overrides from config
     if (this.config.providers) {
@@ -1451,7 +1447,7 @@ export class Orchestrator extends TypedEmitter {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
-    notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean;
+    notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
   }): Promise<Task> { return this.engine.addTask(opts); }
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.engine.updateTaskDescription(taskId, description); }
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }

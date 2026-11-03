@@ -482,5 +482,6 @@ export class ContextCompactor {
 
 /** Provider error that means "the prompt does not fit": compact harder and retry once. */
 export function isContextOverflowError(message: string): boolean {
-  return /context.{0,20}(overflow|length|window|limit)|prompt is too long|too many tokens|maximum context|input is too long|exceeds the (?:maximum|model)/i.test(message);
+  // Ollama / llama.cpp: "request (16384 tokens) exceeds the available context size (16384 tokens)"
+  return /context.{0,20}(overflow|length|window|limit|size)|prompt is too long|too many tokens|maximum context|input is too long|exceeds the (?:maximum|model|available)/i.test(message);
 }
