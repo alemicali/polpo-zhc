@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   RefreshCw,
   ChevronRight,
+  Workflow,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 // Provider + context hook
@@ -50,6 +51,7 @@ import { AgentLearningTab } from "@/components/agents/agent-learning-tab";
 import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
+import { AgentPipelineTab } from "@/components/agents/agent-pipeline-tab";
 
 // ── Breadcrumb ──
 
@@ -160,6 +162,10 @@ function AgentDetailContent() {
             <Brain className="h-3.5 w-3.5 mr-1" />
             Memory
           </TabsTrigger>
+          <TabsTrigger value="pipeline">
+            <Workflow className="h-3.5 w-3.5 mr-1" />
+            Pipeline
+          </TabsTrigger>
           <TabsTrigger value="learning">Learning</TabsTrigger>
           <TabsTrigger value="goals">Goals</TabsTrigger>
           <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
@@ -190,6 +196,10 @@ function AgentDetailContent() {
 
         <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
           <AgentMemoryTab />
+        </TabsContent>
+
+        <TabsContent value="pipeline" className="mt-4 flex-1 min-h-0">
+          <AgentPipelineTab />
         </TabsContent>
 
         <TabsContent value="learning" className="mt-4 flex-1 min-h-0">

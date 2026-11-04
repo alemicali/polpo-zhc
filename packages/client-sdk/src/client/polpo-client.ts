@@ -1,5 +1,6 @@
 import { PolpoApiError } from "./errors.js";
 import type {
+  ActiveCheckpoint,
   AuthStatusResponse,
   VaultEntryMeta,
   Task,
@@ -535,6 +536,16 @@ export class PolpoClient {
 
   removeMissionCheckpoint(missionId: string, checkpointName: string): Promise<Mission> {
     return this.del<Mission>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}`);
+  }
+
+  /** Checkpoints currently pausing a mission (reached, not resumed yet). */
+  getActiveCheckpoints(): Promise<ActiveCheckpoint[]> {
+    return this.get<ActiveCheckpoint[]>("/missions/checkpoints");
+  }
+
+  /** Resume a mission paused at a checkpoint: the tasks it blocks can start. */
+  resumeCheckpoint(missionId: string, checkpointName: string): Promise<unknown> {
+    return this.post<unknown>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}/resume`);
   }
 
   // ── Delays ──
