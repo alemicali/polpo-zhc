@@ -560,7 +560,7 @@ export class OrchestratorEngine {
     title: string; description: string; assignTo: string;
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
-    notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean;
+    notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
   }): Promise<Task> { return this.taskMgr.addTask(opts); }
 
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }

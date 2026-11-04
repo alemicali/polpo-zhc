@@ -27,6 +27,39 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-03-deltapolpo-fixes",
+    date: "2026-11-03",
+    kind: "fixed",
+    title: "Agenti più affidabili: le correzioni di DeltaPolpo",
+    summary: "Task che falliscono davvero quando il modello si rompe, agenti fuori da .polpo, missioni con le dipendenze giuste e molto altro, anche su Windows.",
+    body: [
+      "Una serie di correzioni di **DeltaM128**:",
+      "",
+      "- **Sicurezza**: gli agenti dei task non possono più leggere o scrivere la cartella `.polpo` (configurazione, chiavi, vault).",
+      "- **Errori del modello**: un task il cui modello va in errore ora fallisce con il motivo, invece di risultare fatto senza aver lavorato.",
+      "- **Missioni**: un `dependsOn` verso un task scritto dopo non si perde più, e il `maxRetries` di ogni task viene rispettato.",
+      "- **Strumenti**: gli argomenti delle chiamate vengono controllati prima di eseguirle; i file non ricevono più i numeri di riga copiati da `read`; `glob` trova anche i percorsi con cartelle.",
+      "- **Prompt**: un agente vede elencati solo gli strumenti che ha davvero.",
+      "- **Playbook e grafo**: un playbook che non parte dice perché e quale task correggere; il grafo della missione non sparisce più a un checkpoint.",
+      "- **Windows**: il terminale, i controlli dei task, i percorsi assoluti e il server dell'interfaccia funzionano.",
+      "- **Modelli locali**: il contesto pieno di Ollama e llama.cpp viene riconosciuto e compattato.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-03-audio-files",
+    date: "2026-11-03",
+    kind: "fixed",
+    title: "Audio in chat e vocali di Telegram",
+    summary: "Carichi qualsiasi file in chat (anche i vocali .ogg, che vengono trascritti), e rispondere a un vocale su Telegram lo fa ascoltare al bot.",
+    body: [
+      "- **Allegati in chat**: ora puoi caricare qualsiasi file, anche i vocali esportati da Telegram (`.ogg`). Prima il controllo dei tipi li rifiutava.",
+      "- **Audio trascritti**: un audio caricato in chat viene trascritto, come i vocali di Telegram, e le sue parole restano nella conversazione.",
+      "- **Rispondere a un vocale su Telegram**: rispondi a un vocale menzionando il bot (\"@bot cosa dice?\") e il bot lo ascolta, anche se non l'aveva ricevuto. In privato basta rispondere al vocale.",
+      "",
+      "Se nei gruppi il bot non sente i vocali, toglilo e aggiungilo di nuovo al gruppo dopo aver disattivato la privacy mode in BotFather: Telegram applica il cambio solo così.",
+    ].join("\n"),
+  },
+  {
     id: "2026-10-31-compaction-loop",
     date: "2026-10-31",
     kind: "fixed",

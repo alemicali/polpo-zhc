@@ -7,6 +7,7 @@ import type {
 } from "react";
 
 import { nanoid } from "nanoid";
+import { fileMediaType } from "./file-accept";
 import {
   useCallback,
   useEffect,
@@ -63,7 +64,7 @@ export const PromptInputProvider = ({
       ...incoming.map((file) => ({
         filename: file.name,
         id: nanoid(),
-        mediaType: file.type,
+        mediaType: fileMediaType(file),
         type: "file" as const,
         url: URL.createObjectURL(file),
       })),
