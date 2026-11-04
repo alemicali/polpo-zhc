@@ -130,4 +130,66 @@ describe("TelegramCallbackPoller — group media", () => {
     expect(handler.describeGroupMedia).not.toHaveBeenCalled();
     expect(handler.handleInboundMessage).toHaveBeenCalledWith("7", String(GROUP.id), "[photo] the new logo", "Ada", "503", [], expect.objectContaining({ addressed: false }));
   });
+
+  it("a mention in reply to someone's voice note brings that voice note along (even one the bot never received)", async () => {
+    const calls = stubTelegram();
+    const { handle, handler } = poller("token-e");
+    const text = "@polpo_test_bot cosa dice?";
+    await handle(msg({
+      message_id: 504, text, entities: [{ type: "mention", offset: 0, length: 15 }],
+      reply_to_message: msg({ message_id: 400, voice, from: { id: 8, is_bot: false, first_name: "Grazia" } }),
+    }));
+    expect(calls.filter(u => u.includes("/getFile"))).toHaveLength(1);
+    expect(handler.describeGroupMedia).toHaveBeenCalledWith(String(GROUP.id), "400", expect.any(Array));
+    expect(handler.handleInboundMessage).toHaveBeenCalledWith("7", String(GROUP.id), `${LINE} cosa dice?`, "Ada", "504", [], { title: "Team", threadId: undefined, addressed: true }, true);
+  });
+
+  it("an unaddressed reply, or a reply to the bot's own voice, does not bring media", async () => {
+    stubTelegram();
+    const { handle, handler } = poller("token-f");
+    await handle(msg({ message_id: 505, text: "ahah", reply_to_message: msg({ message_id: 401, voice }) }));
+    await handle(msg({
+      message_id: 506, text: "@polpo_test_bot ripeti", entities: [{ type: "mention", offset: 0, length: 15 }],
+      reply_to_message: msg({ message_id: 402, voice, from: { id: 999, is_bot: true, first_name: "Polpo" } }),
+    }));
+    expect(handler.describeGroupMedia).not.toHaveBeenCalled();
+  });
+});
+
+describe("TelegramCallbackPoller — private replies and polling errors", () => {
+  it("in a private chat, a reply to an earlier voice note sends that voice note", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/getFile")) return new Response(JSON.stringify({ ok: true, result: { file_path: "voice/2.ogg" } }));
+      if (u.includes("/file/bot")) return new Response("ogg-bytes");
+      return new Response(JSON.stringify({ ok: true, result: {} }));
+    }));
+    const handler = {
+      handleInboundMessage: vi.fn(async () => ({ text: "ok" })),
+      handleApprovalCallback: vi.fn(async () => undefined),
+    } satisfies TelegramGatewayHandler;
+    const p = new TelegramCallbackPoller("token-g", "7");
+    p.setGateway(handler);
+    const dm = { id: 7, type: "private" as const };
+    await (p as any).handleMessage({
+      message_id: 30, chat: dm, from: { id: 7, is_bot: false, first_name: "Ada" }, text: "riascolta questo",
+      reply_to_message: { message_id: 29, chat: dm, from: { id: 7, is_bot: false, first_name: "Ada" }, voice },
+    });
+    const [, , text, , , attachments] = handler.handleInboundMessage.mock.calls[0] as unknown as [string, string, string, string, string, InboundAttachment[]];
+    expect(text).toBe("riascolta questo");
+    expect(attachments).toEqual([expect.objectContaining({ kind: "voice", filename: "voice.ogg", mimeType: "audio/ogg" })]);
+  });
+
+  it("a getUpdates conflict is logged once, saying another program reads the bot", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: false, error_code: 409, description: "Conflict: terminated by other getUpdates request" }), { status: 409 })));
+    const p = new TelegramCallbackPoller("token-h", "7");
+    await (p as any).poll();
+    await (p as any).poll();
+    const lines = errors.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("getUpdates failed"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("(409): Conflict: terminated by other getUpdates request.");
+    expect(lines[0]).toContain("Another program reads this bot's messages");
+    errors.mockRestore();
+  });
 });

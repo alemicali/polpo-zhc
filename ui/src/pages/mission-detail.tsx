@@ -80,6 +80,7 @@ import {
   type MissionDelayDef,
   type MissionTaskDef,
 } from "@/lib/mission-data";
+import { withMeasured } from "@/lib/graph-nodes";
 
 // ── Copyable ID ──
 
@@ -1019,7 +1020,10 @@ export function MissionGraphInner({
     const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays);
     setNodes((previous: Node[]) => n.map((node: Node) => {
       const existing = previous.find((candidate) => candidate.id === node.id);
-      return existing?.data.expanded ? { ...node, data: { ...node.data, expanded: true } } : node;
+      // Keep the size React Flow measured: a rebuilt node without it is hidden until measured
+      // again, which happens only if its size changes (e.g. at a checkpoint the whole graph vanished).
+      const kept = withMeasured(node, existing);
+      return existing?.data.expanded ? { ...kept, data: { ...kept.data, expanded: true } } : kept;
     }));
     setEdges(e);
   }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, setNodes, setEdges]);

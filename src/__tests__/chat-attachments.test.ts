@@ -51,4 +51,36 @@ describe("chat attachment contract", () => {
       expect(messages).toHaveLength(2);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
+  test("an audio file (a Telegram .ogg export) is saved and its words join the message", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "polpo-attachments-test-"));
+    try {
+      await mkdir(join(dir, ".polpo"));
+      const store = new FileAttachmentStore(join(dir, ".polpo"));
+      const messages: any[] = [];
+      const sessions: any = { addMessage: async (_sid: string, role: string, content: string) => {
+        const m = { id: `message-${messages.length}`, role, content, ts: new Date().toISOString() }; messages.push(m); return m;
+      } };
+      const bytes = Buffer.from("OggS-fake-audio");
+      const heard: string[] = [];
+      const saved = await saveChatUserMessage(sessions, store, dir, "session-audio", [
+        { type: "text", text: "ascolta" },
+        // browsers report .ogg as audio/ogg, video/ogg or nothing (application/octet-stream)
+        { type: "file", file: { filename: "audio_2026-11-03_05-18-45.ogg", file_data: `data:video/ogg;base64,${bytes.toString("base64")}` } },
+      ] as any, { transcribe: async (audio, filename) => { heard.push(`${filename}:${audio.toString()}`); return " ci vediamo alle 5 "; } });
+      expect(heard).toEqual(["audio_2026-11-03_05-18-45.ogg:OggS-fake-audio"]);
+      expect(messages[0].content).toBe('[audio audio_2026-11-03_05-18-45.ogg, transcribed: "ci vediamo alle 5"]\nascolta');
+      expect(saved.attachments[0]).toMatchObject({ filename: "audio_2026-11-03_05-18-45.ogg", mimeType: "video/ogg" });
+      expect(saved.attachments[0].path).toMatch(/\.ogg$/);
+      expect(await readFile(join(dir, saved.attachments[0].path))).toEqual(bytes);
+      expect(saved.modelContent[0]).toEqual({ type: "text", text: '[audio audio_2026-11-03_05-18-45.ogg, transcribed: "ci vediamo alle 5"]' });
+      // no speech key: kept as a file, nothing added
+      const quiet = await saveChatUserMessage(sessions, store, dir, "session-audio", [
+        { type: "file", file: { filename: "note.ogg", file_data: `data:audio/ogg;base64,${bytes.toString("base64")}` } },
+      ] as any, { transcribe: async () => null });
+      expect(messages[1].content).toBe("");
+      expect(quiet.modelContent).toEqual([{ type: "text", text: `[file: ${quiet.attachments[0].path}]` }]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -5,6 +5,7 @@ import { getPolpoDir } from "../core/constants.js";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { buildSystemPrompt, sandboxPromptNote } from "../adapters/engine.js";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -85,6 +86,8 @@ import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
+import { transcribeSpeech } from "../tools/audio-tools.js";
+import { speechVaultFor } from "../notifications/speech-vault.js";
 import { FileTokenUsageStore } from "../stores/file-token-usage-store.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileContextCheckpointStore } from "../stores/file-context-checkpoint-store.js";
@@ -144,11 +147,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   // Global middleware
   app.use("*", errorMiddleware());
-  // Rate limit API routes only (not static assets)
-  app.use("/api/*", rateLimitMiddleware());
-  app.use("/v1/*", rateLimitMiddleware());
 
-  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id"];
+  // CORS before the rate limit: a 429 without CORS headers reaches a page on another origin as a
+  // bare "Failed to fetch", and its Retry-After cannot be read.
+  const corsExposeHeaders = ["x-session-id", "x-user-message-id", "x-turn-id", "retry-after"];
   if (opts?.corsOrigins && opts.corsOrigins.length > 0) {
     app.use("*", cors({ origin: opts.corsOrigins, exposeHeaders: corsExposeHeaders, credentials: true }));
   } else {
@@ -166,6 +168,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       credentials: true,
     }));
   }
+
+  // Rate limit API routes only (not static assets)
+  app.use("/api/*", rateLimitMiddleware());
+  app.use("/v1/*", rateLimitMiddleware());
 
   // ── Public routes (no auth) ───────────────────────────────────────────
 
@@ -279,8 +285,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     turnScheduler,
     contextCheckpoints: o.getContextCheckpointStore(),
     resolveAttachmentReferences: (text) => resolveChatAttachmentReferences(text, o.getWorkDir()),
-    saveUserMessage: (sessionId, content) => saveChatUserMessage(o.getSessionStore()!,
-      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content),
+    saveUserMessage: (sessionId, content, options) => saveChatUserMessage(o.getSessionStore()!,
+      o.getAttachmentStore() ?? new FileAttachmentStore(o.getPolpoDir()), o.getWorkDir(), sessionId, content, {
+        transcribe: async (audio, filename) => (await transcribeSpeech(audio, filename, await speechVaultFor(o, options?.agent)))?.text ?? null,
+      }),
     getAgents: () => o.getAgents(),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
@@ -547,6 +555,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return { tools, executor: attributed, isInteractive };
     },
     streamLLM: streamSimpleWithAuth as any,
+    // A tool call whose arguments do not match the tool's schema is returned to the model instead of run.
+    // Only a validation failure counts: if the validator itself fails, the call goes through as before.
+    validateToolArguments: (tool: any, call: any) => {
+      try {
+        return validateToolArguments(tool, call);
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Validation failed")) throw err;
+        return call.arguments;
+      }
+    },
     completeLLM: completeSimpleWithAuth as any,
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
