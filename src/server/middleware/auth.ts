@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { isTrustedApiCall, TRUSTED_API_CALL_HEADER } from "@polpo-ai/server";
 
 /**
  * Constant-time string comparison to prevent timing attacks.
@@ -29,7 +30,10 @@ export function authMiddleware(apiKeys: string[]): MiddlewareHandler {
       return next();
     }
 
-    const key = c.req.header("x-api-key");
+    // calls the server makes for an authenticated MCP client
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) return next();
+    const auth = c.req.header("authorization");
+    const key = c.req.header("x-api-key") ?? (auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined);
     if (!key || !apiKeys.some(k => safeCompare(k, key))) {
       return c.json(
         { ok: false, error: "API key required", code: "AUTH_REQUIRED" },

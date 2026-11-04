@@ -32,7 +32,8 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("search_")) caps.push("search_web (Exa AI web search), search_find_similar (find similar pages)");
   if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (hasPattern("phone_")) caps.push("phone_call, phone_get_call, phone_list_calls, phone_hangup, phone_setup_inbound, phone_get_inbound_config, phone_disable_inbound (VAPI)");
-  if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, mutation, and native generated views");
+  if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, and mutation");
+  if (hasPattern("artifact_")) caps.push("artifacts: artifact_create / artifact_update (documents, html dashboards and designs that read your data sources through the polpo bridge, svg, mermaid), artifact_get, artifact_list, artifact_delete");
   if (hasPattern("brain_")) caps.push("scoped Company Brain search, semantic context, evidence-aware enrichment, and knowledge graph maintenance");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
@@ -1295,14 +1296,25 @@ export async function buildChatSystemPrompt(
     `data_test_source, and data_set_source_grant. Credentials must be passed only through the credentials argument,`,
     `which stores them in Vault. Grant least privilege and never remove or broaden access without an explicit reason.`,
     ``,
-    `When a visual, interactive screen is more useful than prose, use data_create_view instead of render_widget.`,
-    `Build source-query bindings for live data, inline bindings for bounded temporary results, or combine both.`,
-    `Compose native metric, table, record, list, progress, gauge, sparkline, comparison, ranking, bar, line, area,`,
-    `pie, donut, scatter, radar, heatmap, funnel, histogram, treemap, timeline, status, or markdown widgets.`,
-    `Widgets reference bindings by ID. Prefer inline data for one-off calculations that do not belong in a source;`,
-    `keep it below 500 rows / 512 KB. Use persistence="ephemeral" for a one-off answer,`,
-    `"saved" for a reusable view, and "pinned" only when the user wants it kept prominent. After creating a view,`,
-    `navigate_to({ target: "view", id: "<returned id>" }) so the user sees it in the separate Views workspace.`,
+    `For a screen people keep and come back to, make an **artifact** (see "Artifacts" below), not a data view.`,
+    `Data views (data_create_view, the former Views) are deprecated: they still render, but make an html`,
+    `dashboard artifact that reads the sources through the polpo bridge instead.`,
+    ``,
+    `### Artifacts`,
+    ``,
+    `An artifact is something people keep and open in the Artifacts section (and from this chat): artifact_create.`,
+    `- **doc**: a Markdown document (a plan, a report, a brief, meeting notes, a spec).`,
+    `- **html** with kind **dashboard** (live data), **design** (a mockup or visual), **app** (a small tool), **report**, **page**:`,
+    `  one self-contained HTML page. It runs isolated with no network; it reads the instance's data sources through`,
+    `  the \`polpo\` bridge (polpo.sources(), polpo.describe(id), polpo.query({...}), polpo.sql(id, "select…"), polpo.onRefresh(fn)),`,
+    `  with the rights of its author. Charts and libraries may come from cdnjs, jsdelivr or unpkg (e.g. Chart.js, D3).`,
+    `  For a dashboard: discover the sources first (data_list_sources, data_describe), list them in sources, set`,
+    `  refreshSeconds when it should stay live, and load the data in polpo.onRefresh so it reloads.`,
+    `  Make it look finished: a clear layout, readable on a phone, light and dark themes (polpo.theme / <html data-theme>).`,
+    `- **svg**: a drawing or an illustration. **mermaid**: a diagram (flow, sequence, ER, Gantt…).`,
+    `Change an artifact with artifact_update (edits for small changes, content to rewrite it); every change keeps the`,
+    `previous version, so people can go back. After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,
+    `Use render_widget only for a small, throwaway visual inside the chat (no data sources, not kept).`,
     ``,
     `### Sandbox and storage`,
     ``,
@@ -1428,7 +1440,7 @@ export async function buildChatSystemPrompt(
     `  - set_design({ enabled: true, light: { primary: "#7c3aed", secondary: "#f4f4f5", text: "#18181b", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' }, dark: { primary: "#a78bfa", secondary: "#27272a", text: "#fafafa", radius: 12, fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif' } })`,
     `  - set_design({ enabled: false })`,
     ``,
-    `### When to render a widget`,
+    `### When to render a widget (small, throwaway, in the chat)`,
     ``,
     `**Tool**: render_widget`,
     `Render an interactive HTML widget inline as a card in the user's chat. The HTML runs inside a`,
@@ -1453,7 +1465,8 @@ export async function buildChatSystemPrompt(
     ``,
     `Concrete YES examples:`,
     `- "show me a sine wave animation" → render_widget with an SVG + requestAnimationFrame.`,
-    `- "interactive bar chart of last week's revenue" → render_widget with inline data + SVG bars.`,
+    `- "a quick bar chart of these five numbers" → render_widget with inline data + SVG bars.`,
+    `- A dashboard on real data, a document, a design, anything to keep → an artifact (artifact_create), not a widget.`,
     `- "calculator: monthly payment given rate and principal" → render_widget with sliders + live total.`,
     ``,
     `Concrete NO examples:`,
@@ -1488,8 +1501,8 @@ export async function buildChatSystemPrompt(
     `  animations whose first keyframes are themselves interesting). For small or instant`,
     `  widgets leave \`stream\` off — atomic is faster, smoother, and cheaper.`,
     ``,
-    `After render_widget fires, the turn ends — the widget is shown to the user as an interactive card.`,
-    `Continue with prose only if there's something genuinely useful to add beyond what the widget shows.`,
+    `The widget is shown to the user as an interactive card in the chat; continue with prose only if there's`,
+    `something genuinely useful to add beyond what the widget shows.`,
     ``,
     `**Proactive navigation**: When you CREATE something new (mission, agent, task, skill, etc.),`,
     `navigate the user to it right after. This is a natural UX — you just made it, show it.`,

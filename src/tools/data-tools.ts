@@ -148,7 +148,8 @@ export const DATA_ORCHESTRATOR_TOOLS: Tool[] = [
   },
   {
     name: "data_create_view",
-    description: "Compose a native interactive data screen from live-source query bindings, bounded inline rows, or both. The UI renders this JSON; do not generate HTML.",
+    description: "Deprecated: for a dashboard make an html artifact (artifact_create, kind \"dashboard\") that reads the sources through the polpo bridge. "
+      + "Still works: composes a native data screen (JSON widgets) from live-source query bindings, bounded inline rows, or both.",
     parameters: Type.Object({
       name: Type.String(), description: Type.Optional(Type.String()),
       persistence: Type.Optional(Type.Union([Type.Literal("ephemeral"), Type.Literal("saved"), Type.Literal("pinned")])),
@@ -158,7 +159,7 @@ export const DATA_ORCHESTRATOR_TOOLS: Tool[] = [
   },
   {
     name: "data_update_view",
-    description: "Replace the bindings and widgets of an existing data view while preserving its identity.",
+    description: "Deprecated (views are now artifacts of type view): replace the bindings and widgets of an existing data view while preserving its identity.",
     parameters: Type.Object({
       id: Type.String(), name: Type.Optional(Type.String()), description: Type.Optional(Type.String()),
       persistence: Type.Optional(Type.Union([Type.Literal("ephemeral"), Type.Literal("saved"), Type.Literal("pinned")])),

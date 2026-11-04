@@ -45,7 +45,7 @@ const titles: Record<string, string> = {
   "/config": "Configuration",
   "/apps": "Apps",
   "/data": "Data",
-  "/views": "Views",
+  "/artifacts": "Artifacts",
   "/brain": "Company Brain",
   "/changelog": "Novità",
 };

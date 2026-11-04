@@ -78,6 +78,13 @@
       "when": 1791746197667,
       "tag": "0010_conversation_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792940249085,
+      "tag": "0011_artifacts",
+      "breakpoints": true
     }
   ]
 }

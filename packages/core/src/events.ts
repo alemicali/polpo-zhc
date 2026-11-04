@@ -188,6 +188,7 @@ export interface PolpoEventMap {
   // Registries and operational surfaces
   "app:changed": { appId: string; action: "created" | "updated" | "deleted" | "runtime" | "log"; resourceId?: string; timestamp: string };
   "data-source:changed": { sourceId: string; action: "created" | "updated" | "deleted" | "activity" | "data"; timestamp: string };
+  "artifact:changed": { artifactId: string; action: "created" | "updated" | "deleted"; type: string; title: string; timestamp: string };
   "data-view:changed": { viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
   "skill:changed": { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string };
   "token-usage:recorded": { timestamp: string };

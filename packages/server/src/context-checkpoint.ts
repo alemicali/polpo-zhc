@@ -81,16 +81,39 @@ export interface LoadedContextCheckpoint {
   revision: string;
 }
 
+/** The session's stored checkpoint, checked against this conversation. */
+export interface ContextCheckpointInspection {
+  /** Usable: its covered prefix is still the start of this conversation. */
+  checkpoint: LoadedContextCheckpoint | null;
+  /** The revision in storage, usable or not: a new checkpoint replaces it (compare-and-swap). */
+  storedRevision: string | null;
+  /** Why a stored checkpoint is not usable. */
+  rejected?: string;
+}
+
+export async function inspectContextCheckpoint(
+  store: ContextCheckpointStore | undefined, sessionId: string | null, scope: string, original: any[],
+): Promise<ContextCheckpointInspection> {
+  if (!store || !sessionId) return { checkpoint: null, storedRevision: null };
+  const saved = await store.load(sessionId).catch(() => null);
+  if (!saved) return { checkpoint: null, storedRevision: null };
+  const stale = (rejected: string) => ({ checkpoint: null, storedRevision: saved.revision, rejected });
+  if (saved.scope !== scope) return stale("made for another model or session");
+  if (saved.prefixHashes.length > original.length) return stale(`it covers ${saved.prefixHashes.length} messages, the conversation has ${original.length}`);
+  const current = await Promise.all(saved.prefixHashes.map((_, i) => fingerprint(original[i])));
+  const at = current.findIndex((hash, i) => hash !== saved.prefixHashes[i]);
+  if (at >= 0) {
+    const moved = current.includes(saved.prefixHashes[at]!);
+    return stale(`message ${at + 1} of the ${saved.prefixHashes.length} it covers ${moved ? "is in another position" : "changed"} (${String(original[at]?.role)})`);
+  }
+  return { checkpoint: { covered: current.length, summary: saved.summary, count: saved.count ?? 1, revision: saved.revision }, storedRevision: saved.revision };
+}
+
 /** The session's checkpoint, when its covered prefix is still the start of this conversation. */
 export async function loadContextCheckpoint(
   store: ContextCheckpointStore | undefined, sessionId: string | null, scope: string, original: any[],
 ): Promise<LoadedContextCheckpoint | null> {
-  if (!store || !sessionId) return null;
-  const saved = await store.load(sessionId).catch(() => null);
-  if (!saved || saved.scope !== scope || saved.prefixHashes.length > original.length) return null;
-  const current = await Promise.all(saved.prefixHashes.map((_, i) => fingerprint(original[i])));
-  if (!current.every((hash, i) => hash === saved.prefixHashes[i])) return null;
-  return { covered: current.length, summary: saved.summary, count: saved.count ?? 1, revision: saved.revision };
+  return (await inspectContextCheckpoint(store, sessionId, scope, original)).checkpoint;
 }
 
 /**

@@ -43,6 +43,7 @@ import type { ConversationCheckTarget, RoomKind, RoomMessage, RoomStore, VoiceRe
 import { synthesizeSpeech, transcribeSpeech } from "../tools/audio-tools.js";
 import { reactionHint, reactionOf } from "./telegram-reactions.js";
 import { loadAgentVaultEntries, resolveAgentVault } from "../vault/index.js";
+import { speechVaultFor } from "./speech-vault.js";
 import type { TelegramAgentRelay } from "../rooms/telegram-relay.js";
 import type { AgentProfile } from "../rooms/room-engine.js";
 import { ROOM_TURN_LINES, roomTurnText } from "../rooms/transcript.js";
@@ -1639,6 +1640,34 @@ export class ChannelGateway {
   /** How long a channel message waits for an answer already running in its conversation. */
   static LEASE_WAIT_MS = 10 * 60 * 1000;
 
+  /** The vault whose speech-to-text key a turn uses (see speech-vault.ts). */
+  private speechVault(agent: string | undefined): ReturnType<typeof speechVaultFor> {
+    return speechVaultFor(this.orchestrator, agent);
+  }
+
+  /**
+   * A turn's voice notes and audio, transcribed: the words go into the message text and the audio is
+   * dropped; what cannot be transcribed (no key, an error) stays attached for the agent's own tools.
+   */
+  private async transcribeTurnAudio(text: string, attachments: InboundAttachment[], agent: string | undefined): Promise<{ text: string; attachments: InboundAttachment[] }> {
+    if (!attachments.some((a) => a.kind === "voice" || a.kind === "audio")) return { text, attachments };
+    const vault = await this.speechVault(agent).catch(() => undefined);
+    const lines: string[] = [];
+    const kept: InboundAttachment[] = [];
+    for (const a of attachments) {
+      if (a.kind !== "voice" && a.kind !== "audio") { kept.push(a); continue; }
+      const label = a.kind === "voice" ? "voice message" : "audio";
+      const speech = await transcribeSpeech(a.data, a.filename, vault).catch((err: unknown) => {
+        this.log("warn", `transcription of a ${label} failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+      if (speech?.text) lines.push(`[${label}, transcribed: "${speech.text}"]`);
+      else kept.push(a);
+    }
+    if (lines.length === 0) return { text, attachments };
+    return { text: [...lines, text.trim()].filter(Boolean).join("\n"), attachments: kept };
+  }
+
   /**
    * Turn through the host's chat pipeline (agent-direct, or orchestrator when
    * agent is undefined). The pipeline persists both messages and attachments.
@@ -1652,9 +1681,12 @@ export class ChannelGateway {
         : "Attachments are not supported on this instance yet. Please send text.";
     }
 
-    const attachments = msg.attachments ?? [];
-    const tooLarge = attachments.find(a => a.data.length > MAX_ATTACHMENT_BYTES);
+    const tooLarge = (msg.attachments ?? []).find(a => a.data.length > MAX_ATTACHMENT_BYTES);
     if (tooLarge) return `${tooLarge.filename} is too large: attachments can be up to 15 MB.`;
+    // Voice notes are heard on arrival: their words join the message, so they stay in the conversation
+    // (a model cannot listen to an audio file, and a transcript kept only in a tool result is lost next turn).
+    const heard = await this.transcribeTurnAudio(msg.text, msg.attachments ?? [], agent);
+    const attachments = heard.attachments;
 
     // The whole conversation: compaction keeps it within the window and reuses its checkpoint,
     // which a sliding window of recent messages would invalidate at every turn.
@@ -1664,7 +1696,7 @@ export class ChannelGateway {
     const messages: ChannelChatRequest["messages"] = history
       .filter(m => (m.role === "user" || m.role === "assistant") && m.content)
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
-    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(msg.text, attachments.slice(0, 5)) : msg.text });
+    messages.push({ role: "user", content: attachments.length > 0 ? attachmentContent(heard.text, attachments.slice(0, 5)) : heard.text });
 
     if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
     const { text, files = [] } = await runner({ agent, sessionId, messages, origin: this.checkTarget(msg) });

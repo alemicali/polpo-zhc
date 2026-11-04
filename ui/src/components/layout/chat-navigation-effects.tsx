@@ -70,8 +70,11 @@ export function ChatNavigationEffects() {
       case "app":            route = id ? `/apps/${encodeURIComponent(id)}` : "/apps"; break;
       case "data":           route = "/data"; break;
       case "storage":        route = "/files"; break;
-      case "views":          route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
-      case "view":           route = id ? `/views?view=${encodeURIComponent(id)}` : "/views"; break;
+      case "artifacts":
+      case "artifact":       route = id ? `/artifacts/${encodeURIComponent(id)}` : "/artifacts"; break;
+      // former data views are artifacts of type "view"
+      case "views":
+      case "view":           route = id ? `/artifacts/${encodeURIComponent(`view:${id}`)}` : "/artifacts?type=view"; break;
       case "brain":          route = id ? `/brain?entity=${encodeURIComponent(id)}` : "/brain"; break;
       case "config":
       case "settings":       route = "/config"; break;

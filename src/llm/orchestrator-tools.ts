@@ -53,6 +53,8 @@ import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
 import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
+import { ARTIFACT_TOOLS, executeArtifactTool } from "../tools/artifact-tools.js";
+import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
 import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
@@ -1980,7 +1982,8 @@ Available targets:
 - "app_preview" — App Preview page (optional url selects a running app/service)
 - "data" — Data sources and query explorer
 - "storage" — Storage buckets (S3/R2) and their mount status
-- "views" / "view" — Generated view registry or a specific view (id)
+- "artifacts" / "artifact" — Artifacts (documents, dashboards, designs, diagrams) or a specific one (id)
+- "views" / "view" — Former data views (deprecated: now artifacts of type view)
 
 Examples:
 - navigate_to({ target: "dashboard" })
@@ -1988,10 +1991,10 @@ Examples:
 - navigate_to({ target: "agent", name: "coder" })
 - navigate_to({ target: "files", path: "src/", highlight: "index.ts" })
 - navigate_to({ target: "app_preview", url: "https://machine.example.ts.net:3020/" })
-- navigate_to({ target: "view", id: "view-id" })
+- navigate_to({ target: "artifact", id: "art_xyz" })
 - navigate_to({ target: "task", id: "task-xyz" })`,
   parameters: Type.Object({
-    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, storage, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
+    target: Type.String({ description: "Page target: dashboard, tasks, task, missions, mission, agents, agent, skills, skill, files, apps, app, app_preview, data, storage, artifacts, artifact, views, view, brain, activity, chat, memory, notifications, approvals, playbooks, config" }),
     id: Type.Optional(Type.String({ description: "Entity ID for detail pages (task, mission)" })),
     name: Type.Optional(Type.String({ description: "Entity name for detail pages (agent, skill)" })),
     path: Type.Optional(Type.String({ description: "Directory path for files target" })),
@@ -2169,6 +2172,8 @@ export const READ_TOOLS = new Set([
   "whatsapp_read",
   // Structured data
   "data_list_sources", "data_test_source", "data_describe", "data_query", "data_sql", "data_list_views", "data_get_view",
+  // Artifacts
+  "artifact_get", "artifact_list",
   // Company Brain
   "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
   // Storage (buckets)
@@ -2195,6 +2200,8 @@ export const WRITE_TOOLS = new Set([
   "review_agent_learning", "revert_agent_learning", "reflect_agent", "confirm_check",
   // Conversation checks
   "schedule_check", "cancel_check", "send_message",
+  // Artifacts
+  "artifact_create", "artifact_update", "artifact_delete",
   // Notification rules
   "add_notification_rule", "remove_notification_rule", "send_notification",
   // Task watchers
@@ -2356,6 +2363,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   controlAppTool, controlAppServiceTool, runAppDeploymentTool, captureAppScreenshotTool,
   // Structured data + generated views
   ...DATA_ORCHESTRATOR_TOOLS,
+  ...ARTIFACT_TOOLS,
   // Evidence-grounded semantic company graph
   ...BRAIN_ORCHESTRATOR_TOOLS,
   // Storage: S3/R2 buckets (host-side; admin + object tools)
@@ -2375,6 +2383,11 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
 
 /** Tool action labels for the approval prompt title. */
 const TOOL_LABELS: Record<string, string> = {
+  artifact_create: "Create Artifact",
+  artifact_update: "Update Artifact",
+  artifact_get: "Read Artifact",
+  artifact_list: "List Artifacts",
+  artifact_delete: "Delete Artifact",
   create_task: "Create Task",
   update_task: "Update Task",
   delete_task: "Delete Task",
@@ -2629,6 +2642,15 @@ export async function executeOrchestratorTool(
       case "configure_app_domain": return execConfigureAppDomain(polpo, args);
       case "control_app": return execControlApp(polpo, args);
       case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
+
+      // ── Artifacts ──
+      case "artifact_create": case "artifact_update": case "artifact_get": case "artifact_list": case "artifact_delete":
+        return executeArtifactTool(toolName, args, {
+          store: getArtifactStore(polpo.getPolpoDir()),
+          author: "polpo",
+          ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+          emit: (payload) => polpo.emit("artifact:changed", payload),
+        });
 
       // ── Structured data ──
       case "data_list_sources": case "data_register_source": case "data_update_source": case "data_delete_source":

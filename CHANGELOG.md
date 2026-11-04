@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
 - **Agent pipelines run:** an agent with `loops` and a `pipeline` now runs it for every task assigned to it, instead of the contract being only validated and stored. Loops (own instructions, tools, model, turn limit, `stopWhen`, `output.schema`, retried with feedback up to 3 attempts), `parallel` (join all / any / n), `switch`, `when` guards and `human` approvals, with a shared context. Human steps are regular approvals (Approvals page, `/approve`, API); requests left open by a stopped pipeline are closed automatically. The run state travels with `agent:activity` events. See `docs/loops.md`.
 - **Pipeline editor** (Agents → an agent → Pipeline): define the agent's loops and its pipeline as a top-down flow. Insert loops, parallel branches, switches and human approvals with the "+" on the arrows, edit them in a side panel, and see problems (unknown loops, empty branches, duplicate approval names) on the nodes; they block saving. `PATCH /agents/:name` accepts `pipeline: null` to remove the pipeline and rejects pipelines that reference unknown loops.
 - **Live pipeline view** (Tasks → a task → Pipeline): for tasks of an agent with a pipeline, each step is colored by its state (running, waiting for approval, done, failed, skipped or stopped), with attempts, retry feedback, errors and the shared context. It updates live while the task runs and stays available after it ends.
@@ -18,12 +17,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Edit an agent from its page:** an Edit button opens a panel with the agent's role, team, manager, model (with "Use project default"), reasoning, turn and parallel-task limits, additional instructions, built-in tools and tool categories, skills, identity (display name, title, company, email, timezone, tone, personality, bio, responsibilities) and advanced settings (allowed folders, email domains, browser profile, Telegram voice replies). Before, the agent page only showed the configuration.
 
 ### Changed
+- `PATCH /agents/:name`: an empty value removes an optional text field (`model`, `role`, `systemPrompt`, `reasoning`, `browserProfile`, identity fields); e.g. `model: ""` makes the agent use the project default again.
+
+## [0.5.2] — 2026-11-03 — Fixes from DeltaPolpo, chat attachments and voice notes
+
+Most of these fixes are by @DeltaM128 (#149–#183).
+
+### Security
+- **Task agents could read and write the project's `.polpo` folder.** The file tools keep agents out of `.polpo` (configuration, `.env`, vault, sessions, storage mounts), but the guard was only switched on in the server process. Tasks run in a separate runner process, where it was off: an agent with the default access (its working directory) could read `.polpo/.env` or the vault file and write anywhere in `.polpo`. The runner now sets the same guard before building the agent's tools, with the same exceptions (offloaded tool outputs, skills, playbooks). A task output folder that lies inside `.polpo` stays writable: it is now granted explicitly. (#150)
+
+### Fixed
+- **Files could not be attached in the chat.** The composer accepts any file (`*/*`), but its check read `*/*` literally and refused every file picked or dropped (pasted images went another way). It now accepts any file, matches extensions, and takes the type from the name when the browser gives none (a Telegram `.ogg` export). The limit is 15 MB, as on the server.
+- **Audio attached in the chat is transcribed**, as Telegram voice notes are: its words join the message (`[audio name.ogg, transcribed: "…"]`), so the model reads them now and in later turns. The file stays attached.
+- **Telegram: replying to a voice note.** A mention of the bot in reply to someone's voice note, photo or file ("@bot what does it say?") brings that media along, even when the bot never received the original. Telegram includes it in the reply. The same holds for a reply to an earlier voice note in a private chat. The bot's own voice replies are not read again.
+- **Telegram: failed polling is logged.** A failed `getUpdates` was ignored, so two programs reading the same bot (`409 Conflict`) lost messages without a trace. It is now logged once every 10 minutes, saying what to do.
+- A task whose model call failed (e.g. Ollama answering HTTP 500 because the model crashed while loading, or a connection error) ended as **done** with no output and no work: the agent ends such a run with an error reply instead of throwing, and the engine counted it as a success. It now fails with the reason (`Model error: …`), so it is retried and then shown as failed. (#149)
+- A run stopped at the turn limit is not a model error: stopping the agent at `maxTurns` ends its last call with an abort error, so the run ends as a normal one (its expectations decide) and its output says `[Stopped at the turn limit (N turns)]`. (#149)
+- Tool calls whose arguments did not match the tool's schema were run or previewed anyway: e.g. a local model putting the mission name inside `data` produced a mission preview without a name. The chat now checks every call against its schema (pi-ai's validator) before running or previewing it; a call that does not match is returned to the model with the reason, so it can call the tool again in the same turn. An object or array parameter passed as a JSON string is still accepted, as before. (#151)
+- **A playbook that cannot run says why, and which task to fix.** The reason was shown only in a toast that disappears in seconds, and it named fields by index (`tasks.0.description: task requires a description`). The Run dialog now keeps the reasons on screen until the next try, and they name the task, checkpoint or delay (`task "test" (tasks.0).description: task requires a description`). (#152)
+- **The mission graph disappeared when a run paused at a checkpoint** (nodes and connections gone, only the background left). On every status update the graph was rebuilt with new node objects that had lost the size React Flow had measured; React Flow hides a node of unknown size and measures it again only when its size changes. Task cards change size with their status, so they came back, but at a checkpoint nothing changed size and the whole graph stayed hidden. The rebuilt nodes now keep their measured size (mission page). (#153)
+- `ui/server.mjs` did not work on Windows: every file, including the JavaScript and CSS in `/assets`, was served as `index.html`, because the path check expected `/` separators, and the default static root was built from a URL path (`/D:/...`). The server now uses the platform's paths and still refuses paths outside the static root. (#154)
+- **Line numbers copied from `read` into files.** The read tool shows each line as `<n><TAB><text>`, and agents of every size copied those numbers into what they wrote (with the tab, a space, the escape `\t`, a dot or nothing, sometimes with `\n` written instead of the line breaks), so a file ended up with numbers that were never in it. `write` and `edit` now refuse content whose every line starts with consecutive line numbers, with text after them on most lines (a file of numbers, one per line, is data), with an error that says why; `keep_line_numbers: true` lets a file whose lines really are numbered through. An `edit` whose `old_text` carries the numbers says so instead of a bare "not found", and the read tool's description says the numbers are not part of the file. (#161)
+- **The glob tool found nothing for patterns with a folder** (`docs/report.md`, `src/**/*.ts`), and nothing at all on Windows without bash: it ran `find -name`, which matches file names only, through a Unix shell. It now walks the files itself (`src/tools/glob-files.ts`, on the FileSystem port, so remote sandboxes too), with `*`, `**`, `?`, `{a,b}` and `[abc]`; `node_modules` and `.git` are walked only when the pattern names them. (#161)
+- **The bash tool failed for every command on Windows** ("uv_spawn '/bin/bash' ENOENT"): the local workspace always ran `/bin/bash -c <command>`. On Windows it now uses Git for Windows' bash (from the usual install folders, or next to `git` on PATH; never `System32\bash.exe`, the WSL launcher), else `cmd.exe`; `POLPO_SHELL` picks another bash-compatible shell. Commands no longer open a console window. Linux and macOS are unchanged. (#162)
+- **A context-full error from Ollama or llama.cpp was not recognized** ("request (16384 tokens) exceeds the available context size"), so the task failed instead of compacting its conversation and retrying once, as it does for the other providers' overflow errors. (#163)
+- **A mission or playbook task's `maxRetries` was ignored:** every task got the project's `settings.maxRetries` (3 by default), so a task meant to fail at once (`maxRetries: 0`) was retried three times. The task now keeps its own value; `POST /tasks` accepts `maxRetries` too. (#164)
+- **A page on another origin saw a rate-limited request as "Failed to fetch"**: the rate limit answered 429 before the CORS headers were added, so the browser hid the answer and its `Retry-After`. CORS now runs first (preflight requests no longer count against the limit) and `Retry-After` is exposed. (#166)
+- **A runner that could not start ended the whole server** (for example a project folder longer than Windows' 260 characters, or one that no longer exists): the start error came as an event nobody listened to. The task now fails with the reason and the working folder, and the server keeps running. (#167)
+- **A `dependsOn` on a task listed after it was dropped in silence**, so the task started at once, in parallel with the one it should have waited for: the tasks were created in the listed order, and a dependency not yet created had no id to point to. They are now created dependencies first (the listed order is kept otherwise, and the output folders keep their numbers). A `dependsOn` naming a task that does not exist, or a cycle (`A` → `B` → `A`, which would never start), is now refused with a message that names the task; renaming a task in a mission keeps the `dependsOn`, checkpoints, delays and quality gates that point to it. (#169)
+- **An agent limited to some tools was told it had all the core ones**: the agent's prompt listed read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome and the vault tools as "always available", and the Ink tools too, whatever its `allowedTools`. An agent limited to the file tools tried `bash` ("Tool bash not found") or wrote that it had run a command it never could. The prompt now names only the tools the agent gets, with the same filter that creates them (the vault tools come with every agent); an agent without `bash` is told it has no shell and not to claim tools it does not have, and the bash rules are left out of its task message. (#170)
+- **On Windows, `file_exists` expectations on an absolute path always failed** (`C:\data\x.csv`, `C:/data/x.csv`, `\\server\share\x.csv`): the check read a Windows absolute path as relative to the working directory and looked for it there. (#177)
+- **On Windows, `test` and `script` expectations and metrics ran in `cmd.exe`**, while the agents' commands run in Git's bash: a check written for bash (`test -f …`, `grep -q …`) always failed there. They now run in the same bash (cmd.exe only when Git's bash is missing); Linux and macOS are unchanged. (#178)
+- **On Windows, a command stopped for its timeout kept running** (the bash tool, checks): only the shell was ended, and the program it had started went on, keeping the run waiting until it finished by itself. Now the msys process groups of Git's bash are ended (the programs it runs are linked to it there, not in the Windows process tree, so `taskkill /T` alone misses them), then the Windows tree; a stopped command no longer waits for its output to close. A runner the supervisor kills on Windows (task timeout, unresponsive agent) takes the commands it started with it. (#178)
+
+## [0.5.1] — 2026-10-31 — The agent card in Claude and ChatGPT
+
+### Added
+- **The agent card, an MCP App:** in Claude, ChatGPT and other hosts that show [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), the `show_agent` tool shows an interactive card in the conversation; other clients get the same as text.
+  - **Inline:** whether the agent is working, the task at hand, today (done, failed, waiting for a person), what it plans next and its main goal with its progress. Two actions: **Open** (full screen) and **Ask for an update** (a chat message, so the model talks to the agent).
+  - **Full screen:** tabs for overview (self-portrait, goals, latest reflections), tasks (with filters), goals (the tree with progress) and routine, where the agent's proposals are confirmed or cancelled. The tab in view goes to the model's context.
+  - **Native look:** the host's style variables (light and dark, its font), a transparent background, skeletons while loading, safe areas and 44px targets on mobile, no menus or inline scrolling.
+  - **One live card per agent:** when the card is shown again in a conversation, older copies grey out.
+  - **Claude** reads a connector's apps when it is connected: reconnect the connector after an update that adds or changes apps.
+  - **Log:** one `[polpo/mcp]` line per MCP message, without contents (the client and whether it shows apps, the tools and resources it uses).
+  - **Self-contained:** the widget (`widgets/agent-card`, built with the MCP Apps SDK into one HTML document by `pnpm run build:widgets`) loads nothing from other origins. Its refresh and decide tools are visible only to it.
+
+### Fixed
+- **A long chat compacted again at every turn.** When a session's saved context checkpoint stopped matching the conversation (for example after a change of model), the new checkpoint was never saved: the save expected "no checkpoint yet" and the store refused it. From then on, every message summarized the whole conversation again: hundreds of thousands of tokens per turn, sometimes past the 90-second limit. A checkpoint that no longer fits is now replaced, so the next turns reuse it. The server logs why a checkpoint was not reused (`[polpo/compaction]`).
+
+## [0.5.0] — 2026-10-25 — Artifacts and the MCP connector
+
+### Added
+- **Artifacts** replace Views: one concept for what agents and people make to look at and keep.
+  - **Types:**
+    - `doc` (Markdown);
+    - `html`, one self-contained page with a kind: dashboard, design, app, report, page;
+    - `svg` (a drawing) and `mermaid` (a diagram);
+    - `view`, the former data views, still shown and working.
+  - **Data in html artifacts:** the page runs isolated, in a sandbox without same-origin and with a strict CSP: no network except a few CDNs for libraries. It reads the instance's data sources through a `polpo` bridge with the **rights of its author**: an agent's artifact sees only the sources and fields that agent is granted. The bridge offers:
+    - `polpo.sources()`, `polpo.describe(id)`, `polpo.query({...})` and `polpo.sql(id, …)` (read-only);
+    - `polpo.onRefresh(fn)`, called every `refreshSeconds` and when a data source changes;
+    - `polpo.theme` / `polpo.onTheme`.
+  - **Versions:** every change keeps the previous content with its author and note, and any version can be restored.
+  - **Tools:** `artifact_create`, `artifact_update` (whole content, or find/replace edits), `artifact_get` (also earlier versions), `artifact_list`, `artifact_delete`.
+    - Polpo has all of them; agents get them with `artifact_*` in allowedTools (a new "Artifacts" category in the Tools tab).
+    - Agents change only their own artifacts.
+    - `navigate_to` gains `artifacts` / `artifact`.
+  - **API:** `GET/POST /artifacts`, `GET/PATCH/DELETE /artifacts/:id`, `POST /artifacts/:id/restore/:version`, `POST /artifacts/:id/data` (the bridge). The event is `artifact:changed`. Storage is the `artifacts` table (SQLite/Postgres migrations) or `.polpo/artifacts/` in file mode.
+  - **UI:**
+    - an **Artifacts** section (replacing Views in every menu) with a gallery by type and search;
+    - a viewer with live content, versions and restore, source, data reload, full screen and download;
+    - in the chat, a card for each artifact made or changed, which opens it next to the conversation.
+
+- **Polpo as an MCP connector:** every server is also an MCP server at `/mcp` (Streamable HTTP, stateless), so Claude Code, Codex, Claude Desktop, Cursor and other MCP clients can use the instance.
+  - **Tools:** 22 tools for what people do (`ask_polpo` delegates anything to Polpo; `chat_with_agent`; tasks, missions, artifacts, data, approvals; files: `list_files`, `search_files`, `read_file` with text by line ranges and images and PDFs as they are, `write_file`, `manage_file` to make folders, rename and delete) plus `list_operations` / `call_operation`, which reach every REST operation of the server (more than 300). There is not one tool per endpoint, to keep the model's context small. Read-only and destructive tools (`call_operation`, `resolve_approval`, `write_file`, `manage_file`) are annotated.
+  - **Authentication:** the API key as `Authorization: Bearer` or `X-API-Key`, or **OAuth 2.1**, so it can be added as a custom connector in Claude (web, Desktop, mobile) and ChatGPT.
+    - **Discovery:** a `401` with the protected-resource pointer, then RFC 9728 and RFC 8414 metadata.
+    - **Client registration:** Client ID Metadata Documents or Dynamic Client Registration.
+    - **Codes:** authorization code with PKCE S256 only, `iss` in the response, loopback redirects on any port for Claude Code.
+    - **Consent page:** signed in to the dashboard, or with the API key or MCP key; it has a session-bound CSRF token.
+    - **Tokens:** 1-hour access tokens and 30-day refresh tokens rotated at every use, stored hashed in `.polpo/oauth.json`; `/oauth/revoke`.
+    - **Public URL:** the `X-Forwarded-*` headers when behind a proxy, or `POLPO_PUBLIC_URL`, which may carry a path (a proxy that mounts Polpo under `/name`) and applies to requests through its host.
+  - **Publishing only the connector:** `POLPO_MCP_KEY` opens `/mcp` and the consent page without putting an API key on the dashboard and REST API, so an instance can expose `/mcp`, `/oauth` and the discovery documents (for example with Tailscale Funnel) and keep the rest private. Since these endpoints can be public, open client registration is capped (200 clients; ones holding tokens are kept), and client metadata documents are fetched only from public addresses.
+  - **Same rules:** the tools call the server's own REST API in process.
+  - **stdio:** `polpo mcp --url <server> --api-key <key>` runs the same tools over stdio for clients that start a process.
+  - **Setup guide:** `docs/mcp.md`.
+- The API key middleware also accepts `Authorization: Bearer <key>`, not only `X-API-Key`.
+
+### Changed
+- Polpo's prompt now says when to make an artifact (documents, dashboards on real data, designs, diagrams) and keeps `render_widget` for small throwaway visuals in the chat. The old prompts contradicted each other on views vs widgets.
+- `data_create_view` / `data_update_view` are deprecated in favor of html dashboards. `/views` redirects to the artifacts of type view.
+- In the Artifacts section the former data views are marked **Legacy**: they have no tab of their own and a note says to make html dashboards instead.
+
+### Fixed
+- A data view shown in the dashboard queried its sources as an administrator, so an agent's view could show data that agent is not granted. As an artifact, a view's data bridge uses its author's rights.
+
+## [0.4.10] — 2026-10-15 — Fixes from DeltaPolpo
+
+Most of these were found and fixed by @DeltaM128 in the DeltaPolpo fork (#127; #133–#137, #144, #145). Thanks!
+
+### Added
+- **Local (offline) models in setup:** the provider step has a "Local model (offline)" option for Ollama, LM Studio, vLLM or any OpenAI-compatible server on this machine or the local network. Polpo detects the server and its models, and flags Ollama models without tool calling, which can chat but cannot run agent tasks. No account or API key is needed.
+
+### Changed
 - A new mission whose name is taken is named `name (2)`, `name (3)`…, so every run of a playbook is its own mission.
 - Task titles must be unique within a mission, no longer across all active tasks, so two runs of one playbook can run at the same time.
 - Abort also cancels a mission paused at a checkpoint, and releases its checkpoints and delays.
-- `PATCH /agents/:name`: an empty value removes an optional text field (`model`, `role`, `systemPrompt`, `reasoning`, `browserProfile`, identity fields); e.g. `model: ""` makes the agent use the project default again.
 
 ### Fixed
+- **Telegram voice notes in private chats are transcribed on arrival**, as in groups, and their words become the message.
+  - **Why:** before, the model got an audio file it cannot hear and had to transcribe it with its tools. Polpo has no speech-to-text key of its own, so it delegated the transcription to an agent as a task. The transcript then lived only in a tool result, so the next message no longer knew what the voice note said ("I don't have the content of the voice message").
+  - **Which key:** the agent's own speech-to-text key (vault, then environment). Polpo uses the environment, else the first agent's key.
+  - **Without a key:** the audio stays attached, as before.
 - Task runs ignored the custom providers of `polpo.json` (local model servers such as Ollama or LM Studio, gateways): their models worked in chat, but tasks failed with "Model not found". The task runner now registers them, with their secrets from the vault.
 - Playbooks could not be run from the dashboard: the run dialog existed but no button opened it. Playbook cards and the playbook page now have a Run button.
 - Playbooks with checkpoints, delays or quality gates could be saved but not run: the blocked tasks lacked the `dependsOn` the mission schema requires, and the run answered a plain-text 500 ("Unexpected token 'I'… is not valid JSON" in the dashboard). The dependencies are now added when the playbook runs, and a run that cannot start answers a JSON 400 and leaves no mission behind.
@@ -35,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The mission page refreshed the mission only on the first change of a run: nothing cleared the "missions stale" flag when the missions list was not mounted. Checkpoint events now also update the mission status (paused / active), and an abort refreshes it.
 - The Approvals page went blank (counters back to 0) at every refresh: `useApprovals` showed the loading state on every refetch. It now does so only on the first load.
 - The agents list kept a stale ETag after an agent's configuration changed, so browsers kept showing the old agents. The ETag now depends on the content.
-- A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, the playbook editor flags it, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
+- A delay whose duration the parser could not read (e.g. `PT1s`, lowercase) made every supervisor tick fail, so no task of any mission started anymore. Durations are now read case-insensitively, a mission or playbook with an invalid duration is refused with a clear message, and a stored delay that still cannot be read is reported once and ignored instead of stopping the supervisor.
 - **Desktop app:** the model list of the Add agent dialog was empty: the model picker asked for the models with a relative path, which does not reach the server from a page loaded from `file://`. It now uses the configured server address and API key.
 
 ## [0.4.9] — 2026-10-14 — Routine
