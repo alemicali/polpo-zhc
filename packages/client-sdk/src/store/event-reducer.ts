@@ -1,6 +1,7 @@
 import type {
   Task,
   AgentProcess,
+  AgentActivity,
   AgentConfig,
   Team,
   SSEEvent,
@@ -115,6 +116,7 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
         tool?: string;
         file?: string;
         summary?: string;
+        pipeline?: AgentActivity["pipeline"];
       };
       const processes = state.processes.map((p) => {
         if (p.taskId !== payload.taskId) return p;
@@ -127,6 +129,7 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
             toolCalls: p.activity.toolCalls + (payload.tool ? 1 : 0),
             lastUpdate: new Date().toISOString(),
             summary: payload.summary ?? p.activity.summary,
+            pipeline: payload.pipeline ?? p.activity.pipeline,
           },
         };
       });

@@ -5,7 +5,7 @@
  * eliminating prop drilling.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,7 +22,7 @@ import { Loader2, Plus, FolderPlus, Trash2, ChevronDown, X } from "lucide-react"
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { useAgentsPage } from "./agents-page-context";
 import { ModelPicker } from "@/components/shared/model-picker";
-import { useAuthStatus } from "@polpo-ai/react";
+import { useConfiguredProviders } from "@/hooks/use-configured-providers";
 import { cn } from "@/lib/utils";
 
 // ─── Add Agent Dialog ────────────────────────────────────
@@ -40,17 +40,7 @@ export function AddAgentDialog() {
 
   // Models come from configured/authenticated providers — same source as the
   // settings page picker, so users see only models they can actually call.
-  const { authStatus } = useAuthStatus();
-  const { configuredProviders, providerSources } = useMemo(() => {
-    if (!authStatus) return { configuredProviders: [] as string[], providerSources: {} as Record<string, string> };
-    const active = Object.entries(authStatus.providers).filter(
-      ([, info]) => (info.custom ? !!info.configured : info.hasEnvKey) || info.profiles.some((p) => p.status === "active"),
-    );
-    return {
-      configuredProviders: active.map(([n]) => n),
-      providerSources: Object.fromEntries(active.map(([n, info]) => [n, info.custom ? "custom" : info.hasEnvKey ? "env" : "oauth"])),
-    };
-  }, [authStatus]);
+  const { configuredProviders, providerSources } = useConfiguredProviders();
 
   const [handleSubmit, isSubmitting] = useAsyncAction(async () => {
     if (!name.trim()) return;
