@@ -20,6 +20,8 @@ export interface UsePlaybooksReturn {
     name: string,
     params?: Record<string, string | number | boolean>,
   ) => Promise<PlaybookRunResult>;
+  /** Create or overwrite a playbook, then refresh the list. */
+  savePlaybook: (definition: PlaybookDefinition) => Promise<{ name: string; path: string }>;
 
   // Backward-compat aliases
   /** @deprecated Use playbooks instead. */
@@ -80,8 +82,18 @@ export function usePlaybooks(): UsePlaybooksReturn {
     [client, refetch],
   );
 
+  const savePlaybook = useCallback(
+    async (definition: PlaybookDefinition) => {
+      if (!client) throw new Error("Client not initialized");
+      const result = await client.savePlaybook(definition);
+      refetch();
+      return result;
+    },
+    [client, refetch],
+  );
+
   return {
-    playbooks, loading, refetch, getPlaybook, runPlaybook,
+    playbooks, loading, refetch, getPlaybook, runPlaybook, savePlaybook,
     // Backward-compat aliases
     templates: playbooks,
     getTemplate: getPlaybook,

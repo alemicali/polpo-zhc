@@ -25,6 +25,7 @@ import type {
   AddMissionDelayRequest,
   UpdateMissionDelayRequest,
   ActiveDelay,
+  ActiveCheckpoint,
   AddMissionQualityGateRequest,
   UpdateMissionQualityGateRequest,
   AddMissionTeamMemberRequest,
@@ -537,6 +538,16 @@ export class PolpoClient {
     return this.del<Mission>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}`);
   }
 
+  /** Checkpoints currently pausing a mission (reached, not resumed yet). */
+  getActiveCheckpoints(): Promise<ActiveCheckpoint[]> {
+    return this.get<ActiveCheckpoint[]>("/missions/checkpoints");
+  }
+
+  /** Resume a mission paused at a checkpoint: the tasks it blocks can start. */
+  resumeCheckpoint(missionId: string, checkpointName: string): Promise<unknown> {
+    return this.post<unknown>(`/missions/${missionId}/checkpoints/${encodeURIComponent(checkpointName)}/resume`);
+  }
+
   // ── Delays ──
 
   listDelays(): Promise<ActiveDelay[]> {
@@ -1007,6 +1018,11 @@ export class PolpoClient {
   /** Run a playbook with parameters. Returns the created mission + task count. */
   runPlaybook(name: string, params?: Record<string, string | number | boolean>): Promise<PlaybookRunResult> {
     return this.post<PlaybookRunResult>(`/playbooks/${encodeURIComponent(name)}/run`, { params });
+  }
+
+  /** Create or overwrite a playbook. The server validates the definition before writing it. */
+  savePlaybook(definition: PlaybookDefinition): Promise<{ name: string; path: string }> {
+    return this.post<{ name: string; path: string }>("/playbooks", definition);
   }
 
   // Backward-compat aliases

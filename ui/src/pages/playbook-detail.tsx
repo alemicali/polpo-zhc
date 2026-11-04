@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,6 +14,7 @@ import {
   ListChecks,
   FileJson,
   Bot,
+  PencilRuler,
   Play,
 } from "lucide-react";
 import { RunPlaybookDialog } from "@/pages/playbooks";
@@ -26,6 +27,7 @@ import type {
 } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { JsonBlock } from "@/components/json-block";
+import { PlaybookGraphEditor } from "@/components/playbook-graph-editor";
 import {
   MissionGraphInner,
   TaskStepCard,
@@ -72,7 +74,7 @@ export function PlaybookDetailPage() {
   const { getPlaybook, runPlaybook } = usePlaybooks();
   const [runOpen, setRunOpen] = useState(false);
 
-  // Runs the playbook: it becomes a mission, opened right away.
+  // Runs the saved playbook: it becomes a mission, opened right away.
   const handleRun = async (playbookName: string, params: Record<string, string | number | boolean>) => {
     try {
       const result = await runPlaybook(playbookName, params);
@@ -83,6 +85,9 @@ export function PlaybookDetailPage() {
       throw e;
     }
   };
+  // ?tab=editor opens the graph editor directly (e.g. right after "New playbook").
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") ?? "graph";
 
   // The fetched playbook is tagged with the name it was loaded for, so a
   // route change shows the loader without resetting state in the effect.
@@ -115,6 +120,7 @@ export function PlaybookDetailPage() {
 
   const taskDefs = parsed?.tasks ?? [];
   const checkpoints = parsed?.checkpoints;
+  const delays = parsed?.delays;
   const params = playbook?.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
@@ -174,7 +180,7 @@ export function PlaybookDetailPage() {
           size="sm"
           className="shrink-0 gap-1.5"
           disabled={taskDefs.length === 0}
-          title={taskDefs.length === 0 ? "The playbook has no tasks" : "Run the playbook"}
+          title={taskDefs.length === 0 ? "Add at least one task in the Editor and save" : "Run the saved playbook"}
           onClick={() => setRunOpen(true)}
         >
           <Play className="h-3.5 w-3.5" /> Run
@@ -191,11 +197,15 @@ export function PlaybookDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="graph" className="flex flex-col flex-1 min-h-0">
+      <Tabs defaultValue={initialTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="graph" className="gap-1.5 text-xs">
             <Workflow className="h-3.5 w-3.5" />
             Graph
+          </TabsTrigger>
+          <TabsTrigger value="editor" className="gap-1.5 text-xs">
+            <PencilRuler className="h-3.5 w-3.5" />
+            Editor
           </TabsTrigger>
           <TabsTrigger value="tasks" className="gap-1.5 text-xs">
             <ListChecks className="h-3.5 w-3.5" />
@@ -227,9 +237,23 @@ export function PlaybookDetailPage() {
                   taskDefs={taskDefs}
                   findLiveTask={findLiveTask}
                   checkpoints={checkpoints}
+                  delays={delays}
                 />
               </ReactFlowProvider>
             </div>
+          </div>
+        </TabsContent>
+
+        {/* Editor tab */}
+        <TabsContent value="editor" className="flex-1 min-h-0 mt-0">
+          <div className="h-full rounded-lg border border-border/40 overflow-hidden">
+            <ReactFlowProvider>
+              <PlaybookGraphEditor
+                key={playbook.name}
+                playbook={playbook}
+                onSaved={(saved) => setLoaded({ name: saved.name, playbook: saved })}
+              />
+            </ReactFlowProvider>
           </div>
         </TabsContent>
 

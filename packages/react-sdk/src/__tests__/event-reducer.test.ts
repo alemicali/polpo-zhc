@@ -29,3 +29,20 @@ describe("reduceEvent: mission status from checkpoints and abort", () => {
     expect(next.missionsStale).toBe(true);
   });
 });
+
+describe("reduceEvent: pipeline state in agent activity", () => {
+  it("keeps the latest pipeline state of a run, and keeps it on activity without one", () => {
+    const process = {
+      agentName: "writer", pid: 1, taskId: "t1", startedAt: "2025-01-01T00:00:00Z", alive: true,
+      activity: { filesCreated: [], filesEdited: [], toolCalls: 0, totalTokens: 0, lastUpdate: "2025-01-01T00:00:00Z" },
+    };
+    const base = { ...createMockStore().getSnapshot(), processes: [process] } as unknown as StoreState;
+    const pipeline = { status: "running", pipeline: { steps: [{ loop: "draft" }] }, steps: { "steps.0": { kind: "loop", name: "draft", status: "running", attempt: 1 } }, startedAt: "2025-01-01T00:00:01Z" };
+
+    const withState = reduceEvent(base, event("agent:activity", { taskId: "t1", agentName: "writer", pipeline }));
+    expect(withState.processes[0].activity.pipeline).toEqual(pipeline);
+
+    const later = reduceEvent(withState, event("agent:activity", { taskId: "t1", agentName: "writer", tool: "write_file" }));
+    expect(later.processes[0].activity.pipeline).toEqual(pipeline);
+  });
+});
