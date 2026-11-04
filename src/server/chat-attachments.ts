@@ -15,9 +15,19 @@ export function resolveChatAttachmentReferences(text: string, workDir: string): 
 }
 
 /** Persist bytes once, return lightweight metadata in history, keep vision input for the current turn. */
+/** Audio a person attaches (voice notes, recordings): `.ogg` may come as video/ogg or application/ogg. */
+export function isAudioAttachment(mimeType: string, filename: string): boolean {
+  return mimeType.startsWith("audio/") || /\.(ogg|oga|opus|mp3|m4a|aac|wav|flac|weba)$/i.test(filename);
+}
+
+export interface SaveChatUserMessageOptions {
+  /** Speech to text for audio attachments: their words join the message, so the model reads them now and later. */
+  transcribe?: (audio: Buffer, filename: string) => Promise<string | null>;
+}
+
 export async function saveChatUserMessage(
   sessionStore: SessionStore, attachmentStore: AttachmentStore, workDir: string,
-  sessionId: string, content: string | Part[],
+  sessionId: string, content: string | Part[], options: SaveChatUserMessageOptions = {},
 ) {
   if (!/^[\w-]+$/.test(sessionId)) throw new Error("Invalid attachment session id");
   const parts = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
@@ -50,14 +60,27 @@ export async function saveChatUserMessage(
       await writeFile(absolute, bytes, { flag: "wx" });
       written.push(absolute);
     }
-    const text = parts.filter((p): p is Extract<Part, { type: "text" }> => p.type === "text").map(p => p.text).join("\n");
+    // what the audio says, as with Telegram voice notes (a model cannot listen to the file)
+    const heard: string[] = [];
+    if (options.transcribe) {
+      for (const { metadata, bytes, part } of files) {
+        if (part.type !== "file" || !isAudioAttachment(metadata.mimeType, metadata.filename)) continue;
+        const words = await options.transcribe(bytes, metadata.filename).catch(() => null);
+        if (words?.trim()) heard.push(`[audio ${metadata.filename}, transcribed: "${words.trim()}"]`);
+      }
+    }
+    const typed = parts.filter((p): p is Extract<Part, { type: "text" }> => p.type === "text").map(p => p.text).join("\n");
+    const text = [...heard, typed.trim()].filter(Boolean).join("\n");
     const message = await sessionStore.addMessage(sessionId, "user", text);
     messageSaved = true;
     const attachments = files.map(({ metadata }) => ({ ...metadata, messageId: message.id }));
     for (const attachment of attachments) await attachmentStore.save(attachment);
-    const modelContent = parts.map(part => part.type === "file"
-      ? { type: "text" as const, text: `[file: ${files.find(f => f.part === part)!.metadata.path}]` }
-      : part);
+    const modelContent = [
+      ...heard.map((line) => ({ type: "text" as const, text: line })),
+      ...parts.map(part => part.type === "file"
+        ? { type: "text" as const, text: `[file: ${files.find(f => f.part === part)!.metadata.path}]` }
+        : part),
+    ];
     return { ...message, attachments, modelContent };
   } catch (error) {
     // Once a message exists, preserve its bytes for recovery instead of destroying evidence.

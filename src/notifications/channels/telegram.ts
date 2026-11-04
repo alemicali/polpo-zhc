@@ -377,6 +377,25 @@ export class TelegramCallbackPoller {
     }
   }
 
+  private lastPollError: { key: string; at: number } | undefined;
+
+  /**
+   * A failed getUpdates, at most once every 10 minutes per error. 409 means another program reads this
+   * bot's updates (another instance, a dev server, a webhook): Telegram gives each message to one of
+   * them, so here some messages never arrive.
+   */
+  private reportPollError(status: number, body: string): void {
+    let description = body.slice(0, 200);
+    try { description = (JSON.parse(body) as { description?: string }).description ?? description; } catch { /* not JSON */ }
+    const key = `${status}:${description}`;
+    if (this.lastPollError?.key === key && Date.now() - this.lastPollError.at < 10 * 60_000) return;
+    this.lastPollError = { key, at: Date.now() };
+    const hint = status === 409
+      ? " Another program reads this bot's messages (another Polpo instance, a dev server or a webhook): each message goes to only one of them, so some never reach this one. Stop the other, or give it its own bot."
+      : "";
+    console.error(`[polpo/telegram] getUpdates failed (${status}): ${description}.${hint}`);
+  }
+
   private async poll(): Promise<void> {
     // A slow request must not let the next tick fetch the same updates again.
     if (this.polling) return;
@@ -393,7 +412,10 @@ export class TelegramCallbackPoller {
         }),
       });
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        this.reportPollError(response.status, await response.text().catch(() => ""));
+        return;
+      }
 
       const data = await response.json() as TelegramUpdateResponse;
       if (!data.ok || !data.result) return;
@@ -489,7 +511,9 @@ export class TelegramCallbackPoller {
     // ── Gateway mode: route ALL messages (text and media) through the ChannelGateway ──
     if (this.gateway) {
       if (isGroupChat(message.chat)) return this.handleGroupMessage(message);
-      const media = inboundMediaOf(message);
+      // a reply to a voice note, photo or file ("what does this say?") brings that media along
+      const own = inboundMediaOf(message);
+      const media = own.length > 0 ? own : repliedMediaOf(message);
       if (!text && media.length === 0) return; // stickers, locations, … carry nothing usable
       await this.respond(chatId, undefined, text ?? "", media, senderId, senderName, String(message.message_id));
       return;
@@ -546,8 +570,13 @@ export class TelegramCallbackPoller {
     const { addressed, forOtherBot, text } = groupAddressing(message, me);
     if (forOtherBot) return;
     const group: InboundGroup = { title, threadId, addressed };
-    const refs = inboundMediaOf(message);
-    const media = refs.length > 0 ? await this.groupMedia(chatId, message.message_id, refs) : undefined;
+    // Called in a reply to someone's voice note, photo or file ("@bot what did she say?"): that media comes
+    // along. A group message the bot did not receive at the time (privacy mode) is still in the reply.
+    const own = inboundMediaOf(message);
+    const replied = own.length === 0 && addressed ? repliedMediaOf(message) : [];
+    const refs = own.length > 0 ? own : replied;
+    const mediaMessageId = own.length > 0 ? message.message_id : message.reply_to_message?.message_id ?? message.message_id;
+    const media = refs.length > 0 ? await this.groupMedia(chatId, mediaMessageId, refs) : undefined;
     // What the agent gets with its turn: images and files; a transcribed voice note is in the text already
     const forAgent = media && { ...media, attachments: media.attachments.filter(a => !media.transcribed.includes(a)) };
     const target = { threadId, replyTo: message.message_id };
@@ -1049,6 +1078,13 @@ interface InboundMediaRef {
   fileSize?: number;
   filename: string;
   mimeType: string;
+}
+
+/** The media of the message this one replies to (not a bot's own: its voice replies are its own words). */
+export function repliedMediaOf(message: TelegramMessage): InboundMediaRef[] {
+  const replied = message.reply_to_message;
+  if (!replied || replied.from?.is_bot) return [];
+  return inboundMediaOf(replied);
 }
 
 /** Media carried by a Telegram message (largest photo size only). */

@@ -43,6 +43,7 @@ import type { ConversationCheckTarget, RoomKind, RoomMessage, RoomStore, VoiceRe
 import { synthesizeSpeech, transcribeSpeech } from "../tools/audio-tools.js";
 import { reactionHint, reactionOf } from "./telegram-reactions.js";
 import { loadAgentVaultEntries, resolveAgentVault } from "../vault/index.js";
+import { speechVaultFor } from "./speech-vault.js";
 import type { TelegramAgentRelay } from "../rooms/telegram-relay.js";
 import type { AgentProfile } from "../rooms/room-engine.js";
 import { ROOM_TURN_LINES, roomTurnText } from "../rooms/transcript.js";
@@ -1639,19 +1640,9 @@ export class ChannelGateway {
   /** How long a channel message waits for an answer already running in its conversation. */
   static LEASE_WAIT_MS = 10 * 60 * 1000;
 
-  /**
-   * The vault whose speech-to-text key a turn uses: the agent's own (then the environment). Polpo has
-   * no vault: the environment, else the first agent's vault with a speech-to-text key.
-   */
-  private async speechVault(agent: string | undefined): Promise<ReturnType<typeof resolveAgentVault> | undefined> {
-    const store = this.orchestrator.getVaultStore();
-    if (agent) return resolveAgentVault(await loadAgentVaultEntries(store, agent));
-    if (process.env.OPENAI_API_KEY || process.env.DEEPGRAM_API_KEY) return undefined;
-    for (const a of await this.orchestrator.getAgents()) {
-      const vault = resolveAgentVault(await loadAgentVaultEntries(store, a.name));
-      if (vault.getKey("openai", "key") || vault.getKey("deepgram", "key")) return vault;
-    }
-    return undefined;
+  /** The vault whose speech-to-text key a turn uses (see speech-vault.ts). */
+  private speechVault(agent: string | undefined): ReturnType<typeof speechVaultFor> {
+    return speechVaultFor(this.orchestrator, agent);
   }
 
   /**

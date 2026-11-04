@@ -60,10 +60,12 @@ import {
   useOptionalPromptInputController,
   usePromptInputAttachments,
 } from "./prompt-input-context";
+import { fileMatchesAccept, fileMediaType } from "./file-accept";
 
 // ============================================================================
 // PromptInputActionAddAttachments
 // ============================================================================
+
 
 export type PromptInputActionAddAttachmentsProps = ComponentProps<
   typeof DropdownMenuItem
@@ -174,28 +176,7 @@ export const PromptInput = ({
     inputRef.current?.click();
   }, []);
 
-  const matchesAccept = useCallback(
-    (f: File) => {
-      if (!accept || accept.trim() === "") {
-        return true;
-      }
-
-      const patterns = accept
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      return patterns.some((pattern) => {
-        if (pattern.endsWith("/*")) {
-          // e.g: image/* -> image/
-          const prefix = pattern.slice(0, -1);
-          return f.type.startsWith(prefix);
-        }
-        return f.type === pattern;
-      });
-    },
-    [accept]
-  );
+  const matchesAccept = useCallback((f: File) => fileMatchesAccept(f, accept), [accept]);
 
   const addLocal = useCallback(
     (fileList: File[] | FileList) => {
@@ -237,7 +218,7 @@ export const PromptInput = ({
           next.push({
             filename: file.name,
             id: nanoid(),
-            mediaType: file.type,
+            mediaType: fileMediaType(file),
             type: "file",
             url: URL.createObjectURL(file),
           });
