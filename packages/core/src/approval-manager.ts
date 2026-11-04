@@ -5,6 +5,13 @@ import type { ApprovalGate, ApprovalRequest, ApprovalStatus } from "./types.js";
 import type { LifecycleHook } from "./hooks.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
 
+/** Gate id prefix of approvals requested by pipeline `human` steps. */
+export const PIPELINE_GATE_PREFIX = "pipeline:";
+
+export function isPipelineGate(gateId: string): boolean {
+  return gateId.startsWith(PIPELINE_GATE_PREFIX);
+}
+
 /**
  * Manages approval gates — both automatic (condition-based) and human (blocking).
  *
@@ -171,9 +178,9 @@ export class ApprovalManager {
    * A human approval asked by the system itself (no configured gate), e.g. an escalation:
    * stored like any gate request, so /approve, /reject and the API can resolve it.
    */
-  async requestHumanApproval(opts: { gateId: string; gateName: string; taskId?: string; missionId?: string; payload?: unknown }): Promise<ApprovalRequest> {
+  async requestHumanApproval(opts: { id?: string; gateId: string; gateName: string; taskId?: string; missionId?: string; payload?: unknown }): Promise<ApprovalRequest> {
     const request: ApprovalRequest = {
-      id: nanoid(),
+      id: opts.id ?? nanoid(),
       gateId: opts.gateId,
       gateName: opts.gateName,
       taskId: opts.taskId,
@@ -200,6 +207,8 @@ export class ApprovalManager {
   async reject(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
     const request = await this.store.get(requestId);
     if (!request || request.status !== "pending") return null;
+    // A pipeline step is waiting on this decision inside a running task: no revision cycle.
+    if (isPipelineGate(request.gateId)) return this.resolve(requestId, "rejected", resolvedBy, feedback);
     if (!request.taskId) return null;
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
@@ -245,6 +254,9 @@ export class ApprovalManager {
 
   async canReject(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
     const request = await this.store.get(requestId);
+    if (request?.status === "pending" && isPipelineGate(request.gateId)) {
+      return { allowed: true, rejectionCount: 0, maxRejections: 1 };
+    }
     if (!request || request.status !== "pending" || !request.taskId) {
       return { allowed: false, rejectionCount: 0, maxRejections: 0 };
     }
@@ -280,7 +292,8 @@ export class ApprovalManager {
       resolvedBy: request.resolvedBy,
     });
 
-    if (request.taskId) {
+    // Pipeline steps read the decision themselves; the task keeps running.
+    if (request.taskId && !isPipelineGate(request.gateId)) {
       try {
         if (status === "approved") {
           const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
