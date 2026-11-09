@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-09-telegram-files",
+    date: "2026-11-09",
+    kind: "fixed",
+    title: "Gli agenti mandano file su Telegram",
+    summary: "Gli agenti dicevano di non poter inviare allegati: ora mandano documenti, immagini e audio nella chat o in qualsiasi gruppo.",
+    body: [
+      "Gli agenti rispondevano di non avere strumenti per mandare allegati su Telegram. Ora possono:",
+      "",
+      "- **in questa chat**: un PDF, un'immagine, un audio o un grafico che hanno preparato arriva come allegato, accanto alla risposta;",
+      "- **in qualsiasi chat o gruppo**, come già i messaggi.",
+      "",
+      "Partono solo i file dello spazio di lavoro degli agenti: mai la configurazione di Polpo o file con credenziali.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-03-deltapolpo-fixes",
     date: "2026-11-03",
     kind: "fixed",
