@@ -27,3 +27,10 @@ export function reactionHint(): string {
     + "it is added as a reaction to that message instead of sending a reply. Use it when a reaction says enough "
     + "(thanks, ok, good news); answer in words when there is something to say.";
 }
+
+/** How to send a file in a Telegram turn: agents otherwise believe they cannot attach anything. */
+export function telegramFilesHint(): string {
+  return "To send files (a document, an image, an audio, a PDF or a chart you made), call send_message with `files` "
+    + "(paths in your workspace): without `to` they come to this chat as attachments, next to your answer. "
+    + "You can send attachments here: never say you cannot.";
+}

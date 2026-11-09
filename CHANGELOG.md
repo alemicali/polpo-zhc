@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Agents said they could not send attachments on Telegram.** The only way was `open_file`, which the prompt describes as a web-dashboard preview, and `send_message` carried text only. `send_message` now takes `files` (paths in the agents' workspace, up to 10), sent as Telegram attachments; without `to` they go to the chat the turn came from. A Telegram turn's prompt says how to send files. Only regular files in the agents' workspace leave the server: never `.polpo`, hidden folders or files named like credentials.
+
 ## [0.5.2] — 2026-11-03 — Fixes from DeltaPolpo, chat attachments and voice notes
 
 Most of these fixes are by @DeltaM128 (#149–#183).
