@@ -49,7 +49,7 @@ import { createHmac } from "node:crypto";
 import { handleMcpRequest } from "./mcp.js";
 import { authorizationServerMetadata, consentPage, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
 import { hasValidApiKey } from "./middleware/instance-auth.js";
-import { reactionHint } from "../notifications/telegram-reactions.js";
+import { reactionHint, telegramFilesHint } from "../notifications/telegram-reactions.js";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
@@ -569,7 +569,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
     // only Telegram turns carry an origin (see ChannelGateway.checkTarget)
-    channelTurnPrompt: () => `## Channel\nThis turn comes from Telegram: your answer is sent as a Telegram message. ${reactionHint()}`,
+    channelTurnPrompt: () => `## Channel\nThis turn comes from Telegram: your answer is sent as a Telegram message. ${reactionHint()}\n${telegramFilesHint()}`,
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");

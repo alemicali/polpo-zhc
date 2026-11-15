@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileConversationCheckStore } from "../stores/file-conversation-check-store.js";
@@ -218,9 +218,10 @@ describe("sending anywhere", () => {
     listChats: async () => chats,
     chatBots: () => [{ key: "main" }, { key: "ops-bot", agent: "ops" }],
     resolveChatTarget: async (to, opts) => chatTarget(resolveChat(chats, to, opts?.topic), opts?.agent === "ops" ? "ops-bot" : "main"),
-    sendToChat: async (target, text) => { sent.push([target.channel, target.chatId, text]); return target.channel; },
+    sendToChat: async (target, text, _agent, files) => { sent.push([target.channel, target.chatId, text]); if (files?.length) sentFiles.push(...files); return target.channel; },
   };
-  beforeEach(() => { sent.length = 0; });
+  const sentFiles: string[] = [];
+  beforeEach(() => { sent.length = 0; sentFiles.length = 0; });
 
   it("schedule_check to another chat, from a web chat, with a cron or once", async () => {
     const ctx = { manager, sessionId: "web-1", agent: "ops", chats: access, timezone: "Europe/Rome" };
@@ -245,6 +246,48 @@ describe("sending anywhere", () => {
     const list = await execListChats({ chats: access });
     expect(list).toMatch(/^Now: .*Telegram bots: main \(Polpo\), ops-bot \(ops\)/);
     expect(list).toContain("- Team Marketing [group] to: telegram:group:-100123");
+  });
+
+  it("send_message sends files, to this chat when `to` is omitted", async () => {
+    const origin = { channel: "ops-bot", chatId: "7", name: "Ada" };
+    expect(await execSendMessage({ files: ["reports/week.pdf"], text: "Here it is" }, { chats: access, agent: "ops", origin }))
+      .toBe("Sent to this Telegram chat with 1 file (bot ops-bot).");
+    expect(sent).toEqual([["ops-bot", "7", "Here it is"]]);
+    expect(sentFiles).toEqual(["reports/week.pdf"]);
+    expect(await execSendMessage({ files: ["a.png", "b.png"] }, { chats: access, origin })).toBe("Sent to this Telegram chat with 2 files (bot ops-bot).");
+    expect(await execSendMessage({}, { chats: access, origin })).toMatch(/nothing to send/);
+    // a web chat has no "this chat" on Telegram
+    expect(await execSendMessage({ files: ["a.png"] }, { chats: access })).toMatch(/say where to send it/);
+  });
+
+  it("the orchestrator sends files from the agents' workspace only, and records them in the group", async () => {
+    const work = mkdtempSync(join(tmpdir(), "polpo-send-files-"));
+    try {
+      mkdirSync(join(work, "reports"));
+      writeFileSync(join(work, "reports", "week.pdf"), "%PDF");
+      mkdirSync(join(work, ".polpo"));
+      writeFileSync(join(work, ".polpo", "vault.json"), "{}");
+      const documents: Array<[string, string]> = [];
+      const poller = { sendMarkdown: vi.fn(async () => true), sendDocument: vi.fn(async (_chat: string, path: string, name: string) => { documents.push([path, name]); return true; }) };
+      const recorded = vi.fn(async () => {});
+      const fake = {
+        getAgentWorkDir: () => work,
+        chatBots: () => [{ key: "main" }],
+        telegramPollersByChannel: new Map([["main", poller]]),
+        channelGateways: new Map([["main", { recordConversationReport: recorded }]]),
+      };
+      const target = { channel: "main", chatId: "-100123", conversation: "telegram:group:-100123", name: "Mangiare Bene" };
+      expect(await Orchestrator.prototype.sendToChat.call(fake as any, target, "", undefined, ["reports/week.pdf"])).toBe("main");
+      expect(poller.sendMarkdown).not.toHaveBeenCalled();
+      expect(documents).toEqual([[realpathSync(join(work, "reports", "week.pdf")), "week.pdf"]]);
+      expect(recorded).toHaveBeenCalledWith("telegram:group:-100123", "[file: week.pdf]");
+      for (const forbidden of [".polpo/vault.json", "/etc/passwd", "reports/missing.pdf"]) {
+        await expect(Orchestrator.prototype.sendToChat.call(fake as any, target, "x", undefined, [forbidden])).rejects.toThrow(/Cannot send .*not a file in the agents' workspace/);
+      }
+      expect(documents).toHaveLength(1);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 
   it("the orchestrator falls back to another bot when Telegram refuses", async () => {

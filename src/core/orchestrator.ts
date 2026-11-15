@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, basename } from "node:path";
+import { resolveSharedFile } from "./shared-files.js";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
@@ -1573,14 +1574,25 @@ export class Orchestrator extends TypedEmitter {
    * group, the person never wrote to it), by the agent's other bots, then any bot of the instance.
    * A group's message joins its transcript. Returns the bot that sent it.
    */
-  async sendToChat(target: ConversationCheckTarget, text: string, agent?: string): Promise<string> {
+  async sendToChat(target: ConversationCheckTarget, text: string, agent?: string, files: string[] = []): Promise<string> {
+    // only the agents' workspace is shareable, never .polpo or files named like credentials
+    const resolved = files.map((f) => ({ asked: f, path: resolveSharedFile(f, [this.getAgentWorkDir()]) }));
+    const missing = resolved.filter((f) => !f.path).map((f) => f.asked);
+    if (missing.length) throw new Error(`Cannot send ${missing.join(", ")}: not a file in the agents' workspace`);
+    const thread = target.threadId !== undefined ? { threadId: target.threadId } : undefined;
     const tried: string[] = [];
     for (const key of botOrder(this.chatBots(), target, agent)) {
       const poller = this.telegramPollersByChannel.get(key);
       if (!poller) continue;
       tried.push(key);
-      if (!await poller.sendMarkdown(target.chatId, text, undefined, undefined, target.threadId !== undefined ? { threadId: target.threadId } : undefined)) continue;
-      if (target.conversation) await this.channelGateways.get(key)?.recordConversationReport(target.conversation, text);
+      if (text && !await poller.sendMarkdown(target.chatId, text, undefined, undefined, thread)) continue;
+      let sent = 0;
+      for (const f of resolved) if (await poller.sendDocument(target.chatId, f.path!, basename(f.path!), thread)) sent++;
+      // the text went out: a file refused by this bot is reported rather than resent by another one
+      if (!text && sent === 0) continue;
+      if (sent < resolved.length) throw new Error(`Sent ${text ? "the message and " : ""}${sent} of ${resolved.length} files: Telegram refused the others (too large, over 50 MB?)`);
+      const report = [text, ...resolved.map((f) => `[file: ${basename(f.path!)}]`)].filter(Boolean).join("\n");
+      if (target.conversation) await this.channelGateways.get(key)?.recordConversationReport(target.conversation, report);
       return key;
     }
     throw new Error(tried.length

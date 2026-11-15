@@ -2768,7 +2768,7 @@ export async function executeOrchestratorTool(
       case "list_checks":    return execListChecks({ manager: polpo.getConversationCheckManager(), sessionId: context.sessionId }, args);
       case "cancel_check":   return execCancelCheck(args, { manager: polpo.getConversationCheckManager(), sessionId: context.sessionId });
       case "list_chats":     return execListChats({ chats: polpo });
-      case "send_message":   return execSendMessage(args, { chats: polpo });
+      case "send_message":   return execSendMessage(args, { chats: polpo, origin: context.origin });
 
       // ── Notification Rules ──
       case "add_notification_rule":    return execAddNotificationRule(polpo, args);

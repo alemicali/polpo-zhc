@@ -40,8 +40,9 @@ export const ConfirmCheckSchema = Type.Object({
 });
 export const ListChatsSchema = Type.Object({});
 export const SendMessageSchema = Type.Object({
-  to: Type.String({ description: "The chat: a group, topic or person by name or by its id from list_chats" }),
-  text: Type.String({ description: "The message (Markdown)" }),
+  to: Type.Optional(Type.String({ description: "The chat: a group, topic or person by name or by its id from list_chats (default: the chat this request came from)" })),
+  text: Type.Optional(Type.String({ description: "The message (Markdown); optional when sending files" })),
+  files: Type.Optional(Type.Array(Type.String(), { maxItems: 10, description: "Files to attach, by path in your workspace (documents, images, audio, a PDF you made): each is sent as a Telegram attachment" })),
   topic: topicParam,
 });
 
@@ -55,13 +56,15 @@ export const LIST_CHECKS_DESCRIPTION = "List scheduled checks and reminders (thi
 export const CANCEL_CHECK_DESCRIPTION = "Stop a scheduled check or reminder, or drop a proposed one (by id).";
 export const CONFIRM_CHECK_DESCRIPTION = "Say yes to a proposed check (an agent's intention waiting for approval): it runs from then on. Use it when the person it concerns agrees.";
 export const LIST_CHATS_DESCRIPTION = "The chats you can send to: every Telegram group, topic and person the instance's bots have met, with the id to use in `to` (send_message, schedule_check). Also tells the current time.";
-export const SEND_MESSAGE_DESCRIPTION = "Send a message now to any chat: a Telegram group, topic or person (by name or id from list_chats), wherever you were asked from. "
-  + "If your bot is not in that chat, another bot of the instance sends it. For later or recurring messages use schedule_check.";
+export const SEND_MESSAGE_DESCRIPTION = "Send a message now, with files if you want (`files`: documents, images, audio from your workspace, sent as attachments), "
+  + "to any chat: a Telegram group, topic or person (by name or id from list_chats), or this chat when `to` is omitted. "
+  + "This is how you send a file on Telegram. If your bot is not in that chat, another bot of the instance sends it. For later or recurring messages use schedule_check.";
 
 /** Sending to any chat (the orchestrator's Telegram bots). */
 export interface ChatAccess {
   resolveChatTarget(to: string, opts?: { agent?: string; topic?: number }): Promise<ConversationCheckTarget>;
-  sendToChat(target: ConversationCheckTarget, text: string, agent?: string): Promise<string>;
+  /** Sends the text (when any), then each file as an attachment; files are paths in the agents' workspace. */
+  sendToChat(target: ConversationCheckTarget, text: string, agent?: string, files?: string[]): Promise<string>;
   listChats(): Promise<ReachableChat[]>;
   chatBots(): ChatBot[];
 }
@@ -230,12 +233,15 @@ export async function execListChats(ctx: CheckToolContext): Promise<string> {
 
 export async function execSendMessage(args: Record<string, unknown>, ctx: CheckToolContext): Promise<string> {
   if (!ctx.chats) return "Error: no Telegram bot on this instance";
-  const text = str(args.text);
-  if (!text) return "Error: text is empty";
+  const text = str(args.text) ?? "";
+  const files = Array.isArray(args.files) ? args.files.filter((f): f is string => typeof f === "string" && f.trim().length > 0) : [];
+  if (!text && files.length === 0) return "Error: nothing to send (text or files)";
   try {
-    const target = await ctx.chats.resolveChatTarget(String(args.to ?? ""), { ...(ctx.agent ? { agent: ctx.agent } : {}), ...(num(args.topic) !== undefined ? { topic: num(args.topic)! } : {}) });
+    const target = await targetOf(args, ctx);
+    if (!target) return "Error: say where to send it (`to`: a group, topic or person from list_chats)";
     // at a reflection, an agent that proposes does not write on its own: the message waits for a yes
     if (ctx.autonomy === "propose" && ctx.reflecting?.() && ctx.manager && ctx.sessionId) {
+      if (files.length > 0) return "Error: files cannot wait for a yes; propose the message, and send the files when you are asked";
       const check = await ctx.manager.create({
         sessionId: ctx.sessionId, ...(ctx.agent ? { agent: ctx.agent } : {}), prompt: "", message: text, everyMinutes: 0,
         firstRunAt: new Date().toISOString(), target, proposed: true, why: str(args.why) ?? "written at a reflection",
@@ -243,9 +249,9 @@ export async function execSendMessage(args: Record<string, unknown>, ctx: CheckT
       ctx.noteAction?.(`proposed ${check.id}: a message to ${target.name ?? target.chatId}`);
       return `Proposed ${check.id}: the message to ${where(target)} waits for a yes (confirm_check, or the agent's page).`;
     }
-    const bot = await ctx.chats.sendToChat(target, text, ctx.agent);
-    ctx.noteAction?.(`wrote to ${target.name ?? target.chatId}: ${text.slice(0, 120)}`);
-    return `Sent to ${where(target)} (bot ${bot}).`;
+    const bot = await ctx.chats.sendToChat(target, text, ctx.agent, files);
+    ctx.noteAction?.(`wrote to ${target.name ?? target.chatId}: ${text.slice(0, 120)}${files.length ? ` (+${files.length} file${files.length === 1 ? "" : "s"})` : ""}`);
+    return `Sent to ${where(target, ctx.origin)}${files.length ? ` with ${files.length} file${files.length === 1 ? "" : "s"}` : ""} (bot ${bot}).`;
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
