@@ -60,6 +60,7 @@ import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage
 import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
+import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -1221,6 +1222,31 @@ const confirmCheckTool: Tool = { name: "confirm_check", description: CONFIRM_CHE
 const listChatsTool: Tool = { name: "list_chats", description: LIST_CHATS_DESCRIPTION, parameters: ListChatsSchema };
 const sendMessageTool: Tool = { name: "send_message", description: SEND_MESSAGE_DESCRIPTION, parameters: SendMessageSchema };
 
+// ── Browser profiles (agents' persistent browser state: cookies, logins) ──
+const browserProfilesTool: Tool = {
+  name: "browser_profiles",
+  description: "List the browser profiles (each agent's persistent browser: cookies and logins in .polpo/browser-profiles/<name>): "
+    + "which agents use each, size, last use, whether it holds cookies (signed in somewhere) and whether a login session is open.",
+  parameters: Type.Object({}),
+};
+const browserProfileLoginTool: Tool = {
+  name: "browser_profile_login",
+  description: "Let the person sign in to a site with an agent's browser profile, so the agent finds it logged in: "
+    + "action \"start\" opens the profile at the url in a session the Live browser view shows (the person signs in there, "
+    + "with password, 2FA or captcha); \"finish\" closes it once they are done, and the login stays in the profile. "
+    + "profile = the agent's browserProfile, else the agent's name (browser_profiles lists them).",
+  parameters: Type.Object({
+    action: Type.Union([Type.Literal("start"), Type.Literal("finish")]),
+    profile: Type.String({ description: "Profile name" }),
+    url: Type.Optional(Type.String({ description: "For start: the sign-in page (https://…)" })),
+  }),
+};
+const browserProfileClearTool: Tool = {
+  name: "browser_profile_clear",
+  description: "Delete a browser profile and every login it holds (its open browser sessions are closed first). The agents that use it start signed out.",
+  parameters: Type.Object({ profile: Type.String({ description: "Profile name" }) }),
+};
+
 // ═══════════════════════════════════════════════════════
 //  MODEL CATALOG
 // ═══════════════════════════════════════════════════════
@@ -2157,7 +2183,7 @@ export const READ_TOOLS = new Set([
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
-  "list_schedules", "list_checks", "list_chats", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
+  "list_schedules", "list_checks", "list_chats", "browser_profiles", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // Playbooks (read-only)
@@ -2200,6 +2226,8 @@ export const WRITE_TOOLS = new Set([
   "review_agent_learning", "revert_agent_learning", "reflect_agent", "confirm_check",
   // Conversation checks
   "schedule_check", "cancel_check", "send_message",
+  // Browser profiles (deleting one signs its agents out)
+  "browser_profile_clear",
   // Artifacts
   "artifact_create", "artifact_update", "artifact_delete",
   // Notification rules
@@ -2329,6 +2357,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   setVoiceRepliesTool,
   // Conversation checks
   scheduleCheckTool, listChecksTool, cancelCheckTool, confirmCheckTool, listChatsTool, sendMessageTool,
+  // Browser profiles
+  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -2487,6 +2517,9 @@ const TOOL_LABELS: Record<string, string> = {
   cancel_check: "Cancel Check",
   list_chats: "List Chats",
   send_message: "Send Message",
+  browser_profiles: "Browser Profiles",
+  browser_profile_login: "Browser Profile Login",
+  browser_profile_clear: "Clear Browser Profile",
   list_models: "List Models",
   get_agent_learning: "Agent Learning",
   review_agent_learning: "Review Agent Learning",
@@ -2769,6 +2802,9 @@ export async function executeOrchestratorTool(
       case "cancel_check":   return execCancelCheck(args, { manager: polpo.getConversationCheckManager(), sessionId: context.sessionId });
       case "list_chats":     return execListChats({ chats: polpo });
       case "send_message":   return execSendMessage(args, { chats: polpo, origin: context.origin });
+      case "browser_profiles":      return execBrowserProfiles(polpo);
+      case "browser_profile_login": return execBrowserProfileLogin(polpo, args);
+      case "browser_profile_clear": return execBrowserProfileClear(polpo, args);
 
       // ── Notification Rules ──
       case "add_notification_rule":    return execAddNotificationRule(polpo, args);
@@ -6950,4 +6986,44 @@ export function readSystemContext(polpoDir: string): string {
     return readFileSync(contextPath, "utf-8").trim();
   }
   return "";
+}
+
+// ── Browser profiles ──
+
+const formatBytes = (n: number): string => n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+async function execBrowserProfiles(polpo: Orchestrator): Promise<string> {
+  const profiles = await listBrowserProfiles(polpo.getPolpoDir(), await polpo.getAgents());
+  if (profiles.length === 0) return "No browser profiles yet: an agent with browser tools gets one the first time it opens the browser.";
+  return profiles.map((p) => `- ${p.name}: ${p.agents.length ? `used by ${p.agents.join(", ")}` : "no agent uses it"}; `
+    + (p.exists ? `${formatBytes(p.sizeBytes)}${p.lastUsedAt ? `, last used ${p.lastUsedAt.slice(0, 16).replace("T", " ")}` : ""}, ${p.hasCookies ? "has cookies (signed in somewhere)" : "no cookies"}` : "not created yet")
+    + (p.loginOpen ? "; a login session is open in the Live view" : "")).join("\n");
+}
+
+async function execBrowserProfileLogin(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const profile = String(args.profile ?? "").trim();
+  try {
+    if (args.action === "finish") {
+      const closed = await finishProfileLogin(profile);
+      return closed ? `Login session for "${profile}" closed: the profile keeps what was signed in.` : `No login session was open for "${profile}".`;
+    }
+    if (typeof args.url !== "string" || !args.url.trim()) return "Error: start needs the url of the sign-in page";
+    const { session } = await startProfileLogin(polpo.getPolpoDir(), profile, args.url.trim());
+    return `Opened ${args.url} with the profile "${profile}" in the browser session "${session}". `
+      + "Tell the person to open the Live browser view (Browser), pick that session and sign in; when they are done, call browser_profile_login with action \"finish\". "
+      + "Agents using this profile should not run browser tasks meanwhile.";
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function execBrowserProfileClear(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const profile = String(args.profile ?? "").trim();
+  try {
+    const { deleted, closedSessions } = await clearBrowserProfile(polpo.getPolpoDir(), profile, await polpo.getAgents());
+    const closed = closedSessions.length ? ` Closed its browser sessions: ${closedSessions.join(", ")}.` : "";
+    return deleted ? `Deleted the browser profile "${profile}" and its logins.${closed}` : `There is no browser profile "${profile}".${closed}`;
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }

@@ -144,3 +144,46 @@ describe("browser on this machine", () => {
     expect(spawned[0]![1]).not.toBe("/vm/work/s.png");
   });
 });
+
+describe("browser_fill from the vault", () => {
+  const SECRET = "s3cret-Passw0rd!";
+  const vault = { get: (s: string) => (s === "github" ? { user: "ada", password: SECRET } : undefined), has: (s: string) => s === "github", list: () => [{ service: "github", type: "login", keys: ["user", "password"] }] } as any;
+
+  test("on the host the value goes to the process, never back to the model", async () => {
+    const tools = createBrowserTools(CWD, "ada", ["browser_fill"], "/polpo/browser-profiles/ada", "/tmp/out", undefined, undefined, { vault });
+    const result = await tool(tools, "browser_fill").execute("1", { selector: "@e3", from_vault: "github.password" });
+    const args = spawned.at(-1)!;
+    expect(args.slice(args.indexOf("fill"), args.indexOf("fill") + 3)).toEqual(["fill", "@e3", SECRET]);
+    const text = JSON.stringify(result);
+    expect(text).not.toContain(SECRET);
+    expect(result.content[0].text).toBe("Filled @e3 with github.password from the vault.");
+  });
+
+  test("in a sandbox the command line holds a variable, the value travels in the environment", async () => {
+    const envs: Array<Record<string, string> | undefined> = [];
+    const shell = new FakeVmShell();
+    const execute = shell.execute.bind(shell);
+    shell.execute = async (command: string, opts?: ShellOptions) => { envs.push(opts?.env); return execute(command, opts); };
+    const tools = createBrowserTools(CWD, "ada", ["browser_fill"], "/polpo/browser-profiles/ada", "/tmp/out", undefined, undefined, { shell, vault });
+    const result = await tool(tools, "browser_fill").execute("1", { selector: "@e3", from_vault: "github.password" });
+    const fill = shell.commands.find((c) => c.includes(" 'fill' "))!;
+    expect(fill).toContain(`'fill' '@e3' "$POLPO_BROWSER_SECRET"`);
+    expect(shell.commands.join("\n")).not.toContain(SECRET);
+    expect(envs.at(-1)).toEqual({ POLPO_BROWSER_SECRET: SECRET });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  test("errors name the reference, never a value; text and from_vault are exclusive", async () => {
+    const tools = createBrowserTools(CWD, "ada", ["browser_fill"], undefined, "/tmp/out", undefined, undefined, { vault });
+    const fill = tool(tools, "browser_fill");
+    expect((await fill.execute("1", { selector: "@e3", from_vault: "github.token" })).content[0].text).toMatch(/vault entry "github" has no key "token" \(keys: user, password\)/);
+    expect((await fill.execute("1", { selector: "@e3", from_vault: "gitlab.password" })).content[0].text).toMatch(/no vault entry/);
+    expect((await fill.execute("1", { selector: "@e3", text: "x", from_vault: "github.password" })).content[0].text).toMatch(/either text or from_vault/);
+    expect((await fill.execute("1", { selector: "@e3" })).content[0].text).toMatch(/either text or from_vault/);
+    const noVault = tool(createBrowserTools(CWD, "ada", ["browser_fill"], undefined, "/tmp/out"), "browser_fill");
+    expect((await noVault.execute("1", { selector: "@e3", from_vault: "github.password" })).content[0].text).toMatch(/no vault entries are available/);
+    // plain text still works
+    await fill.execute("1", { selector: "@e4", text: "ada@example.com" });
+    expect(spawned.at(-1)).toContain("ada@example.com");
+  });
+});
