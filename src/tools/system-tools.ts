@@ -688,7 +688,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs }));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs, vault: options.vault }));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools

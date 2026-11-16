@@ -27,6 +27,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-16-browser-profiles",
+    date: "2026-11-16",
+    kind: "new",
+    title: "Profili browser e password dal vault",
+    summary: "Fai accedere un agente a un sito dal browser Live, e gli agenti inseriscono le password dal vault senza vederle.",
+    body: [
+      "- **Accesso dal browser Live**: chiedi a Polpo di far accedere un agente a un sito. Si apre il suo profilo nella vista Live del browser, accedi tu (anche con 2FA o captcha) e l'agente ritrova l'accesso nei suoi task.",
+      "- **Profili sotto controllo**: Polpo elenca i profili (quali agenti li usano, dimensione, ultimo uso, se sono collegati) e può cancellarli.",
+      "- **Password dal vault**: gli agenti compilano un campo con una credenziale del vault senza che il modello la veda mai, anche in sandbox.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-09-telegram-files",
     date: "2026-11-09",
     kind: "fixed",

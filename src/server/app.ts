@@ -73,6 +73,7 @@ import { learningRoutes } from "./routes/learning.js";
 import { driveRoutes } from "./routes/drive.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
+import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
@@ -1283,6 +1284,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
+  authed.route("/browser-profiles", browserProfileRoutes({ polpoDir: () => orchestrator.getPolpoDir(), agents: () => orchestrator.getAgents() }));
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,

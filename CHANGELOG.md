@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Browser profiles from Polpo, the dashboard and the API.** Polpo's tools `browser_profiles` (which agents use each profile, size, last use, whether it holds cookies, open logins), `browser_profile_login` and `browser_profile_clear`, and the routes `GET /browser-profiles`, `POST /browser-profiles/:name/login`, `POST /browser-profiles/:name/login/finish` and `DELETE /browser-profiles/:name`. A login opens the profile at the sign-in page in a browser session (`login-<profile>`) that the Live browser view shows: the person signs in there, with password, 2FA or captcha, and finishing it keeps the login in the profile. Clearing a profile closes the browser sessions writing into it first. Until now this was only possible from a terminal (`polpo browser …`).
+
+### Security
+- **`browser_fill` takes `from_vault`** ("service.key"): a password or token from the agent's vault goes into the field without passing through the model. On the host the value is given straight to the browser process; in a sandbox it travels in the command's environment, so the command line (which sandboxes log) never holds it, and any echo is masked. Until now an agent had to read the secret with `vault_get` and copy it into `text`, and in a sandbox, where `vault_get` hides values, it could not sign in at all.
+
 ### Fixed
 - **Agents said they could not send attachments on Telegram.** The only way was `open_file`, which the prompt describes as a web-dashboard preview, and `send_message` carried text only. `send_message` now takes `files` (paths in the agents' workspace, up to 10), sent as Telegram attachments; without `to` they go to the chat the turn came from. A Telegram turn's prompt says how to send files. Only regular files in the agents' workspace leave the server: never `.polpo`, hidden folders or files named like credentials.
 
