@@ -455,8 +455,10 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
 
   // ── Branches ─────────────────────────────────────────────────────────
   //
-  // POST   /sessions/:id/fork   — { messageId } new session with the conversation up to that user
-  //                               message; the assistant answers it again there (server-side turn)
+  // POST   /sessions/:id/fork   — { messageId } new session with the conversation up to that message.
+  //                               From a user message the assistant answers it again there
+  //                               (server-side turn); from a reply it waits for the person (a
+  //                               side thread on that answer).
   // DELETE /sessions/:id/fork   — undo a branch: delete it and go back to the parent. Answers 409
   //                               FORK_HAS_MESSAGES when the user already wrote in it (?force=1 to
   //                               delete anyway).
@@ -475,8 +477,8 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     const messages: any[] = await sessionStore.getMessages(id);
     const target = messages.find((m) => m.id === messageId);
     if (!target) return c.json({ ok: false, error: "Message not found", code: "NOT_FOUND" }, 404);
-    if (target.role !== "user") {
-      return c.json({ ok: false, error: "Branch from one of your messages", code: "NOT_A_USER_MESSAGE" }, 400);
+    if (target.role !== "user" && target.role !== "assistant") {
+      return c.json({ ok: false, error: "Branch from a message of the conversation", code: "NOT_A_CHAT_MESSAGE" }, 400);
     }
 
     const fork = await sessionStore.forkSession(id, messageId);
@@ -507,7 +509,7 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
     // The assistant answers the copied user message again, in the branch.
     let turnId: string | null = null;
     let turnError: string | undefined;
-    if (turnScheduler) {
+    if (turnScheduler && target.role === "user") {
       try {
         turnId = (await turnScheduler.startTurn(forkId, { reason: "fork" }))?.turnId ?? null;
       } catch (error) {
