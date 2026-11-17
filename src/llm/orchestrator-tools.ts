@@ -62,6 +62,7 @@ import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
 import { ASK_AGENT_DESCRIPTION, AskAgentSchema, execAskAgent, execMessageAgent, MESSAGE_AGENT_DESCRIPTION, MessageAgentSchema } from "../tools/agent-talk-tools.js";
+import { proxyReachable } from "../tools/browser-egress.js";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -930,6 +931,7 @@ const addAgentTool: Tool = {
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
+    browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\": a residential line) its browser goes out through, for sites that block datacenter IPs" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
@@ -993,6 +995,7 @@ const updateAgentTool: Tool = {
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
+    browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\") its browser goes out through; empty string: directly" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
     sandbox: agentSandboxParam,
     learning: agentLearningParam,
@@ -1245,6 +1248,12 @@ const browserProfileLoginTool: Tool = {
     profile: Type.String({ description: "Profile name" }),
     url: Type.Optional(Type.String({ description: "For start: the sign-in page (https://…)" })),
   }),
+};
+const egressStatusTool: Tool = {
+  name: "egress_status",
+  description: "The egress proxies agents' browsers can go out through (settings.egressProxies, e.g. \"home\": a residential line over Tailscale), "
+    + "whether each is reachable now, and which agents use it (agent browserEgress, set with update_agent).",
+  parameters: Type.Object({}),
 };
 const browserProfileClearTool: Tool = {
   name: "browser_profile_clear",
@@ -2188,7 +2197,7 @@ export const READ_TOOLS = new Set([
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
-  "list_schedules", "list_checks", "list_chats", "browser_profiles", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
+  "list_schedules", "list_checks", "list_chats", "browser_profiles", "egress_status", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // Playbooks (read-only)
@@ -2366,6 +2375,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   browserProfilesTool, browserProfileLoginTool, browserProfileClearTool,
   // Talking to agents during the chat
   askAgentTool, messageAgentTool,
+  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, egressStatusTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -2527,6 +2537,7 @@ const TOOL_LABELS: Record<string, string> = {
   browser_profiles: "Browser Profiles",
   ask_agent: "Ask Agent",
   message_agent: "Message Agent",
+  egress_status: "Egress Status",
   browser_profile_login: "Browser Profile Login",
   browser_profile_clear: "Clear Browser Profile",
   list_models: "List Models",
@@ -2814,6 +2825,7 @@ export async function executeOrchestratorTool(
       case "ask_agent":     return execAskAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
       case "message_agent": return execMessageAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
       case "browser_profiles":      return execBrowserProfiles(polpo);
+      case "egress_status":         return execEgressStatus(polpo);
       case "browser_profile_login": return execBrowserProfileLogin(polpo, args);
       case "browser_profile_clear": return execBrowserProfileClear(polpo, args);
 
@@ -4079,6 +4091,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     maxTurns: args.maxTurns as number | undefined,
     maxConcurrency: args.maxConcurrency as number | undefined,
     browserProfile: args.browserProfile as string | undefined,
+    browserEgress: args.browserEgress as string | undefined,
     emailAllowedDomains: args.emailAllowedDomains as string[] | undefined,
     learning: args.learning as AgentConfig["learning"] | undefined,
     voiceReplies: args.voiceReplies as AgentConfig["voiceReplies"] | undefined,
@@ -4127,6 +4140,7 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.maxTurns !== undefined) updates.maxTurns = args.maxTurns as number;
   if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;
   if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
+  if (args.browserEgress !== undefined) updates.browserEgress = (args.browserEgress as string) || undefined;
   if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
   if (args.team !== undefined) updates.team = args.team as string;
   if (args.learning !== undefined) updates.learning = args.learning as AgentConfig["learning"];
@@ -7037,4 +7051,19 @@ async function execBrowserProfileClear(polpo: Orchestrator, args: Record<string,
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+async function execEgressStatus(polpo: Orchestrator): Promise<string> {
+  const proxies = polpo.getConfig()?.settings?.egressProxies ?? {};
+  const agents = await polpo.getAgents();
+  const names = Object.keys(proxies);
+  if (names.length === 0) return "No egress proxies configured (settings.egressProxies): every browser goes out directly from the server.";
+  const lines = await Promise.all(names.map(async (name) => {
+    const users = agents.filter((a) => a.browserEgress === name).map((a) => a.name);
+    const up = await proxyReachable(proxies[name]!);
+    return `- ${name}: ${up ? "reachable" : "UNREACHABLE (browsers fall back to the server's address; profiles signed in through it pause)"}; `
+      + `used by ${users.length ? users.join(", ") : "no agent"}`;
+  }));
+  const unknown = agents.filter((a) => a.browserEgress && !proxies[a.browserEgress]).map((a) => `${a.name} (${a.browserEgress})`);
+  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "");
 }

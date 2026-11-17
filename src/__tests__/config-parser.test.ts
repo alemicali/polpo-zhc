@@ -55,6 +55,13 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.tasks).toEqual([]);
     });
 
+    it("reads egress proxies, and refuses a malformed one", async () => {
+      const ok = await parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, egressProxies: { home: "socks5://100.101.55.7:1080" } } }));
+      expect(ok.settings.egressProxies).toEqual({ home: "socks5://100.101.55.7:1080" });
+      await expect(parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, egressProxies: { home: "ftp://x" } } })))
+        .rejects.toThrow(/settings.egressProxies.home/);
+    });
+
     it("parses config with full settings", async () => {
       const cfg = {
         ...minimalConfig(),

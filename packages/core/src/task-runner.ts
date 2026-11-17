@@ -638,6 +638,8 @@ export class TaskRunner {
       databaseUrl: this.ctx.config.settings.databaseUrl,
       notifySocket: this.ctx.notifySocketPath,
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
+      ...(agent.browserEgress && this.ctx.config.settings.egressProxies?.[agent.browserEgress]
+        ? { browserEgress: { name: agent.browserEgress, url: this.ctx.config.settings.egressProxies[agent.browserEgress]! } } : {}),
       reasoning: this.ctx.config.settings.reasoning,
       compaction: this.ctx.config.settings.compaction,
       sandbox,

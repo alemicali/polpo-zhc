@@ -303,6 +303,8 @@ export interface AgentConfig {
   // Note: HTTP tools (http_fetch, http_download) and vault tools (vault_get, vault_list) are always available as core tools.
   /** Browser profile name for persistent context (cookies, auth). Used with agent-browser --profile. */
   browserProfile?: string;
+  /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */
+  browserEgress?: string;
   /** Allowed recipient email domains for email_send. Overrides global setting. */
   emailAllowedDomains?: string[];
 }
@@ -1152,6 +1154,8 @@ export interface UpdateAgentRequest {
   loops?: Record<string, LoopConfig>;
   pipeline?: Pipeline;
   browserProfile?: string;
+  /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */
+  browserEgress?: string;
   emailAllowedDomains?: string[];
   /** Move agent to a different team. */
   team?: string;

@@ -334,6 +334,7 @@ async function main(): Promise<void> {
       polpoDir: config.polpoDir,
       outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
+      browserEgress: config.browserEgress,
       reasoning: config.reasoning,
       compaction: config.compaction,
       sandbox: config.sandbox,

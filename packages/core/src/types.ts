@@ -430,6 +430,9 @@ export interface AgentConfig {
    *  Defaults to agent name. Used with agent-browser's --profile flag.
    *  Profiles stored in .polpo/browser-profiles/<name>/. */
   browserProfile?: string;
+  /** Where its browser goes out to the internet: the name of a proxy in settings.egressProxies
+   *  (e.g. "home", a residential line over Tailscale). Unset: directly from the server. */
+  browserEgress?: string;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */
@@ -725,6 +728,8 @@ export interface RunnerConfig {
   notifySocket?: string;
   /** Email domain allowlist (from settings or agent config). */
   emailAllowedDomains?: string[];
+  /** The agent's browser egress proxy (settings.egressProxies[agent.browserEgress]). */
+  browserEgress?: { name: string; url: string };
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
   /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
@@ -953,6 +958,8 @@ export interface PolpoSettings {
   defaultQualityThreshold?: number;
   /** Allowed recipient email domains — applies to all agents (can be overridden per-agent). */
   emailAllowedDomains?: string[];
+  /** Named egress proxies for agents' browsers (agent.browserEgress): { home: "socks5://100.101.55.7:1080" }. */
+  egressProxies?: Record<string, string>;
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

@@ -76,6 +76,7 @@ import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { AgentTalk } from "./agent-talk.js";
+import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
@@ -401,6 +402,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         browserSession: agentConfig.name,
         browserProfileDir,
         browserNetwork: await o.chatBrowserNetwork(agentConfig),
+        browserEgress: resolveBrowserEgress(agentConfig, o.getConfig()?.settings?.egressProxies),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
