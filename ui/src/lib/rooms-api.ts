@@ -16,6 +16,10 @@ export interface RoomSettings {
   replyOrder?: RoomReplyOrder;
   agentToAgent?: boolean;
   maxAgentHops?: number;
+  /** What the group is for: the shared outcome. */
+  goal?: string;
+  /** The agent that owns the next step: it answers what nobody else picks up. */
+  owner?: string;
 }
 
 export interface Room {
@@ -62,6 +66,8 @@ export const DEFAULT_ROOM_SETTINGS: Required<RoomSettings> = {
   replyOrder: "parallel",
   agentToAgent: true,
   maxAgentHops: 3,
+  goal: "",
+  owner: "",
 };
 
 export function resolveRoomSettings(settings: RoomSettings | undefined): Required<RoomSettings> {
@@ -103,8 +109,9 @@ export const roomsApi = {
     request<{ deleted: true }>(roomPath(id), { method: "DELETE" }),
   messages: (id: string, limit = 200) =>
     request<RoomMessage[]>(`${roomPath(id)}/messages?limit=${limit}`),
-  send: (id: string, text: string) =>
-    request<RoomMessage>(`${roomPath(id)}/messages`, { method: "POST", body: JSON.stringify({ text }) }),
+  /** `replyToId`: replying to an agent's message calls that agent in. */
+  send: (id: string, text: string, replyToId?: string) =>
+    request<RoomMessage>(`${roomPath(id)}/messages`, { method: "POST", body: JSON.stringify(replyToId ? { text, replyToId } : { text }) }),
   typing: (id: string) =>
     request<RoomTypingEntry[]>(`${roomPath(id)}/typing`),
 };
