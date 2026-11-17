@@ -2020,7 +2020,10 @@ export function useChat() {
     }
   }, [client]);
 
-  /** Branch the conversation at a user message; the assistant answers it again in the branch. */
+  /**
+   * Branch the conversation at a message. From a user message the assistant answers it again in
+   * the branch; from a reply the branch waits for the next message (a side thread on that answer).
+   */
   const forkSession = useCallback(async (messageId: string) => {
     const sid = activeSessionKeyRef.current;
     if (isLocalNewSessionKey(sid)) return;

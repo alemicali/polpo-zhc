@@ -346,8 +346,12 @@ describe("branches", () => {
     const forkPoint = parentMessages[2];
     expect(forkPoint.attachments).toHaveLength(1);
 
-    // Only user messages can be branched from.
-    expect((await app.request(`/api/v1/chat/sessions/${sid}/fork`, json("POST", { messageId: parentMessages[1].id }))).status).toBe(400);
+    // From a reply: a side thread on that answer, nobody answers until the person writes.
+    const fromReply = (await (await app.request(`/api/v1/chat/sessions/${sid}/fork`, json("POST", { messageId: parentMessages[1].id }))).json()).data;
+    expect(fromReply.session).toMatchObject({ parentSessionId: sid, forkMessageId: parentMessages[1].id, messageCount: 2 });
+    expect(fromReply.turnId).toBeNull();
+    expect((await messagesOf(fromReply.session.id)).map((m) => m.content)).toEqual(["question one", "Answer A."]);
+    expect((await (await app.request(`/api/v1/chat/sessions/${fromReply.session.id}/fork`, { method: "DELETE" })).json()).data.deleted).toBe(true);
 
     script([() => mockTextStream("Answer B, take two.")]);
     const forked = await (await app.request(`/api/v1/chat/sessions/${sid}/fork`, json("POST", { messageId: forkPoint.id }))).json();

@@ -872,7 +872,7 @@ export class PolpoClient {
 
   // ── Branches ────────────────────────────────────────────
 
-  /** Branch the conversation at one of the user's messages; the assistant answers it again in the branch. */
+  /** Branch the conversation at a message: from a user message the assistant answers it again in the branch, from a reply the branch waits for the next message. */
   forkSession(sessionId: string, messageId: string): Promise<ForkSessionResult> {
     return this.post<ForkSessionResult>(`/chat/sessions/${sessionId}/fork`, { messageId });
   }

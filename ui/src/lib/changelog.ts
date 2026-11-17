@@ -27,6 +27,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-thread-from-reply",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Thread da una risposta",
+    summary: "Approfondisci una risposta di un agente in una chat a parte, senza riempire quella principale.",
+    body: [
+      "Sotto ogni risposta, accanto a Copia e Ascolta, c'è **Thread da questa risposta**: apre una nuova chat con la conversazione fino a lì.",
+      "",
+      "- Nessuno risponde finché non scrivi tu: continui il discorso su quel punto.",
+      "- La risposta originale mostra il link ai suoi thread, e il thread si annulla come un ramo.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-17-agents-talk",
     date: "2026-11-17",
     kind: "new",

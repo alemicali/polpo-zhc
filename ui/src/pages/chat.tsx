@@ -3564,8 +3564,30 @@ function ChatMessages() {
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
                             {msg.content.trim() && <SpeakAction text={msg.content} />}
+                            {sessionId && !msg.id.startsWith("temp-") && (
+                              <MessageAction
+                                tooltip="Thread from this reply — new chat that continues from here"
+                                label="Thread from this reply"
+                                onClick={() => { void handleFork(msg.id); }}
+                                disabled={forking !== null}
+                              >
+                                {forking === msg.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitBranch className="h-3.5 w-3.5" />}
+                              </MessageAction>
+                            )}
                           </MessageActions>
                         )}
+                        {!isStreaming && forksByMessage.get(msg.id)?.map((fork) => (
+                          <button
+                            key={fork.id}
+                            type="button"
+                            onClick={() => { void loadSession(fork.id); }}
+                            className="mt-1 flex max-w-full items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                            title="Open the thread started from this reply"
+                          >
+                            <GitBranch className="h-3 w-3 shrink-0" />
+                            <span className="truncate">Thread: {fork.title || "Untitled"}</span>
+                          </button>
+                        ))}
                         {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
                           <AskUserCards
                             questions={msg.askUserQuestions}
