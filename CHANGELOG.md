@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Polpo as the primary bot**, as in Grok Bot. With `set_check_ins`, Polpo checks in on a schedule (default 9:00 and 18:00) and writes only when something needs the person: approvals waiting, failed or stuck tasks, finished missions, agents' proposals to confirm. It also proposes a dedicated agent when a kind of request keeps coming back. Its prompt describes the role: it coordinates the agents, and it creates an agent only after a yes.
+
+### Added
 - **Browser profiles from Polpo, the dashboard and the API.** Polpo's tools `browser_profiles` (which agents use each profile, size, last use, whether it holds cookies, open logins), `browser_profile_login` and `browser_profile_clear`, and the routes `GET /browser-profiles`, `POST /browser-profiles/:name/login`, `POST /browser-profiles/:name/login/finish` and `DELETE /browser-profiles/:name`. A login opens the profile at the sign-in page in a browser session (`login-<profile>`) that the Live browser view shows: the person signs in there, with password, 2FA or captcha, and finishing it keeps the login in the profile. Clearing a profile closes the browser sessions writing into it first. Until now this was only possible from a terminal (`polpo browser …`).
 
 ### Security

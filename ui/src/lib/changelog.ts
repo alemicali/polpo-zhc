@@ -27,6 +27,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-polpo-check-ins",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Polpo ti scrive quando serve",
+    summary: "Chiedi a Polpo di tenerti aggiornato: due volte al giorno controlla cosa ti aspetta e ti scrive solo se c'è qualcosa.",
+    body: [
+      "Polpo può fare da tuo assistente principale: chiedigli \"tienimi aggiornato\" e, agli orari che scegli (di base alle 9 e alle 18), guarda cosa ti riguarda:",
+      "",
+      "- approvazioni in attesa, task falliti o fermi, missioni finite;",
+      "- proposte degli agenti da confermare;",
+      "- richieste che tornano spesso: ti propone un agente dedicato, e lo crea solo se dici di sì.",
+      "",
+      "Se non c'è niente, non ti scrive.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-16-browser-profiles",
     date: "2026-11-16",
     kind: "new",

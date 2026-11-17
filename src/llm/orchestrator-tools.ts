@@ -61,6 +61,7 @@ import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
+import { CHECK_NOTHING_TO_REPORT } from "@polpo-ai/core";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -1241,6 +1242,19 @@ const browserProfileLoginTool: Tool = {
     url: Type.Optional(Type.String({ description: "For start: the sign-in page (https://…)" })),
   }),
 };
+const setCheckInsTool: Tool = {
+  name: "set_check_ins",
+  description: "Turn on, change or off your own check-ins with the person, as their primary bot: on a schedule you look at what needs them "
+    + "(approvals waiting, failed or stuck tasks, agents' proposals to confirm, finished missions, work that keeps coming back and deserves a "
+    + "dedicated agent) and write only when something does. Default schedule: 9:00 and 18:00 in the given timezone; reports go to `to` "
+    + "(a chat from list_chats), else to where this was asked.",
+  parameters: Type.Object({
+    enabled: Type.Boolean(),
+    cron: Type.Optional(Type.String({ description: "When (5-field cron), default \"0 9,18 * * *\"" })),
+    timezone: Type.Optional(Type.String({ description: "IANA timezone, e.g. Europe/Rome" })),
+    to: Type.Optional(Type.String({ description: "Where to write: a chat, group or person (list_chats); default: here" })),
+  }),
+};
 const browserProfileClearTool: Tool = {
   name: "browser_profile_clear",
   description: "Delete a browser profile and every login it holds (its open browser sessions are closed first). The agents that use it start signed out.",
@@ -2358,7 +2372,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Conversation checks
   scheduleCheckTool, listChecksTool, cancelCheckTool, confirmCheckTool, listChatsTool, sendMessageTool,
   // Browser profiles
-  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool,
+  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, setCheckInsTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -2518,6 +2532,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_chats: "List Chats",
   send_message: "Send Message",
   browser_profiles: "Browser Profiles",
+  set_check_ins: "Check-ins",
   browser_profile_login: "Browser Profile Login",
   browser_profile_clear: "Clear Browser Profile",
   list_models: "List Models",
@@ -2803,6 +2818,7 @@ export async function executeOrchestratorTool(
       case "list_chats":     return execListChats({ chats: polpo });
       case "send_message":   return execSendMessage(args, { chats: polpo, origin: context.origin });
       case "browser_profiles":      return execBrowserProfiles(polpo);
+      case "set_check_ins":         return execSetCheckIns(polpo, args, context);
       case "browser_profile_login": return execBrowserProfileLogin(polpo, args);
       case "browser_profile_clear": return execBrowserProfileClear(polpo, args);
 
@@ -7023,6 +7039,43 @@ async function execBrowserProfileClear(polpo: Orchestrator, args: Record<string,
     const { deleted, closedSessions } = await clearBrowserProfile(polpo.getPolpoDir(), profile, await polpo.getAgents());
     const closed = closedSessions.length ? ` Closed its browser sessions: ${closedSessions.join(", ")}.` : "";
     return deleted ? `Deleted the browser profile "${profile}" and its logins.${closed}` : `There is no browser profile "${profile}".${closed}`;
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+// ── Primary bot check-ins ──
+
+export const CHECK_IN_WHY = "polpo:check-in";
+export const CHECK_IN_INSTRUCTIONS = [
+  "Check in with the person as their primary bot. Look at what needs them since your last check-in:",
+  "- approvals waiting (list_approvals);",
+  "- tasks that failed or are stuck, missions that finished (list_tasks, list_missions);",
+  "- agents' proposals waiting for a yes (list_checks with all=true: the proposed ones; get_agent_drive for an agent's plans);",
+  "- requests that keep coming back to you or to an agent and would deserve a dedicated agent: propose one (name and job), do not create it.",
+  "Write a short message with only what needs them, the most important first, each with what you suggest. "
+    + `If nothing needs them, answer exactly ${CHECK_NOTHING_TO_REPORT}.`,
+].join("\n");
+
+async function execSetCheckIns(polpo: Orchestrator, args: Record<string, unknown>, context: OrchestratorToolExecutionContext): Promise<string> {
+  const manager = polpo.getConversationCheckManager();
+  if (!manager) return "Error: scheduled checks are not available on this instance";
+  const current = (await manager.list({ states: ["active"] })).filter((c) => !c.agent && c.why === CHECK_IN_WHY);
+  for (const c of current) await manager.cancel(c.id);
+  if (args.enabled !== true) return current.length ? "Check-ins turned off." : "Check-ins were not on.";
+  if (!context.sessionId) return "Error: check-ins need a conversation to report to; ask from a chat";
+  try {
+    const to = typeof args.to === "string" && args.to.trim() ? args.to.trim() : undefined;
+    const target = to ? await polpo.resolveChatTarget(to, {}) : context.origin;
+    const cron = typeof args.cron === "string" && args.cron.trim() ? args.cron.trim() : "0 9,18 * * *";
+    const timezone = typeof args.timezone === "string" && args.timezone.trim() ? args.timezone.trim() : undefined;
+    const check = await manager.create({
+      sessionId: context.sessionId, prompt: CHECK_IN_INSTRUCTIONS, everyMinutes: 0, cron,
+      ...(timezone ? { timezone } : {}), ...(target ? { target } : {}), why: CHECK_IN_WHY, createdBy: "person",
+    });
+    const where = target ? (target.name ? `to "${target.name}"` : `to Telegram chat ${target.chatId}`) : "in this conversation";
+    return `Check-ins on (${check.id}): cron "${cron}"${timezone ? ` ${timezone}` : ""}, next ${check.nextRunAt}, ${where}. `
+      + "You write only when something needs the person.";
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
