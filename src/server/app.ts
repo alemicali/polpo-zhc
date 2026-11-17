@@ -43,6 +43,7 @@ import {
   isTrustedApiCall,
   TRUSTED_API_CALL_HEADER,
   CHAT_ORIGIN_HEADER,
+  AGENT_CHAIN_HEADER,
 } from "@polpo-ai/server";
 import { getCookie } from "hono/cookie";
 import { createHmac } from "node:crypto";
@@ -74,6 +75,7 @@ import { driveRoutes } from "./routes/drive.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
+import { AgentTalk } from "./agent-talk.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
@@ -129,6 +131,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
   const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
+  /** Agents talking to each other during a chat (set up once the completions pipeline exists). */
+  let agentTalk: AgentTalk | undefined;
   const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir(), (event) => orchestrator.emit("app:changed", event));
   const activeDataRegistry = () => getDataRegistryRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (event) => {
     if (event.type === "source") {
@@ -328,7 +332,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
           remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
     },
-    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget }) => {
+    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
@@ -498,6 +502,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
               if (drive?.isReflecting(agentConfig.name, context?.sessionId?.())) drive.noteAction(agentConfig.name, action);
             },
           } : {}),
+        })).filter((tool) => !existingToolNames.has(tool.name)));
+      }
+      // Talking to other agents in the middle of the chat (ask_agent waits, message_agent hands off)
+      if (agentTalk && !existingToolNames.has("ask_agent")) {
+        const { createAgentTalkTools } = await import("../tools/agent-talk-tools.js");
+        const talk = agentTalk;
+        tools.push(...createAgentTalkTools(talk, () => ({
+          agent: agentConfig.name, chain: context?.chain ?? [], sessionId: context?.sessionId?.(), origin: context?.origin,
         })).filter((tool) => !existingToolNames.has(tool.name)));
       }
       // Opt-in `render_widget` per agente, via allowedTools (es.
@@ -951,6 +963,39 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const content = payload?.choices?.[0]?.message?.content;
     return { text: typeof content === "string" ? content : "" };
   });
+
+  // Agents talking to each other during a chat: their turns go through the same completions pipeline
+  agentTalk = new AgentTalk(activePolpoDir(), {
+    turn: async ({ agent, sessionId, messages, chain, origin, signal }) => {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+        [AGENT_CHAIN_HEADER]: chain.join(","),
+        "x-polpo-lease-wait": String(10 * 60 * 1000),
+        ...(origin ? { [CHAT_ORIGIN_HEADER]: encodeURIComponent(JSON.stringify(origin)) } : {}),
+        ...internalCallHeaders(),
+      };
+      if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+      const response = await completionApp.request(new Request("http://polpo.internal/", {
+        method: "POST", headers, ...(signal ? { signal } : {}),
+        body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages }),
+      }));
+      const payload = await response.json().catch(() => null) as any;
+      if (!response.ok) throw new Error(payload?.error?.message ?? `turn failed (${response.status})`);
+      const content = payload?.choices?.[0]?.message?.content;
+      return { text: typeof content === "string" ? content : "", sessionId: response.headers.get("x-session-id") ?? sessionId };
+    },
+    history: async (sessionId) => {
+      const messages = await o.getSessionStore()?.getMessages(sessionId) ?? [];
+      return messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    },
+    agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    post: (origin, text, agent) => o.sendToChat(origin, text, agent),
+    emit: (event, data) => o.emit(event as any, data as any),
+    log: (line) => console.warn(`[polpo/agent-talk] ${line}`),
+  });
+  o?.setAgentTalk?.(agentTalk);
 
   // Messaging channels (Telegram, WhatsApp) run agent turns, and any turn with
   // media, through the same completions pipeline as the web UI: prompt, memory,

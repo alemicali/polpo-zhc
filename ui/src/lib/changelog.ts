@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-agents-talk",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Gli agenti si parlano anche durante la chat",
+    summary: "Un agente può chiedere a un altro e aspettare la risposta, o passargli un lavoro e riceverne l'esito più tardi.",
+    body: [
+      "Come in un vero team, gli agenti ora si parlano mentre lavorano con te, non solo con i task in background:",
+      "",
+      "- **Domanda al volo**: l'health coach chiede al wealth coach quanto puoi spendere per la palestra e ti risponde con quell'informazione.",
+      "- **Passaggio di lavoro**: un agente affida un compito a un altro; quando quello ha finito, il primo riceve l'esito e ti aggiorna nella stessa chat (anche su Telegram).",
+      "- Ogni coppia di agenti ha la sua conversazione, quindi si ricordano gli scambi precedenti. Al massimo 3 agenti di fila, niente giri a vuoto.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-16-browser-profiles",
     date: "2026-11-16",
     kind: "new",
