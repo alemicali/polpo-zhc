@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agents talk to each other during a chat**, not only through background tasks (as Grok Bot's bots message each other):
+  - `ask_agent`: an agent (or Polpo) asks another and waits for the answer within its turn ("wealth-coach: how much can Alessio spend on the gym?");
+  - `message_agent`: it hands work over and goes on. The other agent works on it in its own time, and its reply comes back to the sender, which gets a turn in the conversation it wrote from (on Telegram its answer is posted there).
+  - Each pair has its own conversation per direction (a session of the receiving agent, `.polpo/agent-dms.json`), so the receiver remembers earlier exchanges. Every exchange is an `agent:message` event.
+  - Brakes: no loops (an agent already in the exchange is not asked back), at most 3 agents in a row, 5 minutes per answer.
+
+### Added
 - **Browser profiles from Polpo, the dashboard and the API.** Polpo's tools `browser_profiles` (which agents use each profile, size, last use, whether it holds cookies, open logins), `browser_profile_login` and `browser_profile_clear`, and the routes `GET /browser-profiles`, `POST /browser-profiles/:name/login`, `POST /browser-profiles/:name/login/finish` and `DELETE /browser-profiles/:name`. A login opens the profile at the sign-in page in a browser session (`login-<profile>`) that the Live browser view shows: the person signs in there, with password, 2FA or captcha, and finishing it keeps the login in the profile. Clearing a profile closes the browser sessions writing into it first. Until now this was only possible from a terminal (`polpo browser …`).
 
 ### Security

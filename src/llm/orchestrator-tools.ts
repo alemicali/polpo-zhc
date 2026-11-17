@@ -61,6 +61,7 @@ import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
+import { ASK_AGENT_DESCRIPTION, AskAgentSchema, execAskAgent, execMessageAgent, MESSAGE_AGENT_DESCRIPTION, MessageAgentSchema } from "../tools/agent-talk-tools.js";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -84,6 +85,8 @@ export interface OrchestratorToolExecutionContext {
   sessionId?: string;
   /** Where the turn came from (a Telegram chat or topic): recurring checks report there. */
   origin?: import("@polpo-ai/core").ConversationCheckTarget;
+  /** Agents already in an agent-to-agent exchange that led to this turn. */
+  chain?: string[];
 }
 
 
@@ -1221,6 +1224,8 @@ const cancelCheckTool: Tool = { name: "cancel_check", description: CANCEL_CHECK_
 const confirmCheckTool: Tool = { name: "confirm_check", description: CONFIRM_CHECK_DESCRIPTION, parameters: ConfirmCheckSchema };
 const listChatsTool: Tool = { name: "list_chats", description: LIST_CHATS_DESCRIPTION, parameters: ListChatsSchema };
 const sendMessageTool: Tool = { name: "send_message", description: SEND_MESSAGE_DESCRIPTION, parameters: SendMessageSchema };
+const askAgentTool: Tool = { name: "ask_agent", description: ASK_AGENT_DESCRIPTION, parameters: AskAgentSchema };
+const messageAgentTool: Tool = { name: "message_agent", description: MESSAGE_AGENT_DESCRIPTION, parameters: MessageAgentSchema };
 
 // ── Browser profiles (agents' persistent browser state: cookies, logins) ──
 const browserProfilesTool: Tool = {
@@ -2359,6 +2364,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   scheduleCheckTool, listChecksTool, cancelCheckTool, confirmCheckTool, listChatsTool, sendMessageTool,
   // Browser profiles
   browserProfilesTool, browserProfileLoginTool, browserProfileClearTool,
+  // Talking to agents during the chat
+  askAgentTool, messageAgentTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -2518,6 +2525,8 @@ const TOOL_LABELS: Record<string, string> = {
   list_chats: "List Chats",
   send_message: "Send Message",
   browser_profiles: "Browser Profiles",
+  ask_agent: "Ask Agent",
+  message_agent: "Message Agent",
   browser_profile_login: "Browser Profile Login",
   browser_profile_clear: "Clear Browser Profile",
   list_models: "List Models",
@@ -2802,6 +2811,8 @@ export async function executeOrchestratorTool(
       case "cancel_check":   return execCancelCheck(args, { manager: polpo.getConversationCheckManager(), sessionId: context.sessionId });
       case "list_chats":     return execListChats({ chats: polpo });
       case "send_message":   return execSendMessage(args, { chats: polpo, origin: context.origin });
+      case "ask_agent":     return execAskAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
+      case "message_agent": return execMessageAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
       case "browser_profiles":      return execBrowserProfiles(polpo);
       case "browser_profile_login": return execBrowserProfileLogin(polpo, args);
       case "browser_profile_clear": return execBrowserProfileClear(polpo, args);

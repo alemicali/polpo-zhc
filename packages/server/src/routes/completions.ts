@@ -473,7 +473,7 @@ export interface CompletionRouteDeps {
   /** What else an agent's chats know about it (its purpose and self-portrait, when it has a drive). */
   agentChatContext?: (agentConfig: any) => Promise<string | undefined>;
   /** Create tools + executor for the agent. Return empty arrays for chat-only. */
-  resolveAgentTools: (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: ConversationCheckTarget }) => Promise<{
+  resolveAgentTools: (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: ConversationCheckTarget; chain?: string[] }) => Promise<{
     tools: any[];
     executor: (name: string, args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
     isInteractive?: (name: string) => boolean;
@@ -521,10 +521,14 @@ export interface ToolExecutionContext {
   sessionId?: string;
   /** Where an internal channel turn came from (x-polpo-chat-origin): recurring checks report there. */
   origin?: ConversationCheckTarget;
+  /** Agents already in an agent-to-agent exchange that led to this turn (x-polpo-agent-chain). */
+  chain?: string[];
 }
 
 /** Header with the origin of a channel turn (URI-encoded JSON); honoured only on internal calls. */
 export const CHAT_ORIGIN_HEADER = "x-polpo-chat-origin";
+/** The agents already in an agent-to-agent exchange (comma-separated); honoured only on internal calls. */
+export const AGENT_CHAIN_HEADER = "x-polpo-agent-chain";
 
 function chatOrigin(header: string | undefined): ConversationCheckTarget | undefined {
   if (!header) return undefined;
@@ -585,6 +589,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     // lease over, wait longer and skip storing the user message; nobody else can.
     const internal = isInternalCall(c.req.header(INTERNAL_CALL_HEADER));
     const origin = internal ? chatOrigin(c.req.header(CHAT_ORIGIN_HEADER)) : undefined;
+    const chain = internal ? (c.req.header(AGENT_CHAIN_HEADER) ?? "").split(",").map((a: string) => a.trim()).filter(Boolean).slice(0, 10) : [];
     /**
      * Claim the session's lease: synchronously when free (or handed over by the scheduler via
      * x-polpo-lease), otherwise wait only when the caller asked to (x-polpo-lease-wait, ms).
@@ -661,6 +666,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         "(list_chats lists them); schedule_check does it later, once (at, in_minutes) or on a schedule (every_minutes, cron),",
         "to any of them (to), with a fixed message or instructions to run. Use them when asked to notify, remind or follow up;",
         "never promise to notify later without schedule_check: nothing runs after this turn.",
+        "You can talk to the other agents during the chat: ask_agent asks one and waits for the answer (what they know or can do),",
+        "message_agent hands them work and their reply comes back to you here later. They do not see this chat: give them the context.",
         todayLine(agentConfig.identity?.timezone),
         "When someone asks you to learn from your conversations (or to stop), or to answer with voice messages,",
         "change it yourself with set_learning or set_voice_replies.",
@@ -696,7 +703,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
       // Resolve tools via dep
       // the conversation is known once the session is resolved below; sandboxes open lazily
-      const { tools, executor, isInteractive } = await deps.resolveAgentTools(agentConfig, { sessionId: () => lease.sessionId ?? undefined, origin });
+      const { tools, executor, isInteractive } = await deps.resolveAgentTools(agentConfig, { sessionId: () => lease.sessionId ?? undefined, origin, chain });
       effectiveTools = tools;
       effectiveToolExecutor = executor;
       isInteractiveFn = isInteractive;
@@ -1373,6 +1380,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 toolCallId: call.id,
                 sessionId: sessionId ?? undefined,
                 origin,
+                chain,
                 onProgress: async (progress) => {
                   if (abortController.signal.aborted) return;
                   await emit(sseChunk(completionId, {}, null, {
@@ -1853,6 +1861,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               toolCallId: call.id,
               sessionId: sessionId ?? undefined,
               origin,
+              chain,
             });
             const isError = result.startsWith("Error:");
             emitFileChanged(call.name, call.arguments, result, deps.emit);
