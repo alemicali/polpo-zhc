@@ -13,7 +13,9 @@ import {
   Copy,
   CornerDownRight,
   RefreshCw,
+  Reply,
   Settings2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -118,7 +120,8 @@ export function GroupConversation({
   error: string | null;
   typingAgents: TypingAgent[];
   resolve: (id: string, fallbackName?: string) => GroupMember;
-  onSend: (text: string) => Promise<unknown>;
+  /** `replyToId`: the agent message being replied to (that agent answers). */
+  onSend: (text: string, replyToId?: string) => Promise<unknown>;
   /** Leaves the group (back to the normal chat). Shown on small screens. */
   onBack: () => void;
   backLabel?: string;
@@ -130,6 +133,8 @@ export function GroupConversation({
 }) {
   const now = useNow();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  /** The agent message the next one replies to. */
+  const [replyingTo, setReplyingTo] = useState<RoomMessage | null>(null);
   const [atBottom, setAtBottom] = useState(true);
 
   const members = useMemo(() => (room?.agents ?? []).map((id) => resolve(id)), [resolve, room?.agents]);
@@ -248,6 +253,11 @@ export function GroupConversation({
                 </MessageContent>
                 <MessageActions className="mt-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <CopyAction text={message.text} />
+                  {!readOnly && (
+                    <MessageAction tooltip={`Reply to ${author.name}`} label={`Reply to ${author.name}`} onClick={() => setReplyingTo(message)}>
+                      <Reply className="h-3.5 w-3.5" />
+                    </MessageAction>
+                  )}
                   {message.addressedTo?.length ? (
                     <span className="ml-1 min-w-0 text-[10px] text-muted-foreground">{addressedHint(message)}</span>
                   ) : null}
@@ -327,10 +337,26 @@ export function GroupConversation({
 
   const composer = room && !readOnly ? (
     <>
+      {replyingTo && (
+        <div className="mx-auto mb-1.5 flex max-w-3xl items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+          <CornerDownRight className="h-3 w-3 shrink-0" />
+          <span className="shrink-0">Replying to</span>
+          <span className="shrink-0 font-medium text-foreground/80">{nameOf(replyingTo)}</span>
+          <span className="min-w-0 truncate italic">“{firstLine(replyingTo.text)}”</span>
+          <button type="button" onClick={() => setReplyingTo(null)} className="ml-auto shrink-0 rounded px-1 hover:text-foreground" aria-label="Cancel reply">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
       <GroupComposer
         key={room.id}
         members={members}
-        onSend={onSend}
+        onSend={async (text) => {
+          const target = replyingTo?.id;
+          const sent = await onSend(text, target);
+          setReplyingTo(null);
+          return sent;
+        }}
         autoFocus={autoFocusComposer}
         placeholder={`Message ${room.title || "the group"}…`}
       />

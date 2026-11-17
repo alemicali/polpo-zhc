@@ -27,6 +27,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-groups-goal-owner",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Gruppi con obiettivo, responsabile e @everyone",
+    summary: "Dai un obiettivo al gruppo e un agente responsabile del prossimo passo, rispondi al messaggio di un agente o chiama tutti con @everyone.",
+    body: [
+      "- **Obiettivo e responsabile**: nelle impostazioni del gruppo scrivi a cosa state lavorando e scegli chi ha il prossimo passo. Tutti gli agenti lo sanno, e il responsabile risponde a quello che nessun altro raccoglie.",
+      "- **Rispondi a un agente**: il pulsante Rispondi su un suo messaggio lo chiama in causa, senza menzionarlo.",
+      "- **@everyone** (o @tutti) per chiamare tutti gli agenti del gruppo.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-16-browser-profiles",
     date: "2026-11-16",
     kind: "new",
