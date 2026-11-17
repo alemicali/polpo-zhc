@@ -333,10 +333,10 @@ export function useGroups(activeRoomId: string | null) {
   });
 
   // ── Actions ────────────────────────────────────────────────────────
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, replyToId?: string) => {
     const roomId = activeRoomRef.current;
     if (!roomId) throw new Error("No group selected");
-    const message = await roomsApi.send(roomId, text);
+    const message = await roomsApi.send(roomId, text, replyToId);
     fastUntilRef.current = Date.now() + FAST_WINDOW_MS;
     lastPollRef.current = Date.now();
     if (activeRoomRef.current === roomId && isRoomMessage(message)) {

@@ -493,6 +493,10 @@ export class Orchestrator extends TypedEmitter {
   getBackgroundWaitManager(): BackgroundWaitManager | undefined { return this.backgroundWaitMgr; }
   /** Recurring checks agents run in a chat (schedule_check). */
   getConversationCheckManager(): ConversationCheckManager | undefined { return this.conversationCheckMgr; }
+  private agentTalk: import("../tools/agent-talk-tools.js").AgentTalkAccess | undefined;
+  /** Agents talking to each other during a chat (set by the server, which runs the turns). */
+  setAgentTalk(talk: import("../tools/agent-talk-tools.js").AgentTalkAccess): void { this.agentTalk = talk; }
+  getAgentTalk(): import("../tools/agent-talk-tools.js").AgentTalkAccess | undefined { return this.agentTalk; }
   /** Agents learning from their conversations (learning in the agent config). */
   getLearningManager(): LearningManager | undefined { return this.learningMgr; }
   /** Agents pursuing a purpose on their own initiative (drive in the agent config). */

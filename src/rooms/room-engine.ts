@@ -32,7 +32,12 @@ export const ROOM_DEFAULTS: Required<RoomSettings> = {
   replyOrder: "parallel",
   agentToAgent: true,
   maxAgentHops: 3,
+  goal: "",
+  owner: "",
 };
+
+/** Mentions that call every agent of the group. */
+const EVERYONE = ["everyone", "all", "tutti"];
 
 /** Between agents the classifier must be surer than for a person. */
 const AGENT_TO_AGENT_MARGIN = 0.15;
@@ -77,6 +82,13 @@ const settingsOf = (room: Room): Required<RoomSettings> => ({ ...ROOM_DEFAULTS, 
 /** The agents a message mentions: @name, @display name, case-insensitive. */
 export function mentionedAgents(text: string, profiles: AgentProfile[]): string[] {
   const lower = text.toLowerCase();
+  const whole = (n: string) => {
+    const at = `@${n}`;
+    const i = lower.indexOf(at);
+    return i >= 0 && !/[\p{L}\p{N}_-]/u.test(lower.charAt(i + at.length));
+  };
+  // @everyone: the whole group (sparingly, as in Grok Bot's group chats)
+  if (EVERYONE.some(whole) && !profiles.some((p) => EVERYONE.includes(p.id.toLowerCase()))) return profiles.map((p) => p.id);
   return profiles
     .filter((p) => [p.id, p.name].some((n) => {
       const at = `@${n.toLowerCase()}`;
@@ -105,14 +117,20 @@ export class RoomEngine {
    * A person writes in a room: the message is stored and announced, then the agents answer in
    * the background (their replies come as room:message events).
    */
-  async post(roomId: string, person: { id: string; name: string }, text: string): Promise<RoomMessage> {
+  async post(roomId: string, person: { id: string; name: string }, text: string, options: { replyToId?: string } = {}): Promise<RoomMessage> {
     const room = await this.opts.rooms.getRoom(roomId);
     if (!room) throw new Error(`Room not found: ${roomId}`);
     const profiles = await this.profiles(room);
-    const addressedTo = mentionedAgents(text, profiles);
+    // replying to an agent's message calls that agent in, as a mention would
+    const replied = options.replyToId
+      ? (await this.opts.rooms.getRecentMessages(roomId, 200)).find((m) => m.id === options.replyToId)
+      : undefined;
+    const repliedAgent = replied?.authorKind === "agent" && profiles.some((p) => p.id === replied.authorId) ? replied.authorId : undefined;
+    const addressedTo = [...new Set([...mentionedAgents(text, profiles), ...(repliedAgent ? [repliedAgent] : [])])];
     const message = await this.opts.rooms.addMessage(roomId, {
       authorKind: "person", authorId: person.id, authorName: person.name, text,
       ...(addressedTo.length ? { addressedTo } : {}),
+      ...(replied ? { replyToId: replied.id } : {}),
     });
     this.opts.emit({ type: "room:message", roomId, message });
     const generation = (this.generations.get(roomId) ?? 0) + 1;
@@ -145,7 +163,8 @@ export class RoomEngine {
 
     const profiles = (await this.profiles(room)).filter((p) => !(message.authorKind === "agent" && p.id === message.authorId));
     if (profiles.length === 0) return;
-    const mentioned = mentionedAgents(message.text, profiles);
+    const mentioned = [...new Set([...mentionedAgents(message.text, profiles),
+      ...(message.authorKind === "person" ? (message.addressedTo ?? []).filter((id) => profiles.some((p) => p.id === id)) : [])])];
     const chosen = new Map<string, number>(mentioned.map((id) => [id, 1]));
 
     // between agents, by intent, only those who have not spoken in this chain yet
@@ -154,7 +173,9 @@ export class RoomEngine {
       const probabilities = await this.classify(room, message, others);
       const threshold = hop === 0 ? settings.intentThreshold : Math.min(0.95, settings.intentThreshold + AGENT_TO_AGENT_MARGIN);
       for (const p of others) if ((probabilities[p.id] ?? 0) >= threshold) chosen.set(p.id, probabilities[p.id]!);
-      // a person's message nobody picked up: the agent most likely meant answers
+      // a person's message nobody picked up: the owner of the next step answers, else the agent most likely meant
+      const owner = settings.owner && others.find((p) => p.id === settings.owner);
+      if (chosen.size === 0 && hop === 0 && message.authorKind === "person" && owner) chosen.set(owner.id, probabilities[owner.id] ?? 0);
       if (chosen.size === 0 && hop === 0 && message.authorKind === "person") {
         const best = others.map((p) => [p.id, probabilities[p.id] ?? 0] as const).sort((a, b) => b[1] - a[1])[0];
         if (best && (best[1] > 0 || others.length === 1)) chosen.set(best[0], best[1]);
@@ -254,9 +275,15 @@ export class RoomEngine {
 /** What the agent is told about the room it speaks in, on each turn. */
 function roomPreamble(room: Room, me: AgentProfile, members: AgentProfile[]): string {
   const others = members.filter((p) => p.id !== me.id).map((p) => `${p.name} (@${p.id}: ${p.role})`);
+  const { goal, owner } = settingsOf(room);
+  const ownerName = owner ? (members.find((p) => p.id === owner)?.name ?? owner) : "";
+  const purpose = [
+    goal ? `The group's goal: ${goal}.` : "",
+    ownerName ? (owner === me.id ? "You own the next step: move the work forward and say who does what." : `${ownerName} owns the next step.`) : "",
+  ].filter(Boolean).join(" ");
   return `[Group chat "${room.title}": one person and the agents${others.length ? ` ${others.join(", ")} and you` : ""}. ` +
-    `You are ${me.name}. Lines marked "(agent)" are the other agents. Answer the last message as ${me.name}; ` +
-    `to ask another agent, write @its-id. Keep it short and do not repeat what another agent already said.]`;
+    `You are ${me.name}. Lines marked "(agent)" are the other agents. ${purpose ? `${purpose} ` : ""}Answer the last message as ${me.name}; ` +
+    `to ask another agent, write @its-id (@everyone for all, sparingly). Keep it short and do not repeat what another agent already said.]`;
 }
 
 /** A new web room's id. */

@@ -400,6 +400,7 @@ export const AddAgentSchema = z.object({
   reportsTo: z.string().optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
+  browserEgress: z.string().optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
@@ -445,6 +446,7 @@ export const UpdateAgentSchema = z.object({
   loops: AgentLoopsSchema.optional(),
   pipeline: PipelineSchema.optional(),
   browserProfile: z.string().optional(),
+  browserEgress: z.string().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
 });

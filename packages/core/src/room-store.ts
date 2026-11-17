@@ -24,6 +24,10 @@ export interface RoomSettings {
   agentToAgent?: boolean;
   /** Agent turns set off by one person's message, at most (agentToAgent). Default 3. */
   maxAgentHops?: number;
+  /** What the group is for: the shared outcome every agent works toward. */
+  goal?: string;
+  /** The agent (id) that owns the next step: it answers what nobody else picks up. */
+  owner?: string;
 }
 
 export interface Room {
@@ -53,7 +57,7 @@ export interface RoomMessage {
   externalId?: string;
   /** The agents the message was addressed to (mentions, replies, commands). */
   addressedTo?: string[];
-  /** An agent's reply: the message it answers. */
+  /** The message this one answers (an agent's reply, or a person replying to a message). */
   replyToId?: string;
 }
 

@@ -187,3 +187,69 @@ describe("browser_fill from the vault", () => {
     expect(spawned.at(-1)).toContain("ada@example.com");
   });
 });
+
+describe("browser egress through a residential proxy", () => {
+  const net = require("node:net") as typeof import("node:net");
+  const fsMod = require("node:fs") as typeof import("node:fs");
+  const os = require("node:os") as typeof import("node:os");
+  const path = require("node:path") as typeof import("node:path");
+
+  async function listening(): Promise<{ url: string; close: () => void }> {
+    const server = net.createServer((s) => s.end());
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as import("node:net").AddressInfo).port;
+    return { url: `socks5://127.0.0.1:${port}`, close: () => server.close() };
+  }
+  const closedPort = async () => { const p = await listening(); p.close(); await new Promise((r) => setTimeout(r, 20)); return p.url; };
+
+  test("reachable: the browser starts behind the proxy (a running one restarts) and the profile is marked", async () => {
+    const { resetEgressReachability } = await import("../tools/browser-egress.js");
+    resetEgressReachability();
+    const proxy = await listening();
+    const profile = fsMod.mkdtempSync(path.join(os.tmpdir(), "polpo-egress-"));
+    try {
+      const tools = createBrowserTools(CWD, "growth-egress-1", ["browser_navigate"], profile, "/tmp/out", undefined, undefined, { egress: { name: "home", url: proxy.url } });
+      await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
+      expect(spawned.some((a) => a.includes("close"))).toBe(true);
+      const open = spawned.find((a) => a.includes("open"))!;
+      expect(open).toEqual(expect.arrayContaining(["--proxy", proxy.url]));
+      expect(fsMod.readFileSync(path.join(profile, ".polpo-egress"), "utf-8")).toBe("home");
+    } finally {
+      proxy.close();
+      fsMod.rmSync(profile, { recursive: true, force: true });
+    }
+  });
+
+  test("unreachable: direct from the server, but a profile signed in through it pauses", async () => {
+    const { resetEgressReachability } = await import("../tools/browser-egress.js");
+    resetEgressReachability();
+    const url = await closedPort();
+    const fresh = fsMod.mkdtempSync(path.join(os.tmpdir(), "polpo-egress-"));
+    const signedIn = fsMod.mkdtempSync(path.join(os.tmpdir(), "polpo-egress-"));
+    fsMod.writeFileSync(path.join(signedIn, ".polpo-egress"), "home");
+    try {
+      const direct = createBrowserTools(CWD, "growth-egress-2", ["browser_navigate"], fresh, "/tmp/out", undefined, undefined, { egress: { name: "home", url } });
+      await tool(direct, "browser_navigate").execute("1", { url: "https://example.com" });
+      expect(spawned.find((a) => a.includes("open"))).not.toContain("--proxy");
+      spawned.length = 0;
+      const paused = createBrowserTools(CWD, "growth-egress-3", ["browser_navigate"], signedIn, "/tmp/out", undefined, undefined, { egress: { name: "home", url } });
+      const result = await tool(paused, "browser_navigate").execute("1", { url: "https://example.com" });
+      expect(result.content[0].text).toMatch(/"home" connection is unreachable.*stays paused/s);
+      expect(spawned).toHaveLength(0);
+    } finally {
+      fsMod.rmSync(fresh, { recursive: true, force: true });
+      fsMod.rmSync(signedIn, { recursive: true, force: true });
+    }
+  });
+
+  test("a sandbox network rule keeps its own proxy; a remote sandbox ignores the egress", async () => {
+    const guard = network();
+    const tools = createBrowserTools(CWD, "growth-egress-4", ["browser_navigate"], undefined, "/tmp/out", undefined, guard, { egress: { name: "home", url: "socks5://127.0.0.1:1" } });
+    await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
+    expect(spawned.find((a) => a.includes("open"))).toEqual(expect.arrayContaining(["--proxy", "http://127.0.0.1:9"]));
+    const shell = new FakeVmShell();
+    const remote = createBrowserTools(CWD, "growth-egress-5", ["browser_navigate"], undefined, "/tmp/out", undefined, undefined, { shell, egress: { name: "home", url: "socks5://127.0.0.1:1" } });
+    const r = await tool(remote, "browser_navigate").execute("1", { url: "https://example.com" });
+    expect(JSON.stringify(r)).not.toMatch(/paused|unreachable/);
+  });
+});

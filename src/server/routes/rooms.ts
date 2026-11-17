@@ -25,6 +25,8 @@ const SettingsSchema = z.object({
   replyOrder: z.enum(["parallel", "sequential"]).optional(),
   agentToAgent: z.boolean().optional(),
   maxAgentHops: z.number().int().min(0).max(10).optional(),
+  goal: z.string().max(500).optional(),
+  owner: z.string().max(120).optional(),
 }).strict();
 
 const CreateSchema = z.object({
@@ -41,6 +43,8 @@ const PatchSchema = z.object({
 
 const PostSchema = z.object({
   text: z.string().trim().min(1).max(20_000),
+  /** The message this one replies to: replying to an agent's message calls that agent in. */
+  replyToId: z.string().max(100).optional(),
   name: z.string().trim().min(1).max(80).optional(),
 }).strict();
 
@@ -133,7 +137,9 @@ export function roomRoutes(getDeps: () => RoomRoutesDeps): OpenAPIHono {
     if (room.kind !== "web") return fail(c, 400, "Telegram rooms are written from Telegram");
     const parsed = PostSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return fail(c, 400, parsed.error.issues[0]?.message ?? "Invalid message");
-    const message = await getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text);
+    const message = await parsed.data.replyToId
+      ? getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text, { replyToId: parsed.data.replyToId })
+      : getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text);
     return c.json({ ok: true, data: message }, 201);
   });
 

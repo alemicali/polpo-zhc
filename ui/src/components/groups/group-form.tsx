@@ -4,6 +4,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { RoomReplyMode, RoomReplyOrder, RoomSettings } from "@/lib/rooms-api";
@@ -174,9 +175,11 @@ export function MemberPicker({ members, selected, onChange, isLoading }: {
   );
 }
 
-export function GroupSettingsFields({ settings, onChange }: {
+export function GroupSettingsFields({ settings, onChange, members = [] }: {
   settings: Required<RoomSettings>;
   onChange: (next: Required<RoomSettings>) => void;
+  /** The group's agents, to choose who owns the next step. */
+  members?: Array<{ id: string; name: string }>;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const set = <K extends keyof RoomSettings>(key: K, value: Required<RoomSettings>[K]) =>
@@ -184,6 +187,30 @@ export function GroupSettingsFields({ settings, onChange }: {
 
   return (
     <div className="space-y-4">
+      <div className="space-y-1.5">
+        <label htmlFor="group-goal" className="text-xs font-medium">Goal</label>
+        <Textarea
+          id="group-goal"
+          value={settings.goal}
+          onChange={(e) => set("goal", e.target.value.slice(0, 500))}
+          placeholder="What the group is working toward, e.g. launch the spring campaign by May"
+          rows={2}
+          className="min-h-0 resize-none text-sm"
+        />
+      </div>
+      {members.length > 0 && (
+        <SettingRow title="Owns the next step" description="Answers what nobody else picks up, and keeps the work moving.">
+          <select
+            aria-label="Owns the next step"
+            value={members.some((m) => m.id === settings.owner) ? settings.owner : ""}
+            onChange={(e) => set("owner", e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">Nobody in particular</option>
+            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </SettingRow>
+      )}
       <SettingRow
         title="Who replies"
         description={settings.replyMode === "intent"

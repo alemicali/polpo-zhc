@@ -127,6 +127,9 @@ export function validateAgents(agents: any[]): void {
         throw new Error(`Agent "${agent.name}": browserProfile must contain only letters, numbers, hyphens, underscores`);
       }
     }
+    if (agent.browserEgress !== undefined && (typeof agent.browserEgress !== "string" || !/^[A-Za-z0-9_-]*$/.test(agent.browserEgress))) {
+      throw new Error(`Agent "${agent.name}": browserEgress must be the name of a proxy in settings.egressProxies`);
+    }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.
     if ((agent as any).vault) delete (agent as any).vault;
@@ -402,6 +405,16 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.reasoning) settings.reasoning = raw.reasoning;
   if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
   if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
+  if (raw?.egressProxies && typeof raw.egressProxies === "object") {
+    const proxies: Record<string, string> = {};
+    for (const [name, url] of Object.entries(raw.egressProxies as Record<string, unknown>)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(name) || typeof url !== "string" || !/^(socks5h?|socks4|https?):\/\/[^\s/]+(:\d+)?\/?$/.test(url)) {
+        throw new Error(`settings.egressProxies.${name}: use a name of letters, digits, - and _, and a proxy URL like socks5://100.101.55.7:1080`);
+      }
+      proxies[name] = url;
+    }
+    settings.egressProxies = proxies;
+  }
 
   // Storage backend.
   // Default to "sqlite" so new installs get the indexed/transactional store

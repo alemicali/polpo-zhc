@@ -27,6 +27,62 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-agents-talk",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Gli agenti si parlano anche durante la chat",
+    summary: "Un agente può chiedere a un altro e aspettare la risposta, o passargli un lavoro e riceverne l'esito più tardi.",
+    body: [
+      "Come in un vero team, gli agenti ora si parlano mentre lavorano con te, non solo con i task in background:",
+      "",
+      "- **Domanda al volo**: l'health coach chiede al wealth coach quanto puoi spendere per la palestra e ti risponde con quell'informazione.",
+      "- **Passaggio di lavoro**: un agente affida un compito a un altro; quando quello ha finito, il primo riceve l'esito e ti aggiorna nella stessa chat (anche su Telegram).",
+      "- Ogni coppia di agenti ha la sua conversazione, quindi si ricordano gli scambi precedenti. Al massimo 3 agenti di fila, niente giri a vuoto.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-17-residential-egress",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Il browser degli agenti può uscire da casa",
+    summary: "Per i siti che bloccano gli IP dei server, il browser di un agente può navigare dalla tua connessione di casa, tramite Tailscale.",
+    body: [
+      "Alcuni siti bloccano gli indirizzi dei datacenter. Ora il browser degli agenti che scegli può uscire da un computer di casa collegato in Tailscale:",
+      "",
+      "- **Solo per gli agenti che scegli**, e solo per il browser.",
+      "- **Se il computer di casa è spento**, il browser esce dal server; ma un profilo in cui l'agente è entrato da casa resta in pausa, per non far vedere l'account saltare da un posto all'altro.",
+      "- Polpo ti dice in ogni momento se la connessione di casa è raggiungibile e chi la usa.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-17-groups-goal-owner",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Gruppi con obiettivo, responsabile e @everyone",
+    summary: "Dai un obiettivo al gruppo e un agente responsabile del prossimo passo, rispondi al messaggio di un agente o chiama tutti con @everyone.",
+    body: [
+      "- **Obiettivo e responsabile**: nelle impostazioni del gruppo scrivi a cosa state lavorando e scegli chi ha il prossimo passo. Tutti gli agenti lo sanno, e il responsabile risponde a quello che nessun altro raccoglie.",
+      "- **Rispondi a un agente**: il pulsante Rispondi su un suo messaggio lo chiama in causa, senza menzionarlo.",
+      "- **@everyone** (o @tutti) per chiamare tutti gli agenti del gruppo.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-17-polpo-check-ins",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Polpo ti scrive quando serve",
+    summary: "Chiedi a Polpo di tenerti aggiornato: due volte al giorno controlla cosa ti aspetta e ti scrive solo se c'è qualcosa.",
+    body: [
+      "Polpo può fare da tuo assistente principale: chiedigli \"tienimi aggiornato\" e, agli orari che scegli (di base alle 9 e alle 18), guarda cosa ti riguarda:",
+      "",
+      "- approvazioni in attesa, task falliti o fermi, missioni finite;",
+      "- proposte degli agenti da confermare;",
+      "- richieste che tornano spesso: ti propone un agente dedicato, e lo crea solo se dici di sì.",
+      "",
+      "Se non c'è niente, non ti scrive.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-16-browser-profiles",
     date: "2026-11-16",
     kind: "new",
