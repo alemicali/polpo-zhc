@@ -1255,6 +1255,7 @@ const egressStatusTool: Tool = {
   description: "The egress proxies agents' browsers can go out through (settings.egressProxies, e.g. \"home\": a residential line over Tailscale), "
     + "whether each is reachable now, and which agents use it (agent browserEgress, set with update_agent).",
   parameters: Type.Object({}),
+};
 const setCheckInsTool: Tool = {
   name: "set_check_ins",
   description: "Turn on, change or off your own check-ins with the person, as their primary bot: on a schedule you look at what needs them "
@@ -2384,12 +2385,12 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   setVoiceRepliesTool,
   // Conversation checks
   scheduleCheckTool, listChecksTool, cancelCheckTool, confirmCheckTool, listChatsTool, sendMessageTool,
-  // Browser profiles
-  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool,
+  // Browser profiles and egress
+  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, egressStatusTool,
   // Talking to agents during the chat
   askAgentTool, messageAgentTool,
-  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, egressStatusTool,
-  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, setCheckInsTool,
+  // Primary bot check-ins
+  setCheckInsTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -7082,6 +7083,8 @@ async function execEgressStatus(polpo: Orchestrator): Promise<string> {
   }));
   const unknown = agents.filter((a) => a.browserEgress && !proxies[a.browserEgress]).map((a) => `${a.name} (${a.browserEgress})`);
   return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "");
+}
+
 // ── Primary bot check-ins ──
 
 export const CHECK_IN_WHY = "polpo:check-in";
