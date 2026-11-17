@@ -814,6 +814,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           browserSession: agentConfig.name,
           browserProfileDir,
           browserNetwork,
+          browserEgress: ctx?.browserEgress,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,

@@ -607,6 +607,8 @@ export interface CreateAllToolsOptions {
   browserProfileDir?: string;
   /** The agent's sandbox network rule for the browser (see browser-network-guard.ts). */
   browserNetwork?: import("./browser-network-guard.js").BrowserNetworkGuard;
+  /** The agent's egress proxy for the browser (settings.egressProxies[agent.browserEgress]). */
+  browserEgress?: import("./browser-egress.js").BrowserEgressConfig;
   /** Resolved vault credentials for the agent */
   vault?: ResolvedVault;
   /** Allowed recipient email domains for email_send. */
@@ -688,7 +690,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
 
   // Browser tools — activated when any browser_* tool is in allowedTools
   if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs, vault: options.vault }));
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress }));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools

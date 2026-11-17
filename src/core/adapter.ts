@@ -65,6 +65,8 @@ export interface SpawnContext {
   outputDir?: string;
   /** Email domain allowlist — restricts email_send tool to these domains. */
   emailAllowedDomains?: string[];
+  /** The agent's browser egress proxy (a residential line, see tools/browser-egress.ts). */
+  browserEgress?: { name: string; url: string };
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
   /** Consistent conversation messages restored for a manual continuation. */

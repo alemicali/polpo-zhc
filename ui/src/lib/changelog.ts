@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-17-residential-egress",
+    date: "2026-11-17",
+    kind: "new",
+    title: "Il browser degli agenti può uscire da casa",
+    summary: "Per i siti che bloccano gli IP dei server, il browser di un agente può navigare dalla tua connessione di casa, tramite Tailscale.",
+    body: [
+      "Alcuni siti bloccano gli indirizzi dei datacenter. Ora il browser degli agenti che scegli può uscire da un computer di casa collegato in Tailscale:",
+      "",
+      "- **Solo per gli agenti che scegli**, e solo per il browser.",
+      "- **Se il computer di casa è spento**, il browser esce dal server; ma un profilo in cui l'agente è entrato da casa resta in pausa, per non far vedere l'account saltare da un posto all'altro.",
+      "- Polpo ti dice in ogni momento se la connessione di casa è raggiungibile e chi la usa.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-16-browser-profiles",
     date: "2026-11-16",
     kind: "new",

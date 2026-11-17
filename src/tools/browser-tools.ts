@@ -32,6 +32,7 @@ import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
 import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./browser-network-guard.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
+import { decideEgress, type BrowserEgressConfig } from "./browser-egress.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -781,6 +782,37 @@ function guardedByNetwork(tool: AgentTool<any>, network: BrowserNetworkGuard | u
   };
 }
 
+/** The proxy each agent-browser session was started with: a change needs a restart (the proxy is set at launch). */
+const sessionEgress = new Map<string, string | undefined>();
+
+/**
+ * The agent's egress proxy (a residential line, see browser-egress.ts): the browser runs behind it while
+ * it is reachable, otherwise directly, or not at all for a profile signed in through it. A sandbox network
+ * rule takes precedence (its own proxy), and a browser in a remote sandbox cannot reach it.
+ */
+function withEgress(
+  tool: AgentTool<any>, egress: BrowserEgressConfig | undefined, network: BrowserNetworkGuard | undefined,
+  inSandbox: () => Promise<boolean>, session: string, profileDir: string | undefined,
+): AgentTool<any> {
+  if (!egress || network) return tool;
+  return {
+    ...tool,
+    async execute(id, params: any, signal, ...rest) {
+      if (await inSandbox()) return tool.execute(id, params, signal, ...rest);
+      const decision = await decideEgress(egress, profileDir);
+      if (decision.refusal) return { content: [{ type: "text", text: `Browser error: ${decision.refusal}` }], details: { error: decision.refusal, egress: decision.label } };
+      // the proxy is fixed when the browser starts: switching means a fresh browser on the same profile
+      if (!sessionEgress.has(session) ? decision.proxy !== undefined : sessionEgress.get(session) !== decision.proxy) {
+        if (tool.name !== "browser_close") await execAgentBrowser(["close"], { session, timeout: 15_000 }).catch(() => undefined);
+      }
+      sessionEgress.set(session, decision.proxy);
+      return decision.proxy
+        ? browserProxyContext.run({ proxy: decision.proxy }, () => tool.execute(id, params, signal, ...rest))
+        : tool.execute(id, params, signal, ...rest);
+    },
+  };
+}
+
 /**
  * Create browser automation tools powered by agent-browser CLI.
  *
@@ -805,9 +837,9 @@ export function createBrowserTools(
   toolOutputDir: string = resolveToolOutputDir({ agentName: session }),
   allowedPaths?: string[],
   network?: BrowserNetworkGuard,
-  runtime: { shell?: Shell; fs?: FileSystem; vault?: ResolvedVault } = {},
+  runtime: { shell?: Shell; fs?: FileSystem; vault?: ResolvedVault; egress?: BrowserEgressConfig } = {},
 ): AgentTool<any>[] {
-  const { shell, fs, vault } = runtime;
+  const { shell, fs, vault, egress } = runtime;
   const inSandbox = () => shellIsRemote(shell);
   const profileName = profileDir ? basename(profileDir).replace(/[^A-Za-z0-9._-]/g, "_") || "default" : undefined;
   const exec: BrowserExec = async (args, options = {}) => {
@@ -862,5 +894,8 @@ export function createBrowserTools(
     ? ALL_BROWSER_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_BROWSER_TOOL_NAMES;
 
-  return names.map(n => withToolOutputOffload(guardedByNetwork(factories[n](), network, inSandbox), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs }));
+  return names.map(n => withToolOutputOffload(
+    withEgress(guardedByNetwork(factories[n](), network, inSandbox), egress, network, inSandbox, session, profileDir),
+    { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs },
+  ));
 }
