@@ -195,13 +195,15 @@ function Transcript({
   avatar: (name: string) => string | undefined;
 }) {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
+  // Loading until the transcript for this pair/version/reload has come back
+  const requestKey = `${pair.sessionId}:${version}:${reloads}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     agentTalkApi.transcript(pair.sessionId).then((list) => {
       if (cancelled) return;
       setMessages(list.filter((m) => m.role === "user" || m.role === "assistant"));
@@ -209,10 +211,10 @@ function Transcript({
     }).catch((reason) => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
     }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (!cancelled) setLoadedKey(requestKey);
     });
     return () => { cancelled = true; };
-  }, [pair.sessionId, version, reloads]);
+  }, [pair.sessionId, requestKey]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card" data-testid="agent-transcript">
