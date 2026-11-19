@@ -27,6 +27,12 @@ export interface VaultOAuthProviderOptions {
   interactive: boolean;
   /** A pre-registered client (connector clientId, or the shared OAuth app). */
   preregistered?: PreregisteredClient;
+  /**
+   * This instance's Client ID Metadata Document (https only): servers that advertise
+   * client_id_metadata_document_supported take this URL as client_id (no registration); the others
+   * get a dynamic registration.
+   */
+  clientMetadataUrl?: string;
 }
 
 function parse<T>(raw: string | undefined): T | undefined {
@@ -39,11 +45,18 @@ export class VaultOAuthProvider implements OAuthClientProvider {
   authorizationRequired = false;
   /** Interactive mode: the URL to send the person to. */
   authorizationUrl?: URL;
+  /** Client ID Metadata Document URL (SEP-991), when this instance has a public https URL. */
+  readonly clientMetadataUrl?: string;
+
   constructor(
     private readonly connector: ConnectorConfig,
     private readonly secrets: ConnectorSecrets,
     private readonly options: VaultOAuthProviderOptions,
-  ) {}
+  ) {
+    if (options.clientMetadataUrl && !options.preregistered && /^https:\/\/[^/]+\/.+/.test(options.clientMetadataUrl)) {
+      this.clientMetadataUrl = options.clientMetadataUrl;
+    }
+  }
 
   /** Read fresh every time: another process (a task runner) may have refreshed the tokens meanwhile. */
   private creds(): Promise<Record<string, string>> {

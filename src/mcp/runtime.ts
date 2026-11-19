@@ -5,7 +5,8 @@
 import { connectorGrants, type ConnectorChangedEvent, type ConnectorConfig, type PolpoSettings, type VaultStore } from "@polpo-ai/core";
 import { getConnectorManager, type ConnectorManager } from "./manager.js";
 
-export const CONNECTOR_OAUTH_CALLBACK_PATH = "/api/v1/connectors/oauth/callback";
+import { CONNECTOR_OAUTH_CALLBACK_PATH } from "./paths.js";
+export { CONNECTOR_OAUTH_CALLBACK_PATH, CONNECTOR_CLIENT_METADATA_PATH, clientMetadataDocument, clientMetadataUrlFor } from "./paths.js";
 
 export interface ConnectorHost {
   getPolpoDir(): string;

@@ -126,13 +126,21 @@ export interface ConnectorCatalogEntry {
   description: string;
   /** Fixed endpoint. */
   url?: string;
-  /** Per-account endpoint the person pastes (e.g. Zapier): a hint like "https://mcp.zapier.com/api/mcp/s/<your-key>/mcp". */
+  /** Per-account / per-tenant endpoint the person fills in, e.g. "https://mcp.dev.azure.com/{organization}". */
   urlTemplate?: string;
+  /** Region / environment endpoints to pick from (the first is the default). */
+  variants?: Array<{ label: string; url: string }>;
   transport: "http" | "sse";
-  /** "oauth": DCR; "oauth_preregistered": needs a client id/secret (or a shared oauthApp); "bearer": a token; "none". */
+  /** "oauth": DCR / CIMD; "oauth_preregistered": needs a client id/secret (a shared `oauth.app`); "bearer": a token; "none". */
   auth: "oauth" | "oauth_preregistered" | "bearer" | "none";
+  /** How the OAuth client is registered with the server. */
+  oauthRegistration?: "dcr" | "cimd" | "dcr+cimd" | "preregistered" | null;
+  /** auth "bearer" sent in this header instead of Authorization: Bearer (e.g. X-Goog-Api-Key). */
+  authHeader?: string;
   authNotes?: string;
   oauth?: Omit<ConnectorOAuthSettings, "clientId">;
+  inClaudeDirectory?: boolean;
+  inLovable?: boolean;
   docs?: string;
   domain?: string;
   /** The vendor's official icon (bundled by the UI; no hotlinking). */

@@ -126,7 +126,9 @@ async function normalizeTransport(input: Partial<ConnectorTransport>, ctx: Valid
     };
   }
   if (!input.url || typeof input.url !== "string") throw new ConnectorInputError("transport.url (the MCP server URL) is required");
-  if (input.url.includes("<")) throw new ConnectorInputError("Replace the placeholder in the URL with your own (e.g. from your account settings)");
+  if (input.url.includes("<") || /\{[^}]*\}/.test(input.url)) {
+    throw new ConnectorInputError("This app needs your own URL: replace the {placeholders} with yours (e.g. from your account settings)");
+  }
   try {
     await checkConnectorUrl(input.url, ctx);
   } catch (err) {
@@ -178,10 +180,20 @@ export async function buildConnector(input: ConnectorInput, ctx: ValidateContext
     ...(input.transport ?? {}),
     ...(input.url ? { url: input.url } : {}),
   }, ctx);
-  const authType = input.auth?.type ?? (entry ? (entry.auth === "oauth_preregistered" ? "oauth" : entry.auth) : "none");
+  let authType = input.auth?.type ?? (entry ? (entry.auth === "oauth_preregistered" ? "oauth" : entry.auth) : "none");
   if (!AUTH_TYPES.has(authType)) throw new ConnectorInputError(`auth.type must be "none", "bearer", "headers" or "oauth"`);
   if (authType === "oauth" && transport.type === "stdio") throw new ConnectorInputError("OAuth is for remote connectors");
-  const { values, headerNames } = secretValues(input.secrets);
+  // a key sent in a vendor header instead of Authorization: Bearer (e.g. Google Maps' X-Goog-Api-Key)
+  let secretsInput = input.secrets;
+  if (authType === "bearer" && entry?.authHeader) {
+    authType = "headers";
+    if (secretsInput?.bearerToken !== undefined) {
+      const { bearerToken, ...rest } = secretsInput;
+      secretsInput = { ...rest, headers: { ...(rest.headers ?? {}), [entry.authHeader]: bearerToken! } };
+    }
+  }
+  const { values, headerNames } = secretValues(secretsInput);
+  if (authType === "headers" && entry?.authHeader) headerNames.push(entry.authHeader);
   const auth: ConnectorAuth = { type: authType };
   if (authType === "headers") auth.headerNames = [...new Set([...(input.auth?.headerNames ?? []), ...headerNames])];
   if (authType === "oauth") {

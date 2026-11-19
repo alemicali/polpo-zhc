@@ -21,7 +21,8 @@ export const CONNECTOR_TOOLS: Tool[] = [
     description: "List the connectors (external apps over MCP: Linear, Notion, Gmail, GitHub, custom servers): status (connected, needs (re)authorization, error), "
       + "tool count, who may use them (agents, Polpo). With catalog: true, also the catalog of apps that can be added with connector_add.",
     parameters: Type.Object({
-      catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps" })),
+      catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps (ids and names)" })),
+      search: Type.Optional(Type.String({ description: "Search the catalog (e.g. \"crm\", \"google\", \"jira\"), with descriptions" })),
       tools: Type.Optional(Type.String({ description: "A connector id: list its tools" })),
     }),
   },
@@ -115,9 +116,13 @@ export async function executeConnectorTool(name: string, args: Record<string, un
         }
         const list = manager.store.list();
         const lines = [list.length ? `Connectors:\n${list.map(describe).join("\n")}` : "No connectors yet."];
-        if (args.catalog) {
-          lines.push("Catalog (connector_add with catalogId):", ...CONNECTOR_CATALOG.map((e) =>
-            `- ${e.id}: ${e.name} (${e.category}) — ${e.description}${e.auth === "oauth_preregistered" ? ` [needs the "${e.oauth?.app}" OAuth app set up once]` : e.auth === "bearer" ? " [needs a token]" : ""}${e.urlTemplate ? " [needs your own URL]" : ""}`));
+        if (args.catalog || typeof args.search === "string") {
+          const words = typeof args.search === "string" ? args.search.toLowerCase().split(/\s+/).filter(Boolean) : [];
+          const entries = CONNECTOR_CATALOG.filter((e) => words.every((w) => `${e.id} ${e.name} ${e.category} ${e.description}`.toLowerCase().includes(w)));
+          lines.push(`Catalog (connector_add with catalogId; ${entries.length} of ${CONNECTOR_CATALOG.length}):`, ...entries.map((e) =>
+            `- ${e.id}: ${e.name} (${e.category})${words.length ? ` — ${e.description}` : ""}`
+            + `${e.auth === "oauth_preregistered" ? ` [needs the "${e.oauth?.app}" OAuth app set up once]` : e.auth === "bearer" ? " [needs a token]" : ""}`
+            + `${e.urlTemplate ? ` [needs your URL: ${e.urlTemplate}]` : ""}${e.variants ? ` [regions: ${e.variants.map((v) => `${v.label} ${v.url}`).join(", ")}]` : ""}`));
         }
         return lines.join("\n");
       }

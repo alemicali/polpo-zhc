@@ -21,6 +21,7 @@ import { checkConnectorUrl } from "../mcp/net.js";
 import { connectorToolAllowed, convertToolResult, mcpToolName, MAX_RESULT_TEXT, toolResultText } from "../mcp/tools.js";
 import { connectorRoutes, connectorOAuthCallback, CONNECTOR_OAUTH_CALLBACK_PATH } from "../server/routes/connectors.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
+import { clientMetadataDocument, clientMetadataUrlFor } from "../mcp/paths.js";
 import { executeConnectorTool } from "../tools/connector-tools.js";
 
 // ── a fake MCP server + authorization server ──
@@ -33,6 +34,7 @@ interface FakeAuth {
   revoked: string[];
   lastAuthorize?: URLSearchParams;
   n: number;
+  cimd?: boolean;
 }
 
 const BEARER = "secret-bearer-token-123";
@@ -96,6 +98,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, registration_endpoint: `${base}/register`,
       revocation_endpoint: `${base}/revoke`, response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
       code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"],
+      ...(fake.cimd ? { client_id_metadata_document_supported: true } : {}),
     });
   }
   if (url.pathname === "/register") {
@@ -279,7 +282,7 @@ describe("URL safety", () => {
     const { connector } = await buildConnector({ catalogId: "gmail" }, { allowStdio: false, existingIds: [], resolve: async () => ["142.250.1.1"] });
     expect(connector).toMatchObject({ id: "gmail", auth: { type: "oauth", oauth: { app: "google", authorizationServer: "https://accounts.google.com", extraAuthParams: { access_type: "offline", prompt: "consent" } } }, status: "needs_auth" });
     expect(connector.auth.oauth?.scopes).toContain("https://www.googleapis.com/auth/gmail.readonly");
-    expect(connector.icon).toEqual({ simpleIcons: "google" });
+    expect(connector.icon?.simpleIcons).toBeTruthy();
     expect(CONNECTOR_CATALOG.filter((e) => e.category === "Google Workspace").length).toBe(9);
   });
 });
@@ -528,5 +531,58 @@ describe("Polpo's connector tools", () => {
     expect(out).toMatch(/must open this link/);
     expect(out).toContain(`${base}/authorize?`);
     expect(await executeConnectorTool("connector_add", { url: "http://127.0.0.1:9/x", transport: "http", name: "S" }, { ...ctx, settings: {} })).toMatch(/https/);
+  });
+});
+
+describe("catalog and Client ID Metadata Documents", () => {
+  const publicDns = async () => ["160.79.104.10"];
+  const ctx = { allowStdio: false, existingIds: [] as string[], resolve: publicDns };
+
+  it("normalizes the published catalog: shared OAuth apps, Google scopes, variants, URL templates, header keys", async () => {
+    const byId = (id: string) => CONNECTOR_CATALOG.find((e) => e.id === id)!;
+    expect(CONNECTOR_CATALOG.length).toBeGreaterThan(100);
+    expect(new Set(CONNECTOR_CATALOG.map((e) => e.id)).size).toBe(CONNECTOR_CATALOG.length);
+    expect(byId("bigquery").oauth).toMatchObject({ app: "google", scopes: ["https://www.googleapis.com/auth/bigquery"] });
+    expect(byId("slack").oauth).toEqual({ app: "slack" });
+    expect(byId("slack").setup).toContain('"slack" OAuth app');
+    expect(byId("intercom").variants).toEqual([
+      { label: "Default", url: "https://mcp.intercom.com/mcp" },
+      { label: "EU", url: "https://mcp.eu.intercom.com/mcp" },
+    ]);
+    expect(byId("azure-devops")).toMatchObject({ urlTemplate: "https://mcp.dev.azure.com/{organization}" });
+    expect(byId("azure-devops").url).toBeUndefined();
+    await expect(buildConnector({ catalogId: "azure-devops" }, ctx)).rejects.toThrow(/URL/);
+    await expect(buildConnector({ catalogId: "azure-devops", url: "https://mcp.dev.azure.com/{organization}" }, ctx)).rejects.toThrow(/placeholders/);
+    const { connector: ado } = await buildConnector({ catalogId: "azure-devops", url: "https://mcp.dev.azure.com/contoso" }, ctx);
+    expect(ado).toMatchObject({ transport: { url: "https://mcp.dev.azure.com/contoso" }, auth: { type: "oauth", oauth: { app: "azure-devops" } } });
+    const { connector: maps, secrets } = await buildConnector({ catalogId: "google-maps", secrets: { bearerToken: "maps-key" } }, ctx);
+    expect(maps.auth).toEqual({ type: "headers", headerNames: ["X-Goog-Api-Key"] });
+    expect(secrets).toEqual({ "header:X-Goog-Api-Key": "maps-key" });
+  });
+
+  it("serves the metadata document and uses its URL as client_id when the server supports CIMD", async () => {
+    const doc = clientMetadataDocument("https://polpo.example.com/team");
+    expect(doc).toMatchObject({
+      client_id: "https://polpo.example.com/team/api/v1/connectors/oauth/client-metadata.json",
+      redirect_uris: [`https://polpo.example.com/team${CONNECTOR_OAUTH_CALLBACK_PATH}`],
+      token_endpoint_auth_method: "none",
+    });
+    expect(clientMetadataUrlFor(`http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`)).toBeUndefined();
+
+    const { manager } = setup();
+    await add(manager, { id: "cimd", name: "Cimd", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    fake.cimd = true;
+    try {
+      const before = fake.clients.size;
+      const { authorizationUrl } = await manager.startOAuth("cimd", `https://polpo.example.com/team${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+      expect(new URL(authorizationUrl!).searchParams.get("client_id")).toBe(doc.client_id);
+      expect(fake.clients.size).toBe(before); // no dynamic registration
+    } finally {
+      fake.cimd = false;
+    }
+    // without CIMD (or without a public https URL) it registers dynamically
+    await manager.secrets.unset("cimd", ["oauth_client_info", "oauth_discovery"]);
+    const { authorizationUrl } = await manager.startOAuth("cimd", `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+    expect(new URL(authorizationUrl!).searchParams.get("client_id")).toMatch(/^client-/);
   });
 });

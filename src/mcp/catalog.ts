@@ -1,124 +1,168 @@
 /**
- * Catalog of well-known REMOTE MCP servers people can connect with one click (Settings →
- * Connectors, or Polpo's connector_add). Entries follow `ConnectorCatalogEntry`, the same shape
- * as the generated catalog JSON ({id, name, category, description, url | urlTemplate, transport,
- * auth, authNotes, docs, domain, verified}), so a larger list can be dropped in later.
+ * Catalog of official REMOTE MCP servers people can connect with one click (Settings → Connectors,
+ * or Polpo's connector_add). The data (catalog-data.ts) is generated from a verified list
+ * (scripts/generate-connector-catalog.mjs); this module turns it into `ConnectorCatalogEntry`:
  *
- * auth: "oauth" = OAuth with dynamic client registration (nothing to set up); "oauth_preregistered" =
- * the person registers an OAuth client with the vendor once (a shared `oauth.app`, e.g. "google",
- * reused by every Google entry); "bearer" = an API token; "none".
- *
- * `verified: false` marks endpoints not confirmed against the vendor's documentation.
+ * - auth "oauth": dynamic client registration or a Client ID Metadata Document (nothing to set up);
+ * - auth "oauth_preregistered": the admin registers an OAuth client with the vendor once and saves it
+ *   as a shared OAuth app (`oauth.app`: "google" for every Google entry, else the entry id), reused
+ *   by every connector of that vendor;
+ * - Google: accounts.google.com as authorization server, structured scopes, access_type=offline and
+ *   prompt=consent (so a refresh token is issued);
+ * - per-account URLs (`urlTemplate`, e.g. https://mcp.dev.azure.com/{organization}) are filled in by
+ *   the person; region / sandbox endpoints become `variants`.
  */
-import type { ConnectorCatalogEntry } from "@polpo-ai/core";
+import type { ConnectorCatalogEntry, ConnectorIcon } from "@polpo-ai/core";
+import { CATALOG_DATA } from "./catalog-data.js";
+
+/** One entry of the generated catalog data, as published. */
+export interface RawCatalogEntry {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  url: string;
+  transport: string;
+  auth: string;
+  oauthRegistration?: string | null;
+  authNotes?: string | null;
+  urlTemplate?: boolean | string | null;
+  docs?: string | null;
+  domain?: string | null;
+  inClaudeDirectory?: boolean;
+  inLovable?: boolean;
+  verified?: boolean;
+  icon?: { simpleIcons?: string | null; svg?: string | null; png?: string | null } | null;
+  brandColor?: string | null;
+}
 
 const G = "https://www.googleapis.com/auth/";
-const gScopes = (...names: string[]) => names.map((n) => `${G}${n}`);
 
 /** Google Workspace MCP servers (Developer Preview): one Web OAuth client, shared by all of them. */
 export const GOOGLE_WORKSPACE_SETUP = [
-  "Google Workspace MCP servers (Developer Preview) need a Google Cloud OAuth client, set up once for all of them:",
-  "1. In Google Cloud Console (APIs & Services → Credentials) create an OAuth client of type \"Web application\" and enable \"Use this client for an AI-powered agent\".",
+  "Google's MCP servers need a Google Cloud OAuth client, set up once for all of them:",
+  "1. In Google Cloud Console (APIs & Services → Credentials) create an OAuth client of type \"Web application\"; for Workspace servers enable \"Use this client for an AI-powered agent\".",
   "2. Add this instance's redirect URI to it: <public URL>/api/v1/connectors/oauth/callback (shown on the Connectors page).",
   "3. Enable the product API and its MCP API in the same project (e.g. Gmail API + gmailmcp.googleapis.com; Drive API + drivemcp.googleapis.com; Calendar API + calendarmcp.googleapis.com).",
-  "4. Your Google Cloud project must be in the Workspace MCP Developer Preview.",
-  "5. Save the client id and secret as the \"google\" OAuth app in Polpo (Connectors → Google OAuth app), then connect each service.",
+  "4. Workspace MCP servers are a Developer Preview: the Google Cloud project must be enrolled.",
+  "5. Save the client id and secret as the \"google\" OAuth app (Connectors → OAuth apps), then connect each service with one click.",
 ].join("\n");
 
-const google = (id: string, name: string, description: string, host: string, scopes: string[]): ConnectorCatalogEntry => ({
-  id, name, category: "Google Workspace", description,
-  url: `https://${host}/mcp/v1`,
-  transport: "http",
-  auth: "oauth_preregistered",
-  authNotes: "Uses the shared \"google\" OAuth app (a Web OAuth client with \"Use this client for an AI-powered agent\").",
-  oauth: {
-    app: "google",
-    authorizationServer: "https://accounts.google.com",
-    scopes,
-    extraAuthParams: { access_type: "offline", prompt: "consent" },
-  },
-  docs: "https://developers.google.com/workspace/guides/configure-mcp-servers",
-  domain: "google.com",
-  icon: { simpleIcons: "google" },
-  verified: true,
-  setup: GOOGLE_WORKSPACE_SETUP,
-});
+/** Fallback scopes when the notes do not list them. */
+const GOOGLE_SCOPES: Record<string, string[]> = {
+  gmail: ["gmail.readonly", "gmail.compose", "gmail.modify"],
+  "google-drive": ["drive.readonly", "drive.file"],
+  "google-calendar": ["calendar.calendarlist.readonly", "calendar.events.freebusy", "calendar.events.readonly", "calendar.events"],
+  "google-docs": ["drive.readonly", "drive.file", "documents.readonly", "documents"],
+  "google-sheets": ["drive.readonly", "drive.file", "spreadsheets.readonly", "spreadsheets"],
+  "google-slides": ["drive.readonly", "drive.file", "presentations.readonly", "presentations"],
+  "google-chat": ["chat.spaces.readonly", "chat.memberships.readonly", "chat.messages.readonly", "chat.messages.create"],
+  "google-people": ["directory.readonly", "userinfo.profile", "contacts.readonly"],
+  "google-workspace-search": ["gmail.readonly", "drive.readonly", "calendar.readonly", "chat.messages.readonly", "chat.spaces.readonly", "chat.memberships.readonly"],
+};
 
-export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
-  // ── Google Workspace (pre-registered OAuth app "google") ──
-  google("gmail", "Gmail", "Search, read and draft email, manage labels.", "gmailmcp.googleapis.com",
-    gScopes("gmail.readonly", "gmail.compose", "gmail.modify")),
-  google("google-drive", "Google Drive", "Search and read files in Drive, create files.", "drivemcp.googleapis.com",
-    gScopes("drive.readonly", "drive.file")),
-  google("google-calendar", "Google Calendar", "Read calendars and events, find free time, create and update events.", "calendarmcp.googleapis.com",
-    gScopes("calendar.calendarlist.readonly", "calendar.events.freebusy", "calendar.events.readonly", "calendar.events")),
-  google("google-docs", "Google Docs", "Read and write Google Docs.", "docsmcp.googleapis.com",
-    gScopes("drive.readonly", "drive.file", "documents.readonly", "documents")),
-  google("google-sheets", "Google Sheets", "Read and write spreadsheets.", "sheetsmcp.googleapis.com",
-    gScopes("drive.readonly", "drive.file", "spreadsheets.readonly", "spreadsheets")),
-  google("google-slides", "Google Slides", "Read and write presentations.", "slidesmcp.googleapis.com",
-    gScopes("drive.readonly", "drive.file", "presentations.readonly", "presentations")),
-  google("google-chat", "Google Chat", "Read spaces and messages, send messages.", "chatmcp.googleapis.com",
-    gScopes("chat.spaces.readonly", "chat.memberships.readonly", "chat.messages.readonly", "chat.messages.create")),
-  google("google-people", "Google People", "Look up contacts and the directory.", "people.googleapis.com",
-    gScopes("directory.readonly", "userinfo.profile", "contacts.readonly")),
-  google("google-workspace-search", "Google Workspace Search", "Search across Gmail, Drive, Calendar and Chat at once.", "workspacemcp.googleapis.com",
-    gScopes("gmail.readonly", "drive.readonly", "calendar.readonly", "chat.messages.readonly", "chat.spaces.readonly", "chat.memberships.readonly")),
+function isGoogle(raw: RawCatalogEntry): boolean {
+  return raw.category === "Google Workspace" || /^(google-|gcp-)/.test(raw.id) || raw.id === "bigquery"
+    || /\.googleapis\.com$/.test(new URL(raw.url.replace(/\{[^}]*\}/g, "x")).hostname);
+}
 
-  // ── Project management & docs ──
-  { id: "linear", name: "Linear", category: "Project management", description: "Issues, projects, cycles and comments in Linear.",
-    url: "https://mcp.linear.app/mcp", transport: "http", auth: "oauth", docs: "https://linear.app/docs/mcp", domain: "linear.app", icon: { simpleIcons: "linear" }, verified: true },
-  { id: "notion", name: "Notion", category: "Docs & knowledge", description: "Search, read and edit Notion pages and databases.",
-    url: "https://mcp.notion.com/mcp", transport: "http", auth: "oauth", docs: "https://developers.notion.com/docs/mcp", domain: "notion.so", icon: { simpleIcons: "notion" }, verified: true },
-  { id: "atlassian", name: "Atlassian (Jira & Confluence)", category: "Project management", description: "Jira issues and Confluence pages.",
-    url: "https://mcp.atlassian.com/v1/sse", transport: "sse", auth: "oauth", docs: "https://support.atlassian.com/rovo/docs/getting-started-with-the-atlassian-remote-mcp-server/", domain: "atlassian.com", icon: { simpleIcons: "atlassian" }, verified: true },
-  { id: "asana", name: "Asana", category: "Project management", description: "Tasks, projects and goals in Asana.",
-    url: "https://mcp.asana.com/sse", transport: "sse", auth: "oauth", docs: "https://developers.asana.com/docs/using-asanas-mcp-server", domain: "asana.com", icon: { simpleIcons: "asana" }, verified: false },
-  { id: "monday", name: "monday.com", category: "Project management", description: "Boards, items and updates in monday.com.",
-    url: "https://mcp.monday.com/sse", transport: "sse", auth: "oauth", docs: "https://developer.monday.com/apps/docs/mondaycom-mcp-integration", domain: "monday.com", icon: { simpleIcons: "mondaydotcom" }, verified: false },
-  { id: "box", name: "Box", category: "Docs & knowledge", description: "Search and read files in Box.",
-    url: "https://mcp.box.com", transport: "http", auth: "oauth", docs: "https://developer.box.com/guides/box-mcp/", domain: "box.com", icon: { simpleIcons: "box" }, verified: false },
+/** Google scopes from the notes ("Scopes: gmail.readonly, gmail.compose." / "Scope https://…/bigquery" / "cloud-platform scope"). */
+function googleScopes(raw: RawCatalogEntry): string[] {
+  const notes = raw.authNotes ?? "";
+  const listed = /Scopes?:\s*(.+?)(?:\.\s|\.$|$)/i.exec(notes)?.[1];
+  let scopes = listed
+    ? listed.split(",").map((s) => s.replace(/\(.*?\)/g, "").trim()).filter((s) => /^[a-z][\w.]*$/.test(s))
+    : [];
+  const urls = notes.match(/https:\/\/www\.googleapis\.com\/auth\/[\w.]+/g);
+  if (urls) scopes = [...scopes, ...urls.map((u) => u.slice(G.length).replace(/\.+$/, ""))];
+  if (/cloud-platform/.test(notes)) scopes.push("cloud-platform");
+  if (scopes.length === 0) scopes = GOOGLE_SCOPES[raw.id] ?? (raw.category === "Google Workspace" ? [] : ["cloud-platform"]);
+  return [...new Set(scopes)].map((s) => `${G}${s}`);
+}
 
-  // ── Engineering ──
-  { id: "github", name: "GitHub", category: "Engineering", description: "Repositories, issues, pull requests and Actions.",
-    url: "https://api.githubcopilot.com/mcp/", transport: "http", auth: "bearer",
-    authNotes: "A GitHub personal access token (fine-grained: pick the repositories and permissions). OAuth works only with a pre-registered GitHub OAuth app.",
-    docs: "https://github.com/github/github-mcp-server", domain: "github.com", icon: { simpleIcons: "github" }, verified: true },
-  { id: "sentry", name: "Sentry", category: "Engineering", description: "Issues, errors and releases in Sentry.",
-    url: "https://mcp.sentry.dev/mcp", transport: "http", auth: "oauth", docs: "https://docs.sentry.io/product/sentry-mcp/", domain: "sentry.io", icon: { simpleIcons: "sentry" }, verified: true },
-  { id: "vercel", name: "Vercel", category: "Engineering", description: "Projects, deployments and logs on Vercel.",
-    url: "https://mcp.vercel.com", transport: "http", auth: "oauth", docs: "https://vercel.com/docs/mcp/vercel-mcp", domain: "vercel.com", icon: { simpleIcons: "vercel" }, verified: true },
-  { id: "cloudflare-docs", name: "Cloudflare Docs", category: "Engineering", description: "Search Cloudflare's documentation.",
-    url: "https://docs.mcp.cloudflare.com/mcp", transport: "http", auth: "none", docs: "https://github.com/cloudflare/mcp-server-cloudflare", domain: "cloudflare.com", icon: { simpleIcons: "cloudflare" }, verified: true },
-  { id: "supabase", name: "Supabase", category: "Engineering", description: "Projects, databases, SQL and edge functions on Supabase.",
-    url: "https://mcp.supabase.com/mcp", transport: "http", auth: "oauth", docs: "https://supabase.com/docs/guides/getting-started/mcp", domain: "supabase.com", icon: { simpleIcons: "supabase" }, verified: true },
-  { id: "neon", name: "Neon", category: "Engineering", description: "Neon Postgres projects, branches and SQL.",
-    url: "https://mcp.neon.tech/mcp", transport: "http", auth: "oauth", docs: "https://neon.com/docs/ai/neon-mcp-server", domain: "neon.tech", icon: { simpleIcons: "neon" }, verified: true },
-  { id: "huggingface", name: "Hugging Face", category: "Engineering", description: "Search models, datasets, Spaces and papers.",
-    url: "https://huggingface.co/mcp", transport: "http", auth: "oauth", docs: "https://huggingface.co/settings/mcp", domain: "huggingface.co", icon: { simpleIcons: "huggingface" }, verified: true },
+const VARIANT = /\b(US\d?|EU\d?|AU|IN|SG|AP\d|Sandbox|Demo)\s*:?\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[\w/.-]*)?)/g;
 
-  // ── Payments & business ──
-  { id: "stripe", name: "Stripe", category: "Payments", description: "Customers, payments, invoices and Stripe docs.",
-    url: "https://mcp.stripe.com", transport: "http", auth: "oauth", docs: "https://docs.stripe.com/mcp", domain: "stripe.com", icon: { simpleIcons: "stripe" }, verified: true },
-  { id: "paypal", name: "PayPal", category: "Payments", description: "Invoices, orders and transactions on PayPal.",
-    url: "https://mcp.paypal.com/mcp", transport: "http", auth: "oauth", docs: "https://developer.paypal.com/tools/mcp-server/", domain: "paypal.com", icon: { simpleIcons: "paypal" }, verified: false },
-  { id: "square", name: "Square", category: "Payments", description: "Payments, catalog, orders and customers on Square.",
-    url: "https://mcp.squareup.com/sse", transport: "sse", auth: "oauth", docs: "https://developer.squareup.com/docs/mcp", domain: "squareup.com", icon: { simpleIcons: "square" }, verified: false },
-  { id: "intercom", name: "Intercom", category: "Customer support", description: "Conversations and contacts in Intercom.",
-    url: "https://mcp.intercom.com/mcp", transport: "http", auth: "oauth", docs: "https://developers.intercom.com/docs/guides/mcp", domain: "intercom.com", icon: { simpleIcons: "intercom" }, verified: false },
+/** Region / sandbox endpoints mentioned in the notes ("EU: mcp.eu.intercom.com/mcp", "US1 mcp.datadoghq.com"). */
+function variants(raw: RawCatalogEntry): Array<{ label: string; url: string }> | undefined {
+  const notes = raw.authNotes ?? "";
+  if (raw.urlTemplate === true) return undefined;
+  const base = new URL(raw.url);
+  const found: Array<{ label: string; url: string }> = [];
+  for (const [, label, target] of notes.matchAll(VARIANT)) {
+    const clean = target!.replace(/[.,;]+$/, "");
+    let url: URL;
+    try {
+      url = new URL(clean.startsWith("http") ? clean : `https://${clean}`);
+    } catch {
+      continue;
+    }
+    if (url.pathname === "/" && base.pathname !== "/") url.pathname = base.pathname;
+    if (!found.some((v) => v.url === url.toString())) found.push({ label: label!, url: url.toString() });
+  }
+  const others = found.filter((v) => v.url !== base.toString());
+  if (others.length === 0) return undefined;
+  const defaultLabel = found.find((v) => v.url === base.toString())?.label ?? "Default";
+  return [{ label: defaultLabel, url: base.toString() }, ...others];
+}
 
-  // ── Design & web ──
-  { id: "canva", name: "Canva", category: "Design", description: "Search, create and export Canva designs.",
-    url: "https://mcp.canva.com/mcp", transport: "http", auth: "oauth", docs: "https://www.canva.dev/docs/connect/canva-mcp-server-setup/", domain: "canva.com", icon: { simpleIcons: "canva" }, verified: false },
-  { id: "webflow", name: "Webflow", category: "Design", description: "Sites, CMS collections and pages on Webflow.",
-    url: "https://mcp.webflow.com/sse", transport: "sse", auth: "oauth", docs: "https://developers.webflow.com/mcp/reference/overview", domain: "webflow.com", icon: { simpleIcons: "webflow" }, verified: false },
+function icon(raw: RawCatalogEntry): ConnectorIcon | undefined {
+  if (!raw.icon && !raw.brandColor) return undefined;
+  return {
+    ...(raw.icon?.simpleIcons !== undefined ? { simpleIcons: raw.icon.simpleIcons } : {}),
+    ...(raw.icon?.svg !== undefined ? { svg: raw.icon.svg } : {}),
+    ...(raw.icon?.png !== undefined ? { png: raw.icon.png } : {}),
+    ...(raw.brandColor ? { color: raw.brandColor } : {}),
+  };
+}
 
-  // ── Automation ──
-  { id: "zapier", name: "Zapier", category: "Automation", description: "Run the actions you enabled in your Zapier MCP server.",
-    urlTemplate: "https://mcp.zapier.com/api/mcp/s/<your-secret>/mcp", transport: "http", auth: "none",
-    authNotes: "Custom URL from your Zapier account (mcp.zapier.com): the URL itself is the secret, keep it private.",
-    docs: "https://zapier.com/mcp", domain: "zapier.com", icon: { simpleIcons: "zapier" }, verified: true },
-];
+/** Turn a published entry into a catalog entry. */
+export function normalizeCatalogEntry(raw: RawCatalogEntry): ConnectorCatalogEntry {
+  const google = isGoogle(raw);
+  const auth = (["oauth", "oauth_preregistered", "bearer", "none"].includes(raw.auth) ? raw.auth : "none") as ConnectorCatalogEntry["auth"];
+  const template = raw.urlTemplate === true || /\{[^}]+\}/.test(raw.url);
+  const entry: ConnectorCatalogEntry = {
+    id: raw.id,
+    name: raw.name,
+    category: raw.category,
+    description: raw.description,
+    ...(template ? { urlTemplate: raw.url } : { url: raw.url }),
+    transport: raw.transport === "sse" ? "sse" : "http",
+    auth,
+    ...(raw.oauthRegistration ? { oauthRegistration: raw.oauthRegistration as ConnectorCatalogEntry["oauthRegistration"] } : {}),
+    ...(raw.authNotes ? { authNotes: raw.authNotes } : {}),
+    ...(raw.docs ? { docs: raw.docs } : {}),
+    ...(raw.domain ? { domain: raw.domain } : {}),
+    ...(icon(raw) ? { icon: icon(raw) } : {}),
+    ...(raw.inClaudeDirectory !== undefined ? { inClaudeDirectory: raw.inClaudeDirectory } : {}),
+    ...(raw.inLovable !== undefined ? { inLovable: raw.inLovable } : {}),
+    verified: raw.verified !== false,
+  };
+  const found = variants(raw);
+  if (found) entry.variants = found;
+  if (auth === "bearer" && /X-Goog-Api-Key/i.test(raw.authNotes ?? "")) entry.authHeader = "X-Goog-Api-Key";
+  if (auth === "oauth_preregistered") {
+    if (google) {
+      entry.oauth = {
+        app: "google",
+        authorizationServer: "https://accounts.google.com",
+        scopes: googleScopes(raw),
+        extraAuthParams: { access_type: "offline", prompt: "consent" },
+      };
+      entry.setup = GOOGLE_WORKSPACE_SETUP;
+    } else {
+      entry.oauth = { app: raw.id };
+      entry.setup = [
+        `${raw.name} does not let apps register themselves: register an OAuth app with ${raw.name} once${raw.docs ? ` (${raw.docs})` : ""}.`,
+        raw.authNotes ? `Notes: ${raw.authNotes}` : "",
+        "Use this instance's redirect URI: <public URL>/api/v1/connectors/oauth/callback (shown on the Connectors page).",
+        `Then save its client id and secret as the "${raw.id}" OAuth app (Connectors → OAuth apps) and connect.`,
+      ].filter(Boolean).join("\n");
+    }
+  }
+  return entry;
+}
+
+export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = CATALOG_DATA.map(normalizeCatalogEntry);
 
 export function catalogEntry(id: string): ConnectorCatalogEntry | undefined {
   return CONNECTOR_CATALOG.find((entry) => entry.id === id);

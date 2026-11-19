@@ -17,4 +17,7 @@ export { buildConnector, applyConnectorPatch, ConnectorInputError } from "./vali
 export type { ConnectorInput, ConnectorSecretsInput } from "./validate.js";
 export { publicConnector } from "./view.js";
 export type { PublicConnector } from "./view.js";
-export { connectorManagerFor, notePublicOrigin, connectorRedirectUri, connectorsPromptSection, CONNECTOR_OAUTH_CALLBACK_PATH } from "./runtime.js";
+export { connectorManagerFor, notePublicOrigin, connectorRedirectUri, connectorsPromptSection } from "./runtime.js";
+export { CONNECTOR_OAUTH_CALLBACK_PATH, CONNECTOR_CLIENT_METADATA_PATH, clientMetadataDocument, clientMetadataUrlFor } from "./paths.js";
+export { normalizeCatalogEntry } from "./catalog.js";
+export type { RawCatalogEntry } from "./catalog.js";

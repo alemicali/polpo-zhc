@@ -76,7 +76,7 @@ import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
-import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
+import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { AgentTalk } from "./agent-talk.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
@@ -824,6 +824,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.get(CONNECTOR_OAUTH_CALLBACK_PATH, async (c, next) => {
     if (!orchestrator?.isInitialized) return next();
     return connectorOAuthCallback({ manager: () => connectorManagerFor(o), uiUrl: publicOrigin })(c);
+  });
+  // Our OAuth Client ID Metadata Document: servers that support CIMD fetch it (its URL is our client_id)
+  app.get(CONNECTOR_CLIENT_METADATA_PATH, (c) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.json(clientMetadataDocument(publicOrigin(c)));
   });
 
   // ── Authenticated routes (require initialized orchestrator) ───────────

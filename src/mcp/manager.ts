@@ -29,6 +29,7 @@ import { VaultOAuthProvider, type PreregisteredClient } from "./oauth-provider.j
 import { ConnectorSecrets, OAUTH_KEYS, resolveSecretRefs, SECRET_KEYS } from "./secrets.js";
 import { ConnectorStore } from "./store.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
+import { clientMetadataUrlFor } from "./paths.js";
 
 const VERSION = "1.0.0";
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -389,8 +390,10 @@ export class ConnectorManager {
     if (!connector) throw new ConnectorError(`No connector "${id}"`, "error");
     if (connector.auth.type !== "oauth" || !connector.transport.url) throw new ConnectorError(`${connector.name} does not use OAuth`, "error");
     const url = await checkConnectorUrl(connector.transport.url, this.urlPolicy());
+    const metadataUrl = clientMetadataUrlFor(redirectUrl);
     const provider = await new VaultOAuthProvider(connector, this.secrets, {
       interactive: true, redirectUrl, preregistered: await this.preregisteredClient(connector),
+      ...(metadataUrl ? { clientMetadataUrl: metadataUrl } : {}),
     }).init();
     const scopes = connector.auth.oauth?.scopes;
     const result = await auth(provider, { serverUrl: url, ...(scopes?.length ? { scope: scopes.join(" ") } : {}) });
