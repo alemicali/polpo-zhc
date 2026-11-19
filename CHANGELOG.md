@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Agents talk to each other during a chat**, not only through background tasks (as Grok Bot's bots message each other):
-  - `ask_agent`: an agent (or Polpo) asks another and waits for the answer within its turn ("wealth-coach: how much can Alessio spend on the gym?");
-  - `message_agent`: it hands work over and goes on. The other agent works on it in its own time, and its reply comes back to the sender, which gets a turn in the conversation it wrote from (on Telegram its answer is posted there).
+  - `ask_agent`: an agent (or Polpo) asks another a quick question ("wealth-coach: how much can Alessio spend on the gym?");
+  - `message_agent`: it hands real work over.
+  - **Nobody waits.** Both return at once and the writer goes on. The answer is brought into its conversation as soon as it is ready, in real time: into the answer it is still writing (as a steer), or as a new turn streamed live in the open chat, which shows it as a card ("wealth-coach answered"). While the other agent works the chat shows "wealth-coach is answering…". From Telegram the writer gets a turn there and its answer is posted.
+  - **Agent conversations page** (`/agent-talk`, `GET /agent-talk`): the pairs' conversations and the latest exchanges (question, answer, status), updated live from `agent:message` events.
   - Each pair has its own conversation per direction (a session of the receiving agent, `.polpo/agent-dms.json`), so the receiver remembers earlier exchanges. Every exchange is an `agent:message` event.
   - Brakes: no loops (an agent already in the exchange is not asked back), at most 3 agents in a row, 5 minutes per answer.
 - **Residential egress for agents' browsers.** Sites that block datacenter IPs see a home line instead: name a proxy in `settings.egressProxies` (e.g. `{ "home": "socks5://100.101.55.7:1080" }`, a SOCKS5 proxy on a computer at home, reached over Tailscale) and set `browserEgress: "home"` on the agents that need it. Only their browser uses it.
