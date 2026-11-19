@@ -126,6 +126,12 @@ export interface PolpoEventMap {
   "chat:turn-started": { sessionId: string; turnId: string; reason: "queue" | "steer" | "fork" | "send-now"; userMessageId?: string };
   /** A session's prompt queue changed (items or auto-send). */
   "chat:queue-updated": { sessionId: string };
+  /** Two agents talking during a chat: an exchange started ("working"), was answered or failed. */
+  "agent:message": {
+    id: string; from: string; to: string; kind: "question" | "handoff"; message: string;
+    status: "working" | "answered" | "failed"; answer?: string; error?: string;
+    fromSessionId?: string; dmSessionId?: string; startedAt: string; answeredAt?: string;
+  };
 
   // Rooms (group conversations of people and agents)
   "room:created": { room: import("./room-store.js").Room };

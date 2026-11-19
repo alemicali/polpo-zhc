@@ -1084,7 +1084,7 @@ export async function buildChatSystemPrompt(
     `  in_minutes; message for a fixed reminder, instructions for work to do at each run). list_chats lists the chats`,
     `  and their ids. Checks with instructions stay silent when there is nothing to report.`,
     `  Never promise to notify later without one of these tools: nothing happens after this turn.`,
-    `- Talking to an agent during the chat: ask_agent (ask and wait for the answer, e.g. "what does wealth-coach know about…"),`,
+    `- Talking to an agent during the chat: ask_agent (a quick question; it returns at once and the answer arrives in the chat when ready, e.g. "what does wealth-coach know about…"),`,
     `  message_agent (hand work to it; its reply comes back to you in this conversation later). Prefer them to a task for questions`,
     `  and quick help; agents use them with each other too (at most 3 in a row, no loops).`,
     `- You are the person's primary bot: you coordinate the agents and keep them posted. Offer check-ins (set_check_ins: on a schedule`,

@@ -7,7 +7,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ConversationCheckTarget } from "@polpo-ai/core";
 
 export interface AgentTalkAccess {
-  ask(from: AgentTalkCaller, to: string, question: string): Promise<string>;
+  ask(from: AgentTalkCaller, to: string, question: string): Promise<{ to: string }>;
   send(from: AgentTalkCaller, to: string, message: string): Promise<{ to: string }>;
 }
 
@@ -27,8 +27,10 @@ export const MessageAgentSchema = Type.Object({
   message: Type.String({ description: "What they should do, with the context they need: they do not see this conversation" }),
 });
 
-export const ASK_AGENT_DESCRIPTION = "Ask another agent now and wait for the answer, in the middle of your work: "
+export const ASK_AGENT_DESCRIPTION = "Ask another agent a quick question, in the middle of your work: "
   + "what they know or can find out with their own tools, memory and skills (\"wealth-coach: how much can Alessio spend on the gym this month?\"). "
+  + "It returns at once, without the answer: do not wait for it. Go on with what you can (or tell the person you asked); "
+  + "the answer arrives in this conversation as soon as it is ready, even while you are still writing. "
   + "They do not see this conversation: put what they need in the question. Use it instead of guessing what another agent knows.";
 export const MESSAGE_AGENT_DESCRIPTION = "Hand something to another agent and go on: they work on it in their own time, "
   + "and their reply comes back to you in this conversation later (you get a turn to act on it). "
@@ -40,7 +42,8 @@ export async function execAskAgent(args: Record<string, unknown>, talk: AgentTal
   const question = String(args.question ?? "").trim();
   if (!agent || !question) return "Error: agent and question are required";
   try {
-    return `${agent} answered:\n${await talk.ask(from, agent, question)}`;
+    const { to } = await talk.ask(from, agent, question);
+    return `Asked ${to}. Their answer will arrive in this conversation as soon as it is ready: do not wait for it, go on with what you can.`;
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }

@@ -525,7 +525,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           } : {}),
         })).filter((tool) => !existingToolNames.has(tool.name)));
       }
-      // Talking to other agents in the middle of the chat (ask_agent waits, message_agent hands off)
+      // Talking to other agents in the middle of the chat (nobody waits: answers arrive live)
       if (agentTalk && !existingToolNames.has("ask_agent")) {
         const { createAgentTalkTools } = await import("../tools/agent-talk-tools.js");
         const talk = agentTalk;
@@ -1048,6 +1048,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     },
     agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    // The answer joins the conversation now: into the running answer, else as the next turn
+    // (streamed, so an open chat shows it live), whatever auto-send says.
+    deliver: async (sessionId, content) => {
+      const queue = o.getChatQueueStore();
+      if (!queue) throw new Error("Chat queue not available");
+      const item = await queue.add(sessionId, content, { front: true });
+      o.emit("chat:queue-updated" as any, { sessionId } as any);
+      await turnScheduler.sendNow(sessionId, item.id);
+    },
     post: (origin, text, agent) => o.sendToChat(origin, text, agent),
     emit: (event, data) => o.emit(event as any, data as any),
     log: (line) => console.warn(`[polpo/agent-talk] ${line}`),
@@ -1386,6 +1395,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
+  // Agent conversations: the pairs' conversations and the latest exchanges (live: agent:message events)
+  authed.get("/agent-talk", (c) => c.json({ ok: true, data: agentTalk?.overview() ?? { conversations: [], recent: [] } }));
   authed.route("/browser-profiles", browserProfileRoutes({ polpoDir: () => orchestrator.getPolpoDir(), agents: () => orchestrator.getAgents() }));
   authed.use("/connectors/*", async (c, next) => { notePublicOrigin(publicOrigin(c)); return next(); });
   authed.route("/connectors", connectorRoutes({
