@@ -34,6 +34,7 @@ const titles: Record<string, string> = {
   "/missions": "Missions",
   "/tasks": "Tasks",
   "/agents": "Agents",
+  "/connectors": "Connectors",
   "/skills": "Skills",
   "/events": "Events",
   "/chat": "Chat",

@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   Bell,
   Bot,
+  Plug,
   Brain,
   Code2,
   AppWindow,
@@ -49,6 +50,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
       { to: "/tasks", icon: ListChecks, label: "Tasks" },
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/connectors", icon: Plug, label: "Connectors" },
     ],
   },
   {
