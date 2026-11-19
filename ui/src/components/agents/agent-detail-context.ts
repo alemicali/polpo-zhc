@@ -44,8 +44,6 @@ export interface AgentDetailState {
   skillPool: Map<string, SkillInfo>;
   /** Vault entries for this agent */
   vaultEntries: VaultEntryMeta[];
-  /** MCP server entries from agent config */
-  mcpEntries: [string, unknown][];
   /** Flat list of allowed tool names */
   agentAllowedTools: string[];
   /** Tool categories that are enabled based on allowedTools */

@@ -95,7 +95,7 @@ function AgentCard({
   teamColor?: ReturnType<typeof getTeamColor>;
 }) {
   const capabilityCount =
-    (agent.allowedTools?.length ?? 0) + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0);
+    (agent.allowedTools?.length ?? 0) + (agent.skills?.length ?? 0);
 
   return (
     <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="group block max-w-full min-w-0">

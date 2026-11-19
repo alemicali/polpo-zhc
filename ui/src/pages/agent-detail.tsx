@@ -147,7 +147,7 @@ function AgentDetailContent() {
           <TabsTrigger value="tools">
             Tools & Skills
             <span className="text-muted-foreground font-normal ml-0.5">
-              ({(agent.allowedTools?.length ?? 0) + enabledCategories.length + (agent.skills?.length ?? 0) + (agent.mcpServers ? Object.keys(agent.mcpServers).length : 0)})
+              ({(agent.allowedTools?.length ?? 0) + enabledCategories.length + (agent.skills?.length ?? 0)})
             </span>
           </TabsTrigger>
           <TabsTrigger value="credentials">

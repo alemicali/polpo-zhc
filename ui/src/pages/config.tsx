@@ -3523,27 +3523,6 @@ export function ConfigPage() {
               </section>
             )}
 
-            {/* ── MCP Tool Allowlist ── */}
-            {settings.mcpToolAllowlist && Object.keys(settings.mcpToolAllowlist).length > 0 && (
-              <section>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <Wrench className="h-3.5 w-3.5" /> MCP Tool Allowlist
-                </h3>
-                <div className="space-y-2.5 max-w-lg">
-                  {Object.entries(settings.mcpToolAllowlist).map(([server, tools]) => (
-                    <div key={server}>
-                      <code className="text-[11px] font-mono text-muted-foreground font-semibold">{server}</code>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {tools.map((t) => (
-                          <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
             {/* ── Email Domains ── */}
             {settings.emailAllowedDomains && settings.emailAllowedDomains.length > 0 && (
               <section>

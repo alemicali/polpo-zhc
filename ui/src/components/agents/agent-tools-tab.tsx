@@ -1,5 +1,5 @@
 /**
- * AgentToolsTab — tools, skills, MCP servers, vault, paths.
+ * AgentToolsTab — tools, skills, connectors, paths.
  * Reads data from AgentDetailContext.
  */
 
@@ -13,10 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Wrench,
   Sparkles,
-  Globe,
   FolderOpen,
-  Terminal,
-  Activity,
   CheckCircle2,
   XCircle,
   Layers,
@@ -25,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-context";
 import { getToolMeta, getSkillMeta, toolCategories } from "@/lib/agent-meta";
+import { AgentConnectorsSection } from "@/components/connectors/agent-connectors-section";
 
 
 export function AgentToolsTab() {
@@ -32,7 +30,6 @@ export function AgentToolsTab() {
     state: {
       agent,
       skillPool,
-      mcpEntries,
       agentAllowedTools,
       enabledCategories,
     },
@@ -171,65 +168,8 @@ export function AgentToolsTab() {
           </div>
         )}
 
-        {/* MCP Servers */}
-        {mcpEntries.length > 0 && (
-          <div>
-            <SectionHeader title="MCP Servers" icon={Globe} count={mcpEntries.length} />
-            <div className="space-y-2">
-              {mcpEntries.map(([serverName, cfg]) => {
-                const type = "command" in (cfg as object) ? "stdio" : ("type" in (cfg as object) ? ((cfg as { type: string }).type) : "http");
-                const command = "command" in (cfg as object) ? (cfg as { command: string; args?: string[] }).command : undefined;
-                const args = "args" in (cfg as object) ? (cfg as { args?: string[] }).args : undefined;
-                const url = "url" in (cfg as object) ? (cfg as { url: string }).url : undefined;
-                const env = "env" in (cfg as object) ? (cfg as { env?: Record<string, string> }).env : undefined;
-                const headers = "headers" in (cfg as object) ? (cfg as { headers?: Record<string, string> }).headers : undefined;
-
-                return (
-                  <div
-                    key={serverName}
-                    className="rounded-md border border-border/30 bg-card/60 px-4 py-3 space-y-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Activity className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span className="text-sm font-medium">{serverName}</span>
-                      <Badge variant="outline" className="text-[10px] ml-auto">{type}</Badge>
-                    </div>
-                    {command && (
-                      <div className="flex items-center gap-1.5">
-                        <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <code className="text-xs font-mono text-muted-foreground">
-                          {command}{args?.length ? ` ${args.join(" ")}` : ""}
-                        </code>
-                      </div>
-                    )}
-                    {url && (
-                      <div className="flex items-center gap-1.5">
-                        <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <code className="text-xs font-mono text-muted-foreground truncate">{url}</code>
-                      </div>
-                    )}
-                    {env && Object.keys(env).length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        <span className="text-[10px] text-muted-foreground mr-1">env:</span>
-                        {Object.keys(env).map(k => (
-                          <Badge key={k} variant="secondary" className="text-[9px] font-mono">{k}</Badge>
-                        ))}
-                      </div>
-                    )}
-                    {headers && Object.keys(headers).length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        <span className="text-[10px] text-muted-foreground mr-1">headers:</span>
-                        {Object.keys(headers).map(k => (
-                          <Badge key={k} variant="secondary" className="text-[9px] font-mono">{k}</Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* Connectors */}
+        <AgentConnectorsSection agentName={agent.name} allowedTools={agent.allowedTools} />
 
         {/* Allowed Paths */}
         {agent.allowedPaths && agent.allowedPaths.length > 0 && (
