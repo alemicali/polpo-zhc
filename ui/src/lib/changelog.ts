@@ -27,6 +27,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-19-connectors",
+    date: "2026-11-19",
+    kind: "new",
+    title: "Connettori: Gmail, Notion, Linear, Slack e altri 150 servizi",
+    summary: "Collega i servizi che usi e gli agenti ne usano gli strumenti, come i connettori di Claude.",
+    body: [
+      "Dalla nuova pagina **Connettori** colleghi una volta i servizi del tuo lavoro e decidi chi può usarli.",
+      "",
+      "- **152 connettori ufficiali**: Gmail, Calendar e Drive, Notion, Linear, Jira, Slack, GitHub, Stripe, HubSpot, Canva, Zapier e molti altri.",
+      "- **Un click per collegarti**: accedi al servizio e fatto. Per Google, Slack e pochi altri imposti prima, una volta sola, l'app OAuth (la pagina ti guida passo passo).",
+      "- **Chi usa cosa**: scegli se il connettore lo usa Polpo, tutti gli agenti o solo alcuni, e spegni i singoli strumenti che non vuoi.",
+      "- **Connettori personalizzati**: aggiungi qualsiasi server MCP con il suo indirizzo.",
+      "- Puoi anche chiedere a Polpo in chat: \"collega Notion\" o \"dai Gmail all'assistente\".",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-19-agents-talk-live",
     date: "2026-11-19",
     kind: "improved",
