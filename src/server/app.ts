@@ -75,6 +75,9 @@ import { driveRoutes } from "./routes/drive.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
+import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
+import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
+import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { AgentTalk } from "./agent-talk.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -329,9 +332,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       } catch { /* ignore — keep prompt without mailboxes section */ }
       const { sandbox, volumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] }));
       const remote = sandbox?.provider === "daytona" || sandbox?.provider === "e2b";
+      // the connectors it may use (state from the last connection; tools come with resolveAgentTools)
+      let connectorsNote = "";
+      try {
+        const section = connectorsPromptSection(connectorManagerFor(o).store.list(), agentConfig.name);
+        if (section) connectorsNote = `\n\n${section}`;
+      } catch { /* no connectors file: nothing to say */ }
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
         + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
-          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
+          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {})
+        + connectorsNote;
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
@@ -446,6 +456,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emitFileChanged: (payload) => o.emit("file:changed", payload),
         fs: chatFs,
       }));
+      // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
+      // connector that cannot connect is skipped (and logged): it never breaks the chat.
+      try {
+        const { tools: connectorTools } = await connectorManagerFor(o).toolsFor(agentConfig.name, agentConfig.allowedTools);
+        const taken = new Set(tools.map((tool: any) => tool.name));
+        tools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
+      } catch (err) {
+        console.warn(`[connectors] ${agentConfig.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       // Cowork chats with hydrated read-write volumes: persist them on demand
       {
         const { sandbox: chatSbx, volumes: chatVolumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] as any[] }));
@@ -552,6 +571,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         if (!tool) return `Error: Unknown tool "${name}"`;
         try {
           const result = await tool.execute(nanoid(), args as any);
+          if (isMcpToolName(name)) return toolResultText(result);
           return result.content.map((c: any) => c.text ?? "").join("");
         } catch (err: any) {
           return `Error: ${err.message}`;
@@ -590,23 +610,45 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
       const { ALL_ORCHESTRATOR_TOOLS, executeOrchestratorTool, isInteractive } = await import("../llm/orchestrator-tools.js");
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
-      const systemPrompt = await buildChatSystemPrompt(o, state);
+      let systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
+      // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
+      const connectorManager = connectorManagerFor(o);
+      const connectorTools = await connectorManager.toolsFor(undefined).catch((err) => {
+        console.warn(`[connectors] polpo: ${err instanceof Error ? err.message : String(err)}`);
+        return { tools: [], notes: [] };
+      });
+      const connectorSection = connectorsPromptSection(connectorManager.store.list(), undefined, connectorTools.notes);
+      if (connectorSection) systemPrompt += `\n\n${connectorSection}`;
+      const connectorToolMap = new Map(connectorTools.tools.map((tool) => [tool.name, tool]));
+      const runTool = async (name: string, args: Record<string, unknown>, context: any): Promise<string> => {
+        const connectorTool = connectorToolMap.get(name);
+        if (!connectorTool) return executeOrchestratorTool(name, args, o, context);
+        try {
+          return toolResultText(await connectorTool.execute(`polpo-${Date.now()}`, args as any));
+        } catch (err) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      };
       return {
         systemPrompt,
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
-        tools: ALL_ORCHESTRATOR_TOOLS,
+        tools: [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
         executor: (name: string, args: Record<string, unknown>, context) =>
-          withEventOrigin({ source: "polpo" }, () => executeOrchestratorTool(name, args, o, context)),
+          withEventOrigin({ source: "polpo" }, () => runTool(name, args, context)),
         isInteractive,
       };
     },
   }), opts?.apiKeys);
   // Chat turns from outside (web UI, API clients) are "api"; internal channel turns keep their origin
-  app.use("/v1/chat/completions", (c, next) => currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next()));
+  app.use("/v1/chat/completions", (c, next) => {
+    // Polpo's connector_add needs the OAuth redirect URI as people reach this instance
+    if (!currentEventOrigin()) notePublicOrigin(publicOrigin(c));
+    return currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next());
+  });
   app.route("/v1/chat/completions", completionApp);
 
   // ── OAuth for the MCP connector (Claude web/Desktop/mobile, ChatGPT…) ──
@@ -774,6 +816,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return { status: res.status, body: parsed, headers: res.headers, bytes };
       },
     }));
+  });
+
+  // ── Connectors: the OAuth callback ────────────────────────────────────
+  // The browser comes back here from the provider (Linear, Notion, Google…) without the API key or
+  // a session: it is public, and authenticated by the single-use, 10-minute state it carries.
+  app.get(CONNECTOR_OAUTH_CALLBACK_PATH, async (c, next) => {
+    if (!orchestrator?.isInitialized) return next();
+    return connectorOAuthCallback({ manager: () => connectorManagerFor(o), uiUrl: publicOrigin })(c);
+  });
+  // Our OAuth Client ID Metadata Document: servers that support CIMD fetch it (its URL is our client_id)
+  app.get(CONNECTOR_CLIENT_METADATA_PATH, (c) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.json(clientMetadataDocument(publicOrigin(c)));
   });
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
@@ -1343,6 +1398,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Agent conversations: the pairs' conversations and the latest exchanges (live: agent:message events)
   authed.get("/agent-talk", (c) => c.json({ ok: true, data: agentTalk?.overview() ?? { conversations: [], recent: [] } }));
   authed.route("/browser-profiles", browserProfileRoutes({ polpoDir: () => orchestrator.getPolpoDir(), agents: () => orchestrator.getAgents() }));
+  authed.use("/connectors/*", async (c, next) => { notePublicOrigin(publicOrigin(c)); return next(); });
+  authed.route("/connectors", connectorRoutes({
+    manager: () => connectorManagerFor(o),
+    settings: () => o.getConfig()?.settings,
+    redirectUri: (c) => `${publicOrigin(c)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+  }));
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,

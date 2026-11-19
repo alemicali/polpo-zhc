@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Connectors (MCP client), like Claude's.** Agents and Polpo use tools from external MCP servers, connected once for the workspace:
+  - **Catalog of 152 official remote MCP servers**, each checked against the vendor's docs and a live probe (Notion, Linear, Atlassian, GitHub, Slack, Stripe, Supabase, Sentry, HubSpot, Canva, Zapier, Shopify, …), including **Google Workspace** (Gmail, Calendar, Drive, Docs, Sheets, Slides, Chat, People, search) through Google's official MCP endpoints. Official icons are bundled.
+  - **Connect in one click** with OAuth 2.1 (discovery, dynamic client registration or Client ID Metadata Documents, PKCE, refresh). Vendors that need a pre-registered app (Google, Slack, GitHub, HubSpot, …) get it once per workspace (**OAuth apps**); then each of their services connects in one click. Also API keys, custom headers, per-account URLs and regions.
+  - **Custom connectors:** any remote MCP URL (Streamable HTTP or SSE, OAuth / bearer / headers / none), and local commands (stdio, admin).
+  - **Who can use what:** per connector, Polpo and each agent (default: Polpo only); per tool, Allow or Off. Tools are `mcp__<connector>__<tool>`, also matched by `allowedTools` patterns (`mcp__linear__*`). Agents get them in chats and tasks.
+  - **Connectors page** (`/connectors`): connected and browse tabs, categories and search, settings with status, reconnect, test, tools and access; the agent page shows the agent's connectors. Polpo manages them from the chat (`connectors_list`, `connector_add`, `connector_connect`, `connector_update_access`, `connector_remove`).
+  - Tokens and secrets live only in the encrypted vault and are never returned by the API. Routes under `/connectors`; the OAuth callback and the client metadata document are the only public paths. Guide: `docs/connectors.md`.
 - **Agents talk to each other during a chat**, not only through background tasks (as Grok Bot's bots message each other):
   - `ask_agent`: an agent (or Polpo) asks another a quick question ("wealth-coach: how much can Alessio spend on the gym?");
   - `message_agent`: it hands real work over.

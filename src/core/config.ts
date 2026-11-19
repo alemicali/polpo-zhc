@@ -415,6 +415,12 @@ function parseSettings(raw: any): PolpoSettings {
     }
     settings.egressProxies = proxies;
   }
+  if (raw?.connectors && typeof raw.connectors === "object") {
+    const connectors: NonNullable<PolpoSettings["connectors"]> = {};
+    if (typeof raw.connectors.allowPrivateNetwork === "boolean") connectors.allowPrivateNetwork = raw.connectors.allowPrivateNetwork;
+    if (typeof raw.connectors.toolTimeoutMs === "number" && raw.connectors.toolTimeoutMs > 0) connectors.toolTimeoutMs = raw.connectors.toolTimeoutMs;
+    settings.connectors = connectors;
+  }
 
   // Storage backend.
   // Default to "sqlite" so new installs get the indexed/transactional store

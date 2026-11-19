@@ -231,3 +231,12 @@ export {
 export type {
   Artifact, ArtifactType, ArtifactVersion, ArtifactSummary, NewArtifact, ArtifactPatch, ArtifactFilter, ArtifactStore,
 } from "./artifacts.js";
+
+// Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)
+export {
+  CONNECTOR_ID_PATTERN, CONNECTORS_VAULT_OWNER, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS, connectorGrants, connectorSlug,
+} from "./connectors.js";
+export type {
+  ConnectorConfig, ConnectorIcon, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
+  ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
+} from "./connectors.js";

@@ -17,6 +17,7 @@ import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { configureRemoteProviders } from "../sandbox/remote-providers.js";
 import { SandboxReaper } from "../sandbox/reaper.js";
+import { closeAllConnectorManagers } from "../mcp/manager.js";
 
 /**
  * Polpo HTTP Server.
@@ -241,6 +242,8 @@ export class PolpoServer {
     await this.storage?.shutdown().catch((err) => {
       console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
     });
+    // Close connector (MCP) connections and stop local connector processes
+    await closeAllConnectorManagers().catch(() => undefined);
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
     console.log("Polpo Server stopped.");

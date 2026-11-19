@@ -5,6 +5,7 @@ import {
   ListChecks,
   Target,
   Bot,
+  Plug,
   MessageCircle,
   Megaphone,
   Brain,
@@ -65,6 +66,7 @@ const nav: NavSection[] = [
     section: "Knowledge",
     items: [
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/connectors", icon: Plug, label: "Connectors" },
       { to: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
       { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },

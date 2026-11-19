@@ -960,6 +960,13 @@ export interface PolpoSettings {
   emailAllowedDomains?: string[];
   /** Named egress proxies for agents' browsers (agent.browserEgress): { home: "socks5://100.101.55.7:1080" }. */
   egressProxies?: Record<string, string>;
+  /** Connectors (MCP servers): network policy and defaults. */
+  connectors?: {
+    /** Allow remote connectors on private / local network addresses (and http:// on localhost). Default false. */
+    allowPrivateNetwork?: boolean;
+    /** Default tool call timeout in ms (per-connector toolTimeoutMs wins). Default 60000. */
+    toolTimeoutMs?: number;
+  };
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===
