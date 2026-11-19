@@ -25,6 +25,7 @@ import {
   Shapes,
   BrainCircuit,
   Radio,
+  MessagesSquare,
 } from "lucide-react";
 import { useEvents, usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -64,6 +65,7 @@ const nav: NavSection[] = [
     section: "Knowledge",
     items: [
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
       { to: "/skills", icon: Sparkles, label: "Skills" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },

@@ -1,14 +1,17 @@
 /**
  * Agents talking to each other, also in the middle of a chat (as Grok Bot's direct messages and
- * handoffs between bots):
+ * handoffs between bots). Nobody waits: the writer goes on, and the answer reaches it in real time.
  *
- * - ask: an agent (or Polpo) asks another and waits for the answer within its own turn;
- * - send: a handoff. The other agent wakes up, works on it in its own time, and its reply goes back
- *   to the sender, who gets a turn in the conversation it wrote from (on Telegram, its answer is
- *   posted there).
+ * - ask: a quick question. The other agent answers in its own time, and the answer is brought into
+ *   the asker's conversation as soon as it is ready: into the answer it is still writing, or as a
+ *   new turn (streamed live like any other).
+ * - send: a handoff. Same delivery, for real work that takes a while.
+ * From a messaging channel (Telegram) the asker gets a turn there and its answer is posted.
  *
  * Each pair has one conversation per direction ("agent-dm:<from>:<to>"), a session of the receiving
- * agent where every message says who wrote it: the receiver remembers earlier exchanges.
+ * agent where every message says who wrote it: the receiver remembers earlier exchanges. Every
+ * exchange is an `agent:message` event, when it starts and when it is answered; the recent ones and
+ * the pairs' conversations are listed by `overview()` (the Agent conversations view).
  *
  * Brakes: no loops (an agent already in the chain is not asked again), at most MAX_AGENT_HOPS
  * nested hops, a time limit per answer.
@@ -33,6 +36,11 @@ export interface AgentTalkRequest {
   /** The messages of a session (user and assistant text). */
   history(sessionId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>>;
   agents(): Promise<Array<{ name: string; role?: string }>>;
+  /**
+   * Bring a message into a web conversation now: into the answer it is writing, else as the next
+   * turn (streamed). Without it the reply gets a non-streaming turn.
+   */
+  deliver?(sessionId: string, content: string): Promise<void>;
   /** Post an answer where a conversation came from (Telegram). */
   post?(origin: ConversationCheckTarget, text: string, agent?: string): Promise<unknown>;
   /** Shown in the chat and the activity: who asked whom, and the answer. */
@@ -50,7 +58,32 @@ export interface AgentTalkFrom {
   origin?: ConversationCheckTarget;
 }
 
+/** One exchange between two agents, as the Agent conversations view shows it. */
+export interface AgentExchange {
+  id: string;
+  from: string;
+  to: string;
+  kind: "question" | "handoff";
+  message: string;
+  status: "working" | "answered" | "failed";
+  answer?: string;
+  error?: string;
+  /** The conversation the writer was in (the answer goes back there). */
+  fromSessionId?: string;
+  /** The pair's conversation (a session of the receiving agent). */
+  dmSessionId?: string;
+  startedAt: string;
+  answeredAt?: string;
+}
+
+export interface AgentTalkOverview {
+  conversations: Array<{ from: string; to: string; sessionId: string }>;
+  recent: AgentExchange[];
+}
+
+const RECENT_LIMIT = 200;
 const label = (agent: string | undefined) => agent ?? "Polpo";
+let exchangeCounter = 0;
 
 export class AgentTalk {
   private readonly file: string;
@@ -88,55 +121,113 @@ export class AgentTalk {
     return (agents.find((a) => a.name === to) ?? agents.find((a) => a.name.toLowerCase() === to.toLowerCase()))!.name;
   }
 
+  /** The pairs' conversations and the latest exchanges, newest first. */
+  overview(): AgentTalkOverview {
+    const conversations = Object.entries(this.sessions())
+      .map(([key, sessionId]) => {
+        const [, from, to] = key.split(":");
+        return { from: from === POLPO ? "Polpo" : from!, to: to!, sessionId };
+      })
+      .filter((c) => c.to);
+    return { conversations, recent: [...this.recent].reverse() };
+  }
+
+  private readonly recent: AgentExchange[] = [];
+
+  private update(exchange: AgentExchange): void {
+    if (!this.recent.includes(exchange)) {
+      this.recent.push(exchange);
+      if (this.recent.length > RECENT_LIMIT) this.recent.splice(0, this.recent.length - RECENT_LIMIT);
+    }
+    this.io.emit?.("agent:message", { ...exchange, message: exchange.message.slice(0, 2000), ...(exchange.answer ? { answer: exchange.answer.slice(0, 4000) } : {}) });
+  }
+
   /** One message from `from` to `to` in their conversation, and `to`'s answer. */
-  private async exchange(from: AgentTalkFrom, to: string, message: string, kind: "question" | "handoff", signal?: AbortSignal): Promise<string> {
+  private async exchange(from: AgentTalkFrom, exchange: AgentExchange, signal?: AbortSignal): Promise<string> {
+    const to = exchange.to;
     const key = `agent-dm:${from.agent ?? POLPO}:${to}`;
     const known = this.sessions()[key];
     const history = known ? await this.io.history(known).catch(() => []) : [];
-    const intro = kind === "question"
-      ? `[${label(from.agent)} asks you, in the middle of their work: answer briefly and to the point; they are waiting]`
+    const intro = exchange.kind === "question"
+      ? `[${label(from.agent)} asks you, in the middle of their work: answer briefly and to the point]`
       : `[${label(from.agent)} hands this to you: work on it, and your answer goes back to them]`;
     const chain = [...from.chain, from.agent ?? POLPO];
     const { text, sessionId } = await this.io.turn({
       agent: to, sessionId: known ?? "new", chain, signal,
-      messages: [...history, { role: "user", content: `${intro}\n${message}` }],
+      messages: [...history, { role: "user", content: `${intro}\n${exchange.message}` }],
     });
     if (!known) this.remember(key, sessionId);
-    this.io.emit?.("agent:message", { from: label(from.agent), to, kind, sessionId, question: message.slice(0, 500), answer: text.slice(0, 2000) });
+    exchange.dmSessionId = sessionId;
     return text.trim() || "(no answer)";
   }
 
-  /** Ask and wait: the answer comes back within the asker's turn. */
-  async ask(from: AgentTalkFrom, to: string, question: string): Promise<string> {
-    const refused = await this.refusal(from, to);
-    if (refused) throw new Error(refused);
-    const target = await this.resolve(to);
-    const timeout = AbortSignal.timeout(ASK_TIMEOUT_MS);
-    return this.exchange(from, target, question, "question", timeout);
-  }
-
   /**
-   * Hand off and go on: the other agent works on it now, in the background; its reply goes back to
-   * the sender, who gets a turn in its conversation (and on Telegram posts its answer there).
+   * Start an exchange and return at once: the other agent works on it now, and its answer is
+   * brought into the writer's conversation as soon as it is ready.
    */
-  async send(from: AgentTalkFrom, to: string, message: string): Promise<{ to: string }> {
+  private async start(from: AgentTalkFrom, to: string, message: string, kind: AgentExchange["kind"]): Promise<{ to: string; id: string }> {
     const refused = await this.refusal(from, to);
     if (refused) throw new Error(refused);
     const target = await this.resolve(to);
+    const known = this.sessions()[`agent-dm:${from.agent ?? POLPO}:${target}`];
+    const exchange: AgentExchange = {
+      id: `ax-${Date.now().toString(36)}-${(exchangeCounter++).toString(36)}`,
+      from: label(from.agent), to: target, kind, message, status: "working",
+      ...(from.sessionId ? { fromSessionId: from.sessionId } : {}),
+      ...(known ? { dmSessionId: known } : {}),
+      startedAt: new Date().toISOString(),
+    };
+    this.update(exchange);
     void (async () => {
+      let reply: string;
       try {
-        const reply = await this.exchange(from, target, message, "handoff");
-        if (!from.sessionId) return;
-        const history = await this.io.history(from.sessionId).catch(() => []);
-        const { text } = await this.io.turn({
-          agent: from.agent, sessionId: from.sessionId, chain: from.chain, origin: from.origin,
-          messages: [...history, { role: "user", content: `[${target} replied to what you handed them]\n${reply}` }],
-        });
-        if (from.origin && text.trim()) await this.io.post?.(from.origin, text, from.agent);
+        reply = await this.exchange(from, exchange, AbortSignal.timeout(ASK_TIMEOUT_MS));
+        Object.assign(exchange, { status: "answered", answer: reply, answeredAt: new Date().toISOString() });
+        this.update(exchange);
       } catch (err) {
-        this.io.log?.(`handoff ${label(from.agent)} → ${target} failed: ${err instanceof Error ? err.message : String(err)}`);
+        const error = err instanceof Error ? err.message : String(err);
+        Object.assign(exchange, { status: "failed", error, answeredAt: new Date().toISOString() });
+        this.update(exchange);
+        this.io.log?.(`${kind} ${label(from.agent)} → ${target} failed: ${error}`);
+        reply = `(no answer: ${error})`;
+      }
+      try {
+        await this.bringBack(from, target, kind, reply);
+      } catch (err) {
+        this.io.log?.(`could not bring ${target}'s answer back to ${label(from.agent)}: ${err instanceof Error ? err.message : String(err)}`);
       }
     })();
-    return { to: target };
+    return { to: target, id: exchange.id };
   }
+
+  /** The answer reaches the writer: in the web chat live, on a channel as a turn posted there. */
+  private async bringBack(from: AgentTalkFrom, target: string, kind: AgentExchange["kind"], reply: string): Promise<void> {
+    if (!from.sessionId) return;
+    const content = `${replyHeader(target, kind)}\n${reply}`;
+    if (!from.origin && this.io.deliver) {
+      await this.io.deliver(from.sessionId, content);
+      return;
+    }
+    const history = await this.io.history(from.sessionId).catch(() => []);
+    const { text } = await this.io.turn({
+      agent: from.agent, sessionId: from.sessionId, chain: from.chain, origin: from.origin,
+      messages: [...history, { role: "user", content }],
+    });
+    if (from.origin && text.trim()) await this.io.post?.(from.origin, text, from.agent);
+  }
+
+  /** A quick question; the answer arrives in the asker's conversation when it is ready. */
+  ask(from: AgentTalkFrom, to: string, question: string): Promise<{ to: string; id: string }> {
+    return this.start(from, to, question, "question");
+  }
+
+  /** A handoff of real work; the reply arrives in the sender's conversation when it is ready. */
+  send(from: AgentTalkFrom, to: string, message: string): Promise<{ to: string; id: string }> {
+    return this.start(from, to, message, "handoff");
+  }
+}
+
+/** First line of an answer brought back into a conversation (the web chat shows it as a card). */
+export function replyHeader(agent: string, kind: AgentExchange["kind"]): string {
+  return kind === "question" ? `[${agent} answered your question]` : `[${agent} replied to what you handed them]`;
 }

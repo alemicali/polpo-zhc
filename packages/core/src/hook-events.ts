@@ -168,6 +168,7 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "delay:expired": { label: "Delay expired", description: "A mission delay expired; blocked tasks can start.", category: "delay", placeholders: ["missionId", "group", "delayName"] },
   "chat:turn-started": { label: "Chat turn started", description: "The server started a chat turn on its own (queue, steer, fork, send now).", category: "session", placeholders: ["sessionId", "turnId", "reason"] },
   "chat:queue-updated": { label: "Chat queue updated", description: "A chat session's prompt queue changed.", category: "session", placeholders: ["sessionId"] },
+  "agent:message": { label: "Agents talked", description: "An agent asked another or handed it work during a chat: started, answered or failed.", category: "agent", placeholders: ["from", "to", "kind", "status", "message", "answer"] },
   "room:created": { label: "Group created", description: "A group conversation was created.", category: "room", placeholders: ["room"] },
   "room:updated": { label: "Group updated", description: "A group conversation's settings or members changed.", category: "room", placeholders: ["room"] },
   "room:deleted": { label: "Group deleted", description: "A group conversation was deleted.", category: "room", placeholders: ["roomId"] },

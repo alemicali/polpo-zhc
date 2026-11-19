@@ -27,6 +27,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-19-agents-talk-live",
+    date: "2026-11-19",
+    kind: "improved",
+    title: "Gli agenti non si aspettano più: risposte in tempo reale",
+    summary: "Quando un agente chiede a un altro va avanti subito; la risposta compare in chat appena arriva, e puoi rileggere come si sono parlati.",
+    body: [
+      "Prima un agente che chiedeva qualcosa a un altro restava fermo ad aspettare, e la risposta di un passaggio di lavoro non compariva nella chat aperta.",
+      "",
+      "- **Nessuna attesa**: chi chiede continua il lavoro; in chat vedi \"wealth-coach sta rispondendo…\" mentre l'altro lavora.",
+      "- **Risposta in tempo reale**: arriva come scheda nella chat appena è pronta, anche mentre l'agente sta ancora scrivendo.",
+      "- **Conversazioni tra agenti**: una pagina mostra chi ha chiesto cosa a chi, le risposte e l'intera conversazione di ogni coppia, aggiornata dal vivo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le conversazioni", to: "/agent-talk" },
+  },
+  {
     id: "2026-11-17-thread-from-reply",
     date: "2026-11-17",
     kind: "new",
@@ -38,13 +54,14 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- Nessuno risponde finché non scrivi tu: continui il discorso su quel punto.",
       "- La risposta originale mostra il link ai suoi thread, e il thread si annulla come un ramo.",
     ].join("\n"),
+    highlight: true,
   },
   {
     id: "2026-11-17-agents-talk",
     date: "2026-11-17",
     kind: "new",
     title: "Gli agenti si parlano anche durante la chat",
-    summary: "Un agente può chiedere a un altro e aspettare la risposta, o passargli un lavoro e riceverne l'esito più tardi.",
+    summary: "Un agente può chiedere a un altro o passargli un lavoro; la risposta arriva in chat appena è pronta.",
     body: [
       "Come in un vero team, gli agenti ora si parlano mentre lavorano con te, non solo con i task in background:",
       "",
@@ -52,6 +69,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- **Passaggio di lavoro**: un agente affida un compito a un altro; quando quello ha finito, il primo riceve l'esito e ti aggiorna nella stessa chat (anche su Telegram).",
       "- Ogni coppia di agenti ha la sua conversazione, quindi si ricordano gli scambi precedenti. Al massimo 3 agenti di fila, niente giri a vuoto.",
     ].join("\n"),
+    highlight: true,
+    cta: { label: "Guarda come si parlano", to: "/agent-talk" },
   },
   {
     id: "2026-11-17-residential-egress",
