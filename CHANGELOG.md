@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`browser_fill` takes `from_vault`** ("service.key"): a password or token from the agent's vault goes into the field without passing through the model. On the host the value is given straight to the browser process; in a sandbox it travels in the command's environment, so the command line (which sandboxes log) never holds it, and any echo is masked. Until now an agent had to read the secret with `vault_get` and copy it into `text`, and in a sandbox, where `vault_get` hides values, it could not sign in at all.
 
 ### Fixed
+- MCP connectors now show readable OAuth errors and guide users to shared OAuth app setup when a vendor such as Figma or Square requires an approved client.
 - **Agents said they could not send attachments on Telegram.** The only way was `open_file`, which the prompt describes as a web-dashboard preview, and `send_message` carried text only. `send_message` now takes `files` (paths in the agents' workspace, up to 10), sent as Telegram attachments; without `to` they go to the chat the turn came from. A Telegram turn's prompt says how to send files. Only regular files in the agents' workspace leave the server: never `.polpo`, hidden folders or files named like credentials.
 
 ## [0.5.2] — 2026-11-03 — Fixes from DeltaPolpo, chat attachments and voice notes

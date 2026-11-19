@@ -54,7 +54,6 @@ function actionLabel(state: ConnectorCardState): string {
 function CatalogCard({
   entry, state, onConnect, onManage,
 }: { entry: CatalogEntry; state: ConnectorCardState; onConnect: () => void; onManage: () => void }) {
-  const added = state !== "connect" && state !== "needs_setup";
   const primary = state === "connect" || state === "needs_setup" || state === "needs_auth" || state === "needs_reauth";
   return (
     <div data-testid={`catalog-card-${entry.id}`} className="flex flex-col gap-3 rounded-xl border bg-card p-4 transition-colors hover:border-foreground/20">
@@ -64,7 +63,7 @@ function CatalogCard({
           <p className="truncate font-medium leading-tight">{entry.name}</p>
           <p className="truncate text-xs text-muted-foreground">{entry.category}</p>
         </div>
-        {added && <StateBadge state={state} />}
+        {state !== "connect" && <StateBadge state={state} />}
       </div>
       <p className="line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">{entry.description}</p>
       <div className="mt-auto flex items-center gap-1.5">
@@ -267,8 +266,8 @@ export function ConnectorsPage() {
       <ConnectDialog
         state={flow.state}
         redirectUri={catalog?.redirectUri ?? ""}
-        oauthApps={oauthApps}
         onBegin={flow.begin}
+        onSetup={flow.openSetup}
         onSetupSaved={async () => { await refreshCatalog(); flow.setupSaved(); }}
         onOpenFallback={flow.openFallback}
         onClose={flow.close}

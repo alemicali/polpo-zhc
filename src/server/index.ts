@@ -183,6 +183,8 @@ export class PolpoServer {
       fetch: app.fetch,
       port: this.config.port,
       hostname: this.config.host,
+      // Keep native fetch responses compatible with libraries that check instanceof Response.
+      overrideGlobalObjects: false,
     });
     this.terminalWs = attachTerminalWebSocket(this.server, this.orchestrator, {
       apiKeys: this.config.apiKeys,

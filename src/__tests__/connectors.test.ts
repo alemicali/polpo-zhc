@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
+import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -35,6 +36,7 @@ interface FakeAuth {
   lastAuthorize?: URLSearchParams;
   n: number;
   cimd?: boolean;
+  oauthFailure?: { path: string; status: number; body: string | Record<string, string> };
 }
 
 const BEARER = "secret-bearer-token-123";
@@ -79,6 +81,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const url = new URL(req.url ?? "/", base);
   const raw = req.method === "POST" ? await body(req) : "";
   const bearer = (req.headers.authorization ?? "").replace(/^Bearer /i, "");
+  if (fake.oauthFailure?.path === url.pathname) {
+    const { status, body } = fake.oauthFailure;
+    if (typeof body !== "string") return json(res, status, body);
+    res.writeHead(status, { "content-type": "text/plain" });
+    return void res.end(body);
+  }
   if (url.pathname === "/mcp") return serveMcp(req, res, raw);
   if (url.pathname === "/bearer-mcp") {
     if (bearer !== BEARER) return json(res, 401, { error: "unauthorized" });
@@ -161,9 +169,13 @@ const previousKey = process.env.POLPO_VAULT_KEY;
 const dirs: string[] = [];
 const managers: ConnectorManager[] = [];
 const allowLocal = () => ({ connectors: { allowPrivateNetwork: true } }) as any;
+const nativeRequest = globalThis.Request;
+const nativeResponse = globalThis.Response;
 
 beforeAll(async () => {
   process.env.POLPO_VAULT_KEY = randomBytes(32).toString("hex");
+  // Reproduce the dashboard server's fetch/Response mismatch.
+  getRequestListener(new Hono().fetch);
   server = createServer((req, res) => { handle(req, res).catch((err) => json(res, 500, { error: String(err) })); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
@@ -171,12 +183,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  globalThis.Request = nativeRequest;
+  globalThis.Response = nativeResponse;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (previousKey === undefined) delete process.env.POLPO_VAULT_KEY;
   else process.env.POLPO_VAULT_KEY = previousKey;
 });
 
 afterEach(async () => {
+  fake.oauthFailure = undefined;
   await Promise.all(managers.splice(0).map((m) => m.closeAll()));
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
 });
@@ -355,6 +370,105 @@ describe("connection manager", () => {
 });
 
 describe("OAuth connectors through the API", () => {
+  it.each([
+    [{ error: "invalid_client_metadata", error_description: "Client approval is required" }, "invalid_client_metadata: Client approval is required"],
+    ["Client approval is required", "HTTP 403: Client approval is required"],
+  ])("reports refused dynamic registration (%j)", async (body, detail) => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "restricted", name: "Restricted", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    fake.oauthFailure = { path: "/register", status: 403, body };
+
+    const res = await app.request("/api/v1/connectors/restricted/oauth/start", { method: "POST" });
+    const failure = await res.json();
+    expect(failure.error).toContain(detail);
+    expect(failure.error).toContain("OAuth apps");
+    expect(failure.error).not.toContain("[object Response]");
+    expect(failure.oauthApp).toBe("restricted");
+    expect(res.status).toBe(409);
+    expect(await (await app.request("/api/v1/connectors/restricted")).json()).toMatchObject({
+      data: { status: "error", lastError: failure.error },
+    });
+  });
+
+  it.each([403, 503])("reports exhausted OAuth discovery after HTTP %d", async (status) => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "discovery", name: "Discovery", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    fake.oauthFailure = {
+      path: "/.well-known/oauth-authorization-server", status,
+      body: { error: "access_denied", error_description: "Metadata is unavailable" },
+    };
+
+    const res = await app.request("/api/v1/connectors/discovery/oauth/start", { method: "POST" });
+    expect(res.status).toBe(409);
+    const { error } = await res.json();
+    expect(error).toContain("OAuth discovery metadata (access_denied: Metadata is unavailable)");
+    expect(await (await app.request("/api/v1/connectors/discovery")).json()).toMatchObject({
+      data: { status: "error", lastError: error },
+    });
+  });
+
+  it.each([
+    [{ error: "invalid_grant", error_description: "The code expired" }, "invalid_grant: The code expired"],
+    ["The token endpoint refused this request", "HTTP 400: The token endpoint refused this request"],
+  ])("reports token exchange failures (%j)", async (body, detail) => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "exchange", name: "Exchange", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/exchange/oauth/start", { method: "POST" })).json();
+    const back = new URL((await fetch(start.data.authorizationUrl, { redirect: "manual" })).headers.get("location")!);
+    fake.oauthFailure = { path: "/token", status: 400, body };
+
+    const res = await app.request(back.pathname + back.search);
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain(detail);
+    expect(html).not.toContain("[object Response]");
+    expect(await (await app.request("/api/v1/connectors/exchange")).json()).toMatchObject({
+      data: { status: "error", lastError: expect.stringContaining(detail), secrets: { oauth: { pending: false, authorized: false } } },
+    });
+  });
+
+  it("keeps the refresh failure reason when a tool call triggers OAuth", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "refresh", name: "Refresh", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/refresh/oauth/start", { method: "POST" })).json();
+    const back = new URL((await fetch(start.data.authorizationUrl, { redirect: "manual" })).headers.get("location")!);
+    expect((await app.request(back.pathname + back.search)).status).toBe(200);
+    const tokens = JSON.parse((await manager.secrets.get("refresh")).oauth_tokens!);
+    fake.access.delete(tokens.access_token);
+    fake.oauthFailure = { path: "/token", status: 403, body: "Refresh requests are blocked" };
+
+    await expect(manager.callTool("refresh", "echo", { text: "test" })).rejects.toThrow("HTTP 403: Refresh requests are blocked");
+    expect(await (await app.request("/api/v1/connectors/refresh")).json()).toMatchObject({
+      data: { status: "needs_reauth", lastError: expect.stringContaining("HTTP 403: Refresh requests are blocked") },
+    });
+    const reconnect = await (await app.request("/api/v1/connectors/refresh/oauth/start", { method: "POST" })).json();
+    expect(reconnect).toMatchObject({ ok: true, data: { authorizationUrl: expect.stringContaining("/authorize?") } });
+    expect(manager.store.get("refresh")?.lastError).toBeUndefined();
+  });
+
+  it("uses Figma's shared OAuth app and skips dynamic registration", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { catalogId: "figma", url: `${base}/oauth-mcp` });
+    fake.oauthFailure = { path: "/register", status: 403, body: "Client approval is required" };
+    const start = () => app.request("/api/v1/connectors/figma/oauth/start", { method: "POST" });
+    expect(await (await start()).json()).toMatchObject({ ok: false, error: expect.stringContaining('Set up the "figma" OAuth app') });
+
+    const saved = await app.request("/api/v1/connectors/oauth-apps/figma", {
+      method: "PUT", body: JSON.stringify({ clientId: "approved-app", clientSecret: "private-app-secret" }),
+    });
+    expect(saved.status).toBe(200);
+    const body = await (await start()).json();
+    expect(body.ok).toBe(true);
+    expect(new URL(body.data.authorizationUrl).searchParams.get("client_id")).toBe("approved-app");
+    expect(JSON.stringify(body)).not.toContain("private-app-secret");
+    expect(manager.store.get("figma")?.lastError).toBeUndefined();
+  });
+
   it("start → authorize → callback stores tokens in the vault → tool calls → refresh on 401 → needs_reauth", async () => {
     const { manager, vault, polpoDir, events } = setup();
     const app = routesApp(manager);
@@ -545,6 +659,10 @@ describe("catalog and Client ID Metadata Documents", () => {
     expect(byId("bigquery").oauth).toMatchObject({ app: "google", scopes: ["https://www.googleapis.com/auth/bigquery"] });
     expect(byId("slack").oauth).toEqual({ app: "slack" });
     expect(byId("slack").setup).toContain('"slack" OAuth app');
+    for (const id of ["figma", "square"]) {
+      expect(byId(id)).toMatchObject({ auth: "oauth_preregistered", oauth: { app: id } });
+    }
+    expect(byId("vercel")).toMatchObject({ auth: "oauth", oauthRegistration: "cimd" });
     expect(byId("intercom").variants).toEqual([
       { label: "Default", url: "https://mcp.intercom.com/mcp" },
       { label: "EU", url: "https://mcp.eu.intercom.com/mcp" },

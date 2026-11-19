@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  connectorsApi, missingOAuthApp, openAuthWindow, waitForOAuth,
+  ConnectorRequestError, connectorsApi, missingOAuthApp, openAuthWindow, waitForOAuth,
   type CatalogEntry, type Connector, type ConnectorInput, type OAuthApp,
 } from "@/lib/connectors-api";
 
@@ -23,6 +23,8 @@ export interface ConnectTarget {
   connector?: Connector;
   /** Custom connector to create first. */
   create?: ConnectorInput;
+  /** Shared app selected after a registration was refused. */
+  oauthApp?: string;
 }
 
 export interface ConnectDetails {
@@ -35,6 +37,7 @@ export interface ConnectState {
   target: ConnectTarget | null;
   connector?: Connector;
   error?: string;
+  oauthApp?: string;
   /** Authorization URL to open by hand when the window was blocked. */
   fallbackUrl?: string;
   toolCount?: number;
@@ -79,8 +82,12 @@ export function useConnectFlow({
     popupRef.current = popup;
     setState({ phase: "working", target });
     const fail = (error: unknown) => {
+      if (ctrl.signal.aborted) return;
       closePopup();
-      if (!ctrl.signal.aborted) setState((s) => ({ ...s, phase: "error", error: error instanceof Error ? error.message : String(error) }));
+      setState((s) => ({
+        ...s, phase: "error", error: error instanceof Error ? error.message : String(error),
+        oauthApp: error instanceof ConnectorRequestError ? error.oauthApp : undefined,
+      }));
     };
     try {
       let connector = target.connector ?? (target.entry ? connectors.find((c) => c.catalogId === target.entry!.id) : undefined);
@@ -89,8 +96,20 @@ export function useConnectFlow({
         const input: ConnectorInput = target.create
           ?? { catalogId: target.entry!.id, ...(details.url ? { url: details.url } : {}), ...(secrets ? { secrets } : {}) };
         connector = await connectorsApi.create(input);
-      } else if (details.url || secrets) {
-        connector = await connectorsApi.update(connector.id, { ...(details.url ? { url: details.url } : {}), ...(secrets ? { secrets } : {}) });
+      } else {
+        // Older catalog connectors may predate the shared app requirement.
+        const catalogApp = target.entry?.auth === "oauth_preregistered" && connector.auth.type === "oauth"
+          && !connector.auth.oauth?.app && !connector.auth.oauth?.clientId && !connector.secrets.oauth.authorized
+          ? target.entry.oauth?.app ?? target.entry.id : undefined;
+        const selectedApp = target.oauthApp ?? catalogApp;
+        const app = selectedApp !== connector.auth.oauth?.app ? selectedApp : undefined;
+        if (app || details.url || secrets) {
+          connector = await connectorsApi.update(connector.id, {
+            ...(app ? { auth: { type: "oauth", oauth: { app } } } : {}),
+            ...(details.url ? { url: details.url } : {}),
+            ...(secrets ? { secrets } : {}),
+          });
+        }
       }
       if (ctrl.signal.aborted) return;
       onChangedRef.current?.(connector);
@@ -140,8 +159,9 @@ export function useConnectFlow({
 
   /** Start (from a click): asks for setup / details first, else connects right away. */
   const open = useCallback((target: ConnectTarget) => {
-    if (target.entry && missingOAuthApp(target.entry, oauthApps)) {
-      setState({ phase: "setup", target });
+    const missingApp = target.entry && missingOAuthApp(target.entry, oauthApps, target.connector);
+    if (missingApp) {
+      setState({ phase: "setup", target: { ...target, oauthApp: missingApp } });
       return;
     }
     if (needsDetails(target.entry, target.connector)) {
@@ -163,6 +183,12 @@ export function useConnectFlow({
   /** After saving the OAuth app: show the details / ready step. */
   const setupSaved = useCallback(() => setState((s) => ({ ...s, phase: "details" })), []);
 
+  const openSetup = useCallback(() => {
+    setState((s) => s.target && s.oauthApp
+      ? { ...s, phase: "setup", target: { ...s.target, oauthApp: s.oauthApp } }
+      : s);
+  }, []);
+
   const openFallback = useCallback(() => {
     if (!state.fallbackUrl) return;
     popupRef.current = window.open(state.fallbackUrl, "_blank");
@@ -175,5 +201,5 @@ export function useConnectFlow({
     setState({ phase: "idle", target: null });
   }, []);
 
-  return { state, open, begin, setupSaved, openFallback, close };
+  return { state, open, begin, openSetup, setupSaved, openFallback, close };
 }

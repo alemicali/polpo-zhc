@@ -41,7 +41,7 @@ export interface ConnectorRouteDeps {
 function fail(c: Context, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   const status = err instanceof ConnectorInputError ? 400 : err instanceof ConnectorError ? 409 : 500;
-  return c.json({ ok: false, error: message }, status);
+  return c.json({ ok: false, error: message, ...(err instanceof ConnectorError && err.oauthApp ? { oauthApp: err.oauthApp } : {}) }, status);
 }
 
 export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
@@ -216,12 +216,15 @@ export function connectorOAuthCallback(deps: { manager: () => ConnectorManager; 
     const manager = deps.manager();
     const ui = deps.uiUrl(c);
     if (error || !code) {
+      const description = c.req.query("error_description");
+      const reason = [error ?? "no code", description].filter(Boolean).join(": ");
+      const message = `Authorization was not completed (${reason}).`;
       const pending = await manager.findPendingState(state);
       if (pending) {
         await manager.secrets.unset(pending.id, ["oauth_state", "oauth_state_expires", "oauth_code_verifier"]);
-        manager.setStatus(pending.id, "needs_auth", { error: `Authorization not granted: ${error ?? "no code"}` });
+        manager.setStatus(pending.id, "error", { error: message });
       }
-      return c.html(page("Not connected", `The authorization was not completed (${c.req.query("error_description") ?? error ?? "no code"}).`, `${ui}/connectors`, false), 400);
+      return c.html(page("Not connected", message, `${ui}/connectors`, false, pending?.id), 400);
     }
     try {
       const { connector, error: connectError } = await manager.finishOAuth(state, code);
