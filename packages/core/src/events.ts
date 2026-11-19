@@ -247,6 +247,8 @@ export interface PolpoEventMap {
   /** open Polpo's volume.* events: attached, written back (checkpoint or end), revision conflict. */
   "sandbox:volume": { workspaceId: string; provider: string; step: "prepared" | "checkpointed" | "finalized" | "conflict"; name: string; revision?: number; message?: string; agentName?: string; taskId?: string; sessionId?: string };
   "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;
+  /** A connector (MCP server) was added, changed, removed, or its connection status changed. */
+  "connector:changed": import("./connectors.js").ConnectorChangedEvent & EventOrigin;
 
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;
