@@ -57,6 +57,9 @@ import { ARTIFACT_TOOLS, executeArtifactTool } from "../tools/artifact-tools.js"
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
+import { CONNECTOR_TOOLS, executeConnectorTool } from "../tools/connector-tools.js";
+import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
+import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
@@ -2232,6 +2235,8 @@ export const READ_TOOLS = new Set([
   "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
   // Storage (buckets)
   "storage_list_entries", "storage_list", "storage_read", "storage_presign",
+  // Connectors
+  "connectors_list",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -2292,6 +2297,8 @@ export const WRITE_TOOLS = new Set([
   "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
   // Storage (buckets)
   "storage_mount", "storage_unmount", "storage_write", "storage_delete",
+  // Connectors
+  "connector_add", "connector_connect", "connector_update_access", "connector_remove",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -2430,6 +2437,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   ...BRAIN_ORCHESTRATOR_TOOLS,
   // Storage: S3/R2 buckets (host-side; admin + object tools)
   ...STORAGE_ORCHESTRATOR_TOOLS,
+  // Connectors (MCP): managing them; their own tools are added per chat (access.polpo)
+  ...CONNECTOR_TOOLS,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2487,6 +2496,11 @@ const TOOL_LABELS: Record<string, string> = {
   data_delete_view: "Delete Data View",
   storage_list_entries: "List Storage",
   storage_mount: "Mount Storage",
+  connectors_list: "Connectors",
+  connector_add: "Add Connector",
+  connector_connect: "Connect Connector",
+  connector_update_access: "Connector Access",
+  connector_remove: "Remove Connector",
   storage_unmount: "Unmount Storage",
   storage_list: "List Storage Files",
   storage_read: "Read Storage File",
@@ -2754,6 +2768,15 @@ export async function executeOrchestratorTool(
           emitFileChanged: (payload) => polpo.emit("file:changed", { ...payload, source: "chat" }),
         });
 
+      // ── Connectors ──
+      case "connectors_list": case "connector_add": case "connector_connect": case "connector_update_access": case "connector_remove":
+        return executeConnectorTool(toolName, args, {
+          manager: connectorManagerFor(polpo),
+          settings: polpo.getConfig()?.settings,
+          redirectUri: connectorRedirectUri(),
+          agentNames: async () => (await polpo.getAgents()).map((a) => a.name),
+        });
+
       // ── Task ──
       case "create_task":      return execCreateTask(polpo, args);
       case "update_task":      return execUpdateTask(polpo, args);
@@ -2940,6 +2963,13 @@ export async function executeOrchestratorTool(
         // mirror every case branch.
         if (ORCHESTRATOR_BROWSER_TOOL_NAMES.has(toolName)) {
           return await executeOrchestratorBrowserTool(toolName, args, polpo);
+        }
+        // ── Connector tools (mcp__<connector>__<tool>), for connectors Polpo may use ──
+        if (isMcpToolName(toolName)) {
+          const { tools } = await connectorManagerFor(polpo).toolsFor(undefined);
+          const tool = tools.find((t) => t.name === toolName);
+          if (!tool) return `Unknown or unavailable connector tool: ${toolName}`;
+          return toolResultText(await tool.execute(nanoid(), args as never));
         }
         return `Unknown tool: ${toolName}`;
     }
