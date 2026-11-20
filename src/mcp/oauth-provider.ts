@@ -10,8 +10,10 @@
  */
 import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { OAuthClientMetadataSchema, type OAuthClientInformationMixed, type OAuthClientMetadata, type OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { ConnectorConfig } from "@polpo-ai/core";
+import { OAuthHttpError, type OAuthStep } from "./oauth-errors.js";
 import { SECRET_KEYS, type ConnectorSecrets } from "./secrets.js";
 
 export const OAUTH_STATE_TTL_MS = 10 * 60_000;
@@ -47,6 +49,8 @@ export class VaultOAuthProvider implements OAuthClientProvider {
   authorizationUrl?: URL;
   /** Client ID Metadata Document URL (SEP-991), when this instance has a public https URL. */
   readonly clientMetadataUrl?: string;
+  refreshError?: OAuthHttpError;
+  private discoveryError?: OAuthHttpError;
 
   constructor(
     private readonly connector: ConnectorConfig,
@@ -57,6 +61,38 @@ export class VaultOAuthProvider implements OAuthClientProvider {
       this.clientMetadataUrl = options.clientMetadataUrl;
     }
   }
+
+  /** The transports use the same fetch for MCP traffic and OAuth. Leave MCP challenges to the SDK. */
+  readonly fetch: typeof fetch = async (input, init) => {
+    const response = await globalThis.fetch(input, init);
+    if (response.status < 400) return response;
+    const body = init?.body;
+    let step: OAuthStep;
+    if (body instanceof URLSearchParams) {
+      step = body.get("grant_type") === "refresh_token" ? "refresh" : "exchange";
+    } else if (typeof body === "string" && OAuthClientMetadataSchema.safeParse(parse<unknown>(body)).success) {
+      step = "registration";
+    } else if (!init?.method && !new Headers(init?.headers).get("accept")?.includes("text/event-stream")) {
+      step = "discovery";
+    } else {
+      return response;
+    }
+    if (step === "discovery") {
+      // Let the SDK probe other well-known paths. Report a rejection if no path succeeds.
+      if (response.status !== 404 && response.status !== 405) {
+        const error = await OAuthHttpError.fromResponse(this.connector.name, step, response.clone());
+        this.discoveryError = error;
+      }
+      return response;
+    }
+    const error = await OAuthHttpError.fromResponse(this.connector.name, step, response, init);
+    if (step === "refresh" && error.code === "invalid_grant") {
+      // Keep the SDK's invalid-grant recovery (discard the tokens and request sign-in).
+      this.refreshError = error;
+      throw new InvalidGrantError(error.message);
+    }
+    throw error;
+  };
 
   /** Read fresh every time: another process (a task runner) may have refreshed the tokens meanwhile. */
   private creds(): Promise<Record<string, string>> {
@@ -120,6 +156,7 @@ export class VaultOAuthProvider implements OAuthClientProvider {
   }
 
   async saveTokens(tokens: OAuthTokens): Promise<void> {
+    this.refreshError = undefined;
     // a refresh response may omit the refresh token: keep the one we had
     const previous = await this.tokens();
     const next = { ...tokens, ...(tokens.refresh_token ? {} : previous?.refresh_token ? { refresh_token: previous.refresh_token } : {}) };
@@ -154,7 +191,17 @@ export class VaultOAuthProvider implements OAuthClientProvider {
   }
 
   async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
+    const error = this.discoveryError;
+    this.discoveryError = undefined;
+    if (!state.authorizationServerMetadata && error) throw error;
     await this.save({ [SECRET_KEYS.discovery]: JSON.stringify(state) });
+  }
+
+  /** The SDK throws on discovery 5xx responses before saving discovery state. */
+  takeDiscoveryError(): OAuthHttpError | undefined {
+    const error = this.discoveryError;
+    this.discoveryError = undefined;
+    return error;
   }
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {

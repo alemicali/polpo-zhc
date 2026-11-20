@@ -25,6 +25,7 @@ import {
 } from "@polpo-ai/core";
 import { safeEnv } from "../tools/safe-env.js";
 import { allowPrivateNetwork, checkConnectorUrl, type ResolveHost } from "./net.js";
+import { OAuthHttpError } from "./oauth-errors.js";
 import { VaultOAuthProvider, type PreregisteredClient } from "./oauth-provider.js";
 import { ConnectorSecrets, OAUTH_KEYS, resolveSecretRefs, SECRET_KEYS } from "./secrets.js";
 import { ConnectorStore } from "./store.js";
@@ -66,7 +67,7 @@ export interface ConnectorToolsResult {
 }
 
 export class ConnectorError extends Error {
-  constructor(message: string, readonly status: ConnectorStatus) {
+  constructor(message: string, readonly status: ConnectorStatus, readonly oauthApp?: string) {
     super(message);
   }
 }
@@ -156,7 +157,7 @@ export class ConnectorManager {
     }
     if (oauth?.app) {
       const app = this.store.getOAuthApp(oauth.app);
-      if (!app) throw new ConnectorError(`Set up the "${oauth.app}" OAuth app first (its client id and secret), then connect`, "needs_auth");
+      if (!app) throw new ConnectorError(`Set up the "${oauth.app}" OAuth app first (its client id and any required secret), then connect`, "needs_auth");
       const secret = await this.secrets.appSecret(oauth.app);
       return { clientId: app.clientId, ...(secret ? { clientSecret: secret } : {}) };
     }
@@ -199,8 +200,9 @@ export class ConnectorManager {
       provider = await new VaultOAuthProvider(connector, this.secrets, { interactive: false, preregistered: await this.preregisteredClient(connector) }).init();
     }
     const requestInit: RequestInit = { headers };
-    const http = () => new StreamableHTTPClientTransport(url, { requestInit, ...(provider ? { authProvider: provider } : {}) });
-    const sse = () => new SSEClientTransport(url, { requestInit, ...(provider ? { authProvider: provider } : {}) });
+    const transportOptions = { requestInit, ...(provider ? { authProvider: provider, fetch: provider.fetch } : {}) };
+    const http = () => new StreamableHTTPClientTransport(url, transportOptions);
+    const sse = () => new SSEClientTransport(url, transportOptions);
     return { transports: t.type === "sse" ? [sse] : [http, sse], provider };
   }
 
@@ -223,6 +225,8 @@ export class ConnectorManager {
       } catch (err) {
         await client.close().catch(() => undefined);
         if (err instanceof UnauthorizedError || provider?.authorizationRequired) throw this.unauthorized(connector, provider);
+        const oauthError = this.oauthFailure(connector, err, provider);
+        if (oauthError) throw oauthError;
         firstError ??= err;
       }
     }
@@ -231,11 +235,35 @@ export class ConnectorManager {
 
   private unauthorized(connector: ConnectorConfig, provider?: VaultOAuthProvider): ConnectorError {
     if (connector.auth.type === "oauth") {
+      if (provider?.refreshError) return new ConnectorError(`${provider.refreshError.message} Reconnect to authorize again.`, "needs_reauth");
       return new ConnectorError(provider?.authorizationRequired
         ? "The authorization expired or was revoked: reconnect it (OAuth)"
         : "Unauthorized: reconnect it (OAuth)", "needs_reauth");
     }
     return new ConnectorError("Unauthorized: check the connector's token or headers", "error");
+  }
+
+  private oauthFailure(connector: ConnectorConfig, error: unknown, provider?: VaultOAuthProvider): ConnectorError | undefined {
+    const failure = error instanceof OAuthHttpError ? error : provider?.takeDiscoveryError();
+    if (failure?.step === "refresh" && failure.status < 500 && failure.status !== 429) {
+      return new ConnectorError(`${failure.message} Reconnect to authorize again.`, "needs_reauth");
+    }
+    if ((failure?.step === "registration" && failure.status < 500 && failure.status !== 429)
+      || errorMessage(error) === "Incompatible auth server: does not support dynamic client registration") {
+      const app = connector.catalogId ?? connector.id;
+      return new ConnectorError(
+        `${failure?.message ?? `${connector.name} does not offer dynamic OAuth client registration.`} Set up an approved, pre-registered client in Connectors → OAuth apps.`,
+        "error",
+        app,
+      );
+    }
+    return failure && new ConnectorError(failure.message, "error");
+  }
+
+  private recordFailure(id: string, error: unknown): ConnectorError {
+    const failure = error instanceof ConnectorError ? error : new ConnectorError(errorMessage(error), "error");
+    this.setStatus(id, failure.status, { error: failure.message });
+    return failure;
   }
 
   /** The live connection, connecting if needed. */
@@ -254,9 +282,7 @@ export class ConnectorManager {
         this.connections.set(id, connection);
         return connection;
       } catch (err) {
-        const status = err instanceof ConnectorError ? err.status : "error";
-        this.setStatus(id, status, { error: errorMessage(err) });
-        throw err instanceof ConnectorError ? err : new ConnectorError(errorMessage(err), status);
+        throw this.recordFailure(id, err);
       } finally {
         this.connecting.delete(id);
       }
@@ -290,11 +316,12 @@ export class ConnectorManager {
       return await run();
     } catch (err) {
       if (err instanceof ConnectorError) throw err;
-      if (err instanceof UnauthorizedError) {
-        const e = this.unauthorized(this.store.get(id)!, this.connections.get(id)?.provider);
+      const connector = this.store.get(id)!;
+      const provider = this.connections.get(id)?.provider;
+      const failure = err instanceof UnauthorizedError ? this.unauthorized(connector, provider) : this.oauthFailure(connector, err, provider);
+      if (failure) {
         await this.close(id);
-        this.setStatus(id, e.status, { error: e.message });
-        throw e;
+        throw this.recordFailure(id, failure);
       }
       await this.close(id);
       if (isSessionGone(err)) return run();
@@ -318,11 +345,11 @@ export class ConnectorManager {
     } catch (err) {
       if (err instanceof ConnectorError) throw err;
       if (signal?.aborted) throw err;
-      if (err instanceof UnauthorizedError) {
-        const e = this.unauthorized(connector, this.connections.get(id)?.provider);
+      const provider = this.connections.get(id)?.provider;
+      const failure = err instanceof UnauthorizedError ? this.unauthorized(connector, provider) : this.oauthFailure(connector, err, provider);
+      if (failure) {
         await this.close(id);
-        this.setStatus(id, e.status, { error: e.message });
-        throw e;
+        throw this.recordFailure(id, failure);
       }
       if (isSessionGone(err)) {
         await this.close(id);
@@ -389,20 +416,27 @@ export class ConnectorManager {
     const connector = this.store.get(id);
     if (!connector) throw new ConnectorError(`No connector "${id}"`, "error");
     if (connector.auth.type !== "oauth" || !connector.transport.url) throw new ConnectorError(`${connector.name} does not use OAuth`, "error");
-    const url = await checkConnectorUrl(connector.transport.url, this.urlPolicy());
-    const metadataUrl = clientMetadataUrlFor(redirectUrl);
-    const provider = await new VaultOAuthProvider(connector, this.secrets, {
-      interactive: true, redirectUrl, preregistered: await this.preregisteredClient(connector),
-      ...(metadataUrl ? { clientMetadataUrl: metadataUrl } : {}),
-    }).init();
-    const scopes = connector.auth.oauth?.scopes;
-    const result = await auth(provider, { serverUrl: url, ...(scopes?.length ? { scope: scopes.join(" ") } : {}) });
-    if (result === "AUTHORIZED") {
-      await this.close(id);
-      return { authorized: true };
+    let provider: VaultOAuthProvider | undefined;
+    try {
+      const url = await checkConnectorUrl(connector.transport.url, this.urlPolicy());
+      const metadataUrl = clientMetadataUrlFor(redirectUrl);
+      provider = await new VaultOAuthProvider(connector, this.secrets, {
+        interactive: true, redirectUrl, preregistered: await this.preregisteredClient(connector),
+        ...(metadataUrl ? { clientMetadataUrl: metadataUrl } : {}),
+      }).init();
+      if (connector.status === "needs_reauth") await provider.invalidateCredentials("tokens");
+      const scopes = connector.auth.oauth?.scopes;
+      const result = await auth(provider, { serverUrl: url, fetchFn: provider.fetch, ...(scopes?.length ? { scope: scopes.join(" ") } : {}) });
+      if (result === "AUTHORIZED") {
+        await this.close(id);
+        return { authorized: true };
+      }
+      if (!provider.authorizationUrl) throw new ConnectorError("The server did not start an authorization", "error");
+      if (connector.lastError) this.setStatus(id, "needs_auth");
+      return { authorizationUrl: provider.authorizationUrl.toString() };
+    } catch (err) {
+      throw this.recordFailure(id, this.oauthFailure(connector, err, provider) ?? err);
     }
-    if (!provider.authorizationUrl) throw new ConnectorError("The server did not start an authorization", "error");
-    return { authorizationUrl: provider.authorizationUrl.toString() };
   }
 
   /** The connector waiting for this state (unexpired), if any. */
@@ -427,14 +461,15 @@ export class ConnectorManager {
     if (!connector) throw new ConnectorError("Unknown or expired authorization: start connecting again", "error");
     // single use: the state goes before anything else
     await this.secrets.unset(connector.id, [SECRET_KEYS.state, SECRET_KEYS.stateExpires]);
-    const provider = await new VaultOAuthProvider(connector, this.secrets, {
-      interactive: true, preregistered: await this.preregisteredClient(connector),
-    }).init();
+    let provider: VaultOAuthProvider | undefined;
     try {
-      await auth(provider, { serverUrl: connector.transport.url!, authorizationCode: code });
+      provider = await new VaultOAuthProvider(connector, this.secrets, {
+        interactive: true, preregistered: await this.preregisteredClient(connector),
+      }).init();
+      await auth(provider, { serverUrl: connector.transport.url!, authorizationCode: code, fetchFn: provider.fetch });
     } catch (err) {
-      this.setStatus(connector.id, "needs_auth", { error: `Authorization failed: ${errorMessage(err)}` });
-      throw new ConnectorError(`Authorization failed: ${errorMessage(err)}`, "needs_auth");
+      throw this.recordFailure(connector.id, this.oauthFailure(connector, err, provider) ??
+        new ConnectorError(`Authorization failed: ${errorMessage(err)}`, "error"));
     } finally {
       await this.secrets.unset(connector.id, [SECRET_KEYS.verifier]);
     }

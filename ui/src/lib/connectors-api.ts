@@ -136,6 +136,15 @@ export interface ConnectorInput {
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 
+export class ConnectorRequestError extends Error {
+  readonly oauthApp?: string;
+
+  constructor(message: string, oauthApp?: string) {
+    super(message);
+    this.oauthApp = oauthApp;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("content-type", "application/json");
@@ -146,10 +155,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error("Could not reach the Polpo server");
   }
-  const body = await response.json().catch(() => null) as { ok?: boolean; data?: unknown; error?: unknown } | null;
+  const body = await response.json().catch(() => null) as { ok?: boolean; data?: unknown; error?: unknown; oauthApp?: unknown } | null;
   if (!response.ok || !body?.ok) {
     const error = typeof body?.error === "string" ? body.error : (body?.error as { message?: string } | undefined)?.message;
-    throw new Error(error || `Connectors request failed (${response.status})`);
+    throw new ConnectorRequestError(error || `Connectors request failed (${response.status})`,
+      typeof body?.oauthApp === "string" ? body.oauthApp : undefined);
   }
   return body.data as T;
 }
@@ -223,11 +233,13 @@ export type ConnectorCardState =
   | "not_connected"; // added (token / no auth), not connected yet
 
 /** The shared OAuth app a catalog entry needs, when it is not configured yet. */
-export function missingOAuthApp(entry: CatalogEntry, apps: OAuthApp[]): string | undefined {
+export function missingOAuthApp(entry: CatalogEntry, apps: OAuthApp[], connector?: Connector): string | undefined {
   if (entry.auth !== "oauth_preregistered") return undefined;
   const appId = entry.oauth?.app ?? entry.id;
+  const oauth = connector?.auth.oauth;
+  if (connector && (connector.auth.type !== "oauth" || oauth?.clientId || (oauth?.app && oauth.app !== appId))) return undefined;
   const app = apps.find((a) => a.id === appId);
-  return app && app.clientId && app.hasSecret ? undefined : appId;
+  return app?.clientId && (appId !== "google" || app.hasSecret) ? undefined : appId;
 }
 
 export function connectorState(connector: Connector): Exclude<ConnectorCardState, "connect" | "needs_setup"> {
@@ -243,7 +255,11 @@ export function connectorState(connector: Connector): Exclude<ConnectorCardState
 
 export function catalogCardState(entry: CatalogEntry, connectors: Connector[], apps: OAuthApp[]): { state: ConnectorCardState; connector?: Connector } {
   const connector = connectors.find((c) => c.catalogId === entry.id);
-  if (connector) return { state: connectorState(connector), connector };
+  if (connector) {
+    const state = connectorState(connector);
+    return { state: (state === "needs_auth" || state === "needs_reauth" || state === "error")
+      && missingOAuthApp(entry, apps, connector) ? "needs_setup" : state, connector };
+  }
   return { state: missingOAuthApp(entry, apps) ? "needs_setup" : "connect" };
 }
 

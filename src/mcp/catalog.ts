@@ -152,10 +152,10 @@ export function normalizeCatalogEntry(raw: RawCatalogEntry): ConnectorCatalogEnt
     } else {
       entry.oauth = { app: raw.id };
       entry.setup = [
-        `${raw.name} does not let apps register themselves: register an OAuth app with ${raw.name} once${raw.docs ? ` (${raw.docs})` : ""}.`,
+        `Use an OAuth app approved by ${raw.name} for its MCP server.`,
         raw.authNotes ? `Notes: ${raw.authNotes}` : "",
         "Use this instance's redirect URI: <public URL>/api/v1/connectors/oauth/callback (shown on the Connectors page).",
-        `Then save its client id and secret as the "${raw.id}" OAuth app (Connectors → OAuth apps) and connect.`,
+        `Save the client id and any issued secret as the "${raw.id}" OAuth app and connect.`,
       ].filter(Boolean).join("\n");
     }
   }

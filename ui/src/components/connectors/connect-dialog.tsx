@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  connectorsApi, fillTemplate, missingOAuthApp, setupSteps, templateFields,
+  connectorsApi, fillTemplate, setupSteps, templateFields,
   type CatalogEntry, type Connector,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -50,21 +50,26 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
 }
 
 /** Steps to register the vendor's OAuth app, the redirect URI to copy, and the client id / secret. */
-function SetupStep({ entry, redirectUri, onSaved }: { entry: CatalogEntry; redirectUri: string; onSaved: () => Promise<void> | void }) {
-  const appId = entry.oauth?.app ?? entry.id;
+function SetupStep({ appId, name, entry, redirectUri, onSaved }: {
+  appId: string; name: string; entry?: CatalogEntry; redirectUri: string; onSaved: () => Promise<void> | void;
+}) {
+  const requireSecret = appId === "google";
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const steps = setupSteps(entry, redirectUri);
+  const steps = entry ? setupSteps(entry, redirectUri) : [];
   const intro = steps[0] && !/^\d+\./.test(steps[0]) ? steps[0] : undefined;
   const list = intro ? steps.slice(1) : steps;
   const save = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) { setError("Enter both the client id and the client secret"); return; }
+    if (!clientId.trim() || (requireSecret && !clientSecret.trim())) {
+      setError(requireSecret ? "Enter both the client id and the client secret" : "Enter the client id");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await connectorsApi.saveOAuthApp(appId, { clientId: clientId.trim(), clientSecret: clientSecret.trim(), name: appId === "google" ? "Google" : entry.name });
+      await connectorsApi.saveOAuthApp(appId, { clientId: clientId.trim(), clientSecret: clientSecret.trim(), name: requireSecret ? "Google" : name });
       await onSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -77,8 +82,8 @@ function SetupStep({ entry, redirectUri, onSaved }: { entry: CatalogEntry; redir
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
         <p className="flex items-center gap-1.5 font-medium"><KeyRound className="h-4 w-4 text-amber-500" /> One-time setup</p>
         <p className="mt-1 text-muted-foreground">
-          {intro ?? `${entry.name} needs an OAuth app you register with the vendor.`}{" "}
-          {appId === "google" ? "Every Google connector reuses it." : null}
+          {intro ?? `Use an OAuth app registered with ${name} and approved for this MCP server.`}{" "}
+          {requireSecret ? "Every Google connector reuses it." : null}
         </p>
       </div>
       {list.length > 0 && (
@@ -87,14 +92,14 @@ function SetupStep({ entry, redirectUri, onSaved }: { entry: CatalogEntry; redir
         </ol>
       )}
       <CopyField label="Redirect URI to register" value={redirectUri} />
-      {entry.docs && (
+      {entry?.docs && (
         <a href={entry.docs} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
           {entry.name} documentation <ExternalLink className="h-3 w-3" />
         </a>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Client ID"><Input value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" spellCheck={false} /></Field>
-        <Field label="Client secret"><Input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="new-password" /></Field>
+        <Field label={requireSecret ? "Client secret" : "Client secret (if issued)"}><Input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="new-password" /></Field>
       </div>
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
       <DialogFooter>
@@ -163,12 +168,12 @@ function DetailsStep({ entry, connector, onSubmit }: { entry?: CatalogEntry; con
 }
 
 export function ConnectDialog({
-  state, redirectUri, oauthApps, onBegin, onSetupSaved, onOpenFallback, onClose, onManage, onRetry,
+  state, redirectUri, onBegin, onSetup, onSetupSaved, onOpenFallback, onClose, onManage, onRetry,
 }: {
   state: ConnectState;
   redirectUri: string;
-  oauthApps: Parameters<typeof missingOAuthApp>[1];
   onBegin: (details: ConnectDetails) => void;
+  onSetup: () => void;
   onSetupSaved: () => Promise<void> | void;
   onOpenFallback: () => void;
   onClose: () => void;
@@ -193,14 +198,12 @@ export function ConnectDialog({
           </div>
         </DialogHeader>
 
-        {phase === "setup" && entry && (
-          <SetupStep entry={entry} redirectUri={redirectUri} onSaved={onSetupSaved} />
+        {phase === "setup" && target?.oauthApp && (
+          <SetupStep appId={target.oauthApp} name={name} entry={entry} redirectUri={redirectUri} onSaved={onSetupSaved} />
         )}
 
         {phase === "details" && (
-          entry && missingOAuthApp(entry, oauthApps)
-            ? <SetupStep entry={entry} redirectUri={redirectUri} onSaved={onSetupSaved} />
-            : <DetailsStep entry={entry} connector={connector} onSubmit={onBegin} />
+          <DetailsStep entry={entry} connector={connector} onSubmit={onBegin} />
         )}
 
         {phase === "working" && (
@@ -255,7 +258,8 @@ export function ConnectDialog({
             </div>
             <DialogFooter>
               {connector && <Button variant="outline" onClick={() => onManage(connector)}>Open settings</Button>}
-              <Button onClick={onRetry}>Try again</Button>
+              <Button variant={state.oauthApp ? "outline" : "default"} onClick={onRetry}>Try again</Button>
+              {state.oauthApp && <Button onClick={onSetup}>Set up OAuth app</Button>}
             </DialogFooter>
           </div>
         )}

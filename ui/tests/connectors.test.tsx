@@ -64,8 +64,10 @@ function connector(id: string, extra: Partial<Connector> = {}): Connector {
 // ── Fake server ─────────────────────────────────────────────────────────────
 interface Server {
   connectors: Connector[];
+  catalog?: CatalogEntry[];
   oauthApps: Array<{ id: string; clientId: string; hasSecret: boolean; createdAt: string }>;
   calls: Array<{ method: string; path: string; body?: unknown }>;
+  registrationFailure?: string;
 }
 let server: Server;
 
@@ -78,20 +80,22 @@ function installFetch() {
     const url = new URL(String(input), "http://localhost");
     const method = init?.method ?? "GET";
     const path = url.pathname.replace("/api/v1/connectors", "") || "/";
+    const catalog = server.catalog ?? CATALOG;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     server.calls.push({ method, path, body });
     expect(url.search).not.toMatch(/key|token/i); // credentials never go in the URL
     if (path === "/" && method === "GET") return ok({ connectors: server.connectors });
-    if (path === "/catalog") return ok({ entries: CATALOG, redirectUri: REDIRECT, oauthApps: server.oauthApps });
+    if (path === "/catalog") return ok({ entries: catalog, redirectUri: REDIRECT, oauthApps: server.oauthApps });
     if (path.startsWith("/oauth-apps/") && method === "PUT") {
       const app = { id: path.split("/")[2]!, clientId: body.clientId, hasSecret: !!body.clientSecret, createdAt: "x" };
       server.oauthApps = [...server.oauthApps.filter((a) => a.id !== app.id), app];
       return ok(app);
     }
     if (path === "/" && method === "POST") {
-      const fromCatalog = CATALOG.find((e) => e.id === body.catalogId);
+      const fromCatalog = catalog.find((e) => e.id === body.catalogId);
       const created = connector(body.catalogId ?? "custom", fromCatalog ? {
         ...(fromCatalog.auth === "bearer" ? { auth: { type: "bearer" as const }, status: "disconnected" as const } : {}),
+        ...(fromCatalog.oauth ? { auth: { type: "oauth" as const, oauth: fromCatalog.oauth } } : {}),
         ...(body.url ? { transport: { type: "http" as const, url: body.url } } : {}),
       } : { name: body.name, catalogId: undefined, auth: body.auth, transport: body.transport, status: body.auth?.type === "oauth" ? "needs_auth" : "disconnected" });
       server.connectors = [...server.connectors, created];
@@ -104,6 +108,11 @@ function installFetch() {
     if (!action && method === "GET") return ok(current);
     if (!action && method === "PATCH") return ok(save({ ...current, ...body, access: body.access ? { ...current.access, ...body.access } : current.access }));
     if (action === "oauth" && method === "POST") {
+      if (server.registrationFailure && !current.auth.oauth?.app) {
+        const error = server.registrationFailure;
+        save({ ...current, status: "error", lastError: error });
+        return Promise.resolve(new Response(JSON.stringify({ ok: false, error, oauthApp: id }), { status: 409 }));
+      }
       save({ ...current, secrets: { ...current.secrets, oauth: { ...current.secrets.oauth, pending: true } } });
       return ok({ authorizationUrl: `https://auth.${id}.com/authorize?state=abc`, redirectUri: REDIRECT });
     }
@@ -294,6 +303,51 @@ test("connect (OAuth): a blocked window offers the sign-in link instead", async 
   await flush();
   expect(document.body.textContent).toContain("Your browser blocked the sign-in window.");
   expect(byText(/Open sign-in page/)).toBeTruthy();
+});
+
+test("a registration refusal shows the provider message and can be retried with a shared OAuth app", async () => {
+  installFetch();
+  server.registrationFailure = "Linear did not accept the OAuth client registration (invalid_client_metadata: Client approval is required).";
+  vi.spyOn(window, "open").mockImplementation(() => ({ closed: false, location: { href: "" }, close() {} }) as unknown as Window);
+  await renderPage();
+  await click(container.querySelector('[aria-label="Connect Linear"]'));
+  await flush();
+  expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain(server.registrationFailure);
+
+  await click(inDialog("Set up OAuth app"));
+  await type(inputByLabel("Client ID"), "approved-client");
+  await click(inDialog("Save and continue"));
+  await flush();
+  await click(inDialog("Connect"));
+  await flush();
+
+  expect(server.calls.find((c) => c.method === "PUT")?.path).toBe("/oauth-apps/linear");
+  expect(server.calls.find((c) => c.method === "PATCH")?.body).toEqual({ auth: { type: "oauth", oauth: { app: "linear" } } });
+  expect(document.body.textContent).toContain("Waiting for you to sign in to Linear");
+});
+
+test("a Figma connector created before the catalog change offers OAuth app setup", async () => {
+  const figma = entry("figma", "Figma", "Design", { auth: "oauth_preregistered", oauth: { app: "figma" } });
+  server.catalog = [figma];
+  server.connectors = [connector("figma")];
+  installFetch();
+  vi.spyOn(window, "open").mockImplementation(() => null);
+  await renderPage();
+  await act(async () => {
+    byText(/^Browse/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  });
+  expect(container.querySelector('[data-testid="catalog-card-figma"]')?.textContent).toContain("Needs setup");
+  await click(container.querySelector('[aria-label="Set up Figma"]'));
+  expect(document.body.textContent).toContain("One-time setup");
+  expect(server.calls.some((c) => c.path === "/figma/oauth/start")).toBe(false);
+  await type(inputByLabel("Client ID"), "figma-approved");
+  await type(inputByLabel("Client secret (if issued)"), "figma-secret");
+  await click(inDialog("Save and continue"));
+  await flush();
+  await click(inDialog("Connect"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PUT")?.path).toBe("/oauth-apps/figma");
+  expect(server.calls.find((c) => c.method === "PATCH")?.body).toEqual({ auth: { type: "oauth", oauth: { app: "figma" } } });
 });
 
 test("needs setup: Google's OAuth app is saved with the exact redirect URI shown, then connect", async () => {
