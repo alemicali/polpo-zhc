@@ -31,9 +31,9 @@ export type ComputerStatus =
   | "running" | "stopped" | "paused" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
 
 export interface ComputerLifecycle {
-  /** Stop (Daytona container) or pause (E2B, Daytona VM) after this many minutes without use. Default 15. */
+  /** Stop (Daytona v0 container) or pause (E2B, Daytona v0 VM, Daytona v2) after this many minutes without use. Default 15. */
   idleStopMinutes?: number;
-  /** Daytona: archive after this many days stopped (disk kept in object storage, not billed). Default: Daytona's (7). */
+  /** Daytona v0: archive after this many days stopped (disk kept in object storage, not billed). Default: Daytona's (7). Ignored on v2. */
   autoArchiveDays?: number;
 }
 

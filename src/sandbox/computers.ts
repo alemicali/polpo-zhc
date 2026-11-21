@@ -8,7 +8,8 @@
  *   process and across the task runners, with a lock file); commands run concurrently.
  * - Kept warm while used: every command or file operation touches it (lastUsedAt, and the
  *   provider's own idle timer); after lifecycle.idleStopMinutes without use the server stops it
- *   (Daytona container) or pauses it (E2B, Daytona VM class). It is NEVER deleted automatically:
+ *   (Daytona v0 container) or pauses it (E2B, Daytona v0 VM class, Daytona v2: always a Linux VM,
+ *   memory kept). It is NEVER deleted automatically:
  *   only reset (delete + recreate) and delete, both asked for by a person.
  * - The working directory is not wiped between runs (see remote.ts: computers skip the reset).
  * - Runtime state (status, remote id, last use, uptime as a rough cost signal) lives in
@@ -60,7 +61,13 @@ const TOUCH_EVERY_MS = 30_000;
 /** While a command runs, it keeps the computer in use this often. */
 const HEARTBEAT_MS = 60_000;
 
-/** Provider states as computer statuses. */
+/** The provider-side name of a computer's machine (Daytona v2 get-or-create): stable per instance and id. */
+export function computerMachineName(labelValue: string): string {
+  const slug = labelValue.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `polpo-computer-${slug}`.slice(0, 63);
+}
+
+/** Provider states as computer statuses (Daytona v0 and v2 share most names). */
 export function computerStatusOf(provider: RemoteSandboxProvider, state: string | undefined): ComputerStatus {
   const s = String(state ?? "").toLowerCase();
   if (provider === "e2b") return s === "running" ? "running" : s === "paused" ? "paused" : s ? "unknown" : "missing";
@@ -69,7 +76,7 @@ export function computerStatusOf(provider: RemoteSandboxProvider, state: string 
     case "stopped": return "stopped";
     case "paused": return "paused";
     case "archived": return "archived";
-    case "creating": case "pending_build": case "building_snapshot": case "pulling_snapshot": return "creating";
+    case "queued": case "creating": case "pending_build": case "building_snapshot": case "pulling_snapshot": return "creating";
     case "starting": case "resuming": case "restoring": return "starting";
     case "stopping": case "pausing": case "archiving": return "stopping";
     case "error": case "build_failed": return "error";
@@ -228,14 +235,22 @@ export class ComputerManager {
     try {
       const [found] = await this.machines(c);
       if (found) {
-        if (computerStatusOf(provider, found.state) !== "running") await this.setStatus(c, "starting", { remoteId: found.remoteId });
+        const wasRunning = computerStatusOf(provider, found.state) === "running";
+        if (!wasRunning) await this.setStatus(c, "starting", { remoteId: found.remoteId });
         const driver = await adapter.connect(found.remoteId, { timeoutMs: idle * 60_000 });
+        // where the provider can change it (Daytona v2), a computer follows its current network rule
+        // when it starts or resumes (not on every check of a running one)
+        if (!wasRunning && adapter.updateNetwork) {
+          await adapter.updateNetwork(driver.remoteId, sandbox.network).catch((err) => onWarning?.(`Could not apply the computer's network rule: ${(err as Error).message}`));
+        }
         await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: new Date(this.now()).toISOString(), ...(found.createdAt ? { createdAt: found.createdAt } : {}) });
         return driver;
       }
       await this.setStatus(c, "creating");
       const driver = await adapter.create({
         sandbox, labels: this.labels(c.id), lifetimeMinutes: idle, keep: true, onWarning, onProgress,
+        // Daytona v2: a stable name makes the create get-or-create (v0 and E2B ignore it)
+        name: computerMachineName(this.labelValue(c.id)),
         persistent: { idleStopMinutes: idle, ...(c.lifecycle?.autoArchiveDays ? { autoArchiveDays: c.lifecycle.autoArchiveDays } : {}) },
       });
       const now = new Date(this.now()).toISOString();

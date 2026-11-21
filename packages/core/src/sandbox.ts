@@ -150,6 +150,61 @@ export interface SandboxSettings {
 export type RemoteSandboxProvider = "daytona" | "e2b";
 export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["daytona", "e2b"];
 
+// ── Daytona API versions ─────────────────────────────────────────────────
+
+/**
+ * Which Daytona service `providers.daytona` talks to:
+ * - "v0" (default, what every instance used so far): https://app.daytona.io/api (or a custom
+ *   `apiUrl`, e.g. self-hosted), organization API keys, `snapshot` images, container or linux-vm
+ *   class depending on the snapshot.
+ * - "v2": Daytona's new service (https://api.daytona.com, Daytona Cloud only, no custom URL),
+ *   project API keys, registered `image`s, and every sandbox is a Linux VM: it pauses (memory and
+ *   processes kept) and resumes; it is never "stopped".
+ */
+export type DaytonaApiVersion = "v0" | "v2";
+export const DAYTONA_API_VERSIONS: readonly DaytonaApiVersion[] = ["v0", "v2"];
+/** The class every Daytona v2 sandbox Polpo creates has (v2 `create()` makes Linux VMs only). */
+export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
+/**
+ * The runner image (scripts/build-sandbox-images.mjs --provider daytona-v2) a v2 sandbox is
+ * created from when `providers.daytona.image` is not set. The suffix is the recipe revision: it
+ * changes only when the image contents change, not with every Polpo release.
+ */
+export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-1";
+
+/** The Daytona API version of provider options (settings.sandbox.providers.daytona). */
+export function daytonaApiVersion(options: Record<string, unknown> | undefined): DaytonaApiVersion {
+  return options?.api === "v2" ? "v2" : "v0";
+}
+
+/**
+ * Problems with settings.sandbox.providers.daytona (empty when fine). `where` prefixes the
+ * messages. Unknown keys are left alone (other options live there too).
+ */
+export function daytonaProviderErrors(raw: unknown, where = "settings.sandbox.providers.daytona"): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw)) return [`${where} must be an object`];
+  const r = raw as Record<string, unknown>;
+  const errors: string[] = [];
+  if (r.api !== undefined && r.api !== null && !(DAYTONA_API_VERSIONS as readonly unknown[]).includes(r.api)) {
+    errors.push(`${where}.api must be "v0" (app.daytona.io, the default) or "v2" (Daytona's new service, Linux VMs)`);
+  }
+  for (const key of ["apiUrl", "target", "region", "image", "snapshot"] as const) {
+    if (r[key] !== undefined && r[key] !== null && typeof r[key] !== "string") errors.push(`${where}.${key} must be a string`);
+  }
+  if (r.api === "v2") {
+    if (typeof r.apiUrl === "string" && r.apiUrl.trim()) {
+      errors.push(`${where}.apiUrl: Daytona v2 only talks to Daytona Cloud (https://api.daytona.com) and takes no API URL. Remove apiUrl, or keep api "v0" for a custom or self-hosted Daytona`);
+    }
+    for (const key of ["class", "sandboxClass"] as const) {
+      if (r[key] !== undefined && r[key] !== null && r[key] !== DAYTONA_V2_SANDBOX_CLASS) {
+        errors.push(`${where}.${key}: Daytona v2 sandboxes are always Linux VMs ("${DAYTONA_V2_SANDBOX_CLASS}")`);
+      }
+    }
+  }
+  return errors;
+}
+
 // Isolation, lifecycle and volume selection: open Polpo's runtime-sandbox.ts (copied as is) is
 // the source of truth for the names, the validation and how levels combine.
 export type {
