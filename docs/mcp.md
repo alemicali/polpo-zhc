@@ -157,6 +157,19 @@ Group chats of people and agents (the dashboard's groups).
 
 Bot tokens, SMTP passwords and API keys are set up in the dashboard (`setup_url`), never through MCP.
 
+### computers (on by default; changes need `polpo:admin`)
+
+Computers are persistent machines agents work on (Daytona or E2B; see `docs/computers.md`).
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_computers_list` | "host" (this server) and each computer with its live status (running, stopped, paused, archived, creating, error; missing = not created yet), last use, uptime and the agents using it; with `id`, one computer. | read-only |
+| `polpo_computer_save` | Create a computer (`kind` needed) or change one (only the fields given; `null` clears). `start: true` creates the machine now; otherwise it is created on first use. | write, idempotent |
+| `polpo_computer_control` | `start`, `stop`, `restart`, or `reset` (delete the machine and create a new one: needs `confirm: true`). | destructive, open world |
+| `polpo_computer_delete` | Delete a computer and its machine (`confirm: true`); refused while it is an agent's default. | destructive |
+
+An agent's computer is set with `polpo_agent_update` (`defaultComputer`, `computers`).
+
 ### Toolsets off by default
 
 Enable them with `settings.mcp.toolsets` / `POLPO_MCP_TOOLSETS` (e.g. `default,brain,vault`) or `all`; see [Toolsets](#toolsets).
@@ -211,7 +224,7 @@ An instance chooses the toolsets it offers:
 - **`settings.mcp.toolsets`** in `.polpo/polpo.json`, e.g. `{ "settings": { "mcp": { "toolsets": ["default", "admin"] } } }`;
 - **`POLPO_MCP_TOOLSETS`** in the environment (comma-separated; it wins over the settings).
 
-Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 90 tools) or `all`. Without either, the default toolsets are offered.
+Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, `computers`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 95 tools) or `all`. Without either, the default toolsets are offered.
 
 For example, the defaults plus the company brain and the vault: `POLPO_MCP_TOOLSETS=default,brain,vault`.
 
@@ -231,7 +244,7 @@ What a client does through MCP is recorded as the authenticated principal, in ev
 | A dashboard session | the person's email |
 | A server without auth (localhost) | `mcp` |
 
-Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team, the configuration, skills, connectors, channels and rules, learning, and the `vault` and `admin` toolsets (reads too), `polpo:admin`. Sending a message (`polpo_message_send`) needs `polpo:work`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
+Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team, the configuration, skills, connectors, channels and rules, computers, learning, and the `vault` and `admin` toolsets (reads too), `polpo:admin`. Sending a message (`polpo_message_send`) needs `polpo:work`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
 
 ## The agent card (MCP App)
 
