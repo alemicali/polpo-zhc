@@ -1,4 +1,4 @@
-import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
+import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
@@ -417,6 +417,9 @@ function parseSettings(raw: any): PolpoSettings {
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
   const compaction = normalizeCompactionSettings(raw?.compaction);
   if (compaction) settings.compaction = compaction;
+  // Daytona's API version and its options (v2 takes no API URL): refused with a clear message
+  const daytonaErrors = daytonaProviderErrors(raw?.sandbox?.providers?.daytona);
+  if (daytonaErrors.length) throw new Error(daytonaErrors.join("; "));
   const sandbox = normalizeSandboxSettings(raw?.sandbox);
   if (sandbox) settings.sandbox = sandbox;
 

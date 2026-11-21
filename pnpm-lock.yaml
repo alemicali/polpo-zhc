@@ -19,6 +19,9 @@ importers:
       '@daytona/sdk':
         specifier: 0.233.0
         version: 0.233.0
+      '@daytona/sdk-v2':
+        specifier: npm:@daytona/sdk@2.1.0
+        version: '@daytona/sdk@2.1.0(@opentelemetry/api@1.10.0)'
       '@earendil-works/pi-agent-core':
         specifier: ^1.0.4
         version: 1.0.4(@aws-sdk/credential-provider-node@3.972.98)(@modelcontextprotocol/sdk@1.32.2(zod@4.3.6))(@smithy/signature-v4@5.7.5)(undici@8.11.2)(ws@8.20.0)(zod@4.3.6)
@@ -1482,6 +1485,15 @@ packages:
 
   '@daytona/sdk@0.233.0':
     resolution: {integrity: sha512-W3xC0+p7G4ZgtPfPOX/KLbmpg+TYyn2jo0lYIvkImk9bc5B43jZbUJTP7pChbHZG0PLxgBJDLb3H9dNew+BmSg==}
+
+  '@daytona/sdk@2.1.0':
+    resolution: {integrity: sha512-sNjP1BZZDgLbYKYPqk/PWs5rAQiyJUdDpUJJ/BwEz3sFhkg7S75aNGsmw4VtMb7tmZcPBWXgU1PyUIp3HkZQ/A==}
+    engines: {node: '>=22.15.0'}
+    peerDependencies:
+      '@opentelemetry/api': ^1.9.0
+    peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
 
   '@daytona/toolbox-api-client@0.233.0':
     resolution: {integrity: sha512-VA2BLDAXKPG5AioLOmhDOAz4s40yL7pS9+79+0k+zDLaS6gyiW94o8SFflXiqqYpplAEN3+YTcS9DXuoYGAcdQ==}
@@ -6301,15 +6313,6 @@ packages:
   flatted@3.3.3:
     resolution: {integrity: sha512-GX+ysw4PBCz0PzosHDepZGANEuFCMLrnRTiEy9McGjmkCQYwRq4A/X786G/fjM/+OjsWSU1ZrY5qyARZmO/uwg==}
 
-  follow-redirects@1.16.0:
-    resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
-    engines: {node: '>=4.0'}
-    peerDependencies:
-      debug: '*'
-    peerDependenciesMeta:
-      debug:
-        optional: true
-
   follow-redirects@1.16.3:
     resolution: {integrity: sha512-toOSoqN6d51Wjf1aOFJYcoVv1aND9rj/CwjLU0Vz40oDuSpWDayCeKe4JpL5NL0WdFvoOOCI3BRo69HahjbR1A==}
     engines: {node: '>=4.0'}
@@ -9934,6 +9937,9 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
+  tslib@2.9.1:
+    resolution: {integrity: sha512-a4Ux9VKuIMHsOS7ENbEq6hK2ZGYIT27Rtl0E4eD9KqwxhKiQeMZE/9xb3IdYwWaSOyIBQLExhQgXDTYoiCxnWA==}
+
   tsx@4.21.0:
     resolution: {integrity: sha512-5C1sg4USs1lfG0GFb2RLXsdpXqBSEhAaA/0kPL01wxzpMqLILNxIxIOKiILz+cdg/pLnOUxFYOR5yhHU666wbw==}
     engines: {node: '>=18.0.0'}
@@ -12098,6 +12104,42 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@daytona/sdk@2.1.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@aws-sdk/client-s3': 3.1175.0
+      '@aws-sdk/lib-storage': 3.1175.0(@aws-sdk/client-s3@3.1175.0)
+      '@daytona/analytics-api-client': 0.233.0
+      '@daytona/api-client': 0.233.0
+      '@daytona/toolbox-api-client': 0.233.0
+      '@iarna/toml': 2.2.5
+      '@opentelemetry/exporter-trace-otlp-http': 0.301.2(@opentelemetry/api@1.10.0)
+      '@opentelemetry/instrumentation-http': 0.301.2(@opentelemetry/api@1.10.0)
+      '@opentelemetry/otlp-exporter-base': 0.301.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/resources': 3.1.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/sdk-node': 0.301.2(@opentelemetry/api@1.10.0)
+      '@opentelemetry/sdk-trace': 3.1.1(@opentelemetry/api@1.10.0)
+      '@opentelemetry/semantic-conventions': 1.45.0
+      '@types/ws': 8.18.1
+      axios: 1.21.1
+      busboy: 1.6.0
+      expand-tilde: 2.0.2
+      form-data: 4.0.6
+      isomorphic-ws: 5.0.0(ws@8.22.2)
+      pathe: 2.0.3
+      shell-quote: 1.12.0
+      socket.io-client: 4.8.4
+      tar: 7.5.22
+      tinyglobby: 0.2.17
+      tslib: 2.9.1
+      ws: 8.22.2
+    optionalDependencies:
+      '@opentelemetry/api': 1.10.0
+    transitivePeerDependencies:
+      - bufferutil
+      - debug
+      - supports-color
+      - utf-8-validate
+
   '@daytona/toolbox-api-client@0.233.0':
     dependencies:
       axios: 1.21.1
@@ -12753,7 +12795,7 @@ snapshots:
       google-auth-library: 10.6.1
       p-retry: 4.6.2
       protobufjs: 7.6.5
-      ws: 8.20.0
+      ws: 8.22.2
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.32.2(zod@4.3.6)
     transitivePeerDependencies:
@@ -14551,7 +14593,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
       estree-walker: 2.0.2
-      picomatch: 4.0.3
+      picomatch: 4.0.7
     optionalDependencies:
       rollup: 2.80.0
 
@@ -17641,9 +17683,6 @@ snapshots:
 
   flatted@3.3.3: {}
 
-  follow-redirects@1.16.0:
-    optional: true
-
   follow-redirects@1.16.3: {}
 
   for-each@0.3.5:
@@ -18185,7 +18224,7 @@ snapshots:
   http-proxy@1.18.1:
     dependencies:
       eventemitter3: 4.0.7
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.3
       requires-port: 1.0.0
     transitivePeerDependencies:
       - debug
@@ -19846,7 +19885,7 @@ snapshots:
       proc-log: 5.0.0
       semver: 7.7.4
       tar: 7.5.22
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
       which: 5.0.0
     transitivePeerDependencies:
       - supports-color
@@ -22238,6 +22277,8 @@ snapshots:
   tslib@2.6.2: {}
 
   tslib@2.8.1: {}
+
+  tslib@2.9.1: {}
 
   tsx@4.21.0:
     dependencies:

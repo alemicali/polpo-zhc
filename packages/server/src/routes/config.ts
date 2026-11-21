@@ -1,4 +1,4 @@
-import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
+import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
@@ -322,6 +322,11 @@ export function configRoutes(getDeps: () => {
   app.openapi(updateSettingsRoute, async (c) => {
     const deps = getDeps();
     const body = c.req.valid("json");
+    // Daytona API version and options (v2: no API URL): refused before anything is saved
+    if (body.sandbox && typeof body.sandbox === "object") {
+      const errors = daytonaProviderErrors((body.sandbox as { providers?: { daytona?: unknown } }).providers?.daytona);
+      if (errors.length) return c.json({ ok: false, error: errors.join("; ") }, 400);
+    }
     let egressProxies: Record<string, string> | null | undefined;
     if (body.egressProxies !== undefined) {
       try {
