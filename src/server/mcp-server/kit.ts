@@ -74,6 +74,8 @@ export const TOOLSETS = {
   artifacts: { default: true, description: "Artifacts: documents, html dashboards and designs, diagrams" },
   data: { default: true, description: "Structured data sources and queries" },
   files: { default: true, description: "The instance's files: browse, search, read, write" },
+  team: { default: true, description: "Agents' configuration: read, create, update (changes need admin scope)" },
+  config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
 
@@ -102,7 +104,7 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "team"]);
 
 /** The scope a tool needs: reads "polpo:read" (the admin toolset "polpo:admin"), writes "polpo:work" or, for the instance's own setup, "polpo:admin". */
 export function scopeFor(toolset: ToolsetName, annotations: ToolAnnotations): string {

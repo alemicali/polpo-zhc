@@ -226,7 +226,7 @@ export const UpdateSettingsSchema = z.object({
   branding: z.object({
     productName: z.string().trim().max(80).optional(),
     tagline: z.string().trim().max(120).optional(),
-    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo")]).optional(),
+    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
   }).optional(),
 });
 

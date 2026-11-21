@@ -112,11 +112,13 @@ describe("Polpo MCP server", () => {
       "polpo_ask", "polpo_agent_chat", "polpo_answer",
       "polpo_agents_list", "polpo_agent_show", "agent_card_refresh", "agent_intention_decide",
       "polpo_approvals_list", "polpo_approval_resolve",
-      "polpo_tasks_list", "polpo_task_get", "polpo_task_create",
-      "polpo_missions_list", "polpo_mission_get",
+      "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
+      "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run",
       "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create",
       "polpo_data_sources_list", "polpo_data_query",
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
+      "polpo_agent_get", "polpo_agent_create", "polpo_agent_update",
+      "polpo_config_get", "polpo_config_update", "polpo_branding_get", "polpo_branding_update", "polpo_providers_list", "polpo_models_list",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.polpo_file_write!.annotations).toMatchObject({ destructiveHint: true, title: "Write a file" });
@@ -125,7 +127,7 @@ describe("Polpo MCP server", () => {
     expect(byName.polpo_answer!.annotations).toMatchObject({ destructiveHint: true });
     // every tool that returns data declares it; every parameter is described
     for (const t of tools) {
-      if (!["polpo_file_read", "polpo_agent_show", "agent_card_refresh", "agent_intention_decide"].includes(t.name)) expect(t.outputSchema, t.name).toBeTruthy();
+      if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
       for (const [param, schema] of Object.entries(t.inputSchema.properties ?? {})) expect(schema.description, `${t.name}.${param}`).toBeTruthy();
     }
   });
@@ -274,17 +276,17 @@ describe("Polpo MCP server", () => {
 
 describe("toolsets and scopes", () => {
   it("resolves configured toolsets", () => {
-    expect(resolveToolsets()).toEqual(["core", "tasks", "missions", "artifacts", "data", "files"]);
+    expect(resolveToolsets()).toEqual(["core", "tasks", "missions", "artifacts", "data", "files", "team", "config"]);
     expect(resolveToolsets("core, admin")).toEqual(["core", "admin"]);
     expect(resolveToolsets(undefined, ["all"])).toContain("admin");
-    expect(resolveToolsets("default,admin")).toEqual(["core", "tasks", "missions", "artifacts", "data", "files", "admin"]);
+    expect(resolveToolsets("default,admin")).toEqual(["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "admin"]);
     expect(resolveToolsets("nonsense")).toEqual(resolveToolsets());
     expect(resolveToolsets("tasks", ["admin"])).toEqual(["tasks"]); // the env wins over settings
   });
 
   it("offers only the configured toolsets", async () => {
     const { api } = fakeApi();
-    expect(await toolNames({ api, version: "x", toolsets: ["tasks"] })).toEqual(["polpo_tasks_list", "polpo_task_get", "polpo_task_create"]);
+    expect(await toolNames({ api, version: "x", toolsets: ["missions"] })).toEqual(["polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run"]);
     const withAdmin = await toolNames({ api, version: "x", toolsets: ["core", "admin"] });
     expect(withAdmin).toContain("polpo_api_get");
     expect(withAdmin).toContain("polpo_agent_show");

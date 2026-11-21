@@ -325,6 +325,17 @@ export function configRoutes(getDeps: () => {
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
+      if (body.branding !== undefined) {
+        // only the fields given change; an empty string restores the default
+        const branding: Record<string, string | undefined> = { ...(settings.branding ?? {}) };
+        for (const key of ["productName", "tagline", "logoUrl"] as const) {
+          const value = body.branding[key];
+          if (value === undefined) continue;
+          if (value === "") delete branding[key];
+          else branding[key] = value;
+        }
+        settings.branding = Object.keys(branding).some((k) => branding[k] !== undefined) ? branding : undefined;
+      }
       config.settings = settings;
     });
 

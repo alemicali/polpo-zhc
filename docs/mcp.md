@@ -23,12 +23,51 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_agent_show` | An agent's card: in Claude and ChatGPT an interactive card (see below), elsewhere text. |
 | `polpo_approvals_list`, `polpo_approval_resolve` | Decide on requests that wait for a person. |
 
-### tasks, missions, artifacts, data, files (on by default)
+### tasks (on by default)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_tasks_list` | Tasks by status, agent, mission, group or words; paged. | read-only |
+| `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies and its latest activity. | read-only |
+| `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). | write |
+| `polpo_task_update` | Change the description, agent, retries or side-effects flag, or start a draft; returns what changed. | write, idempotent |
+| `polpo_task_retry` | Run a failed task again. | write |
+| `polpo_task_kill` | Stop a running or waiting task (`confirm: true`). | destructive |
+| `polpo_task_direct` | Steer a running task, add a follow-up, or continue a finished one. | write |
+| `polpo_task_wait` | Wait until a task is done, failed, in review or waiting for approval (or given statuses), at most 55 s; returns its state, so call again to keep waiting. | read-only |
+| `polpo_task_logs` | The activity of the task's runs, newest first, paged backwards. | read-only |
+
+### missions (on by default)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_missions_list`, `polpo_mission_get` | Missions; one with its plan, its tasks and their status counts. | read-only |
+| `polpo_mission_create` | A mission from a structured plan (tasks with `assignTo` and `dependsOn` by title; checkpoints, delays, quality gates), validated as the executor will; a draft, or started with `run: true`. | write |
+| `polpo_mission_update` | Rename, or replace its tasks, checkpoints, delays or quality gates (not while it runs). | write, idempotent |
+| `polpo_mission_run` | Start a draft, scheduled or finished mission, or resume a paused one. | write, open world |
+| `polpo_mission_abort` | Stop a running mission and its unfinished tasks (`confirm: true`; without it, it says what would stop). | destructive |
+| `polpo_mission_wait` | Wait until it is completed, failed, cancelled or paused, at most 55 s; returns the status and task counts. | read-only |
+| `polpo_playbooks_list`, `polpo_playbook_run` | Reusable mission templates, run with their parameters. | read-only / write |
+
+`polpo_task_wait` and `polpo_mission_wait` send `notifications/progress` when the client passes a `progressToken`: that request is then answered as an event stream.
+
+### team and config (on by default; changes need `polpo:admin`)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_agent_get` | An agent's configuration: role, model, instructions, tools, skills, identity. | read-only |
+| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity or manager. | write |
+| `polpo_config_get` | Settings (Polpo's model and fallbacks, image model, reasoning, retries…), branding, and a summary of notification channels, rules and approval gates. Never secrets. | read-only |
+| `polpo_config_update` | Polpo's model (and fallbacks), the image model, the reasoning level; models are checked against the catalog. Returns what changed. | write, idempotent |
+| `polpo_branding_get`, `polpo_branding_update` | Product name, tagline and logo. The logo comes from a public https URL (fetched by the server: never from private addresses, also after redirects; at most 4 MB), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF, checked by its bytes. | read-only / write, idempotent |
+| `polpo_providers_list`, `polpo_models_list` | LLM providers (with or without a key) and the model catalog (`provider:model`). | read-only |
+
+**Provider API keys never go through MCP.** `polpo_providers_list` returns `setup_url`, the dashboard's Providers page, where the person enters the key. (The dashboard's colours and theme are chosen in each browser, so they are not part of the instance's branding.)
+
+### artifacts, data, files (on by default)
 
 | Tool | What it does |
 |---|---|
-| `polpo_tasks_list`, `polpo_task_get`, `polpo_task_create` | Follow and create tasks (filter by status, agent, words). |
-| `polpo_missions_list`, `polpo_mission_get` | Missions and their plans. |
 | `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create` | Documents, html dashboards and designs, diagrams. |
 | `polpo_data_sources_list`, `polpo_data_query` | Structured data. |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
@@ -58,6 +97,13 @@ A Polpo turn can stop to ask the person something, or to show something that nee
 
 Actions that cannot be undone need an explicit `confirm: true` (deleting files, executing a mission plan, sending a message); without it the tool explains what would happen and asks to confirm. Clients also ask before tools marked `destructiveHint`.
 
+### Examples
+
+- **Plan and run a mission:** `polpo_mission_create { name: "Launch", tasks: [{ title: "Write copy", description: "…", assignTo: "writer" }, { title: "Review", description: "…", dependsOn: ["Write copy"] }] }` → `polpo_mission_run { id }` → `polpo_mission_wait { id }` (again until `reached: true`) → `polpo_mission_get { id }`.
+- **Delegate in words:** `polpo_ask { message: "send the weekly report to the team" }` → `status: "needs_input"`, `pending.kind: "questions"` → ask the person → `polpo_answer { session_id, answers: [{ question_id: "where", selected: ["Slack"] }] }`.
+- **Follow a task:** `polpo_task_create { … }` → `polpo_task_wait { id, timeout_seconds: 50 }` → if it failed, `polpo_task_get { id }` (assessment and activity), `polpo_task_update` and `polpo_task_retry`.
+- **Rebrand the dashboard:** `polpo_branding_update { product_name: "Shoplix", logo: { url: "https://cdn.example.com/logo.png" } }`.
+
 ## Toolsets
 
 An instance chooses the toolsets it offers:
@@ -65,7 +111,9 @@ An instance chooses the toolsets it offers:
 - **`settings.mcp.toolsets`** in `.polpo/polpo.json`, e.g. `{ "settings": { "mcp": { "toolsets": ["default", "admin"] } } }`;
 - **`POLPO_MCP_TOOLSETS`** in the environment (comma-separated; it wins over the settings).
 
-Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `admin`), `default` (every toolset except `admin`) or `all`. Without either, the default toolsets are offered.
+Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `admin`), `default` (every toolset except `admin`) or `all`. Without either, the default toolsets are offered.
+
+For example, an instance that only lets clients follow work: `POLPO_MCP_TOOLSETS=core,tasks,missions`.
 
 A connector URL can narrow them further, never widen them: `https://<host>/mcp?toolsets=core,tasks`.
 
@@ -81,7 +129,7 @@ What a client does through MCP is recorded as the authenticated principal, in ev
 | A dashboard session | the person's email |
 | A server without auth (localhost) | `mcp` |
 
-Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`, the admin toolset `polpo:admin`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
+Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team and the configuration, and the admin toolset, `polpo:admin`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
 
 ## The agent card (MCP App)
 

@@ -221,6 +221,68 @@ describe("the admin toolset", () => {
       delete process.env.POLPO_MCP_TOOLSETS;
     }
     const widened = await callAs(`Bearer ${MCP_KEY}`, "tools/list", {}, "/mcp?toolsets=admin,tasks");
-    expect((widened.tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["polpo_tasks_list", "polpo_task_get", "polpo_task_create"]);
+    const widenedNames = (widened.tools as Array<{ name: string }>).map((t) => t.name);
+    expect(widenedNames.length).toBeGreaterThan(0);
+    expect(widenedNames.every((n) => n.startsWith("polpo_task"))).toBe(true); // tasks only: admin is not configured
+  });
+});
+
+describe("tasks, missions and configuration on a real instance", () => {
+  const tool = async (name: string, args: Record<string, unknown> = {}) => callAs(`Bearer ${MCP_KEY}`, "tools/call", { name, arguments: args });
+
+  it("creates, updates, waits for and stops a task", async () => {
+    const created = await tool("polpo_task_create", { title: "Summarize the inbox", description: "Three bullet points", assignTo: "agent-1", draft: true });
+    expect(created.isError).toBeFalsy();
+    const id = created.structuredContent.task.id as string;
+    expect(created.structuredContent.task.status).toBe("draft");
+    const updated = await tool("polpo_task_update", { id, description: "Five bullet points", start: true });
+    expect(updated.structuredContent.changed).toEqual(["description", "status"]);
+    const waited = await tool("polpo_task_wait", { id, until: ["done"], timeout_seconds: 1 });
+    expect(waited.structuredContent).toMatchObject({ timed_out: true, task: { id } });
+    expect((await tool("polpo_task_get", { id })).structuredContent.task.description).toBe("Five bullet points");
+    expect((await tool("polpo_tasks_list", { text: "inbox" })).structuredContent.items.map((t: { id: string }) => t.id)).toContain(id);
+    expect((await tool("polpo_task_kill", { id })).isError).toBe(true);
+    expect((await tool("polpo_task_kill", { id, confirm: true })).structuredContent).toMatchObject({ id, killed: true });
+    expect((await tool("polpo_task_get", { id })).structuredContent.task.status).toBe("failed");
+  });
+
+  it("creates a mission from a plan, reads it and aborts it with confirm", async () => {
+    const bad = await tool("polpo_mission_create", { name: "Launch", tasks: [{ title: "A", description: "a", dependsOn: ["Nope"] }, { title: "A", description: "b" }] });
+    expect(bad.isError).toBe(true);
+    const made = await tool("polpo_mission_create", { name: "Launch", goal: "Ship the page", tasks: [
+      { title: "Write copy", description: "The landing copy", assignTo: "agent-1" },
+      { title: "Review copy", description: "Check it", assignTo: "agent-1", dependsOn: ["Write copy"] },
+    ] });
+    expect(made.isError).toBeFalsy();
+    const id = made.structuredContent.mission.id as string;
+    const got = await tool("polpo_mission_get", { id });
+    expect(got.structuredContent).toMatchObject({ mission: { name: "Launch", status: "draft" }, plan: { tasks: [{ title: "Write copy" }, { title: "Review copy" }] } });
+    const renamed = await tool("polpo_mission_update", { id, name: "Launch v2" });
+    expect(renamed.structuredContent).toMatchObject({ changed: ["name"], mission: { name: "Launch v2" } });
+    expect((await tool("polpo_mission_run", { id })).isError).toBeFalsy();
+    expect((await tool("polpo_mission_get", { id })).structuredContent.tasks).toHaveLength(2);
+    expect((await tool("polpo_mission_abort", { id })).isError).toBe(true);
+    expect((await tool("polpo_mission_abort", { id, confirm: true })).structuredContent.aborted_tasks).toBe(2);
+  });
+
+  it("changes the settings and the branding, logo included", async () => {
+    const before = await tool("polpo_config_get");
+    expect(before.structuredContent.project).toBe("mcp-public");
+    const reasoning = await tool("polpo_config_update", { reasoning: "high" });
+    expect(reasoning.structuredContent.changed).toEqual(["reasoning"]);
+    expect((await tool("polpo_config_get")).structuredContent.settings.reasoning).toBe("high");
+
+    const named = await tool("polpo_branding_update", { product_name: "Shoplix", tagline: "Agents for shops" });
+    expect(named.structuredContent).toMatchObject({ changed: ["productName", "tagline"], branding: { productName: "Shoplix", tagline: "Agents for shops" } });
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+    const logo = await tool("polpo_branding_update", { logo: { base64: png.toString("base64"), mime_type: "image/png" } });
+    expect(logo.structuredContent.branding.logoUrl).toBe("/api/v1/config/branding/logo");
+    const served = await app.request("/api/v1/config/branding/logo");
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+    // the name stays when only the logo changes; '' restores the default tagline
+    const reset = await tool("polpo_branding_update", { tagline: "" });
+    expect(reset.structuredContent.branding).toEqual({ productName: "Shoplix", logoUrl: "/api/v1/config/branding/logo" });
+    expect((await tool("polpo_providers_list")).structuredContent.setup_url).toBe(`${PUBLIC}/config?section=providers`);
   });
 });

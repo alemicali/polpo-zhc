@@ -1059,6 +1059,10 @@
                     "minimum": 0,
                     "exclusiveMinimum": true
                   },
+                  "maxRetries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
                   "retryPolicy": {
                     "type": "object",
                     "properties": {
@@ -2370,6 +2374,76 @@
         }
       }
     },
+    "/api/v1/missions/checkpoints": {
+      "get": {
+        "tags": [
+          "Missions"
+        ],
+        "summary": "List checkpoints",
+        "responses": {
+          "200": {
+            "description": "List of active checkpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/delays": {
+      "get": {
+        "tags": [
+          "Missions"
+        ],
+        "summary": "List delays",
+        "responses": {
+          "200": {
+            "description": "List of active delays",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/missions/{missionId}": {
       "get": {
         "tags": [
@@ -2675,41 +2749,6 @@
                   },
                   "required": [
                     "ok"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/missions/checkpoints": {
-      "get": {
-        "tags": [
-          "Missions"
-        ],
-        "summary": "List checkpoints",
-        "responses": {
-          "200": {
-            "description": "List of active checkpoints",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "nullable": true
-                      }
-                    }
-                  },
-                  "required": [
-                    "ok",
-                    "data"
                   ]
                 }
               }
@@ -3652,41 +3691,6 @@
                     "ok",
                     "error",
                     "code"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/missions/delays": {
-      "get": {
-        "tags": [
-          "Missions"
-        ],
-        "summary": "List delays",
-        "responses": {
-          "200": {
-            "description": "List of active delays",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "nullable": true
-                      }
-                    }
-                  },
-                  "required": [
-                    "ok",
-                    "data"
                   ]
                 }
               }
@@ -5131,6 +5135,9 @@
                   "browserProfile": {
                     "type": "string"
                   },
+                  "browserEgress": {
+                    "type": "string"
+                  },
                   "sandbox": {
                     "nullable": true
                   },
@@ -5643,6 +5650,9 @@
                     ]
                   },
                   "browserProfile": {
+                    "type": "string"
+                  },
+                  "browserEgress": {
                     "type": "string"
                   },
                   "emailAllowedDomains": {
@@ -9504,6 +9514,12 @@
                             "type": "string",
                             "enum": [
                               "/api/v1/config/branding/logo"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
                             ]
                           }
                         ]
