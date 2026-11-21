@@ -64,8 +64,29 @@ export function effectiveSandbox(req: Pick<WorkspaceRequest, "scope" | "cascade"
   return resolveSandbox(req.cascade, { scope: req.scope, agentTools: req.agentTools, available: availableProviders() });
 }
 
+const PROVIDER_NAMES: Record<SandboxProviderId, string> = { local: "this machine", bwrap: "bubblewrap", docker: "Docker", daytona: "Daytona", e2b: "E2B" };
+
+/** The text shown when a sandbox runs with weaker isolation than its settings ask for. */
+export function isolationFallbackMessage(from: SandboxProviderId, to: SandboxProviderId): string {
+  return `${PROVIDER_NAMES[from]} is not available where this runs (${from === "daytona" || from === "e2b" ? "no API key chosen in Settings → Sandbox" : "not installed"}): commands run in ${PROVIDER_NAMES[to]} on this server instead, which isolates less`;
+}
+
+const loggedFallbacks = new Set<string>();
+
+/** Every run that falls back gets the warning event; the server log gets it once per process. */
+function warnIsolationFallback(from: SandboxProviderId, to: SandboxProviderId, onRemoteEvent?: WorkspaceRequest["onRemoteEvent"]): void {
+  const message = isolationFallbackMessage(from, to);
+  if (!loggedFallbacks.has(`${from}>${to}`)) {
+    loggedFallbacks.add(`${from}>${to}`);
+    console.warn(`[sandbox] ${message}`);
+  }
+  onRemoteEvent?.({ kind: "warning", message });
+}
+
 /** Create the workspace for an already resolved sandbox. Remote providers come with their adapters. */
 export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRequest, "scope" | "cascade" | "agentTools">): Workspace {
+  // the settings chose a provider this server cannot run: resolveSandbox picked a local jail
+  if (sandbox.fallback) warnIsolationFallback(sandbox.fallback.from, sandbox.provider, req.onRemoteEvent);
   const opts: HostWorkspaceOptions = {
     root: req.root, writable: req.writable, readable: req.readable, mounts: hostVolumeMounts(req.volumes), hide: req.hide, sandbox, onNetworkDenied: req.onNetworkDenied,
   };
@@ -78,11 +99,12 @@ export function createWorkspace(sandbox: EffectiveSandbox, req: Omit<WorkspaceRe
       pool: req.pool, syncEachExec: req.syncEachExec, idleSuspendMs: req.idleSuspendMs,
     });
   }
-  // a provider that is not available here: never fall back to weaker isolation, and say so
-  if (sandbox.provider === "daytona" || sandbox.provider === "e2b") {
-    req.onRemoteEvent?.({ kind: "warning", message: `${sandbox.provider === "daytona" ? "Daytona" : "E2B"} is not configured where this run executes: commands run in bubblewrap on this server instead` });
+  // A provider that is not available here falls back to bubblewrap on this server. For a remote
+  // provider (or docker) that is WEAKER isolation than the settings ask for: say so, every time.
+  if (bwrapAvailable()) {
+    warnIsolationFallback(sandbox.provider, "bwrap", req.onRemoteEvent);
+    return new BwrapWorkspace({ ...opts, sandbox: { ...sandbox, provider: "bwrap", fallback: { from: sandbox.provider, reason: "unavailable" } } });
   }
-  if (bwrapAvailable()) return new BwrapWorkspace({ ...opts, sandbox: { ...sandbox, provider: "bwrap" } });
   throw new Error(`Sandbox provider "${sandbox.provider}" is not available on this server`);
 }
 

@@ -105,7 +105,7 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
                 {agent.name}
                 {agent.settings && <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">override</Badge>}
               </Link>
-              <span className="text-muted-foreground"><span className="text-[10px] uppercase tracking-wider mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
+              <span className={agent.task.fallback ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}><span className="text-[10px] uppercase tracking-wider mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
               <span className="text-muted-foreground">
                 <span className="text-[10px] uppercase tracking-wider mr-1.5">chat</span>
                 {agent.chat.provider === agent.task.provider ? "same" : providerLabel(agent.chat.provider)}

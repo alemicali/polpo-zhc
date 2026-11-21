@@ -65,6 +65,8 @@ export interface EffectiveSandbox {
   provider: SandboxProvider;
   network: { mode: SandboxNetworkMode; allow?: string[] };
   resources: { cpus?: number; memoryMb?: number; diskMb?: number; timeoutMin?: number };
+  /** The provider the settings chose is not available on the server: `provider` runs instead (weaker isolation). */
+  fallback?: { from: SandboxProvider; reason: "unavailable" };
 }
 
 export interface SandboxOverview {
@@ -113,7 +115,8 @@ export function describeSandbox(sandbox: EffectiveSandbox): string {
     sandbox.resources.cpus ? `${sandbox.resources.cpus} CPU` : null,
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min` : null,
   ].filter(Boolean).join(", ");
-  return `${providerLabel(sandbox.provider)} · network ${network}${limits ? ` · ${limits}` : ""}`;
+  const fallback = sandbox.fallback ? ` (instead of ${providerLabel(sandbox.fallback.from)}: not available on this server)` : "";
+  return `${providerLabel(sandbox.provider)}${fallback} · network ${network}${limits ? ` · ${limits}` : ""}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

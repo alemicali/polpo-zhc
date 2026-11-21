@@ -8,8 +8,9 @@
  * Daytona create 0.8 s, pause not supported on container sandboxes, stop 0.9 s / start 0.6 s
  * (files kept).
  */
-import { lookup } from "node:dns/promises";
-import type { EffectiveSandbox, RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
+import { randomBytes } from "node:crypto";
+import { isIP } from "node:net";
+import { splitHostPort, type EffectiveSandbox, type RemoteSandboxProvider, type SandboxNetwork } from "@polpo-ai/core/sandbox";
 import { remoteProviderCredentials } from "./remote-providers.js";
 
 export interface RemoteExecResult { exitCode: number; stdout: string; stderr: string; timedOut?: boolean }
@@ -40,6 +41,8 @@ export interface CreateSpec {
   deleteAfterStopMinutes?: number;
   /** True when the VM may outlive this run (pool/warm): it must not be ephemeral. */
   keep: boolean;
+  /** Something requested could not be applied as asked (e.g. resources fixed by the image). */
+  onWarning?: (message: string) => void;
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -58,12 +61,125 @@ export interface RemoteAdapter {
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-/** DNS resolvers Daytona VMs use (/etc/resolv.conf): kept reachable in allowlist mode. */
-const DAYTONA_RESOLVERS = ["1.1.1.1/32", "1.0.0.1/32", "8.8.8.8/32", "100.65.160.1/32"];
+/** A network rule this provider cannot enforce as written: the VM is not created. */
+export class SandboxNetworkConfigError extends Error {
+  constructor(message: string) { super(message); this.name = "SandboxNetworkConfigError"; }
+}
 
-/** Allowlist entries as host names (drop ports). */
-function allowHosts(sandbox: EffectiveSandbox): string[] {
-  return (sandbox.network.allow ?? []).map((a) => a.trim().replace(/:\d+$/, "")).filter(Boolean);
+/** Daytona API limits (https://www.daytona.io/docs/en/network-limits). */
+export const DAYTONA_NETWORK_LIMITS = { cidrs: 10, domains: 100 } as const;
+
+const HOSTNAME = /^(\*\.)?([a-z0-9_]([a-z0-9_-]*[a-z0-9_])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+export interface AllowEntry { kind: "domain" | "ipv4" | "ipv6" | "invalid"; value: string; raw: string }
+
+/** Allowlist entries without ports (remote providers filter by host), classified and deduplicated. */
+export function classifyAllowEntries(allow: string[] | undefined): AllowEntry[] {
+  const out = new Map<string, AllowEntry>();
+  for (const raw of allow ?? []) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const host = splitHostPort(trimmed.toLowerCase()).host.replace(/\.$/, "");
+    const [addr = "", prefix, extra] = host.split("/");
+    let entry: AllowEntry;
+    if (extra === undefined && isIP(addr) === 4 && (prefix === undefined || (/^\d{1,2}$/.test(prefix) && Number(prefix) <= 32))) {
+      entry = { kind: "ipv4", value: prefix === undefined ? `${addr}/32` : host, raw: trimmed };
+    } else if (extra === undefined && isIP(addr) === 6) {
+      entry = { kind: "ipv6", value: host, raw: trimmed };
+    } else if (prefix === undefined && HOSTNAME.test(host)) {
+      entry = { kind: "domain", value: host, raw: trimmed };
+    } else {
+      entry = { kind: "invalid", value: host, raw: trimmed };
+    }
+    if (!out.has(entry.value)) out.set(entry.value, entry);
+  }
+  return [...out.values()];
+}
+
+/**
+ * Daytona network fields for a rule. Host names go to `domainAllowList` (max 100; "*.x" covers
+ * x and its subdomains; Daytona filters by name, so nothing is resolved here and CDN address
+ * changes do not matter); IPv4 entries go to `networkAllowList` (max 10 CIDRs). Daytona takes
+ * only one of the two per sandbox, and neither takes ports or IPv6: whatever it cannot enforce
+ * as written is an error, never a silently shorter list.
+ */
+export function daytonaNetworkParams(network: SandboxNetwork): { networkBlockAll?: true; networkAllowList?: string; domainAllowList?: string } {
+  if (network.mode === "deny") return { networkBlockAll: true };
+  if (network.mode !== "allowlist") return {};
+  const entries = classifyAllowEntries(network.allow);
+  if (!entries.length) return { networkBlockAll: true };
+  const where = "Daytona sandbox network allowlist";
+  const invalid = entries.filter((e) => e.kind === "invalid");
+  if (invalid.length) throw new SandboxNetworkConfigError(`${where}: not a host name or IPv4 address: ${invalid.map((e) => `"${e.raw}"`).join(", ")}`);
+  const ipv6 = entries.filter((e) => e.kind === "ipv6");
+  if (ipv6.length) throw new SandboxNetworkConfigError(`${where}: Daytona does not filter IPv6 addresses (${ipv6.map((e) => e.raw).join(", ")}); use host names or IPv4 addresses`);
+  const domains = entries.filter((e) => e.kind === "domain").map((e) => e.value);
+  const cidrs = entries.filter((e) => e.kind === "ipv4").map((e) => e.value);
+  if (domains.length && cidrs.length) {
+    throw new SandboxNetworkConfigError(`${where}: Daytona accepts host names or IP addresses in one sandbox, not both (${domains.length} host name(s); addresses ${cidrs.join(", ")}). Remove the addresses or the host names, or use E2B`);
+  }
+  if (domains.length > DAYTONA_NETWORK_LIMITS.domains) {
+    throw new SandboxNetworkConfigError(`${where}: ${domains.length} host names, Daytona accepts at most ${DAYTONA_NETWORK_LIMITS.domains} (group them with wildcards such as "*.example.com")`);
+  }
+  if (cidrs.length > DAYTONA_NETWORK_LIMITS.cidrs) {
+    throw new SandboxNetworkConfigError(`${where}: ${cidrs.length} IP addresses or ranges, Daytona accepts at most ${DAYTONA_NETWORK_LIMITS.cidrs} (merge them into CIDR ranges, or use host names)`);
+  }
+  return domains.length ? { domainAllowList: domains.join(",") } : { networkAllowList: cidrs.join(",") };
+}
+
+/**
+ * E2B network options for a rule. E2B filters by host name or address itself (`allowOut` wins
+ * over `denyOut`). "*.x" also lists x: in Polpo a wildcard covers the base domain too.
+ */
+export function e2bNetworkOpts(network: SandboxNetwork): { allowInternetAccess?: false; network?: { allowOut: string[]; denyOut: string[] } } {
+  if (network.mode === "deny") return { allowInternetAccess: false };
+  if (network.mode !== "allowlist") return {};
+  const allowOut = new Set<string>();
+  for (const e of classifyAllowEntries(network.allow)) {
+    if (e.kind === "invalid") throw new SandboxNetworkConfigError(`E2B sandbox network allowlist: not a host name or IP address: "${e.raw}"`);
+    if (e.kind === "domain" && e.value.startsWith("*.")) allowOut.add(e.value.slice(2));
+    allowOut.add(e.kind === "ipv4" && e.value.endsWith("/32") ? e.value.slice(0, -3) : e.value);
+  }
+  return { network: { allowOut: [...allowOut], denyOut: ["0.0.0.0/0"] } };
+}
+
+/**
+ * Daytona CPU/memory/disk for a create (cores, GiB, GiB). Daytona sizes a sandbox only when it
+ * is created from an image (`providerOptions.image`); a snapshot (ours: polpo-runner-*) comes
+ * with its own size, so the request is reported instead of being sent and rejected.
+ */
+export function daytonaResources(sandbox: Pick<EffectiveSandbox, "resources" | "providerOptions">): { resources?: { cpu?: number; memory?: number; disk?: number }; warning?: string } {
+  const { cpus, memoryMb, diskMb } = sandbox.resources;
+  if (!cpus && !memoryMb && !diskMb) return {};
+  const image = typeof sandbox.providerOptions.image === "string" && sandbox.providerOptions.image ? sandbox.providerOptions.image : undefined;
+  const snapshot = sandbox.providerOptions.snapshot ? String(sandbox.providerOptions.snapshot) : undefined;
+  if (!image || snapshot) {
+    const asked = [cpus ? `${cpus} CPU` : "", memoryMb ? `${memoryMb} MB memory` : "", diskMb ? `${diskMb} MB disk` : ""].filter(Boolean).join(", ");
+    return { warning: `Daytona sandboxes created from a snapshot (${snapshot ?? "Daytona's default"}) have the snapshot's size: ${asked} not applied. To choose the size, set providers.daytona.image instead of a snapshot.` };
+  }
+  return {
+    resources: {
+      ...(cpus ? { cpu: Math.max(1, Math.ceil(cpus)) } : {}),
+      ...(memoryMb ? { memory: Math.max(1, Math.ceil(memoryMb / 1024)) } : {}),
+      ...(diskMb ? { disk: Math.max(1, Math.ceil(diskMb / 1024)) } : {}),
+    },
+  };
+}
+
+/**
+ * Daytona's executeCommand returns stdout and stderr as one string. The command runs with its
+ * stderr in a file, printed after a marker only this call knows: both come back apart in one
+ * round trip, with the command's exit code.
+ */
+export function daytonaExecWrapper(command: string, marker: string): string {
+  return `f=$(mktemp 2>/dev/null || echo "/tmp/.polpo-stderr-$$"); bash -c ${q(command)} 2>"$f"; rc=$?; printf '%s' ${q(marker)}; cat "$f" 2>/dev/null; rm -f "$f"; exit $rc`;
+}
+
+/** Undo daytonaExecWrapper: what came before the marker is stdout, after it stderr. */
+export function splitDaytonaOutput(result: string, marker: string): { stdout: string; stderr: string } {
+  const at = result.lastIndexOf(marker);
+  if (at < 0) return { stdout: result, stderr: "" };
+  return { stdout: result.slice(0, at), stderr: result.slice(at + marker.length) };
 }
 
 // ── Daytona ─────────────────────────────────────────────────────────────
@@ -87,29 +203,23 @@ class DaytonaAdapter implements RemoteAdapter {
   }
 
   async create(spec: CreateSpec): Promise<RemoteDriver> {
-    const client = await this.client();
     const { network } = spec.sandbox;
+    // network rules are checked before anything is created
+    const networkParams = daytonaNetworkParams(network);
+    const client = await this.client();
     const params: Record<string, unknown> = {
       autoStopInterval: spec.lifetimeMinutes,
       labels: spec.labels,
       ...(spec.keep ? { autoDeleteInterval: spec.deleteAfterStopMinutes ?? 60 } : { ephemeral: true }),
       ...(spec.sandbox.providerOptions.snapshot ? { snapshot: String(spec.sandbox.providerOptions.snapshot) } : {}),
     };
-    if (network.mode === "deny") params.networkBlockAll = true;
-    if (network.mode === "allowlist") {
-      // Daytona filters by address: resolve the names now (wildcards resolve their base domain)
-      const cidrs = new Set<string>();
-      for (const host of allowHosts(spec.sandbox)) {
-        const name = host.replace(/^\*\./, "");
-        if (/^[\d.]+(\/\d+)?$/.test(name)) { cidrs.add(name.includes("/") ? name : `${name}/32`); continue; }
-        const addrs = await lookup(name, { all: true, family: 4 }).catch(() => []);
-        for (const a of addrs) cidrs.add(`${a.address}/32`);
-      }
-      // the VM resolves names through public resolvers: without them nothing resolves
-      if (cidrs.size) for (const dns of DAYTONA_RESOLVERS) cidrs.add(dns);
-      if (cidrs.size) params.networkAllowList = [...cidrs].slice(0, 50).join(",");
-      else params.networkBlockAll = true;
-    }
+    Object.assign(params, networkParams);
+    const sized = daytonaResources(spec.sandbox);
+    const image = typeof spec.sandbox.providerOptions.image === "string" && spec.sandbox.providerOptions.image ? spec.sandbox.providerOptions.image : undefined;
+    // an image (no snapshot) is built by Daytona once and sized per sandbox
+    if (image && !params.snapshot) params.image = image;
+    if (sized.resources) params.resources = sized.resources;
+    if (sized.warning) spec.onWarning?.(sized.warning);
     return this.driver(await client.create(params, { timeout: 180 }));
   }
 
@@ -147,8 +257,9 @@ class DaytonaAdapter implements RemoteAdapter {
       async exec(command, opts) {
         const seconds = opts.timeoutMs ? Math.max(1, Math.ceil(opts.timeoutMs / 1000)) : undefined;
         try {
-          const r = await sandbox.process.executeCommand(`bash -c ${q(command)}`, opts.cwd, opts.env, seconds);
-          return { exitCode: r.exitCode, stdout: r.result ?? "", stderr: "" };
+          const marker = `\n__POLPO_STDERR_${randomBytes(9).toString("hex")}__\n`;
+          const r = await sandbox.process.executeCommand(`bash -c ${q(daytonaExecWrapper(command, marker))}`, opts.cwd, opts.env, seconds);
+          return { exitCode: r.exitCode, ...splitDaytonaOutput(r.result ?? "", marker) };
         } catch (err) {
           const message = (err as Error).message ?? String(err);
           if (/timeout|timed out/i.test(message)) return { exitCode: 124, stdout: "", stderr: message, timedOut: true };
@@ -184,8 +295,11 @@ class E2BAdapter implements RemoteAdapter {
     const { network } = spec.sandbox;
     // pooled VMs pause when their timeout hits (files kept) instead of dying; the reaper deletes them later
     const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { lifecycle: { onTimeout: "pause" } } : {}) };
-    if (network.mode === "deny") opts.allowInternetAccess = false;
-    if (network.mode === "allowlist") opts.network = { allowOut: allowHosts(spec.sandbox), denyOut: ["0.0.0.0/0"] };
+    Object.assign(opts, e2bNetworkOpts(network));
+    const { cpus, memoryMb, diskMb } = spec.sandbox.resources;
+    if (cpus || memoryMb || diskMb) {
+      spec.onWarning?.("E2B sizes a sandbox by its template: the requested CPU/memory/disk are not applied (build a template with the size you need).");
+    }
     const template = (spec.sandbox.providerOptions.template as string | undefined) || defaultTemplate || undefined;
     const sbx = template ? await mod.Sandbox.create(template, opts as any) : await mod.Sandbox.create(opts as any);
     return this.driver(mod, conn, sbx, spec.lifetimeMinutes);

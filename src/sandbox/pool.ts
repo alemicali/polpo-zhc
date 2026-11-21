@@ -58,7 +58,7 @@ export function poolFilePath(polpoDir: string): string {
 
 /** Key for reuse: provider image/template, network rule and limits. */
 export function poolKey(provider: RemoteSandboxProvider, sandbox: Pick<EffectiveSandbox, "network" | "resources" | "providerOptions">): string {
-  const image = String(sandbox.providerOptions.snapshot ?? sandbox.providerOptions.template ?? "default");
+  const image = String(sandbox.providerOptions.snapshot ?? sandbox.providerOptions.template ?? sandbox.providerOptions.image ?? "default");
   const network = sandbox.network.mode === "allowlist" ? `allowlist:${[...(sandbox.network.allow ?? [])].sort().join(",")}` : sandbox.network.mode;
   const { cpus, memoryMb, diskMb } = sandbox.resources;
   const raw = JSON.stringify({ provider, image, network, cpus, memoryMb, diskMb });

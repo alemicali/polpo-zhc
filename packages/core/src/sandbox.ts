@@ -4,7 +4,7 @@
  * The agent loop (model calls, vault, database, memory, events) always stays on the host; the
  * tools that act on files and processes go through a Workspace, whose adapter decides where they
  * run: the host itself ("local"), a bubblewrap jail ("bwrap"), a container ("docker"), or a
- * remote sandbox ("daytona", "e2b": task runs only).
+ * remote sandbox ("daytona", "e2b": task runs, and chats where a person opted in with chatRemote).
  *
  * Design: /home/alessio/dev/polpo/polpo-arch/SANDBOX.md
  */
@@ -202,6 +202,8 @@ export interface EffectiveSandbox {
   lifecycle?: Required<Omit<SandboxLifecycleSettings, "idleTtlMinutes">>;
   /** Selected volumes (names, narrowed); resolved against the agent's grants by the host. */
   volumes?: SandboxVolumeSelection[];
+  /** The provider the settings chose is not available here: `provider` is what runs instead. */
+  fallback?: { from: SandboxProviderId; reason: "unavailable" };
 }
 
 export interface SandboxCascade {
@@ -340,10 +342,12 @@ export function resolveSandbox(
   if (context.scope === "chat" && !LOCAL_PROVIDERS.has(provider) && !chatRemote) {
     provider = context.available?.has("docker") ? "docker" : "bwrap";
   }
-  // A provider this host cannot run falls back to the next stronger local one, never weaker.
+  // A provider this host cannot run falls back to a local jail (bwrap or docker). For a remote
+  // provider that is weaker isolation than asked for: it is reported in `fallback`, not hidden.
+  let fallbackFrom: SandboxProviderId | undefined;
   if (context.available && !context.available.has(provider)) {
     const fallback = (["bwrap", "docker"] as SandboxProviderId[]).find((p) => context.available!.has(p) && PROVIDER_ISOLATION[p] >= Math.min(PROVIDER_ISOLATION[provider], 1));
-    if (fallback) provider = fallback;
+    if (fallback) { fallbackFrom = provider; provider = fallback; }
   }
 
   return {
@@ -355,6 +359,7 @@ export function resolveSandbox(
     isolation,
     lifecycle,
     ...(volumes ? { volumes } : {}),
+    ...(fallbackFrom ? { fallback: { from: fallbackFrom, reason: "unavailable" as const } } : {}),
   };
 }
 

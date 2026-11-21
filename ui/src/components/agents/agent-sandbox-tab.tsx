@@ -63,7 +63,7 @@ export function AgentSandboxTab() {
             {!overview && !error && <p className="text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</p>}
             {effective && (
               <>
-                <p><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
+                <p className={effective.task.fallback ? "text-amber-600 dark:text-amber-400" : undefined}><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
                 <p><span className="text-muted-foreground mr-1.5">Chat</span>{describeSandbox(effective.chat)}</p>
                 <p className="text-[10px] text-muted-foreground">
                   Missions and tasks can only make this stricter. Instance defaults are in{" "}
