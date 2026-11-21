@@ -4223,7 +4223,8 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
     const hint = s.provider === "local" ? " (not enforced: no isolation)"
       : s.network.mode === "open" ? " (public destinations only, via proxy)"
       : s.network.mode === "unrestricted" ? " (whole machine network, local services included)" : "";
-    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
+    const fallback = s.fallback ? ` (WEAKER than set: ${s.fallback.from} is not available on this server)` : "";
+    return `${s.provider}${fallback}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
   };
   const lines = [
     `Available on this server: ${[...availableProviders()].join(", ")}`,

@@ -101,7 +101,7 @@ const log = (msg) => console.log(`[build-sandbox-images] ${msg}`);
 const elapsed = (t0) => `${Math.round((Date.now() - t0) / 1000)} s`;
 
 async function buildDaytona(env, force) {
-  const { Daytona, Image } = await import("@daytonaio/sdk");
+  const { Daytona, Image } = await import("@daytona/sdk");
   const daytona = new Daytona({ apiKey: env.DAYTONA_API_KEY, apiUrl: env.DAYTONA_API_URL || undefined, target: env.DAYTONA_TARGET || undefined });
   const existing = await daytona.snapshot.get(DAYTONA_SNAPSHOT).catch(() => undefined);
   if (existing && !force && !/error|failed/i.test(String(existing.state))) {

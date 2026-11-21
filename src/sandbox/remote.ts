@@ -212,6 +212,7 @@ export class RemoteVmSession implements SandboxSession {
     const driver = await this.vm.adapter.create({
       sandbox: this.vm.opts.sandbox, labels: this.labels(), lifetimeMinutes: lifetimeMinutes(this.vm.opts.sandbox),
       deleteAfterStopMinutes: this.vm.releaseTimes.deleteAfterStopMinutes, keep,
+      onWarning: (message) => this.vm.emit({ kind: "warning", message }),
     });
     if (pool && this.vm.isolation === "shared") {
       this.shared = true;
