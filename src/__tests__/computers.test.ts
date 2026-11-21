@@ -336,7 +336,8 @@ describe("computer lifecycle", () => {
     expect(provider.created).toHaveLength(2);
     await m.delete(nina);
     expect(provider.removed).toEqual([before, reset.remoteId]);
-    expect(m.read().nina).toBeUndefined();
+    // a tombstone: nothing makes a machine for it again until it is created again
+    expect(m.read().nina).toMatchObject({ status: "missing", deletedAt: expect.any(String) });
     expect((await m.refresh(nina)).status).toBe("missing");
   });
 

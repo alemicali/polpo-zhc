@@ -55,7 +55,8 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     title: "Create or change a computer",
     description: "Create a computer (a persistent machine for agents) or change one. Its machine is created on first use or with start: true, "
       + "stops (or pauses) after lifecycle.idleStopMinutes without use (default 15) and is never deleted automatically. Image, snapshot, "
-      + "template, size and network apply to a new machine (reset). Make it an agent's default with polpo_agent_update defaultComputer. "
+      + "template and size apply to a new machine (reset); so does the network, except on Daytona v2 where it applies at the next start or wake "
+      + "(and v2 allowlists take host names only: IP addresses are refused). Allowlist entries are checked when saved. Make it an agent's default with polpo_agent_update defaultComputer. "
       + "Ask the person first: a running machine costs money.",
     inputSchema: {
       id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "lowercase letters, digits and -").describe("Slug, e.g. nina"),
@@ -72,7 +73,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
         autoArchiveDays: z.number().int().min(1).max(30).optional().describe("Daytona: archive after this many days stopped"),
       }).nullable().optional().describe("When it stops and archives by itself (it is never deleted automatically)"),
       network: z.object({ mode: z.enum(["deny", "allowlist", "open", "unrestricted"]), allow: z.array(z.string()).optional() }).nullable().optional()
-        .describe("Network rule (fixed when the machine is created); default the instance's"),
+        .describe("Network rule; default the instance's. allow: host names (\"*.example.com\" covers subdomains); Daytona v2 takes host names only"),
       egress: z.string().nullable().optional().describe("Egress proxy name (settings.egressProxies) for its agents' browsers; a remote computer reaches it through Tailscale in its VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"),
       volumes: z.array(z.union([z.string(), looseObject])).nullable().optional().describe("Volumes attached to runs on it (names granted to the agent)"),
       start: z.boolean().optional().describe("Create: start the machine now"),
@@ -115,7 +116,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/computers/${enc(id)}/${action}`, action === "reset" ? { confirm: true } : undefined);
     if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `${action} of computer ${id}`);
     const c = r.data as Computer;
-    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}`, { computer: c });
+    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}${c.note ? `\nNote: ${c.note}.` : ""}`, { computer: c });
   });
 
   tool("computers", "polpo_computer_delete", {

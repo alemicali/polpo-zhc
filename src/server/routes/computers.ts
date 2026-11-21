@@ -23,7 +23,9 @@ import {
   ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
-import { computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
+import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
+import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manager.js";
+import { SandboxNetworkConfigError } from "../../sandbox/remote-adapters.js";
 
 export interface ComputerRouteDeps {
   computers: () => ComputerConfig[];
@@ -88,8 +90,13 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   };
 
 
-  const operationError = (c: Context, what: string, err: unknown) =>
-    fail(c, 502, `${what} failed: ${err instanceof Error ? err.message : String(err)}`, "PROVIDER_ERROR");
+  const operationError = (c: Context, what: string, err: unknown) => {
+    const message = `${what} failed: ${err instanceof Error ? err.message : String(err)}`;
+    // a rule the provider refuses is the computer's settings, not a server failure
+    if (err instanceof SandboxNetworkConfigError) return fail(c, 400, `${message}. Fix the computer's network rule`, "VALIDATION_ERROR");
+    if (err instanceof ComputerDeletedError) return fail(c, 409, message, "DELETED");
+    return fail(c, 502, message, "PROVIDER_ERROR");
+  };
 
   app.get("/", async (c) => {
     const live = c.req.query("live") !== "0";
@@ -114,8 +121,10 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     }
     const existing = deps.computers();
     if (existing.some((x) => x.id === computer.id)) return fail(c, 409, `A computer "${computer.id}" already exists`, "CONFLICT");
-    const egressError = checkEgress(computer, deps.settings());
+    const egressError = checkEgress(computer, deps.settings()) ?? computerNetworkProblem(computer, deps.settings());
     if (egressError) return fail(c, 400, egressError, "VALIDATION_ERROR");
+    // a computer created again with a deleted one's id gets machines again
+    if (isRemoteComputer(computer)) await deps.manager().revive(computer.id);
     await deps.save([...existing, computer]);
     deps.emit({ id: computer.id, action: "created", status: isRemoteComputer(computer) ? "missing" : "running" });
     if (body.start === true && isRemoteComputer(computer)) {
@@ -150,14 +159,14 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     } catch (err) {
       return fail(c, 400, (err as Error).message, "VALIDATION_ERROR");
     }
-    const egressError = checkEgress(next, deps.settings());
+    const egressError = checkEgress(next, deps.settings()) ?? computerNetworkProblem(next, deps.settings());
     if (egressError) return fail(c, 400, egressError, "VALIDATION_ERROR");
     await deps.save(existing.map((x) => (x.id === id ? next : x)));
     deps.emit({ id, action: "updated" });
-    // image, size and network are fixed when the machine is created
+    // image and size are fixed when the machine is created; the network too, except on Daytona
+    // v2, where the rule is applied again whenever its VM starts or wakes
     const fixed = ["image", "snapshot", "template", "resources", "network"].filter((k) => JSON.stringify((current as unknown as Record<string, unknown>)[k]) !== JSON.stringify((next as unknown as Record<string, unknown>)[k]));
-    const note = fixed.length && isRemoteComputer(next) && deps.manager().live(id).status !== "missing"
-      ? `${fixed.join(", ")} apply to a new machine: reset the computer to use them (its disk is lost)` : undefined;
+    const note = isRemoteComputer(next) && deps.manager().live(id).status !== "missing" ? computerChangeNote(next, fixed, deps.settings()) : undefined;
     return c.json({ ok: true, data: { ...(await view(next, false)), ...(note ? { note } : {}) } });
   });
 
@@ -207,6 +216,8 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
       }
       return c.json({ ok: true, data: await view(computer, false) });
     } catch (err) {
+      // the wipe is done: the reset did what was asked, its new machine comes on the next use
+      if (err instanceof ComputerResetIncompleteError) return c.json({ ok: true, data: { ...(await view(computer, false)), note: err.message } });
       return operationError(c, `${op[0]!.toUpperCase()}${op.slice(1)} of computer "${id}"`, err);
     }
   };

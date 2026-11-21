@@ -115,7 +115,10 @@ export class PolpoServer {
     // announce status changes made by task runners
     this.computerUpkeep?.stop();
     this.computerUpkeep = new ComputerUpkeep(
-      computerManagerWithEvents(polpoDir, (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` })),
+      computerManagerWithEvents(
+        polpoDir, (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` }),
+        () => o.getConfig()?.settings?.computers ?? [],
+      ),
       () => o.getConfig()?.settings?.computers ?? [],
       (message) => o.emit("log", { level: "warn", message: `[computers] ${message}` }),
       (c) => computerSandbox(c, o.getConfig()?.settings),

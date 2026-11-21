@@ -37,8 +37,12 @@ export function useComputerActions({ upsert, drop, refresh }: Pick<UseComputersR
     const { computer, what } = pending;
     setPending(null);
     await guard(computer.id, async () => {
-      if (what === "reset") upsert(await computersApi.control(computer.id, "reset"));
-      else { await computersApi.remove(computer.id); drop(computer.id); toast.success(`Deleted ${computer.name}`); }
+      if (what === "reset") {
+        const c = await computersApi.control(computer.id, "reset");
+        upsert(c);
+        // the wipe is done but its new machine comes on the next use: said, not an error
+        if (c.note) toast.info(c.note);
+      } else { await computersApi.remove(computer.id); drop(computer.id); toast.success(`Deleted ${computer.name}`); }
     });
   }, [pending, guard, upsert, drop]);
 

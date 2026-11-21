@@ -226,7 +226,11 @@ export class DaytonaV2Adapter implements RemoteAdapter {
     try {
       await client.delete(remoteId, { timeoutSeconds: WAIT_SECONDS });
     } catch (err) {
-      if (!isNotFound(err)) throw err;
+      if (isNotFound(err)) return;
+      // already destroyed (or being destroyed) by another delete: that is what was asked
+      const state = await client.get(remoteId).then((sb) => String(sb.state), (e) => (isNotFound(e) ? "destroyed" : undefined));
+      if (state && GONE.has(state)) return;
+      throw err;
     }
   }
 

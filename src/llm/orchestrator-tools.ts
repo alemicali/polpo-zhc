@@ -7170,7 +7170,7 @@ async function computerTools(polpo: Orchestrator) {
   return {
     core,
     computers: (): import("@polpo-ai/core/sandbox").ComputerConfig[] => settings()?.computers ?? [],
-    manager: () => computerManagerWithEvents(polpo.getPolpoDir(), (payload) => polpo.emit("computer:changed", payload)),
+    manager: () => computerManagerWithEvents(polpo.getPolpoDir(), (payload) => polpo.emit("computer:changed", payload), undefined, () => settings()?.computers ?? []),
     sandbox: (c: import("@polpo-ai/core/sandbox").ComputerConfig) => computerSandbox(c, settings()),
     save: async (list: import("@polpo-ai/core/sandbox").ComputerConfig[]) => {
       savePolpoSettingsKey(polpo.getPolpoDir(), "computers", list.length ? list : undefined);
@@ -7215,6 +7215,7 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
   const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
   if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
+  if (t.core.isRemoteComputer(computer)) await t.manager().revive(computer.id);
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
   if (args.start === true && t.core.isRemoteComputer(computer)) {

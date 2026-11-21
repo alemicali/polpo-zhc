@@ -68,6 +68,11 @@ export interface ComputerRuntime {
   notice?: string;
   /** Daytona v2: its VM vanished while it ran (found by a refresh); the next wake says so. */
   vanished?: boolean;
+  /**
+   * The computer was deleted (a tombstone): nothing may create a machine for it again (a run,
+   * a tailnet check or a rotation that was still on its way). Cleared when it is created again.
+   */
+  deletedAt?: string;
   updatedAt: string;
 }
 
@@ -178,6 +183,24 @@ export interface ComputerManagerOptions {
 const SNAPSHOT_POLL_MS = 1_000;
 /** How long a hibernation waits for the commands of this process to finish (a forced rotation: then it goes on). */
 const DRAIN_MS = 60_000;
+/** A reset whose wipe is done tries this many times to make the new machine (the provider may lag a deletion). */
+const RESET_CREATE_ATTEMPTS = 3;
+
+/** A reset that wiped the computer but could not make its new machine yet (it is made on its next use). */
+export class ComputerResetIncompleteError extends Error {
+  constructor(readonly computerId: string, reason: string) {
+    super(`Computer "${computerId}" was reset (its old machine, disk and snapshots are deleted), but its new machine could not be created yet: ${reason}. It is created on its next use or start; nothing else needs to be reset`);
+    this.name = "ComputerResetIncompleteError";
+  }
+}
+
+/** A computer that was deleted (or is being deleted): no machine is made for it. */
+export class ComputerDeletedError extends Error {
+  constructor(readonly computerId: string) {
+    super(`Computer "${computerId}" was deleted: no machine is made for it (create it again to use it)`);
+    this.name = "ComputerDeletedError";
+  }
+}
 
 export class ComputerManager {
   /** Called when a computer's status, machine or error changes (the server emits computer:changed). */
@@ -196,7 +219,14 @@ export class ComputerManager {
   private readonly epochs = new Map<string, number>();
   /** The sandbox each computer last ran with (a rotation makes the new VM with it). */
   private readonly sandboxes = new Map<string, EffectiveSandbox>();
+  /** Computers being deleted, or deleted, by this process: nothing makes a machine for them again. */
+  private readonly deleting = new Set<string>();
   private lastSeen = "";
+  /**
+   * Whether a computer is still in the configuration (the server sets it). A computer that is not
+   * gets no machine; without it (task runners) the state file's tombstone (deletedAt) decides.
+   */
+  isConfigured?: (id: string) => boolean;
 
   constructor(readonly polpoDir: string, private readonly opts: ComputerManagerOptions = {}) {
     this.file = join(polpoDir, "computers-state.json");
@@ -335,8 +365,18 @@ export class ComputerManager {
   private async machines(c: ComputerConfig, h?: Hibernation): Promise<RemoteVmSummary[]> {
     const provider = c.kind as RemoteSandboxProvider;
     const label = this.labelValue(c.id);
-    const vms = (await this.adapter(provider).list({ [COMPUTER_LABEL]: label }))
+    let vms = (await this.adapter(provider).list({ [COMPUTER_LABEL]: label }))
       .filter((v) => v.labels?.[COMPUTER_LABEL] === label && computerStatusOf(provider, v.state) !== "missing");
+    if (h) {
+      // the label search lags (Daytona v2): a VM deleted seconds ago (a hibernation, a reset) is
+      // still listed as started. Each hit is read again by id: a destroyed or deleted one is gone,
+      // and the state is the current one
+      const confirmed = await Promise.all(vms.map(async (v) => {
+        const m = await h.machine(v.remoteId);
+        return m && computerStatusOf(provider, m.state) !== "missing" ? { ...v, state: m.state } : undefined;
+      }));
+      vms = confirmed.filter((v): v is RemoteVmSummary => !!v);
+    }
     const known = this.read()[c.id]?.remoteId;
     if (h && known && !vms.some((v) => v.remoteId === known)) {
       const m = await h.machine(known);
@@ -351,6 +391,8 @@ export class ComputerManager {
     const provider = c.kind as RemoteSandboxProvider;
     const adapter = this.adapter(provider);
     const idle = computerIdleStopMinutes(c);
+    // under the computer's lock: a delete that ran before this (or a config without it) wins
+    this.assertWanted(c);
     try {
       const h = await this.hibernation(c);
       if (h) return await this.ensureHibernating(c, sandbox, h, onWarning, onProgress);
@@ -376,9 +418,35 @@ export class ComputerManager {
       this.started(c, driver);
       return driver;
     } catch (err) {
-      await this.setStatus(c, "error", { lastError: (err as Error).message ?? String(err) }).catch(() => undefined);
+      if (!(err instanceof ComputerDeletedError)) await this.setStatus(c, "error", { lastError: (err as Error).message ?? String(err) }).catch(() => undefined);
       throw err;
     }
+  }
+
+  /**
+   * Throws ComputerDeletedError when no machine may be made for the computer: it is being deleted
+   * (or was, by this process), it is no longer in the configuration, or (another process) the
+   * state file holds its tombstone.
+   */
+  private assertWanted(c: ComputerConfig): void {
+    if (this.deleting.has(c.id)) throw new ComputerDeletedError(c.id);
+    if (this.isConfigured) {
+      if (!this.isConfigured(c.id)) throw new ComputerDeletedError(c.id);
+      return;
+    }
+    if (this.read()[c.id]?.deletedAt) throw new ComputerDeletedError(c.id);
+  }
+
+  /** Whether this process deleted the computer (or is deleting it). */
+  isDeleted(id: string): boolean {
+    return this.deleting.has(id);
+  }
+
+  /** A computer created again with a deleted one's id: machines may be made for it again. */
+  async revive(id: string): Promise<void> {
+    this.deleting.delete(id);
+    const rt = this.read()[id];
+    if (rt?.deletedAt) await this.update(id, rt.provider, () => null);
   }
 
   /** A new machine from the image or snapshot of the settings. */
@@ -408,8 +476,16 @@ export class ComputerManager {
     const before = this.read()[c.id];
     const machines = await this.machines(c, h);
     const live = machines.find((m) => ["running", "creating", "starting"].includes(computerStatusOf(provider, m.state)));
+    let driver: RemoteDriver | undefined;
     if (live) {
-      const driver = await adapter.connect(live.remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+      try {
+        driver = await adapter.connect(live.remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+      } catch (err) {
+        // deleted between the read and the connect (a hibernation or a reset): it wakes instead
+        if ((await h.machine(live.remoteId).catch(() => "unknown")) !== undefined) throw err;
+      }
+    }
+    if (driver) {
       const fresh = before?.status !== "running" || before.remoteId !== driver.remoteId;
       const timeoutAt = fresh || !before?.timeoutAt ? (await h.machine(driver.remoteId).catch(() => undefined))?.timeoutAt : before.timeoutAt;
       await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: this.iso(), ...(timeoutAt ? { timeoutAt } : {}) });
@@ -450,6 +526,7 @@ export class ComputerManager {
    * at all: a new VM from the image.
    */
   private async wake(c: ComputerConfig, sandbox: EffectiveSandbox, h: Hibernation, o: { vanished?: boolean; onWarning?: (message: string) => void; onProgress?: (message: string) => void }): Promise<RemoteDriver> {
+    this.assertWanted(c);
     const label = this.labelValue(c.id);
     const name = computerMachineName(label);
     const candidates = await this.wakeCandidates(c, h);
@@ -691,6 +768,7 @@ export class ComputerManager {
   /** The computer's machine, running (started, resumed, woken from its snapshot or created). */
   async ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: there is no machine to start`);
+    this.assertWanted(c);
     this.sandboxes.set(c.id, sandbox);
     return this.exclusive(c.id, () => this.ensureLocked(c, sandbox, onWarning, onProgress));
   }
@@ -753,6 +831,7 @@ export class ComputerManager {
 
   /** In use now: lastUsedAt (at most every 30 s) and the provider's idle timer. */
   touch(c: ComputerConfig, driver?: RemoteDriver, force = false): void {
+    if (this.deleting.has(c.id)) return;
     const now = this.now();
     if (!force && now - (this.touched.get(c.id) ?? 0) < TOUCH_EVERY_MS) return;
     this.touched.set(c.id, now);
@@ -774,6 +853,7 @@ export class ComputerManager {
    */
   async stop(c: ComputerConfig, why: "stop" | "idle" = "stop"): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be stopped`);
+    if (this.deleting.has(c.id)) return this.live(c.id);
     const h = await this.hibernation(c);
     if (h) {
       await this.gated(c.id, () => this.exclusive(c.id, () => this.hibernateLocked(c, h, why)));
@@ -804,29 +884,63 @@ export class ComputerManager {
   async reset(c: ComputerConfig, sandbox: EffectiveSandbox): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be reset`);
     this.sandboxes.set(c.id, sandbox);
+    this.assertWanted(c);
     return this.exclusive(c.id, async () => {
       await this.removeMachines(c);
       await this.update(c.id, c.kind as RemoteSandboxProvider, (cur) => ({ provider: cur.provider, status: "missing", uptimeMs: 0, updatedAt: cur.updatedAt }));
-      await this.ensureLocked(c, sandbox);
-      return this.live(c.id);
+      // its disk is gone now: from the person's view the reset succeeds, or says that the wipe is
+      // done. The new machine is tried a few times (the provider may still list the deleted VM)
+      let last: unknown;
+      for (let attempt = 1; attempt <= RESET_CREATE_ATTEMPTS; attempt++) {
+        try {
+          await this.ensureLocked(c, sandbox);
+          return this.live(c.id);
+        } catch (err) {
+          if (err instanceof ComputerDeletedError) throw err;
+          last = err;
+          if (attempt < RESET_CREATE_ATTEMPTS) await this.sleep(2_000 * attempt);
+        }
+      }
+      // nothing to retry by the person: its next use or start makes the machine
+      await this.setStatus(c, "missing", { lastError: undefined }).catch(() => undefined);
+      throw new ComputerResetIncompleteError(c.id, (last as Error)?.message ?? String(last));
     });
   }
 
   /** Delete the machine for good (and its snapshots and runtime state). */
   async delete(c: ComputerConfig): Promise<void> {
     if (!isRemoteComputer(c)) return;
-    await this.exclusive(c.id, async () => {
-      await this.removeMachines(c);
-      await this.update(c.id, c.kind as RemoteSandboxProvider, () => null);
-    });
+    // from now on nothing makes a machine for it: a run, a tailnet check or a wake queued behind
+    // this delete (or started after it) fails instead of bringing its VM back
+    this.deleting.add(c.id);
+    tailnetEgress.invalidate(c.id);
+    try {
+      await this.exclusive(c.id, async () => {
+        await this.removeMachines(c);
+        // a tombstone for other processes (task runners): no machine for it until it is created again
+        await this.update(c.id, c.kind as RemoteSandboxProvider, (cur) => ({ provider: cur.provider, status: "missing", uptimeMs: 0, deletedAt: this.iso(), updatedAt: cur.updatedAt }));
+      });
+    } catch (err) {
+      // its machine may still be there: the computer is not deleted (it can be used, or deleted again)
+      this.deleting.delete(c.id);
+      throw err;
+    }
     this.sandboxes.delete(c.id);
+    this.touched.delete(c.id);
   }
 
   /** Its machines (leaving the tailnet first) and, where it hibernates, every snapshot of it. */
   private async removeMachines(c: ComputerConfig): Promise<void> {
     const provider = c.kind as RemoteSandboxProvider;
     const h = await this.hibernation(c);
-    for (const m of await this.machines(c, h)) {
+    const machines = await this.machines(c, h);
+    // the one the state knows too (a VM made seconds ago may not be listed yet)
+    const known = this.read()[c.id]?.remoteId;
+    if (h && known && !machines.some((m) => m.remoteId === known)) {
+      const m = await h.machine(known).catch(() => undefined);
+      if (m) machines.push({ remoteId: known, state: m.state, labels: { [COMPUTER_LABEL]: this.labelValue(c.id) } });
+    }
+    for (const m of machines) {
       // a machine in the tailnet leaves it first (best effort; an ephemeral node also goes by itself)
       if (c.egress && computerStatusOf(provider, m.state) === "running") await this.leaveTailnet(c, m.remoteId);
       await this.adapter(provider).remove(m.remoteId);
@@ -853,6 +967,7 @@ export class ComputerManager {
    */
   async refresh(c: ComputerConfig, snapshot?: string): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) return { id: c.id, status: "running", uptimeMinutes: 0 };
+    if (this.deleting.has(c.id)) return this.live(c.id);
     // an operation in progress here writes the state itself (no flicker from a half-done hibernation)
     if (this.chains.has(c.id)) return this.live(c.id);
     const live = await this.refreshLocked(c, await this.hibernation(c));
@@ -916,9 +1031,9 @@ export class ComputerManager {
   async idleTick(computers: readonly ComputerConfig[], sandboxFor?: (c: ComputerConfig) => EffectiveSandbox | { error: string } | undefined): Promise<void> {
     const state = this.read();
     for (const c of computers) {
-      if (!isRemoteComputer(c)) continue;
+      if (!isRemoteComputer(c) || this.deleting.has(c.id)) continue;
       const rt = state[c.id];
-      if (rt?.status !== "running") continue;
+      if (rt?.status !== "running" || rt.deletedAt) continue;
       const now = this.now();
       const idleMs = now - Date.parse(rt.lastUsedAt ?? rt.runningSince ?? rt.updatedAt);
       const h = await this.hibernation(c);
@@ -1056,8 +1171,11 @@ export function computerManagerWithEvents(
   polpoDir: string,
   emit: (payload: { id: string; action: "status"; status: ComputerStatus; remoteId?: string; error?: string; notice?: string }) => void,
   log?: (level: "info" | "warn", message: string) => void,
+  /** The configured computers: one that is not among them never gets a machine (a deleted one). */
+  configured?: () => readonly ComputerConfig[],
 ): ComputerManager {
   const m = computerManager(polpoDir);
+  if (configured) m.isConfigured ??= (id) => configured().some((c) => c.id === id);
   m.onChange ??= (id, live) => emit({
     id, action: "status", status: live.status,
     ...(live.remoteId ? { remoteId: live.remoteId } : {}), ...(live.lastError ? { error: live.lastError } : {}), ...(live.notice ? { notice: live.notice } : {}),

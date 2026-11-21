@@ -13,7 +13,7 @@ Daytona has two services. Polpo talks to either, per instance, with
 | Computers | yes (stop / pause) | yes: they **hibernate** (memory and disk snapshot, VM deleted; wakes in ~3 s) |
 | Longest life | none | the plan's maximum wall clock (86400 s seen; `providers.daytona.maxTimeoutSeconds`), then deleted |
 | Size | fixed by the snapshot | per sandbox (`resources`; default 2 vCPU, 4 GB, 10 GB) |
-| Network allowlist | host names **or** IPv4 addresses (not both) | host names and addresses together; can change while the VM exists |
+| Network allowlist | host names **or** IPv4 addresses (not both) | computers: **host names only** (IP addresses and ranges are refused when saved: seen live, the VM reaches none of them); can change while the VM exists |
 | stderr | separated by a wrapper script | native stdout / stderr / exit code |
 | SDK | `@daytona/sdk` 0.233.0 | `@daytona/sdk` 2.x, installed as `@daytona/sdk-v2` |
 
@@ -69,7 +69,20 @@ is a one-line change.
 - **Network**: `deny` → `{ blockAll: true }`; `allowlist` → `{ blockAll: true, allowDomains,
   allowCidrs }` (ports are dropped: Daytona filters by host); `open` / `unrestricted` → no policy.
   A computer's rule is applied again (`updateNetworkPolicy`, with the ETag) when it starts or
-  resumes, so changing a computer's network takes effect on its next start.
+  wakes, so changing a computer's network takes effect on its next start or wake (stop and start
+  it to apply it now; no reset). A computer's allowlist is checked when it is saved (the API, MCP,
+  the dashboard): an entry that is not a host name, or an IP address or range, is refused with
+  the reason. **Caveat:** Daytona accepts `allowCidrs` and reports the policy as applied, but in
+  the live test (a Linux VM, `*.wikipedia.org` plus `1.1.1.1/32`, and `1.1.1.1` alone) traffic to
+  the address was still answered 403 by Daytona's egress: only the domain rules worked. Polpo
+  therefore takes host names only for v2 computers (CIDR-only rules were not tested).
+- **Lagging search**: right after a VM is deleted (a hibernation, a reset) the label search can
+  still list it as `started`. Every hit is read again by id (`get`, where it shows as `destroyed`
+  or is gone) before it is used, so a restart or reset never connects to the VM it just deleted.
+- **Delete**: deleting a computer marks it deleted first (in the server, and a tombstone in
+  `computers-state.json` for task runners): a run, a tailnet check, a wake or a rotation that was
+  still on its way fails instead of making its VM again. Creating a computer with the same id
+  clears the mark.
 - **Volumes**: Polpo's volumes (rclone / mount-s3 inside the VM) work as on v0. Daytona's own v2
   volumes are not used.
 - **Preview URLs / ports**: not used by Polpo (on v0 either).

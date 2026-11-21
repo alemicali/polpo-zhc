@@ -183,7 +183,8 @@ export function classifyAllowEntries(allow: string[] | undefined): AllowEntry[] 
       entry = { kind: "ipv4", value: prefix === undefined ? `${addr}/32` : host, raw: trimmed };
     } else if (extra === undefined && isIP(addr) === 6) {
       entry = { kind: "ipv6", value: host, raw: trimmed };
-    } else if (prefix === undefined && HOSTNAME.test(host)) {
+    } else if (prefix === undefined && HOSTNAME.test(host) && !/(^|\.)\d+$/.test(host)) {
+      // (a name whose last label is all digits, like 300.1.1.1, is neither a host name nor an address)
       entry = { kind: "domain", value: host, raw: trimmed };
     } else {
       entry = { kind: "invalid", value: host, raw: trimmed };
