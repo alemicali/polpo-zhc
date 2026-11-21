@@ -80,7 +80,7 @@ class DaytonaAdapter implements RemoteAdapter {
     if (!creds?.apiKey) throw new Error("Daytona has no API key (Settings → Sandbox)");
     const fingerprint = JSON.stringify([creds.apiKey, creds.apiUrl, creds.target]);
     if (this.cached?.fingerprint !== fingerprint) {
-      const { Daytona } = await import("@daytonaio/sdk");
+      const { Daytona } = await import("@daytona/sdk");
       this.cached = { fingerprint, client: new Daytona({ apiKey: creds.apiKey, apiUrl: creds.apiUrl || undefined, target: creds.target || undefined }) };
     }
     return this.cached.client;
