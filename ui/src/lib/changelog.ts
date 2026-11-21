@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-computers-home-hibernate",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Computer nel cloud: escono da casa e si ibernano",
+    summary: "I computer degli agenti nel cloud possono navigare con la linea di casa e, quando non servono, si ibernano e ripartono in pochi secondi com'erano.",
+    body: [
+      "- **Uscita da casa anche nel cloud**: il browser di un agente sul suo computer Daytona o E2B esce dalla linea di casa (via Tailscale), così i siti non lo bloccano. Se il computer di casa è spento esce dal cloud, e i profili con login fatto da casa aspettano.",
+      "- **Ibernazione (Daytona v2, VM Linux)**: quando l'agente non lavora, il computer salva memoria e disco e si spegne; alla prima azione riparte in circa 3 secondi con file, programmi aperti e login com'erano.",
+      "- **Sempre al sicuro**: salvataggi periodici e rotazione automatica prima del limite di 24 ore, senza perdere nulla.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-21-computers",
     date: "2026-11-21",
     kind: "new",
