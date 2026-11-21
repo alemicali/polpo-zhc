@@ -15,7 +15,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
-import type { EffectiveSandbox, RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
+import { DAYTONA_V2_RUNNER_IMAGE, daytonaApiVersion, type EffectiveSandbox, type RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
 
 export type PoolEntryState = "leased" | "idle" | "warm" | "shared";
 
@@ -61,7 +61,11 @@ export function poolKey(provider: RemoteSandboxProvider, sandbox: Pick<Effective
   const image = String(sandbox.providerOptions.snapshot ?? sandbox.providerOptions.template ?? sandbox.providerOptions.image ?? "default");
   const network = sandbox.network.mode === "allowlist" ? `allowlist:${[...(sandbox.network.allow ?? [])].sort().join(",")}` : sandbox.network.mode;
   const { cpus, memoryMb, diskMb } = sandbox.resources;
-  const raw = JSON.stringify({ provider, image, network, cpus, memoryMb, diskMb });
+  // a Daytona v2 VM is not reachable from v0 (and back): their keys differ; v0 keys stay as they were
+  const daytonaV2 = provider === "daytona" && daytonaApiVersion(sandbox.providerOptions) === "v2";
+  const raw = JSON.stringify(daytonaV2
+    ? { provider, api: "v2", image: String(sandbox.providerOptions.image ?? DAYTONA_V2_RUNNER_IMAGE), network, cpus, memoryMb, diskMb }
+    : { provider, image, network, cpus, memoryMb, diskMb });
   return `${provider}:${createHash("sha256").update(raw).digest("hex").slice(0, 16)}`;
 }
 

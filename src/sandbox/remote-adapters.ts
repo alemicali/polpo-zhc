@@ -51,6 +51,11 @@ export interface CreateSpec {
   persistent?: { idleStopMinutes: number; autoArchiveDays?: number };
   /** Slow steps worth telling (e.g. reactivating an inactive Daytona snapshot). */
   onProgress?: (message: string) => void;
+  /**
+   * A stable provider-side name (computers on Daytona v2): creating twice with the same name and
+   * options returns the same machine, so a lost race or a lagging search never makes a second one.
+   */
+  name?: string;
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -68,6 +73,11 @@ export interface RemoteAdapter {
   remove(remoteId: string): Promise<void>;
   /** Daytona: a snapshot's state ("active", "inactive", …), undefined when it cannot be read. */
   snapshotState?(name: string): Promise<string | undefined>;
+  /**
+   * Change a VM's network rule while it exists (Daytona v2). Resolves false where the provider
+   * fixes the rule at create (nothing changed); absent: same.
+   */
+  updateNetwork?(remoteId: string, network: SandboxNetwork): Promise<boolean>;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -212,7 +222,48 @@ export function splitDaytonaOutput(result: string, marker: string): { stdout: st
 
 // ── Daytona ─────────────────────────────────────────────────────────────
 
+/**
+ * Daytona behind one adapter: each call goes to the v0 or the v2 service, as
+ * settings.sandbox.providers.daytona.api says now (a person may switch it while the server runs;
+ * VMs of the other service are then simply not found).
+ */
 class DaytonaAdapter implements RemoteAdapter {
+  readonly provider = "daytona" as const;
+  // neither suspends between tool calls (v0 containers cannot pause; v2 pauses on idle by policy)
+  readonly fastSuspend = false;
+  private v0?: DaytonaV0Adapter;
+  private v2?: RemoteAdapter;
+
+  private async pick(): Promise<RemoteAdapter> {
+    const creds = await Promise.resolve(remoteProviderCredentials("daytona"));
+    if (creds?.api === "v2") {
+      if (!this.v2) {
+        const { DaytonaV2Adapter } = await import("./daytona-v2.js");
+        this.v2 = new DaytonaV2Adapter();
+      }
+      return this.v2;
+    }
+    return (this.v0 ??= new DaytonaV0Adapter());
+  }
+
+  async suspendById(remoteId: string) { return (await this.pick()).suspendById(remoteId); }
+  async create(spec: CreateSpec) { return (await this.pick()).create(spec); }
+  async connect(remoteId: string, opts?: { timeoutMs?: number }) { return (await this.pick()).connect(remoteId, opts); }
+  async list(labels: Record<string, string>) { return (await this.pick()).list(labels); }
+  async remove(remoteId: string) { return (await this.pick()).remove(remoteId); }
+  /** v0 snapshots only (v2 has images, and "snapshot" there means a saved machine). */
+  async snapshotState(name: string): Promise<string | undefined> {
+    const adapter = await this.pick();
+    return adapter instanceof DaytonaV0Adapter ? adapter.snapshotState(name) : undefined;
+  }
+  async updateNetwork(remoteId: string, network: SandboxNetwork): Promise<boolean> {
+    const adapter = await this.pick();
+    return adapter.updateNetwork ? adapter.updateNetwork(remoteId, network) : false;
+  }
+}
+
+/** Daytona v0 (app.daytona.io or a custom API URL) through @daytona/sdk 0.x. */
+class DaytonaV0Adapter implements RemoteAdapter {
   readonly provider = "daytona" as const;
   // container sandboxes cannot pause; stop/start (≈1 s each) is too slow between tool calls
   readonly fastSuspend = false;
