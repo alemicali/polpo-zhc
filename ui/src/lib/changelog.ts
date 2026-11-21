@@ -27,6 +27,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-21-computers",
+    date: "2026-11-21",
+    kind: "new",
+    title: "Ogni agente con il suo computer",
+    summary: "Un agente può avere un computer suo, sul server o nel cloud, che si accende quando serve e conserva file, browser e login.",
+    body: [
+      "Dalla nuova pagina **Computer** dai a un agente una macchina tutta sua.",
+      "",
+      "- **Sul server o nel cloud** (Daytona, E2B): l'agente lavora lì sia in chat sia nei task.",
+      "- **Sempre il suo**: si accende alla prima azione, si spegne quando non serve e non viene mai cancellato, quindi file, browser e login restano.",
+      "- **Controllo**: accendi, spegni, riavvia o azzera; vedi chi lo usa e da quanto è acceso.",
+      "- I task che vogliono una macchina usa e getta la possono ancora chiedere.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-21-mcp-everything",
     date: "2026-11-21",
     kind: "improved",
