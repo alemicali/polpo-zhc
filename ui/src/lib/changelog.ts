@@ -27,6 +27,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-21-mcp-tools",
+    date: "2026-11-21",
+    kind: "improved",
+    title: "Polpo da Claude e ChatGPT: task, missioni e configurazione",
+    summary: "Dal connettore MCP gestisci task e missioni, rispondi alle domande di Polpo e cambi impostazioni e logo.",
+    body: [
+      "Il connettore MCP di Polpo (quello che colleghi a Claude, ChatGPT o Codex) ora fa molto di più, con strumenti precisi invece di un accesso generico:",
+      "",
+      "- **Task e missioni**: crei, modifichi, avvii, fermi e riprovi; dai istruzioni a un task in corso e aspetti il risultato.",
+      "- **Domande e anteprime di Polpo**: quando Polpo ti chiede qualcosa o ti mostra un'anteprima (missione, email, WhatsApp), arriva anche lì e rispondi da lì.",
+      "- **Configurazione**: impostazioni, nome, tagline e **logo** (da un link o da un file).",
+      "- **Più sicuro**: niente più scritture generiche sull'API, e ogni azione registra chi l'ha fatta (es. \"tu via Claude\").",
+      "",
+      "Se avevi già collegato Polpo a Claude, ricollega il connettore per vedere i nuovi strumenti.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-19-connectors",
     date: "2026-11-19",
     kind: "new",
