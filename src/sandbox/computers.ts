@@ -49,6 +49,8 @@ export interface ComputerLive {
   uptimeMinutes: number;
   createdAt?: string;
   lastError?: string;
+  /** Daytona: the snapshot a new machine would be created from is not active (it is activated on the next create). */
+  snapshotState?: string;
 }
 
 /** Between two checks that the machine still runs (a long chat may outlive the idle stop). */
@@ -219,7 +221,7 @@ export class ComputerManager {
   }
 
   /** Find by label; start or resume; create only when there is none. Call under exclusive(). */
-  private async ensureLocked(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void): Promise<RemoteDriver> {
+  private async ensureLocked(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
     const provider = c.kind as RemoteSandboxProvider;
     const adapter = this.adapter(provider);
     const idle = computerIdleStopMinutes(c);
@@ -233,7 +235,7 @@ export class ComputerManager {
       }
       await this.setStatus(c, "creating");
       const driver = await adapter.create({
-        sandbox, labels: this.labels(c.id), lifetimeMinutes: idle, keep: true, onWarning,
+        sandbox, labels: this.labels(c.id), lifetimeMinutes: idle, keep: true, onWarning, onProgress,
         persistent: { idleStopMinutes: idle, ...(c.lifecycle?.autoArchiveDays ? { autoArchiveDays: c.lifecycle.autoArchiveDays } : {}) },
       });
       const now = new Date(this.now()).toISOString();
@@ -246,9 +248,9 @@ export class ComputerManager {
   }
 
   /** The computer's machine, running (started, resumed or created). */
-  ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void): Promise<RemoteDriver> {
+  ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
     if (!isRemoteComputer(c)) return Promise.reject(new Error(`Computer "${c.id}" is this server: there is no machine to start`));
-    return this.exclusive(c.id, () => this.ensureLocked(c, sandbox, onWarning));
+    return this.exclusive(c.id, () => this.ensureLocked(c, sandbox, onWarning, onProgress));
   }
 
   /**
@@ -256,12 +258,12 @@ export class ComputerManager {
    * and, after a minute, check it still runs (starting it again if it was stopped meanwhile).
    * Suspending and destroying are no-ops: the computer outlives every run.
    */
-  async attach(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void): Promise<RemoteDriver> {
-    let inner = await this.ensure(c, sandbox, onWarning);
+  async attach(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
+    let inner = await this.ensure(c, sandbox, onWarning, onProgress);
     let verifiedAt = this.now();
     const fresh = async (): Promise<RemoteDriver> => {
       if (this.now() - verifiedAt > VERIFY_EVERY_MS) {
-        inner = await this.ensure(c, sandbox, onWarning);
+        inner = await this.ensure(c, sandbox, onWarning, onProgress);
         verifiedAt = this.now();
       }
       return inner;
@@ -357,10 +359,30 @@ export class ComputerManager {
     for (const m of await this.machines(c)) await this.adapter(provider).remove(m.remoteId);
   }
 
-  /** Live status from the provider (the state file follows it). */
-  async refresh(c: ComputerConfig): Promise<ComputerLive> {
+  /**
+   * Live status from the provider (the state file follows it). `snapshot`: the Daytona snapshot a
+   * new machine would come from; when the computer has no machine (or failed) and that snapshot
+   * is not active, the answer says so (snapshotState).
+   */
+  async refresh(c: ComputerConfig, snapshot?: string): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) return { id: c.id, status: "running", uptimeMinutes: 0 };
-    return this.refreshLocked(c);
+    const live = await this.refreshLocked(c);
+    if (c.kind === "daytona" && snapshot && (live.status === "missing" || live.status === "error")) {
+      const state = await this.snapshotState(snapshot);
+      if (state && state !== "active") return { ...live, snapshotState: state };
+    }
+    return live;
+  }
+
+  private readonly snapshotStates = new Map<string, { state: string | undefined; at: number }>();
+
+  /** A Daytona snapshot's state, cached for a minute. */
+  async snapshotState(name: string): Promise<string | undefined> {
+    const cached = this.snapshotStates.get(name);
+    if (cached && this.now() - cached.at < 60_000) return cached.state;
+    const state = await this.adapter("daytona").snapshotState?.(name).catch(() => undefined);
+    this.snapshotStates.set(name, { state, at: this.now() });
+    return state;
   }
 
   private async refreshLocked(c: ComputerConfig): Promise<ComputerLive> {

@@ -1136,8 +1136,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const { normalizeSandboxSettings } = await import("@polpo-ai/core/sandbox");
     const instance = normalizeSandboxSettings(o.getConfig()?.settings?.sandbox);
     const agents = await o.getAgents();
+    // Daytona deactivates snapshots nobody used for a while: say so (the next create reactivates it)
+    const available = availableProviders();
+    const daytonaSnapshot = instance?.providers?.daytona?.snapshot;
+    let snapshot: { provider: "daytona"; name: string; state: string } | undefined;
+    if (available.has("daytona") && typeof daytonaSnapshot === "string" && daytonaSnapshot) {
+      const { remoteAdapter } = await import("../sandbox/remote-adapters.js");
+      const state = await Promise.race([
+        remoteAdapter("daytona").snapshotState?.(daytonaSnapshot).catch(() => undefined),
+        new Promise<undefined>((r) => setTimeout(() => r(undefined), 5_000).unref?.()),
+      ]);
+      if (state) snapshot = { provider: "daytona", name: daytonaSnapshot, state };
+    }
     return c.json({ ok: true, data: {
-      available: [...availableProviders()],
+      ...(snapshot ? { snapshot } : {}),
+      available: [...available],
       settings: instance ?? null,
       polpo: effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : ["http_fetch"] }),
       agents: agents.map((agent) => {

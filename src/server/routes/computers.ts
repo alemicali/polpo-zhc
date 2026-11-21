@@ -47,6 +47,13 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
 
   const find = (id: string): ComputerConfig | undefined => id === HOST_COMPUTER_ID ? HOST_COMPUTER : deps.computers().find((c) => c.id === id);
 
+  /** The Daytona snapshot a new machine of this computer comes from (to report an inactive one). */
+  const snapshotOf = (computer: ComputerConfig): string | undefined => {
+    if (computer.kind !== "daytona") return undefined;
+    const s = deps.sandboxFor(computer);
+    return "error" in s || typeof s.providerOptions.snapshot !== "string" ? undefined : s.providerOptions.snapshot;
+  };
+
   /** Live status from the provider, or the last known one when it does not answer in time. */
   const liveOf = async (computer: ComputerConfig, live: boolean): Promise<ComputerLive> => {
     if (!isRemoteComputer(computer)) return { id: computer.id, status: "running", uptimeMinutes: 0 };
@@ -55,7 +62,7 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<ComputerLive>((resolve) => { timer = setTimeout(() => resolve(manager.live(computer.id)), LIVE_TIMEOUT_MS); });
     try {
-      return await Promise.race([manager.refresh(computer).catch((err) => ({ ...manager.live(computer.id), status: "unknown" as const, lastError: (err as Error).message })), late]);
+      return await Promise.race([manager.refresh(computer, snapshotOf(computer)).catch((err) => ({ ...manager.live(computer.id), status: "unknown" as const, lastError: (err as Error).message })), late]);
     } finally {
       clearTimeout(timer);
     }

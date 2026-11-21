@@ -79,6 +79,7 @@ class FakeDaytona implements RemoteAdapter {
   }
   async remove(id: string) { const vm = this.vms.get(id); if (vm) vm.destroyed = true; this.removed.push(id); }
   async suspendById(id: string) { this.suspended.push(id); const vm = this.vms.get(id); if (vm) vm.state = "stopped"; }
+  snapshotState?: (name: string) => Promise<string | undefined>;
 }
 
 const computerSandbox = (c: ComputerConfig = nina): EffectiveSandbox =>
@@ -336,6 +337,18 @@ describe("computer lifecycle", () => {
     expect(provider.removed).toEqual([before, reset.remoteId]);
     expect(m.read().nina).toBeUndefined();
     expect((await m.refresh(nina)).status).toBe("missing");
+  });
+
+  test("a computer without a machine says when its snapshot is inactive", async () => {
+    const provider = new FakeDaytona();
+    let state = "inactive";
+    provider.snapshotState = async () => state;
+    const m = manager(provider);
+    expect(await m.refresh(nina, "polpo-runner-0.3.13")).toMatchObject({ status: "missing", snapshotState: "inactive" });
+    // a machine that exists does not need the snapshot
+    await m.ensure(nina, computerSandbox());
+    expect((await m.refresh(nina, "polpo-runner-0.3.13")).snapshotState).toBeUndefined();
+    state = "active";
   });
 
   test("uptime", () => {

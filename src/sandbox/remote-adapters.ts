@@ -49,6 +49,8 @@ export interface CreateSpec {
    * autoArchiveDays stopped.
    */
   persistent?: { idleStopMinutes: number; autoArchiveDays?: number };
+  /** Slow steps worth telling (e.g. reactivating an inactive Daytona snapshot). */
+  onProgress?: (message: string) => void;
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -64,9 +66,28 @@ export interface RemoteAdapter {
   connect(remoteId: string, opts?: { timeoutMs?: number }): Promise<RemoteDriver>;
   list(labels: Record<string, string>): Promise<RemoteVmSummary[]>;
   remove(remoteId: string): Promise<void>;
+  /** Daytona: a snapshot's state ("active", "inactive", …), undefined when it cannot be read. */
+  snapshotState?(name: string): Promise<string | undefined>;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** Daytona deactivates snapshots nobody used for a while: creating from one then fails. */
+export function isInactiveSnapshotError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /snapshot\b.*\bis inactive|snapshot\b.*\binactive\b|inactive snapshot/i.test(message);
+}
+
+/** A Daytona snapshot that is inactive and could not be activated (or did not become active in time). */
+export class SnapshotActivationError extends Error {
+  constructor(readonly snapshot: string, reason: string) {
+    super(`Daytona snapshot "${snapshot}" is inactive and could not be activated: ${reason}. Activate it in the Daytona dashboard (Snapshots), or choose another snapshot in Settings → Sandbox.`);
+    this.name = "SnapshotActivationError";
+  }
+}
+
+/** How long a snapshot may take to become active again, and how often its state is checked. */
+export const SNAPSHOT_ACTIVATION = { timeoutMs: 5 * 60_000, pollMs: 3_000 };
 
 /** A network rule this provider cannot enforce as written: the VM is not created. */
 export class SandboxNetworkConfigError extends Error {
@@ -231,7 +252,15 @@ class DaytonaAdapter implements RemoteAdapter {
     if (image && !params.snapshot) params.image = image;
     if (sized.resources) params.resources = sized.resources;
     if (sized.warning) spec.onWarning?.(sized.warning);
-    const sandbox = await client.create(params, { timeout: 180 });
+    let sandbox: any;
+    try {
+      sandbox = await client.create(params, { timeout: 180 });
+    } catch (err) {
+      // the snapshot was deactivated (unused for a while): activate it, wait, try once more
+      if (!params.snapshot || !isInactiveSnapshotError(err)) throw err;
+      await this.activateSnapshot(client, String(params.snapshot), spec.onProgress);
+      sandbox = await client.create(params, { timeout: 180 });
+    }
     // VM-class snapshots (linux-vm) pause instead of stopping: memory and processes survive
     if (persistent && sandbox.sandboxClass === "linux-vm") {
       try {
@@ -242,6 +271,47 @@ class DaytonaAdapter implements RemoteAdapter {
       }
     }
     return this.driver(sandbox);
+  }
+
+  /** Activate an inactive snapshot and wait (bounded) until it is active. */
+  private async activateSnapshot(client: any, name: string, onProgress?: (message: string) => void): Promise<void> {
+    const t0 = Date.now();
+    onProgress?.(`Daytona snapshot "${name}" is inactive: activating it (this can take a few minutes)…`);
+    try {
+      await client.snapshot.activate(name);
+    } catch (err) {
+      // already being activated by someone else is fine: wait for it below
+      if (!/already|activ/i.test((err as Error).message ?? "")) throw new SnapshotActivationError(name, (err as Error).message ?? String(err));
+    }
+    let state = "";
+    let reported = t0;
+    while (Date.now() - t0 < SNAPSHOT_ACTIVATION.timeoutMs) {
+      try {
+        state = String((await client.snapshot.get(name))?.state ?? "");
+      } catch (err) {
+        throw new SnapshotActivationError(name, (err as Error).message ?? String(err));
+      }
+      if (state === "active") {
+        onProgress?.(`Daytona snapshot "${name}" is active again (${Math.round((Date.now() - t0) / 1000)} s)`);
+        return;
+      }
+      if (state === "error" || state === "build_failed") throw new SnapshotActivationError(name, `its state is ${state}`);
+      if (Date.now() - reported >= 30_000) {
+        reported = Date.now();
+        onProgress?.(`Daytona snapshot "${name}" is still ${state || "activating"} (${Math.round((Date.now() - t0) / 1000)} s)…`);
+      }
+      await new Promise((r) => setTimeout(r, SNAPSHOT_ACTIVATION.pollMs));
+    }
+    throw new SnapshotActivationError(name, `still ${state || "inactive"} after ${Math.round(SNAPSHOT_ACTIVATION.timeoutMs / 60_000)} minutes`);
+  }
+
+  async snapshotState(name: string): Promise<string | undefined> {
+    const client = await this.client();
+    try {
+      return String((await client.snapshot.get(name))?.state ?? "") || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async connect(remoteId: string): Promise<RemoteDriver> {

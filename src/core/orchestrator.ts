@@ -442,6 +442,7 @@ export class Orchestrator extends TypedEmitter {
       case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
       case "volume": this.emit("sandbox:volume", { ...base, step: e.step, name: e.name, revision: e.revision, message: e.message }); break;
       case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
+      case "progress": this.emit("log", { level: "info", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
       default: break;
     }
   }

@@ -47,6 +47,8 @@ export type RemoteWorkspaceEvent =
   | { kind: "ready"; message: string; durationMs: number; steps: Record<string, number>; remoteId: string; source: "created" | "pool" | "warm" | "shared" | "computer" }
   | { kind: "synced"; message: string; durationMs: number }
   | { kind: "warning"; message: string }
+  /** A slow step worth telling (an inactive Daytona snapshot being activated…). */
+  | { kind: "progress"; message: string }
   | { kind: "suspended"; remoteId: string; idleMs: number }
   | { kind: "resumed"; remoteId: string; durationMs: number }
   | { kind: "released"; remoteId: string; outcome: "pooled" | "destroyed" | "shared" | "kept"; runningMs: number; durationMs: number }
@@ -190,7 +192,10 @@ export class RemoteVmSession implements SandboxSession {
       const polpoDir = this.vm.opts.pool?.polpoDir;
       if (!polpoDir) throw new Error(`Computer "${computer.id}" needs the project directory`);
       const manager = this.vm.opts.computers ?? computerManager(polpoDir);
-      return { driver: await manager.attach(computer, this.vm.opts.sandbox, (message) => this.vm.emit({ kind: "warning", message })), source: "computer" };
+      return {
+        driver: await manager.attach(computer, this.vm.opts.sandbox, (message) => this.vm.emit({ kind: "warning", message }), (message) => this.vm.emit({ kind: "progress", message })),
+        source: "computer",
+      };
     }
     const key = poolKey(this.vm.provider, this.vm.opts.sandbox);
     const pool = this.vm.pool;
@@ -223,6 +228,7 @@ export class RemoteVmSession implements SandboxSession {
       sandbox: this.vm.opts.sandbox, labels: this.labels(), lifetimeMinutes: lifetimeMinutes(this.vm.opts.sandbox),
       deleteAfterStopMinutes: this.vm.releaseTimes.deleteAfterStopMinutes, keep,
       onWarning: (message) => this.vm.emit({ kind: "warning", message }),
+      onProgress: (message) => this.vm.emit({ kind: "progress", message }),
     });
     if (pool && this.vm.isolation === "shared") {
       this.shared = true;
