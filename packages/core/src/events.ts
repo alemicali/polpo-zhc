@@ -257,7 +257,7 @@ export interface PolpoEventMap {
   "connector:changed": import("./connectors.js").ConnectorChangedEvent & EventOrigin;
   /**
    * A computer (persistent machine, settings.computers) was created, changed, deleted, or its
-   * machine changed status (creating, running, stopped, paused, archived, error…).
+   * machine changed status (creating, running, stopped, paused, hibernated, archived, error…).
    */
   "computer:changed": {
     id: string;
@@ -265,6 +265,8 @@ export interface PolpoEventMap {
     status?: import("./computers.js").ComputerStatus;
     remoteId?: string;
     error?: string;
+    /** Something worth knowing that is not an error (e.g. a Daytona v2 VM that vanished was restored from its snapshot). */
+    notice?: string;
   } & EventOrigin;
 
   // Company brain

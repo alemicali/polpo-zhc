@@ -10,7 +10,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
-import { splitHostPort, type EffectiveSandbox, type RemoteSandboxProvider, type SandboxNetwork } from "@polpo-ai/core/sandbox";
+import { splitHostPort, type DaytonaV2HibernateSettings, type EffectiveSandbox, type RemoteSandboxProvider, type SandboxNetwork } from "@polpo-ai/core/sandbox";
 import { remoteProviderCredentials } from "./remote-providers.js";
 
 export interface RemoteExecResult { exitCode: number; stdout: string; stderr: string; timedOut?: boolean }
@@ -56,6 +56,63 @@ export interface CreateSpec {
    * options returns the same machine, so a lost race or a lagging search never makes a second one.
    */
   name?: string;
+  /**
+   * The provider's create idempotency key (Daytona v2). A named v2 create derives a permanent
+   * key from the name, so a computer that gets a new machine under the same name (after a
+   * hibernation, a reset or a lost VM) passes a fresh key per machine.
+   */
+  idempotencyKey?: string;
+}
+
+/** A saved machine: a memory and disk snapshot of a VM (Daytona v2 hibernation). */
+export interface MachineSnapshot {
+  id: string;
+  name: string;
+  /** "building", then "ready"; a failure otherwise ("failed", "error"…: see snapshotFailed). */
+  status: string;
+  error?: string;
+  createdAt?: string;
+  /** Disk bytes. */
+  bytes?: number;
+  memoryBytes?: number;
+  /** The VM it was taken from. */
+  sandboxId?: string;
+}
+
+/** A snapshot status that will never become ready. */
+export function snapshotFailed(status: string | undefined): boolean {
+  return /fail|error|cancel|delet/i.test(String(status ?? ""));
+}
+
+/** How a VM is made again from a snapshot. */
+export interface RestoreSpec {
+  /** The machine's stable name (labels.name). */
+  name: string;
+  labels: Record<string, string>;
+  /** Re-applied once the VM runs (a snapshot create takes no network policy). */
+  network: SandboxNetwork;
+  idempotencyKey?: string;
+}
+
+/**
+ * Hibernation, where a VM cannot pause (Daytona v2 Linux VMs): the VM is saved as a memory and
+ * disk snapshot and deleted; later a new VM is created from the snapshot, with its files and
+ * running processes. Snapshots are found by name (they carry no labels).
+ */
+export interface Hibernation {
+  readonly settings: DaytonaV2HibernateSettings;
+  /** Start a snapshot of a running VM (resolves while it is still building; the VM keeps running). */
+  snapshot(remoteId: string, name: string): Promise<MachineSnapshot>;
+  /** A snapshot by id; undefined when it does not exist (any more). */
+  getSnapshot(id: string): Promise<MachineSnapshot | undefined>;
+  /** Snapshots whose name matches (the provider's listing may lag a fresh snapshot). */
+  listSnapshots(match: (name: string) => boolean): Promise<MachineSnapshot[]>;
+  /** Delete a snapshot (one already gone is not an error). */
+  deleteSnapshot(id: string): Promise<void>;
+  /** A new running VM from a ready snapshot, with the computer's name, labels and network rule. */
+  restore(snapshotId: string, spec: RestoreSpec): Promise<RemoteDriver>;
+  /** A VM's state and when its wall clock deletes it; undefined when it is gone. */
+  machine(remoteId: string): Promise<{ state: string; timeoutAt?: string } | undefined>;
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -78,6 +135,8 @@ export interface RemoteAdapter {
    * fixes the rule at create (nothing changed); absent: same.
    */
   updateNetwork?(remoteId: string, network: SandboxNetwork): Promise<boolean>;
+  /** Hibernation, when the provider (as configured now) saves VMs as snapshots instead of pausing them. */
+  hibernation?(): Promise<Hibernation | undefined>;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -259,6 +318,11 @@ class DaytonaAdapter implements RemoteAdapter {
   async updateNetwork(remoteId: string, network: SandboxNetwork): Promise<boolean> {
     const adapter = await this.pick();
     return adapter.updateNetwork ? adapter.updateNetwork(remoteId, network) : false;
+  }
+  /** v2 only: its Linux VMs cannot pause, computers hibernate as snapshots. */
+  async hibernation(): Promise<Hibernation | undefined> {
+    const adapter = await this.pick();
+    return adapter.hibernation ? adapter.hibernation() : undefined;
   }
 }
 

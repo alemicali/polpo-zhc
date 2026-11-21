@@ -1460,7 +1460,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     computers: () => o.getConfig()?.settings?.computers ?? [],
     settings: () => o.getConfig()?.settings,
     agents: () => o.getAgents(),
-    manager: () => computerManagerWithEvents(o.getPolpoDir(), (payload) => o.emit("computer:changed", payload)),
+    manager: () => computerManagerWithEvents(o.getPolpoDir(), (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` })),
     save: async (computers) => {
       const { savePolpoSettingsKey } = await import("../core/config.js");
       savePolpoSettingsKey(o.getPolpoDir(), "computers", computers.length ? computers : undefined);

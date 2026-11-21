@@ -1256,7 +1256,8 @@ const browserProfileLoginTool: Tool = {
 const computersListTool: Tool = {
   name: "computers_list",
   description: "The computers (persistent machines agents work on: settings.computers) with their live status (running, stopped, paused, "
-    + "archived, creating, error, missing = not created yet), provider, last use, uptime and the agents using each. \"host\" is this server.",
+    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet), provider, last use, uptime, "
+    + "last snapshot and the agents using each. \"host\" is this server.",
   parameters: Type.Object({}),
 };
 const computerCreateTool: Tool = {
@@ -1293,7 +1294,8 @@ const computerStartTool: Tool = {
 };
 const computerStopTool: Tool = {
   name: "computer_stop",
-  description: "Stop (Daytona) or pause (E2B) a computer's machine now: its disk is kept, nothing is deleted; it starts again on next use.",
+  description: "Stop (Daytona v0), pause (E2B) or hibernate (Daytona v2: memory and disk snapshot, its VM deleted) a computer's machine now: "
+    + "nothing is lost; it starts (wakes) again on next use.",
   parameters: Type.Object({ id: Type.String({ description: "Computer id" }) }),
 };
 const egressStatusTool: Tool = {
@@ -7177,6 +7179,13 @@ async function computerTools(polpo: Orchestrator) {
   };
 }
 
+/** " (0.2 GB memory + 1.4 GB disk)" for a Daytona v2 snapshot, "" when the sizes are unknown. */
+function snapshotSizes(s: { memoryBytes?: number; diskBytes?: number }): string {
+  const gb = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GB`;
+  const parts = [s.memoryBytes !== undefined ? `${gb(s.memoryBytes)} memory` : "", s.diskBytes !== undefined ? `${gb(s.diskBytes)} disk` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(" + ")})` : "";
+}
+
 async function execComputersList(polpo: Orchestrator): Promise<string> {
   const t = await computerTools(polpo);
   const agents = await polpo.getAgents();
@@ -7187,7 +7196,8 @@ async function execComputersList(polpo: Orchestrator): Promise<string> {
     const users = t.core.computerUsers(c.id, agents).map((u) => `${u.name}${u.isDefault ? " (default)" : ""}`);
     lines.push(`- ${c.id} "${c.name}" (${c.kind}${c.snapshot ? `, snapshot ${c.snapshot}` : c.image ? `, image ${c.image}` : c.template ? `, template ${c.template}` : ""}): ${live.status}`
       + `${live.lastUsedAt ? `, last used ${live.lastUsedAt}` : ""}${live.uptimeMinutes ? `, ${live.uptimeMinutes} min running so far` : ""}`
-      + `${live.lastError ? `, error: ${live.lastError}` : ""}; stops after ${t.core.computerIdleStopMinutes(c)} idle min; agents: ${users.join(", ") || "none"}`);
+      + `${live.lastSnapshot ? `, last snapshot ${live.lastSnapshot.at}${snapshotSizes(live.lastSnapshot)}` : ""}`
+      + `${live.notice ? `, note: ${live.notice}` : ""}${live.lastError ? `, error: ${live.lastError}` : ""}; stops after ${t.core.computerIdleStopMinutes(c)} idle min; agents: ${users.join(", ") || "none"}`);
   }
   return `Computers:\n${lines.join("\n")}`;
 }
@@ -7203,7 +7213,7 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   }
   const existing = t.computers();
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
-  const egressProblem = t.core.computerProviderProblem(computer, polpo.getConfig()?.settings as any) ?? t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
+  const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
   if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
@@ -7236,7 +7246,10 @@ async function execComputerControl(polpo: Orchestrator, op: "start" | "stop", ar
   if (!computer) return id === "host" ? "Error: \"host\" is this server: there is no machine to start or stop" : `Error: there is no computer "${id}" (computers_list)`;
   if (!t.core.isRemoteComputer(computer)) return `Error: "${id}" runs on this server: there is no machine to ${op}`;
   try {
-    if (op === "stop") return `Computer "${id}": ${(await t.manager().stop(computer)).status} (disk kept).`;
+    if (op === "stop") {
+      const live = await t.manager().stop(computer);
+      return `Computer "${id}": ${live.status} (${live.status === "hibernated" ? "memory and disk saved in a snapshot; it wakes in a few seconds on its next use" : "disk kept"}).`;
+    }
     const sandbox = t.sandbox(computer);
     if ("error" in sandbox) return `Error: ${sandbox.error}`;
     return `Computer "${id}": ${(await t.manager().start(computer, sandbox)).status}.`;

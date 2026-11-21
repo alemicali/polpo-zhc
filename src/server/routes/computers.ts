@@ -6,11 +6,12 @@
  *   POST   /computers                 create { id, name, kind, image?, snapshot?, template?, resources?, lifecycle?, network?, egress?, volumes?, start? }
  *   GET    /computers/:id
  *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes (id and kind stay)
- *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk, and the computer
- *   POST   /computers/:id/start       start or resume it (created if it has no machine yet)
- *   POST   /computers/:id/stop        stop (Daytona container) or pause (E2B, Daytona VM); never deletes
+ *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk (Daytona v2: and its snapshots), and the computer
+ *   POST   /computers/:id/start       start, resume, or wake it from its snapshot (Daytona v2); created if it has no machine yet
+ *   POST   /computers/:id/stop        stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2:
+ *                                     memory and disk snapshot, then the VM is deleted); never loses the machine
  *   POST   /computers/:id/restart
- *   POST   /computers/:id/reset       { confirm: true }: delete the machine and create a new one (its disk is lost)
+ *   POST   /computers/:id/reset       { confirm: true }: delete the machine (and its snapshots) and create a new one (its disk is lost)
  *   GET    /computers/:id/egress      a remote computer's egress through Tailscale: tailnet up/down, node, path (direct/DERP),
  *                                     proxy reachable, where its browser goes out now (looks inside only a running machine)
  *
@@ -19,7 +20,7 @@
  */
 import { Hono, type Context } from "hono";
 import {
-  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerProviderProblem, computerUsers, isRemoteComputer, parseComputer,
+  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
 import { computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
@@ -230,12 +231,11 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
 }
 
 /**
- * An error when a computer cannot work with the settings: a Daytona computer on Daytona v2 (Linux
- * sandboxes there cannot pause or stop); its egress: an unknown proxy; for a remote computer, no
+ * An error when a computer's egress cannot work: an unknown proxy; for a remote computer, no
  * Tailscale settings, a proxy that is not SOCKS5 on a tailnet address, or no network.
  */
 function checkEgress(computer: ComputerConfig, settings: PolpoSettings | undefined): string | null {
-  return computerProviderProblem(computer, settings as Parameters<typeof computerProviderProblem>[1]) ?? computerEgressProblem(computer, settings);
+  return computerEgressProblem(computer, settings);
 }
 
 export { ComputerConfigError };

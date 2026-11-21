@@ -4,7 +4,7 @@ import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, computerProviderProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
+import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -445,9 +445,6 @@ function parseSettings(raw: any): PolpoSettings {
     // a remote computer's egress goes through Tailscale in its VM: refused when it cannot work
     for (const c of computers) {
       if (!isRemoteComputer(c)) continue;
-      // a Daytona computer needs v0: v2 Linux sandboxes cannot be paused or stopped
-      const providerProblem = computerProviderProblem(c, raw);
-      if (providerProblem) throw new Error(`settings.computers: ${providerProblem}`);
       const problem = computerEgressProblem(c, settings);
       if (problem) throw new Error(`settings.computers: ${problem}`);
     }

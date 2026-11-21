@@ -6,7 +6,7 @@
  * template). The key itself stays in that vault entry and is read when a VM is created.
  */
 import type { VaultStore } from "@polpo-ai/core";
-import { DAYTONA_V2_RUNNER_IMAGE, DAYTONA_V2_SANDBOX_CLASS, daytonaV2MaxTimeoutSeconds, type DaytonaApiVersion } from "@polpo-ai/core/sandbox";
+import { DAYTONA_V2_RUNNER_IMAGE, DAYTONA_V2_SANDBOX_CLASS, daytonaV2HibernateSettings, daytonaV2MaxTimeoutSeconds, type DaytonaApiVersion, type DaytonaV2HibernateSettings } from "@polpo-ai/core/sandbox";
 import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 
 export type RemoteProviderId = "daytona" | "e2b";
@@ -17,7 +17,8 @@ export interface RemoteProviderSettings {
   credential?: VaultRef;
   /**
    * Daytona: which service. "v0" (default): app.daytona.io (organization key, snapshots). "v2":
-   * Daytona's new service (project API key, images, Linux VMs that pause and resume).
+   * Daytona's new service (project API key, images, Linux VMs that cannot pause: computers
+   * hibernate as memory and disk snapshots).
    */
   api?: DaytonaApiVersion;
   /** Daytona v0: API URL (default https://app.daytona.io/api). Not accepted with v2. */
@@ -32,6 +33,8 @@ export interface RemoteProviderSettings {
   image?: string;
   /** Daytona v2: the longest wall clock a sandbox may get (the plan's maximum; default 86400 s). */
   maxTimeoutSeconds?: number;
+  /** Daytona v2: how computers hibernate (snapshots kept, safety snapshots, wall-clock rotation). */
+  hibernate?: DaytonaV2HibernateSettings;
   /** E2B: custom domain (self-hosted). */
   domain?: string;
   /** E2B: default template. */
@@ -83,6 +86,7 @@ export function remoteProviderSettings(id: RemoteProviderId): RemoteProviderSett
   }
   if (id === "daytona" && raw.api === "v2") out.api = "v2";
   if (id === "daytona" && raw.maxTimeoutSeconds !== undefined) out.maxTimeoutSeconds = daytonaV2MaxTimeoutSeconds(raw);
+  if (id === "daytona" && raw.hibernate !== undefined) out.hibernate = daytonaV2HibernateSettings(raw);
   return out;
 }
 

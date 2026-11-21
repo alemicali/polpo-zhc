@@ -16,7 +16,7 @@
  * network than the computer has gets an ephemeral sandbox with that network instead.
  */
 import type { SandboxNetwork, SandboxResources, SandboxVolumeSelection } from "./sandbox.js";
-import { DAYTONA_V2_COMPUTERS_UNSUPPORTED, daytonaApiVersion, normalizeSandboxSettings } from "./sandbox.js";
+import { normalizeSandboxSettings } from "./sandbox.js";
 import { remoteEgressProblem } from "./tailnet.js";
 
 export * from "./tailnet.js";
@@ -27,14 +27,16 @@ export const COMPUTER_KINDS: readonly ComputerKind[] = ["host", "daytona", "e2b"
 /**
  * Live state. Daytona containers stop (disk kept) and archive after a while stopped (disk moved
  * to object storage: slower to start, not billed); E2B and Daytona VM-class sandboxes pause
- * (memory kept). "missing": not created yet (it is created on first use or on start).
+ * (memory kept). Daytona v2 computers hibernate: their VM is saved as a memory and disk snapshot
+ * and deleted ("hibernated"); the next use makes a VM from the snapshot (a few seconds).
+ * "missing": not created yet (it is created on first use or on start).
  * "unknown": the provider cannot be asked (no API key).
  */
 export type ComputerStatus =
-  | "running" | "stopped" | "paused" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
+  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
 
 export interface ComputerLifecycle {
-  /** Stop (Daytona v0 container) or pause (E2B, Daytona v0 VM, Daytona v2) after this many minutes without use. Default 15. */
+  /** Stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2: snapshot, VM deleted) after this many minutes without use. Default 15. */
   idleStopMinutes?: number;
   /** Daytona v0: archive after this many days stopped (disk kept in object storage, not billed). Default: Daytona's (7). Ignored on v2. */
   autoArchiveDays?: number;
@@ -170,19 +172,6 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
     throw new ComputerConfigError(`${where}: a computer on this server ("host") has no size, lifecycle or volumes of its own (the agent's sandbox settings apply)`);
   }
   return out;
-}
-
-/**
- * Why a computer cannot run on the instance's provider settings (null: it can): a Daytona computer
- * needs Daytona v0 (v2 Linux sandboxes cannot be paused or stopped, and their timeout deletes them).
- */
-export function computerProviderProblem(
-  computer: Pick<ComputerConfig, "id" | "kind">,
-  settings: { sandbox?: { providers?: Partial<Record<string, Record<string, unknown>>> } } | undefined,
-): string | null {
-  if (computer.kind !== "daytona") return null;
-  if (daytonaApiVersion(settings?.sandbox?.providers?.daytona) !== "v2") return null;
-  return `Computer "${computer.id}": ${DAYTONA_V2_COMPUTERS_UNSUPPORTED} (settings.sandbox.providers.daytona.api is "v2")`;
 }
 
 /**

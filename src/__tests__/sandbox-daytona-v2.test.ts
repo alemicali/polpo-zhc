@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
-  DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, computerProviderProblem, daytonaApiVersion, daytonaProviderErrors,
+  DAYTONA_V2_HIBERNATE_DEFAULTS, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, daytonaApiVersion, daytonaProviderErrors, daytonaV2HibernateSettings,
   type ComputerConfig, type EffectiveSandbox, type SandboxNetwork,
 } from "@polpo-ai/core/sandbox";
 
@@ -34,6 +34,15 @@ const v2 = vi.hoisted(() => ({
   networkResets: [] as string[],
   lifecycleUpdates: [] as any[],
   n: 0,
+  // memory and disk snapshots (createSnapshot / createFromSnapshot), as seen live
+  snapshots: new Map<string, { id: string; name: string; status: string; sandboxId: string; reads: number; createdAt: string; error?: string }>(),
+  snapReadyAfter: 2,
+  snapFail: undefined as string | undefined,
+  snapCreateError: undefined as any,
+  restores: [] as Array<{ snapshot: string; opts: any }>,
+  restoreError: undefined as any,
+  sn: 0,
+  clock: Date.parse("2026-11-21T10:00:00Z"),
 }));
 const v0 = vi.hoisted(() => ({ created: [] as any[] }));
 const providerOptions = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
@@ -48,8 +57,17 @@ function fakeSandbox(s: FakeSb) {
     get lifecyclePolicy() { return s.lifecyclePolicy; },
     wait: async () => { s.state = "started"; return sb; },
     start: async () => { v2.calls.push(`start ${s.id} from ${s.state}`); s.state = "started"; },
-    stop: async () => { v2.calls.push(`stop ${s.id}`); throw Object.assign(new Error("A sandbox that is not persistent cannot be stopped"), { statusCode: 400 }); },
-    pause: async () => { v2.calls.push(`pause ${s.id}`); s.state = "paused"; },
+    // live: a Linux v2 sandbox is not persistent
+    stop: async () => { v2.calls.push(`stop ${s.id}`); throw notPersistent(); },
+    pause: async () => { v2.calls.push(`pause ${s.id}`); throw notPersistent(); },
+    fork: async () => { v2.calls.push(`fork ${s.id}`); throw notPersistent(); },
+    createSnapshot: async (name: string) => {
+      v2.calls.push(`snapshot ${s.id} ${name}`);
+      if (v2.snapCreateError) throw v2.snapCreateError;
+      const snap = { id: `snap_${++v2.sn}`, name, status: "building", sandboxId: s.id, reads: 0, createdAt: new Date(v2.clock).toISOString() };
+      v2.snapshots.set(snap.id, snap);
+      return snapView(snap);
+    },
     resume: async () => { v2.calls.push(`resume ${s.id}`); s.state = "started"; },
     delete: async () => { v2.calls.push(`delete ${s.id}`); s.state = "destroyed"; },
     refreshData: async () => undefined,
@@ -70,6 +88,28 @@ function fakeSandbox(s: FakeSb) {
   return sb;
 }
 
+function notPersistent() {
+  return Object.assign(new Error("sandbox is not persistent"), { statusCode: 409, code: "CONFLICT" });
+}
+
+function snapView(x: { id: string; name: string; status: string; sandboxId: string; createdAt: string; error?: string }) {
+  return { id: x.id, name: x.name, status: x.status, sandboxId: x.sandboxId, createdAt: x.createdAt, ...(x.error ? { error: x.error } : {}), ...(x.status === "ready" ? { bytes: 1_500_000_000, memoryBytes: 224_000_000 } : {}) };
+}
+
+/** A read of a building snapshot: ready after snapReadyAfter reads; failed when its source went first (as seen live) or snapFail says so. */
+function readSnapshot(id: string) {
+  const x = v2.snapshots.get(id);
+  if (!x) throw Object.assign(new Error(`snapshot ${id} not found`), { statusCode: 404, code: "NOT_FOUND" });
+  if (x.status === "building") {
+    x.reads++;
+    const source = v2.sandboxes.get(x.sandboxId);
+    if (!source || source.s.state === "destroyed") { x.status = "failed"; x.error = "source sandbox deleted before the snapshot was ready"; }
+    else if (v2.snapFail) { x.status = v2.snapFail; x.error = "capture failed"; }
+    else if (x.reads >= v2.snapReadyAfter) x.status = "ready";
+  }
+  return snapView(x);
+}
+
 function addSandbox(s: Partial<FakeSb> & { id: string }) {
   const full: FakeSb = { state: "started", sandboxClass: "linux", labels: {}, ...s };
   v2.sandboxes.set(full.id, { s: full, sb: fakeSandbox(full) });
@@ -85,8 +125,30 @@ vi.mock("@daytona/sdk-v2", () => ({
           if (v2.createError) throw v2.createError;
           v2.creates.push({ image, opts });
           const id = `sbx_${++v2.n}`;
-          const s = addSandbox({ id, state: v2.createdState, sandboxClass: v2.createClass, labels: { ...opts.labels, ...(opts.name ? { name: opts.name } : {}) }, network: opts.networkPolicy });
+          const timeoutAt = opts.lifecyclePolicy?.timeoutSeconds ? new Date(v2.clock + opts.lifecyclePolicy.timeoutSeconds * 1000).toISOString() : undefined;
+          const s = addSandbox({ id, state: v2.createdState, sandboxClass: v2.createClass, labels: { ...opts.labels, ...(opts.name ? { name: opts.name } : {}) }, network: opts.networkPolicy, lifecyclePolicy: { timeoutSeconds: opts.lifecyclePolicy?.timeoutSeconds, timeoutAt } });
           return v2.sandboxes.get(s.id).sb;
+        },
+        // a VM from a ready snapshot: started, its files and processes back; no network policy option
+        createFromSnapshot: async (snapshot: string, opts: any) => {
+          v2.calls.push(`restore ${snapshot}`);
+          if (v2.restoreError) throw v2.restoreError;
+          const x = v2.snapshots.get(snapshot);
+          if (!x) throw Object.assign(new Error(`snapshot ${snapshot} not found`), { statusCode: 404, code: "NOT_FOUND" });
+          if (x.status !== "ready") throw Object.assign(new Error(`snapshot ${snapshot} is ${x.status}`), { statusCode: 400 });
+          v2.restores.push({ snapshot, opts });
+          const id = `sbx_${++v2.n}`;
+          const timeoutAt = new Date(v2.clock + opts.lifecyclePolicy.timeoutSeconds * 1000).toISOString();
+          const s = addSandbox({ id, labels: { ...opts.labels, ...(opts.name ? { name: opts.name } : {}) }, lifecyclePolicy: { timeoutSeconds: opts.lifecyclePolicy.timeoutSeconds, timeoutAt } });
+          return v2.sandboxes.get(s.id).sb;
+        },
+        snapshots: {
+          get: async (id: string) => readSnapshot(id),
+          iter: async function* () { for (const x of v2.snapshots.values()) yield snapView(x); },
+          delete: async (id: string) => {
+            v2.calls.push(`delete-snapshot ${id}`);
+            if (!v2.snapshots.delete(id)) throw Object.assign(new Error("not found"), { statusCode: 404, code: "NOT_FOUND" });
+          },
         },
         get: async (id: string) => {
           const e = v2.sandboxes.get(id);
@@ -124,13 +186,20 @@ vi.mock("@daytona/sdk", () => ({
 vi.mock("../sandbox/remote-providers.js", () => ({
   remoteProviderCredentials: async (id: string) => {
     const o = providerOptions.value;
-    return { apiKey: `key-${id}`, ...(o.api === "v2" ? { api: "v2" } : {}), ...(typeof o.image === "string" ? { image: o.image } : {}), ...(typeof o.region === "string" ? { region: o.region } : {}), ...(typeof o.maxTimeoutSeconds === "number" ? { maxTimeoutSeconds: o.maxTimeoutSeconds } : {}) };
+    return { apiKey: `key-${id}`, ...(o.api === "v2" ? { api: "v2" } : {}), ...(typeof o.image === "string" ? { image: o.image } : {}), ...(typeof o.region === "string" ? { region: o.region } : {}), ...(typeof o.maxTimeoutSeconds === "number" ? { maxTimeoutSeconds: o.maxTimeoutSeconds } : {}),
+      ...(o.hibernate ? { hibernate: { keepSnapshots: 1, safetySnapshotHours: 6, rotateBeforeMinutes: 60, rotateIdleGapSeconds: 90, forceRotateMinutes: 10, snapshotTimeoutSeconds: 300, retryMinutes: 10, ...(o.hibernate as object) } } : {}) };
   },
+}));
+
+vi.mock("../sandbox/tailnet-egress.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sandbox/tailnet-egress.js")>()),
+  onComputerStarted: vi.fn(),
 }));
 
 const { remoteAdapter, resetRemoteAdapters, SandboxNetworkConfigError } = await import("../sandbox/remote-adapters.js");
 const { daytonaV2NetworkPolicy, daytonaV2Resources, daytonaV2Lifecycle, DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS } = await import("../sandbox/daytona-v2.js");
-const { ComputerManager } = await import("../sandbox/computers.js");
+const { ComputerManager, computerMachineName, computerSnapshotName, isComputerSnapshotName } = await import("../sandbox/computers.js");
+const { onComputerStarted } = await import("../sandbox/tailnet-egress.js");
 const { poolKey } = await import("../sandbox/pool.js");
 
 const allow = (...hosts: string[]): SandboxNetwork => ({ mode: "allowlist", allow: hosts });
@@ -144,8 +213,12 @@ beforeEach(() => {
   Object.assign(v2, {
     ctor: [], creates: [], calls: [], execs: [], execResult: undefined, createError: undefined, searchError: undefined,
     createClass: "linux", createdState: "started", networkUpdates: [], networkResets: [], lifecycleUpdates: [], n: 0,
+    snapReadyAfter: 2, snapFail: undefined, snapCreateError: undefined, restores: [], restoreError: undefined, sn: 0,
+    clock: Date.parse("2026-11-21T10:00:00Z"),
   });
   v2.sandboxes.clear();
+  v2.snapshots.clear();
+  vi.mocked(onComputerStarted).mockClear();
   v0.created.length = 0;
   providerOptions.value = { api: "v2" };
   resetRemoteAdapters();
@@ -172,6 +245,17 @@ describe("providers.daytona.api", () => {
     expect(daytonaProviderErrors({ image: 3 })[0]).toMatch(/image must be a string/);
     expect(daytonaProviderErrors({ api: "v2", maxTimeoutSeconds: 43_200 })).toEqual([]);
     expect(daytonaProviderErrors({ api: "v2", maxTimeoutSeconds: 10 })[0]).toMatch(/maxTimeoutSeconds must be a whole number of seconds, at least 60/);
+    expect(daytonaProviderErrors({ api: "v2", hibernate: { keepSnapshots: 2, safetySnapshotHours: 0, rotateBeforeMinutes: 30 } })).toEqual([]);
+    expect(daytonaProviderErrors({ api: "v2", hibernate: { keepSnapshots: 0 } })[0]).toMatch(/hibernate\.keepSnapshots must be a whole number from 1 to 10/);
+    expect(daytonaProviderErrors({ api: "v2", hibernate: { keep: 2 } })[0]).toMatch(/hibernate\.keep is not a hibernate setting/);
+    expect(daytonaProviderErrors({ api: "v2", hibernate: 3 })[0]).toMatch(/hibernate must be an object/);
+  });
+
+  test("hibernate settings: defaults, bounds, forced rotation inside the rotation window", () => {
+    expect(daytonaV2HibernateSettings(undefined)).toEqual(DAYTONA_V2_HIBERNATE_DEFAULTS);
+    expect(DAYTONA_V2_HIBERNATE_DEFAULTS).toMatchObject({ keepSnapshots: 1, safetySnapshotHours: 6, rotateBeforeMinutes: 60, snapshotTimeoutSeconds: 300 });
+    expect(daytonaV2HibernateSettings({ hibernate: { keepSnapshots: 3, safetySnapshotHours: 99 } })).toMatchObject({ keepSnapshots: 3, safetySnapshotHours: 6 });
+    expect(daytonaV2HibernateSettings({ hibernate: { rotateBeforeMinutes: 10, forceRotateMinutes: 20 } })).toMatchObject({ rotateBeforeMinutes: 10, forceRotateMinutes: 5 });
   });
 
   test("loading polpo.json refuses v2 with an API URL; v0 settings load as before", async () => {
@@ -287,8 +371,11 @@ describe("v2 sizing and lifecycle", () => {
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })).toEqual({ timeoutSeconds: 1200, onTimeout: "delete", idleExpirySeconds: 1200, onIdleTimeout: "delete" });
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true, deleteAfterStopMinutes: 30 })).toEqual({ timeoutSeconds: 3000, onTimeout: "delete", idleExpirySeconds: -1 });
     const computer = daytonaV2Lifecycle({ lifetimeMinutes: 15, keep: true, persistent: { idleStopMinutes: 15 } });
-    expect(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS).toBeGreaterThan(DAYTONA_V2_MAX_TIMEOUT_SECONDS);
-    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_MAX_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
+    expect(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS).toBe(86_400);
+    // a computer: the plan's wall clock (at most 24 h) deletes its VM; it is rotated through a snapshot before
+    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_MAX_TIMEOUT_SECONDS, onTimeout: "delete", idleExpirySeconds: -1 });
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 15, keep: true, persistent: { idleStopMinutes: 15 } }, 200_000).timeoutSeconds).toBe(86_400);
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 15, keep: true, persistent: { idleStopMinutes: 15 } }, 3600).timeoutSeconds).toBe(3600);
     // the cap: 86400 s by default (the plan's maximum), providers.daytona.maxTimeoutSeconds otherwise
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 2000, keep: false }).timeoutSeconds).toBe(86_400);
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 2000, keep: true, deleteAfterStopMinutes: 60 }, 3600).timeoutSeconds).toBe(3600);
@@ -297,7 +384,6 @@ describe("v2 sizing and lifecycle", () => {
     for (const p of [computer, daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true }), daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })]) {
       expect([p.onTimeout, p.onIdleTimeout].filter((a) => a && a !== "delete")).toEqual([]);
     }
-    expect(JSON.stringify(computer)).not.toMatch(/delete/);
   });
 });
 
@@ -378,10 +464,35 @@ describe("Daytona v2 adapter", () => {
     expect(v2.calls).toContain("delete sbx_1");
     // a VM already gone: nothing to do
     await remoteAdapter("daytona").suspendById("sbx_1");
-    // a computer's machine (made before computers were refused on v2) is never deleted by an idle stop
+    // a computer's machine is never deleted by an idle stop: it hibernates through the ComputerManager
     addSandbox({ id: "sbx_pc", labels: { "polpo-computer": "i:nina" } });
-    await expect(remoteAdapter("daytona").suspendById("sbx_pc")).rejects.toThrow(/can't be paused or stopped on this plan: use Daytona v0 or E2B for computers/);
+    await expect(remoteAdapter("daytona").suspendById("sbx_pc")).rejects.toThrow(/hibernates .* instead of pausing/);
     expect(v2.calls.some((c) => c.startsWith("pause") || c.startsWith("stop") || c === "delete sbx_pc")).toBe(false);
+  });
+
+  test("hibernation (as seen live): pause/stop/fork answer 409; a snapshot builds then is ready; deleting its source first fails it", async () => {
+    const driver = await remoteAdapter("daytona").create(spec(sandbox()));
+    const raw = v2.sandboxes.get("sbx_1").sb;
+    for (const op of ["pause", "stop", "fork"]) await expect(raw[op]()).rejects.toMatchObject({ statusCode: 409 });
+    const h = (await remoteAdapter("daytona").hibernation!())!;
+    expect(h.settings).toEqual(DAYTONA_V2_HIBERNATE_DEFAULTS);
+    const snap = await h.snapshot(driver.remoteId, "polpo-computer-i-nina-20261121100000000");
+    expect(snap).toMatchObject({ id: "snap_1", status: "building", sandboxId: "sbx_1" });
+    expect((await h.getSnapshot("snap_1"))!.status).toBe("building");
+    expect(await h.getSnapshot("snap_1")).toMatchObject({ status: "ready", memoryBytes: 224_000_000, bytes: 1_500_000_000 });
+    expect(await h.machine("sbx_1")).toMatchObject({ state: "started" });
+    // the source deleted before the snapshot is ready: the snapshot fails
+    await h.snapshot(driver.remoteId, "polpo-computer-i-nina-20261121100000001");
+    await remoteAdapter("daytona").remove("sbx_1");
+    expect(await h.getSnapshot("snap_2")).toMatchObject({ status: "failed" });
+    expect(await h.machine("sbx_1")).toBeUndefined();
+    expect((await h.listSnapshots((n) => n.endsWith("000"))).map((x) => x.id)).toEqual(["snap_1"]);
+    await h.deleteSnapshot("snap_1");
+    await h.deleteSnapshot("snap_1"); // already gone: fine
+    expect(await h.getSnapshot("snap_1")).toBeUndefined();
+    // v0 has no hibernation
+    providerOptions.value = {};
+    expect(await remoteAdapter("daytona").hibernation!()).toBeUndefined();
   });
 
   test("create caps the wall clock at providers.daytona.maxTimeoutSeconds", async () => {
@@ -469,57 +580,363 @@ describe("v0 stays as it was", () => {
   });
 });
 
-// ── computers on v2: refused ────────────────────────────────────────────
+// ── computers on v2: hibernate ──────────────────────────────────────────
 
-describe("computers on Daytona v2 (Linux sandboxes are not persistent)", () => {
-  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 } };
-  const sb = () => sandbox({ computer: nina });
-  const manager = () => {
+describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () => {
+  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 }, network: allow("example.com") };
+  const sb = (c: ComputerConfig = nina) => sandbox({ network: c.network ?? { mode: "open" }, computer: c });
+  const setup = (opts: { hold?: () => Promise<void> } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-computer-"));
     dirs.push(dir);
-    return new ComputerManager(dir);
+    const m = new ComputerManager(dir, {
+      now: () => v2.clock,
+      // the snapshot polls advance the clock (no real waits)
+      sleep: async (ms) => { v2.clock += ms; await opts.hold?.(); },
+    });
+    const notices: string[] = [];
+    m.onNotice = (_id, level, message) => notices.push(`${level}: ${message}`);
+    const changes: any[] = [];
+    m.onChange = (_id, live) => changes.push(live);
+    // in use now: lastUsedAt written (touch writes in the background)
+    const use = async () => {
+      m.touch(nina, undefined, true);
+      const at = new Date(v2.clock).toISOString();
+      await vi.waitFor(() => expect(m.read().nina?.lastUsedAt).toBe(at));
+    };
+    return { m, notices, changes, use, advance: (ms: number) => { v2.clock += ms; } };
   };
-  const refusal = /Daytona v2 Linux sandboxes can't be paused or stopped on this plan: use Daytona v0 or E2B for computers/;
+  const running = () => [...v2.sandboxes.values()].filter((e) => e.s.state === "started").map((e) => e.s.id);
+  const idx = (call: string) => v2.calls.indexOf(call);
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
 
-  test("a Daytona computer is refused on v2: by the rule, at start, stop and reset (nothing created, paused or deleted)", async () => {
-    expect(computerProviderProblem(nina, { sandbox: { providers: { daytona: { api: "v2" } } } })).toMatch(refusal);
-    expect(computerProviderProblem(nina, { sandbox: { providers: { daytona: {} } } })).toBeNull();
-    expect(computerProviderProblem({ id: "box", kind: "e2b" }, { sandbox: { providers: { daytona: { api: "v2" } } } })).toBeNull();
-    const m = manager();
-    await expect(m.ensure(nina, sb())).rejects.toThrow(refusal);
-    await expect(m.stop(nina)).rejects.toThrow(refusal);
-    await expect(m.reset(nina, sb())).rejects.toThrow(refusal);
-    expect(v2.creates).toHaveLength(0);
-    expect(v2.calls).toEqual([]);
-  });
-
-  test("polpo.json, POST /computers and PATCH /config/settings refuse a Daytona computer on v2", async () => {
+  test("allowed on v2: polpo.json loads, POST /computers creates, switching settings to v2 keeps Daytona computers", async () => {
     const { parseConfig } = await import("../core/config.js");
     const workDir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-config-"));
     dirs.push(workDir);
     mkdirSync(join(workDir, ".polpo"), { recursive: true });
-    const write = (settings: unknown) => writeFileSync(join(workDir, ".polpo", "polpo.json"), JSON.stringify({ project: "p", settings }));
-    write({ sandbox: { providers: { daytona: { api: "v2" } } }, computers: [{ id: "nina", name: "Nina", kind: "daytona" }] });
-    await expect(parseConfig(workDir)).rejects.toThrow(refusal);
-    write({ sandbox: { providers: { daytona: { api: "v2" } } }, computers: [{ id: "box", name: "Box", kind: "e2b" }] });
-    expect((await parseConfig(workDir)).settings.computers?.[0]?.id).toBe("box");
+    writeFileSync(join(workDir, ".polpo", "polpo.json"), JSON.stringify({ project: "p", settings: { sandbox: { providers: { daytona: { api: "v2" } } }, computers: [{ id: "nina", name: "Nina", kind: "daytona" }] } }));
+    expect((await parseConfig(workDir)).settings.computers?.[0]?.id).toBe("nina");
 
     const { computerRoutes } = await import("../server/routes/computers.js");
     const state = { computers: [] as ComputerConfig[] };
     const routes = computerRoutes({
       computers: () => state.computers, settings: () => ({ sandbox: { providers: { daytona: { api: "v2" } } } }) as any, agents: async () => [],
-      manager: () => manager(), save: async (list) => { state.computers = list; }, sandboxFor: () => ({ error: "no key" }), emit: () => {},
+      manager: () => setup().m, save: async (list) => { state.computers = list; }, sandboxFor: () => ({ error: "no key" }), emit: () => {},
     });
     const res = await routes.request("/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "nina", kind: "daytona" }) });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(refusal);
+    expect(res.status).toBe(201);
 
     const { configRoutes } = await import("@polpo-ai/server");
     let config: any = { project: "p", teams: [], settings: { computers: [{ id: "nina", name: "Nina", kind: "daytona" }] } };
     const app = configRoutes(() => ({ getConfig: () => config, reloadConfig: async () => true, saveConfig: async (c: any) => { config = c; }, getNotificationRouter: () => null } as any));
-    const patch = await app.request("/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ sandbox: { providers: { daytona: { api: "v2" } } } }) });
-    expect(patch.status).toBe(400);
-    expect((await patch.json()).error).toMatch(/Move or delete the Daytona computers first, or keep api "v0"/);
-    expect(config.settings.sandbox).toBeUndefined();
+    const patch = await app.request("/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ sandbox: { providers: { daytona: { api: "v2", hibernate: { keepSnapshots: 2 } } } } }) });
+    expect(patch.status).toBe(200);
+    expect(config.settings.sandbox.providers.daytona).toEqual({ api: "v2", hibernate: { keepSnapshots: 2 } });
+  });
+
+  test("first use: a Linux VM from the image with its stable name and labels, a fresh create key, a 24 h wall clock that deletes", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    expect(v2.creates).toHaveLength(1);
+    const { opts } = v2.creates[0];
+    expect(opts.name).toBe(computerMachineName(m.labelValue("nina")));
+    expect(opts.labels["polpo-computer"]).toBe(m.labelValue("nina"));
+    expect(opts.idempotencyKey).toBe(`${opts.name}:${v2.clock}`);
+    expect(opts.lifecyclePolicy).toEqual({ timeoutSeconds: 86_400, onTimeout: "delete", idleExpirySeconds: -1 });
+    expect(m.live("nina").status).toBe("running");
+    expect(m.read().nina.timeoutAt).toBe(new Date(v2.clock + 86_400_000).toISOString());
+  });
+
+  test("snapshot names belong to one computer of one instance", () => {
+    const at = Date.parse("2026-11-21T22:18:55.123Z");
+    expect(computerSnapshotName("inst:nina", at)).toBe("polpo-computer-inst-nina-20261121221855123");
+    expect(isComputerSnapshotName("inst:nina", "polpo-computer-inst-nina-20261121221855123")).toBe(true);
+    expect(isComputerSnapshotName("inst:nina", computerSnapshotName("inst:nina-2", at))).toBe(false);
+    expect(isComputerSnapshotName("inst:nina", computerSnapshotName("other:nina", at))).toBe(false);
+    expect(isComputerSnapshotName("inst:nina", "polpo-computer-inst-nina-latest")).toBe(false);
+  });
+
+  test("idle → hibernated: a snapshot, ready, then the VM deleted (never paused or stopped); the card shows the snapshot", async () => {
+    const { m, advance, changes } = setup();
+    await m.ensure(nina, sb());
+    advance(16 * MIN);
+    await m.idleTick([nina]);
+    const snapCall = v2.calls.find((c) => c.startsWith("snapshot sbx_1 "))!;
+    expect(snapCall).toMatch(new RegExp(`^snapshot sbx_1 ${computerMachineName(m.labelValue("nina"))}-\\d{17}$`));
+    expect(v2.snapshots.get("snap_1")!.status).toBe("ready");
+    expect(idx("delete sbx_1")).toBeGreaterThan(idx(snapCall)); // only once the snapshot was ready (deleting first would fail it)
+    expect(v2.calls.some((c) => /^(pause|stop|fork) /.test(c))).toBe(false);
+    expect(running()).toEqual([]);
+    const live = m.live("nina");
+    expect(live).toMatchObject({ status: "hibernated", lastSnapshot: { diskBytes: 1_500_000_000, memoryBytes: 224_000_000 } });
+    expect(live.remoteId).toBeUndefined();
+    expect(changes.map((x) => x.status)).toEqual(["creating", "running", "stopping", "hibernated"]);
+    // nothing more to do while it hibernates
+    await m.idleTick([nina]);
+    expect(v2.calls.filter((c) => c.startsWith("snapshot"))).toHaveLength(1);
+  });
+
+  test("a snapshot that fails keeps the VM running (error shown, retried later); the failed snapshot is deleted", async () => {
+    providerOptions.value = { api: "v2", hibernate: { retryMinutes: 30 } };
+    const { m, advance, notices } = setup();
+    await m.ensure(nina, sb());
+    v2.snapFail = "failed";
+    await expect(m.stop(nina)).rejects.toThrow(/Could not hibernate \(stop\): the snapshot failed: capture failed\. It keeps running; tried again in 30 min/);
+    expect(running()).toEqual(["sbx_1"]);
+    expect(v2.calls).not.toContain("delete sbx_1");
+    expect(v2.snapshots.size).toBe(0);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_1", lastError: expect.stringMatching(/keeps running/) });
+    expect(m.read().nina.snapshots ?? []).toEqual([]);
+
+    // idle, but within the retry delay: left running
+    v2.snapFail = undefined;
+    advance(16 * MIN);
+    await m.idleTick([nina]);
+    expect(v2.calls.filter((c) => c.startsWith("snapshot"))).toHaveLength(1);
+    expect(running()).toEqual(["sbx_1"]);
+    // the delay is over: hibernated
+    advance(15 * MIN);
+    await m.idleTick([nina]);
+    expect(v2.calls.filter((c) => c.startsWith("snapshot"))).toHaveLength(2);
+    expect(m.live("nina").status).toBe("hibernated");
+    expect(notices).toEqual([]);
+
+    // a snapshot that never gets ready: given up after snapshotTimeoutSeconds, the VM kept
+    await m.ensure(nina, sb());
+    v2.snapReadyAfter = 100_000;
+    await expect(m.stop(nina)).rejects.toThrow(/not ready after 300 s/);
+    expect(m.live("nina").status).toBe("running");
+  });
+
+  test("snapshots unavailable on the plan: the API's error is surfaced, nothing deleted", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    v2.snapCreateError = Object.assign(new Error("FEATURE_NOT_ENABLED: snapshots are not enabled for this organization"), { statusCode: 403 });
+    await expect(m.stop(nina)).rejects.toThrow(/Could not hibernate \(stop\): FEATURE_NOT_ENABLED: snapshots are not enabled/);
+    expect(running()).toEqual(["sbx_1"]);
+    expect(m.live("nina").lastError).toMatch(/FEATURE_NOT_ENABLED/);
+  });
+
+  test("wake: the next use makes a VM from the snapshot (name, labels, 24 h wall clock), re-applies the network rule, checks the tailnet, then deletes older snapshots", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    expect(onComputerStarted).toHaveBeenCalledTimes(1);
+    await m.stop(nina);
+    const driver = await m.ensure(nina, sb());
+    expect(driver.remoteId).toBe("sbx_2");
+    expect(v2.creates).toHaveLength(1); // not from the image again
+    const { snapshot, opts } = v2.restores[0];
+    expect(snapshot).toBe("snap_1");
+    expect(opts).toMatchObject({ name: computerMachineName(m.labelValue("nina")), labels: m.labels("nina"), lifecyclePolicy: { timeoutSeconds: 86_400, onTimeout: "delete", idleExpirySeconds: -1 } });
+    expect(opts.idempotencyKey).toMatch(/:wake:snap_1:\d+$/);
+    expect(v2.networkUpdates.at(-1)).toEqual({ policy: { blockAll: true, allowDomains: ["example.com"] }, ifMatch: "\"etag-sbx_2\"" });
+    // the tailnet is checked again on the new VM (its daemons came back with the memory)
+    expect(onComputerStarted).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(onComputerStarted).mock.calls[1]![0]).toMatchObject({ id: "nina" });
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_2" });
+    expect(m.read().nina.restoredFrom).toBe("snap_1");
+    expect([...v2.snapshots.keys()]).toEqual(["snap_1"]); // keepSnapshots 1: the one it runs from
+
+    // second cycle: snap_1 goes only after the VM from snap_2 runs
+    await m.stop(nina);
+    expect([...v2.snapshots.keys()]).toEqual(["snap_1", "snap_2"]);
+    await m.start(nina, sb());
+    expect(idx("delete-snapshot snap_1")).toBeGreaterThan(idx("restore snap_2"));
+    expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+  });
+
+  test("a failed wake keeps every snapshot; the next use tries again", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    v2.restoreError = Object.assign(new Error("no capacity"), { statusCode: 503 });
+    await expect(m.ensure(nina, sb())).rejects.toThrow(/no capacity/);
+    expect(m.live("nina").status).toBe("error");
+    expect([...v2.snapshots.keys()]).toEqual(["snap_1", "snap_2"]);
+    expect(v2.calls.some((c) => c.startsWith("delete-snapshot"))).toBe(false);
+    v2.restoreError = undefined;
+    await m.ensure(nina, sb());
+    expect(v2.restores.at(-1)!.snapshot).toBe("snap_2");
+    expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+  });
+
+  test("the snapshot is gone: an older one, else a fresh VM from the image, with a notice", async () => {
+    const { m, notices } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    v2.snapshots.delete("snap_1");
+    await m.ensure(nina, sb());
+    expect(v2.creates).toHaveLength(2);
+    expect(v2.restores).toHaveLength(0);
+    expect(m.live("nina").notice).toMatch(/a new VM from the image \(its files are lost\)/);
+    expect(notices.at(-1)).toMatch(/^warn: .*new VM from the image/);
+  });
+
+  test("the state file lost: it wakes from its newest snapshot, found by its name", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    rmSync(join(m.polpoDir, "computers-state.json"));
+    await m.ensure(nina, sb());
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
+    expect(v2.creates).toHaveLength(1);
+  });
+
+  test("24 h wall clock: rotated at a quiet gap (snapshot, new VM from it); busy → waits; close to the end → forced, with a warning", async () => {
+    const { m, advance, notices, use } = setup();
+    await m.ensure(nina, sb());
+    const sandboxFor = () => sb();
+    // busy (used 30 s ago) 50 min before the end: not yet
+    advance(23 * HOUR + 9 * MIN + 30_000);
+    await use();
+    advance(30_000);
+    await m.idleTick([nina], sandboxFor);
+    expect(v2.calls.some((c) => c.startsWith("snapshot"))).toBe(false);
+    // a quiet gap of 2 min: rotated
+    advance(2 * MIN);
+    await m.idleTick([nina], sandboxFor);
+    expect(v2.calls.filter((c) => c.startsWith("snapshot"))).toHaveLength(1);
+    expect(v2.calls).toContain("delete sbx_1");
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_2" });
+    expect(m.read().nina.timeoutAt).toBe(new Date(v2.clock + 86_400_000).toISOString());
+    expect(notices.at(-1)).toBe("info: Rotated through a snapshot before its VM's wall clock");
+
+    // busy all along: forced once less than 10 min are left
+    advance(23 * HOUR + 51 * MIN);
+    await use();
+    advance(10_000);
+    await m.idleTick([nina], sandboxFor);
+    expect(v2.restores).toHaveLength(2);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_3", notice: expect.stringMatching(/while it was busy/) });
+    expect(notices.at(-1)).toMatch(/^warn: Rotated .* while it was busy: a pause of a few seconds/);
+  });
+
+  test("safety snapshots every 6 h while it runs (the VM keeps running); older ones are pruned", async () => {
+    const { m, advance, use } = setup();
+    await m.ensure(nina, sb());
+    advance(5 * HOUR);
+    await use();
+    await m.idleTick([nina]);
+    expect(v2.calls.some((c) => c.startsWith("snapshot"))).toBe(false);
+    advance(HOUR);
+    await use();
+    await m.idleTick([nina]);
+    expect(v2.snapshots.get("snap_1")!.status).toBe("ready");
+    expect(running()).toEqual(["sbx_1"]);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_1", lastSnapshot: { at: expect.any(String) } });
+    advance(6 * HOUR);
+    await use();
+    await m.idleTick([nina]);
+    expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+    expect(running()).toEqual(["sbx_1"]);
+  });
+
+  test("a VM that vanished is restored from the last snapshot, with a notice (computer:changed)", async () => {
+    const { m, advance, changes, use } = setup();
+    await m.ensure(nina, sb());
+    advance(6 * HOUR);
+    await use();
+    await m.idleTick([nina]); // safety snapshot snap_1
+    v2.sandboxes.get("sbx_1").s.state = "destroyed"; // the wall clock or the provider
+    // a refresh sees it: hibernated, with a notice
+    const seen = await m.refresh(nina);
+    expect(seen).toMatchObject({ status: "hibernated", notice: expect.stringMatching(/Its VM is gone .* restores it from the snapshot of/) });
+    expect(changes.at(-1)).toMatchObject({ status: "hibernated", notice: expect.stringMatching(/VM is gone/) });
+    await m.ensure(nina, sb());
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_2", notice: expect.stringMatching(/Its VM was gone .* restored from the snapshot of .* changes made after it are lost/) });
+
+    // straight to the next use, without a refresh: the same
+    v2.sandboxes.get("sbx_2").s.state = "destroyed";
+    await m.ensure(nina, sb());
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1", "snap_1"]);
+    expect(m.live("nina").notice).toMatch(/Its VM was gone/);
+  });
+
+  test("commands that arrive while it hibernates wait, then run on the woken VM", async () => {
+    let release!: () => void;
+    let held: Promise<void> | undefined;
+    const { m } = setup({ hold: () => held ?? Promise.resolve() });
+    const driver = await m.attach(nina, sb());
+    const execOn = () => v2.execs.length;
+    held = new Promise((r) => { release = r; });
+    const stopping = m.stop(nina);
+    await vi.waitFor(() => expect(v2.calls.some((c) => c.startsWith("snapshot sbx_1"))).toBe(true));
+    const exec = driver.exec("echo hi", {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(execOn()).toBe(0); // waiting for the hibernation
+    held = undefined;
+    release();
+    await stopping;
+    const r = await exec;
+    expect(r.exitCode).toBe(0);
+    expect(execOn()).toBe(1);
+    expect(idx("restore snap_1")).toBeGreaterThan(idx("delete sbx_1"));
+    expect(driver.remoteId).toBe("sbx_2");
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_2" });
+  });
+
+  test("hibernation waits for a running command (this process)", async () => {
+    let finish!: () => void;
+    // the drain's waits are real here (a few ms each), so the command can finish meanwhile
+    const { m } = setup({ hold: () => new Promise((r) => setTimeout(r, 1)) });
+    const driver = await m.attach(nina, sb());
+    v2.execResult = undefined;
+    const slow = new Promise<void>((r) => { finish = r; });
+    const realExec = v2.sandboxes.get("sbx_1").sb.exec;
+    v2.sandboxes.get("sbx_1").sb.exec = async (...a: any[]) => { await slow; return realExec(...a); };
+    const exec = driver.exec("make", {});
+    await new Promise((r) => setTimeout(r, 10));
+    const stopping = m.stop(nina);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(v2.calls.some((c) => c.startsWith("snapshot"))).toBe(false);
+    finish();
+    await exec;
+    await stopping;
+    expect(m.live("nina").status).toBe("hibernated");
+  });
+
+  test("reset deletes the VM and every snapshot of this computer (never another's), then a fresh VM from the image; delete the same and forgets it", async () => {
+    const { m } = setup();
+    const other = (id: string, label: string) => v2.snapshots.set(id, { id, name: computerSnapshotName(label, v2.clock), status: "ready", sandboxId: "x", reads: 0, createdAt: "" });
+    other("snap_other_instance", "another-instance:nina");
+    other("snap_other_computer", m.labelValue("nina-2"));
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    expect([...v2.snapshots.keys()].sort()).toEqual(["snap_1", "snap_2", "snap_other_computer", "snap_other_instance"]);
+    await m.reset(nina, sb());
+    expect([...v2.snapshots.keys()].sort()).toEqual(["snap_other_computer", "snap_other_instance"]);
+    expect(v2.creates).toHaveLength(2);
+    expect(v2.creates[1].opts.idempotencyKey).not.toBe(v2.creates[0].opts.idempotencyKey);
+    expect(m.live("nina")).toMatchObject({ status: "running", remoteId: "sbx_3" });
+    expect(m.live("nina").lastSnapshot).toBeUndefined();
+
+    await m.stop(nina);
+    await m.delete(nina);
+    expect([...v2.snapshots.keys()].sort()).toEqual(["snap_other_computer", "snap_other_instance"]);
+    expect(running()).toEqual([]);
+    expect(m.read().nina).toBeUndefined();
+  });
+
+  test("the API shows a hibernated computer with its last snapshot; start wakes it", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    const { computerRoutes } = await import("../server/routes/computers.js");
+    const routes = computerRoutes({
+      computers: () => [nina], settings: () => ({ sandbox: { providers: { daytona: { api: "v2" } } } }) as any, agents: async () => [],
+      manager: () => m, save: async () => {}, sandboxFor: () => sb(), emit: () => {},
+    });
+    const got = await (await routes.request("/nina")).json();
+    expect(got.data).toMatchObject({ status: "hibernated", lastSnapshot: { at: expect.any(String), memoryBytes: 224_000_000, diskBytes: 1_500_000_000 } });
+    const started = await (await routes.request("/nina/start", { method: "POST" })).json();
+    expect(started.data).toMatchObject({ status: "running", remoteId: "sbx_2" });
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
   });
 });

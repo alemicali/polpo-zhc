@@ -6,34 +6,39 @@
  *
  * What changes from v0 (see remote-adapters.ts for the v0 adapter):
  * - Every sandbox is a Linux VM (`sandboxClass` "linux"; Polpo calls the class "linux-vm"). On the
- *   plans seen live it is NOT persistent: pause() and stop() are refused (409 "sandbox is not
- *   persistent" / "warm stop is unavailable"), so Polpo never pauses a v2 VM: suspend is a no-op,
- *   the reaper's idle stop deletes a pooled VM, and computers (persistent machines) are refused on
- *   v2 (DAYTONA_V2_COMPUTERS_UNSUPPORTED; use Daytona v0 or E2B).
+ *   plans seen live it is NOT persistent: pause(), stop() and fork() are refused (409 "sandbox is
+ *   not persistent"), so Polpo never pauses a v2 VM: suspend is a no-op and the reaper's idle stop
+ *   deletes a pooled VM. Computers (persistent machines) hibernate instead (`hibernation()`): a
+ *   memory and disk snapshot (`createSnapshot`, ready in seconds), then the VM is deleted; the
+ *   next use creates a VM from the snapshot (`createFromSnapshot`, files and running processes
+ *   kept, ~3 s). The ComputerManager drives it (computers.ts).
  * - It is created from a registered image (`providers.daytona.image`, default the Polpo runner
  *   image `DAYTONA_V2_RUNNER_IMAGE`) and sized per sandbox (`resources`), whatever the image.
  * - Lifecycle is a policy set at create: a wall-clock timeout (cannot be disabled; capped at
  *   providers.daytona.maxTimeoutSeconds, default 86400, the plan's maximum) and an idle timeout;
- *   Linux VMs accept only "delete" as an action, and the timeout deletes the VM.
+ *   Linux VMs accept only "delete" as an action, and the timeout deletes the VM (a computer is
+ *   rotated through a snapshot before that).
  * - Network: `networkPolicy` with domains and CIDRs together (default-deny once a list is given),
  *   changeable while the sandbox runs (`updateNetwork`).
  * - exec returns stdout, stderr and the exit code apart: no stderr wrapper as on v0.
  *
  * Types come from the 2.x typings (`@daytona/sdk-v2/v2`); the SDK is imported lazily.
  */
-import type { NetworkPolicyInput, LifecyclePolicyOptions, Resources, Sandbox, SandboxState } from "@daytona/sdk-v2/v2";
+import type { NetworkPolicyInput, LifecyclePolicyOptions, Resources, Sandbox, SandboxState, Snapshot as SdkSnapshot } from "@daytona/sdk-v2/v2";
 import type { DaytonaV2Client } from "@daytona/sdk-v2";
-import { COMPUTER_LABEL, DAYTONA_V2_COMPUTERS_UNSUPPORTED, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
+import { COMPUTER_LABEL, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, daytonaV2HibernateSettings, type DaytonaV2HibernateSettings, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
 import { remoteProviderCredentials } from "./remote-providers.js";
 import {
   classifyAllowEntries, SandboxNetworkConfigError,
-  type CreateSpec, type RemoteAdapter, type RemoteDriver, type RemoteExecResult, type RemoteVmSummary,
+  type CreateSpec, type Hibernation, type MachineSnapshot, type RemoteAdapter, type RemoteDriver, type RemoteExecResult, type RemoteVmSummary, type RestoreSpec,
 } from "./remote-adapters.js";
 
 /** Size of a v2 sandbox when nothing is asked: the v0 runner snapshot's (2 vCPU, 4 GiB, 10 GiB). */
 export const DAYTONA_V2_DEFAULT_RESOURCES = { cpus: 2, memoryMb: 4096, diskMb: 10240 } as const;
-/** A computer's wall-clock budget (capped by maxTimeoutSeconds; computers are refused on v2 anyway). */
-export const DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS = 20 * 24 * 60 * 60;
+/** A computer's VM never lives longer than this (then it is rotated through a snapshot), whatever maxTimeoutSeconds says. */
+export const DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS = 86_400;
+/** Why a computer's VM is never paused or deleted by an idle stop on v2. */
+export const DAYTONA_V2_COMPUTER_HIBERNATES = "A Daytona v2 computer hibernates (memory and disk snapshot, then its VM is deleted) instead of pausing: stop it as a computer";
 /** The SDK's DISABLED (-1): clears an idle trigger instead of inheriting the project default. */
 export const DAYTONA_V2_DISABLED = -1;
 /** Waits for create/start/resume/pause/delete, in seconds. */
@@ -96,9 +101,10 @@ export function daytonaV2Resources(sandbox: Pick<EffectiveSandbox, "resources">)
  * The v2 lifecycle policy for a create. Linux VMs accept only "delete" as a policy action (pause is
  * an explicit call, which our idle reaper makes), and fields left out are inherited from the
  * project's dashboard defaults, so the idle trigger is always set: armed with "delete", or DISABLED.
- * - Computer: no idle action (the reaper pauses it); a long wall clock, re-armed on every use, with
- *   the class default action. Never deleted by us.
- * - Pooled/warm VM (may outlive the run): no idle action (the reaper pauses, then deletes it);
+ * - Computer: no idle action (the ComputerManager hibernates it); a wall clock of
+ *   min(maxTimeoutSeconds, 86400) that deletes the VM: the manager rotates it through a snapshot
+ *   before that, and keeps safety snapshots meanwhile.
+ * - Pooled/warm VM (may outlive the run): no idle action (the reaper deletes it);
  *   wall clock → delete after lifetime + deleteAfterStop.
  * - One-run VM: idle or wall clock → delete after the run's lifetime.
  */
@@ -109,7 +115,7 @@ export function daytonaV2Lifecycle(
   // the plan caps a sandbox's wall clock (86400 s on the plans seen so far): a longer one is refused
   const cap = (seconds: number) => Math.min(seconds, maxTimeoutSeconds);
   if (spec.persistent) {
-    return { timeoutSeconds: cap(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS), idleExpirySeconds: DAYTONA_V2_DISABLED };
+    return { timeoutSeconds: cap(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS), onTimeout: "delete", idleExpirySeconds: DAYTONA_V2_DISABLED };
   }
   const lifetime = cap(Math.max(60, spec.lifetimeMinutes * 60));
   if (spec.keep) {
@@ -125,14 +131,18 @@ export class DaytonaV2Adapter implements RemoteAdapter {
   private cached?: { key: string; client: DaytonaV2Client; image?: string; region?: string };
 
   /** The v2 client for the current key (a project API key; the vault entry may change). */
-  private async client(): Promise<{ client: DaytonaV2Client; image?: string; region?: string; maxTimeoutSeconds: number }> {
+  private async client(): Promise<{ client: DaytonaV2Client; image?: string; region?: string; maxTimeoutSeconds: number; hibernate: DaytonaV2HibernateSettings }> {
     const creds = await Promise.resolve(remoteProviderCredentials("daytona"));
     if (!creds?.apiKey) throw new Error("Daytona has no API key (Settings → Sandbox)");
     if (this.cached?.key !== creds.apiKey) {
       const { Daytona } = await import("@daytona/sdk-v2");
       this.cached = { key: creds.apiKey, client: new Daytona({ apiKey: creds.apiKey }).v2 };
     }
-    return { client: this.cached.client, image: creds.image, region: creds.region, maxTimeoutSeconds: creds.maxTimeoutSeconds ?? DAYTONA_V2_MAX_TIMEOUT_SECONDS };
+    return {
+      client: this.cached.client, image: creds.image, region: creds.region,
+      maxTimeoutSeconds: creds.maxTimeoutSeconds ?? DAYTONA_V2_MAX_TIMEOUT_SECONDS,
+      hibernate: creds.hibernate ?? daytonaV2HibernateSettings(undefined),
+    };
   }
 
   async create(spec: CreateSpec): Promise<RemoteDriver> {
@@ -151,6 +161,7 @@ export class DaytonaV2Adapter implements RemoteAdapter {
         lifecyclePolicy: daytonaV2Lifecycle(spec, maxTimeoutSeconds),
         ...(networkPolicy ? { networkPolicy } : {}),
         ...(sandboxRegion ? { region: sandboxRegion } : {}),
+        ...(spec.idempotencyKey ? { idempotencyKey: spec.idempotencyKey } : {}),
         waitSeconds: WAIT_SECONDS,
       });
     } catch (err) {
@@ -222,7 +233,7 @@ export class DaytonaV2Adapter implements RemoteAdapter {
   /**
    * The reaper's idle stop of a pooled VM. A Linux v2 sandbox is not persistent (pause and stop are
    * refused with 409), so it is deleted instead: the pool then finds it gone and makes a new one.
-   * A computer's machine is never deleted here (computers do not run on v2: refused).
+   * A computer's machine is never deleted here: it hibernates through the ComputerManager.
    */
   async suspendById(remoteId: string): Promise<void> {
     const { client } = await this.client();
@@ -234,7 +245,7 @@ export class DaytonaV2Adapter implements RemoteAdapter {
       throw err;
     }
     if (GONE.has(sandbox.state)) return;
-    if (sandbox.labels?.[COMPUTER_LABEL]) throw new Error(DAYTONA_V2_COMPUTERS_UNSUPPORTED);
+    if (sandbox.labels?.[COMPUTER_LABEL]) throw new Error(DAYTONA_V2_COMPUTER_HIBERNATES);
     await this.remove(remoteId);
   }
 
@@ -249,6 +260,81 @@ export class DaytonaV2Adapter implements RemoteAdapter {
     if (policy) await sandbox.updateNetworkPolicy(policy, { ifMatch: etag });
     else await sandbox.resetNetworkPolicy({ ifMatch: etag });
     return true;
+  }
+
+  /** Computers hibernate: memory and disk snapshots, VMs made again from them. */
+  async hibernation(): Promise<Hibernation> {
+    const { client, maxTimeoutSeconds, hibernate } = await this.client();
+    const snap = (x: SdkSnapshot): MachineSnapshot => ({
+      id: x.id, name: x.name, status: String(x.status ?? ""),
+      ...(x.error ? { error: x.error } : {}),
+      ...(x.createdAt ? { createdAt: x.createdAt } : {}),
+      ...(typeof x.bytes === "number" ? { bytes: x.bytes } : {}),
+      ...(typeof x.memoryBytes === "number" ? { memoryBytes: x.memoryBytes } : {}),
+      ...(x.sandboxId ? { sandboxId: x.sandboxId } : {}),
+    });
+    return {
+      settings: hibernate,
+      snapshot: async (remoteId, name) => {
+        const sandbox = await client.get(remoteId);
+        return snap(await sandbox.createSnapshot(name));
+      },
+      getSnapshot: async (id) => {
+        try {
+          return snap(await client.snapshots.get(id));
+        } catch (err) {
+          if (isNotFound(err)) return undefined;
+          throw err;
+        }
+      },
+      listSnapshots: async (match) => {
+        const out: MachineSnapshot[] = [];
+        for await (const x of client.snapshots.iter()) if (match(x.name)) out.push(snap(x));
+        return out;
+      },
+      deleteSnapshot: async (id) => {
+        try {
+          await client.snapshots.delete(id);
+        } catch (err) {
+          if (!isNotFound(err)) throw err;
+        }
+      },
+      restore: (snapshotId, spec) => this.restore(client, snapshotId, spec, maxTimeoutSeconds),
+      machine: async (remoteId) => {
+        try {
+          const sandbox = await client.get(remoteId);
+          if (GONE.has(sandbox.state)) return undefined;
+          return { state: String(sandbox.state), ...(sandbox.lifecyclePolicy?.timeoutAt ? { timeoutAt: sandbox.lifecyclePolicy.timeoutAt } : {}) };
+        } catch (err) {
+          if (isNotFound(err)) return undefined;
+          throw err;
+        }
+      },
+    };
+  }
+
+  /**
+   * A computer's VM from its snapshot: started, with the computer's lifecycle (the same as at
+   * create), then its network rule applied (a snapshot create takes none). When the rule cannot
+   * be applied the VM is deleted again: it never runs with a wider network than asked.
+   */
+  private async restore(client: DaytonaV2Client, snapshotId: string, spec: RestoreSpec, maxTimeoutSeconds: number): Promise<RemoteDriver> {
+    daytonaV2NetworkPolicy(spec.network); // a rule the provider cannot enforce: refused before anything is created
+    const sandbox = await client.createFromSnapshot(snapshotId, {
+      name: spec.name,
+      labels: spec.labels,
+      lifecyclePolicy: daytonaV2Lifecycle({ persistent: { idleStopMinutes: 0 }, keep: true, lifetimeMinutes: 0 }, maxTimeoutSeconds),
+      ...(spec.idempotencyKey ? { idempotencyKey: spec.idempotencyKey } : {}),
+      waitSeconds: WAIT_SECONDS,
+    });
+    try {
+      if (sandbox.state !== "started") await sandbox.wait({ until: "started", timeoutSeconds: WAIT_SECONDS });
+      await this.updateNetwork(sandbox.id, spec.network);
+    } catch (err) {
+      await this.remove(sandbox.id).catch(() => undefined);
+      throw new Error(`The VM made from snapshot ${snapshotId} could not start with the computer's network rule (deleted again): ${errorCode(err).message}`);
+    }
+    return this.driver(sandbox);
   }
 
   private driver(sandbox: Sandbox): RemoteDriver {
