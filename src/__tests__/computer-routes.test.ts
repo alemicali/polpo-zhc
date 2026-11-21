@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { agentRoutes } from "@polpo-ai/server";
 import { resolveSandbox, type ComputerConfig, type RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
 import { ComputerManager } from "../sandbox/computers.js";
-import { computerRoutes } from "../server/routes/computers.js";
+import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "../server/routes/computers.js";
 import type { CreateSpec, RemoteAdapter, RemoteDriver, RemoteVmSummary } from "../sandbox/remote-adapters.js";
 
 const dirs: string[] = [];
@@ -44,7 +44,7 @@ function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKe
   const manager = new ComputerManager(polpoDir, { adapter: () => provider });
   const state = { computers: [...(opts.computers ?? [])], agents: opts.agents ?? [], events: [] as any[] };
   manager.onChange = (id, live) => state.events.push({ id, action: "status", status: live.status });
-  const app = computerRoutes({
+  const deps: ComputerRouteDeps = {
     computers: () => state.computers,
     settings: () => ({ egressProxies: { home: "socks5://100.1.2.3:1080" } } as any),
     agents: async () => state.agents,
@@ -54,8 +54,10 @@ function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKe
       ? { error: "Daytona has no API key on this server: choose one in Settings → Sandbox" }
       : resolveSandbox({}, { scope: "task", computers: { computers: [computer], defaultComputer: computer.id, allowed: [computer.id] } }),
     emit: (payload) => state.events.push(payload),
-  });
-  return { app, state, provider, manager };
+  };
+  const app = computerRoutes(deps);
+  const egress = egressRoutes({ ...deps, reachable: async () => true });
+  return { app, egress, state, provider, manager };
 }
 
 describe("/computers", () => {
@@ -175,9 +177,10 @@ describe("agents' computers", () => {
 describe("MCP computer tools", () => {
   async function mcp(scopes: string[] = ["polpo"]) {
     const { handleMcpRequest } = await import("../server/mcp.js");
-    const t = makeApp({ agents: [{ name: "sitoinchat" }] });
+    const t = makeApp({ agents: [{ name: "sitoinchat" }, { name: "growth", browserEgress: "home" }, { name: "lost", browserEgress: "gone" }] });
     const api = async (method: string, path: string, body?: unknown) => {
-      const res = await t.app.request(path.replace(/^\/api\/v1\/computers/, "") || "/", { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+      const egress = path.startsWith("/api/v1/egress");
+      const res = await (egress ? t.egress : t.app).request(path.replace(/^\/api\/v1\/(computers|egress)/, "") || "/", { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
       const text = await res.text();
       return { status: res.status, body: text ? JSON.parse(text) : null, headers: res.headers };
     };
@@ -218,9 +221,28 @@ describe("MCP computer tools", () => {
   it("reads need polpo:read; changes need polpo:admin", async () => {
     const work = await mcp(["polpo:work"]);
     const names = ((await work.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name);
-    expect(names).toEqual(["polpo_computers_list"]);
+    expect(names).toEqual(["polpo_computers_list", "polpo_egress_status"]);
     const admin = await mcp(["polpo:admin"]);
     expect(((await admin.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name))
-      .toEqual(["polpo_computers_list", "polpo_computer_save", "polpo_computer_control", "polpo_computer_delete"]);
+      .toEqual(["polpo_computers_list", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete"]);
+  });
+
+  it("polpo_egress_status: proxies with the agents and host computers using them, and each remote computer's egress (read-only, never starts it)", async () => {
+    const { t, call } = await mcp(["polpo:read"]);
+    t.state.computers = [{ id: "nina", name: "Nina", kind: "daytona", egress: "home" }, { id: "desk", name: "Desk", kind: "host", egress: "home" }];
+    const all = await call("polpo_egress_status", {});
+    expect(all.isError).toBeFalsy();
+    expect(all.structuredContent.proxies).toEqual([{ name: "home", reachable: true, agents: ["growth"], hostComputers: ["desk"] }]);
+    expect(all.structuredContent.unknown).toEqual([{ agent: "lost", proxy: "gone" }]);
+    // no Tailscale settings in this instance: the reason, and nothing was started
+    expect(all.structuredContent.computers).toMatchObject([{ computerId: "nina", proxy: "home", kind: "daytona", proxyReachable: false }]);
+    expect(all.content[0].text).toMatch(/- home: reachable from this server; agents: growth; host computers: desk/);
+    expect(all.content[0].text).toMatch(/lost \(gone\)/);
+    expect(t.provider.created).toEqual([]);
+    const one = await call("polpo_egress_status", { computer: "nina" });
+    expect(one.structuredContent.computers[0]).toMatchObject({ computerId: "nina", kind: "daytona" });
+    expect(one.content[0].text).toMatch(/^computer nina \(daytona\) → home/);
+    expect((await call("polpo_egress_status", { computer: "ghost" })).content[0].text).toMatch(/There is no computer "ghost"/);
+    expect(t.provider.created).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@
  */
 import { Hono, type Context } from "hono";
 import {
-  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
+  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, agentEgressName, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
 import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
@@ -247,6 +247,60 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
  */
 function checkEgress(computer: ComputerConfig, settings: PolpoSettings | undefined): string | null {
   return computerEgressProblem(computer, settings);
+}
+
+/** One egress proxy as the overview shows it (never its URL: it may carry a password). */
+export interface EgressProxyView {
+  name: string;
+  /** A TCP connection to it opens from this server. */
+  reachable: boolean;
+  /** Agents whose browser runs on this server and goes out through it. */
+  agents: string[];
+  /** Computers on this server ("host" kind) with this egress. */
+  hostComputers: string[];
+}
+
+export interface EgressOverview {
+  proxies: EgressProxyView[];
+  /** Agents naming a proxy that does not exist (their browser goes out directly). */
+  unknown: Array<{ agent: string; proxy: string }>;
+  /** Remote computers with an egress: what each sees from its VM (never started for this). */
+  computers: Array<Awaited<ReturnType<typeof computerEgressStatus>> & { kind: string }>;
+}
+
+/**
+ * GET /egress: every egress proxy (reachable from this server, the agents and host computers
+ * using it) and every remote computer's egress through Tailscale. Read-only: looks inside only
+ * running machines.
+ */
+export function egressRoutes(deps: ComputerRouteDeps & { reachable?: (url: string) => Promise<boolean> }): Hono {
+  const app = new Hono();
+  app.get("/", async (c) => {
+    const settings = deps.settings();
+    const proxies = settings?.egressProxies ?? {};
+    const agents = await deps.agents();
+    const computers = deps.computers();
+    const reachable = deps.reachable ?? (async (url: string) => (await import("../../tools/browser-egress.js")).proxyReachable(url));
+    const remoteDefault = (a: AgentConfig) => computers.some((x) => x.id === a.defaultComputer && isRemoteComputer(x));
+    // agents whose browser runs on this server (a remote default computer's browser runs in its VM)
+    const hostAgents = agents.filter((a) => !remoteDefault(a)).map((a) => ({ name: a.name, proxy: agentEgressName(a, settings) }));
+    const view: EgressProxyView[] = await Promise.all(Object.entries(proxies).map(async ([name, url]) => ({
+      name,
+      reachable: await reachable(url).catch(() => false),
+      agents: hostAgents.filter((a) => a.proxy === name).map((a) => a.name),
+      hostComputers: computers.filter((x) => x.kind === "host" && x.egress === name).map((x) => x.id),
+    })));
+    const unknown = hostAgents.filter((a) => a.proxy && !proxies[a.proxy]).map((a) => ({ agent: a.name, proxy: a.proxy! }));
+    const remote = await Promise.all(computers.filter((x) => isRemoteComputer(x) && x.egress).map(async (x) => {
+      const status = await computerEgressStatus(deps.manager(), x, settings, deps.instance?.()).catch((err) => ({
+        computerId: x.id, proxy: x.egress!, tailnet: "unknown" as const, proxyReachable: false, effective: `direct (${x.egress} could not be checked)`, machine: "unknown" as const, error: (err as Error).message,
+      }));
+      return status ? { ...status, kind: x.kind } : undefined;
+    }));
+    const data: EgressOverview = { proxies: view, unknown, computers: remote.filter((x): x is NonNullable<typeof x> => !!x) };
+    return c.json({ ok: true, data });
+  });
+  return app;
 }
 
 export { ComputerConfigError };

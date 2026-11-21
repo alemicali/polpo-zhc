@@ -7277,14 +7277,12 @@ async function execEgressStatus(polpo: Orchestrator): Promise<string> {
   const remoteLines: string[] = [];
   if (remote.length) {
     const t = await computerTools(polpo);
-    const { computerEgressStatus } = await import("../sandbox/computers.js");
+    const { computerEgressStatus, describeComputerEgress } = await import("../sandbox/computers.js");
     for (const c of remote) {
       const s = await computerEgressStatus(t.manager(), c, settings, polpo.getConfig()?.project).catch((err) => ({ error: (err as Error).message } as const));
       if (!s) continue;
       if (!("proxy" in s)) { remoteLines.push(`- computer ${c.id} (${c.kind}) → ${c.egress}: could not be checked (${s.error})`); continue; }
-      const path = s.path ? `, path ${s.path === "derp" ? `DERP relay${s.relay ? ` ${s.relay}` : ""}` : s.path}` : "";
-      remoteLines.push(`- computer ${c.id} (${c.kind}) → ${s.proxy}: tailnet ${s.tailnet}${s.node ? ` as ${s.node}` : ""}${path}, `
-        + `proxy ${s.proxyReachable ? "reachable" : "not reachable"}; browser goes out ${s.effective}${s.error ? ` (${s.error})` : ""}`);
+      remoteLines.push(`- ${describeComputerEgress(c, s)}`);
     }
   }
   return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "")

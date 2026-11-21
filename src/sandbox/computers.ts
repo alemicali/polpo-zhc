@@ -1141,14 +1141,36 @@ export async function computerEgressStatus(
   }
   if (!live) {
     const last = tailnetEgress.last(c.id);
+    const state = machine === "running" ? "stopped" : machine;
     return {
-      computerId: c.id, proxy, tailnet: "off", proxyReachable: false, machine: machine === "running" ? "stopped" : machine,
-      effective: `comes up when the computer is next used (it is ${machine === "running" ? "not running" : machine})`,
+      computerId: c.id, proxy, tailnet: "off", proxyReachable: false, machine: state,
+      // not checked (nothing runs to check from): never "not reachable"
+      effective: state === "hibernated" ? "checked again when it wakes" : `checked again when it next starts (it is ${state})`,
       ...(last?.node ? { node: last.node } : {}), ...(last?.checkedAt ? { checkedAt: last.checkedAt } : {}),
     };
   }
   const { computerId: _id, ...rest } = live;
   return { computerId: c.id, proxy, ...rest, effective: label(live), machine: "running" };
+}
+
+const capital = (s: string) => `${s[0]?.toUpperCase() ?? ""}${s.slice(1)}`;
+
+/**
+ * One line about a remote computer's egress, for people and models: "computer nina (daytona) →
+ * home: Hibernated: egress is checked again when it wakes", or, while it runs, the tailnet, the
+ * path, whether the proxy answers and where its browser goes out.
+ */
+export function describeComputerEgress(c: Pick<ComputerConfig, "id" | "kind">, s: ComputerEgressStatus): string {
+  const head = `computer ${c.id} (${c.kind}) → ${s.proxy}`;
+  if (s.tailnet === "off") {
+    const node = s.node ? ` (last seen in the tailnet as ${s.node})` : "";
+    return s.machine === "hibernated"
+      ? `${head}: Hibernated: egress is checked again when it wakes${node}`
+      : `${head}: ${capital(s.machine)}: egress is checked again when it next starts${node}`;
+  }
+  const path = s.path ? `, path ${s.path === "derp" ? `DERP relay${s.relay ? ` ${s.relay}` : ""}` : s.path}` : "";
+  return `${head}: tailnet ${s.tailnet}${s.node ? ` as ${s.node}` : ""}${path}, proxy ${s.proxyReachable ? "reachable" : "not reachable"}; `
+    + `its browser goes out ${s.effective}${s.error ? ` (${s.error})` : ""}`;
 }
 
 const managers = new Map<string, ComputerManager>();

@@ -5,6 +5,9 @@
  * where agents run); reset and delete need confirm: true.
  */
 import { z } from "zod";
+import type { ComputerConfig } from "@polpo-ai/core";
+import { describeComputerEgress, type ComputerEgressStatus } from "../../sandbox/computers.js";
+import type { EgressOverview } from "../routes/computers.js";
 import { DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, type McpDeps, type Register } from "./kit.js";
 
 type Computer = {
@@ -117,6 +120,41 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `${action} of computer ${id}`);
     const c = r.data as Computer;
     return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}${c.note ? `\nNote: ${c.note}.` : ""}`, { computer: c });
+  });
+
+  tool("computers", "polpo_egress_status", {
+    title: "Egress status",
+    description: "Where agents' browsers go out to the internet: each egress proxy (settings.egressProxies, e.g. a residential line) — "
+      + "whether this server reaches it and which agents (browser on this server) and host computers use it — and each remote computer "
+      + "with an egress, as seen from its VM through Tailscale (tailnet up/down, node, path, proxy reachable, where its browser goes out now). "
+      + "Read-only: a stopped or hibernated computer is not started (its egress is checked again when it wakes). With computer, one computer.",
+    inputSchema: { computer: z.string().min(1).optional().describe("One computer's id (polpo_computers_list)") },
+    outputSchema: {
+      proxies: z.array(z.object({ name: z.string(), reachable: z.boolean(), agents: z.array(z.string()), hostComputers: z.array(z.string()) }).passthrough()),
+      unknown: z.array(z.object({ agent: z.string(), proxy: z.string() }).passthrough()).describe("Agents naming a proxy that does not exist"),
+      computers: z.array(z.object({ computerId: z.string() }).passthrough()),
+    },
+    annotations: READ,
+  }, async ({ computer }) => {
+    if (computer) {
+      const r = await apiGet(deps, `/computers/${enc(computer)}/egress`);
+      if (!r.ok) return r.status === 404 ? notFound(computer) : apiError(r, `Egress of computer ${computer}`);
+      const s = r.data as ComputerEgressStatus & { egress?: null; note?: string };
+      if (s.egress === null) return ok(`Computer ${computer} has no egress: its browser goes out directly.`, { proxies: [], unknown: [], computers: [s] });
+      if (s.tailnet === null) return ok(`Computer ${computer} runs on this server and uses ${s.proxy} directly (no tailnet).`, { proxies: [], unknown: [], computers: [s] });
+      const kind = ((await apiGet(deps, `/computers/${enc(computer)}?live=0`)) as { data?: { kind?: string } }).data?.kind ?? "remote";
+      return ok(describeComputerEgress({ id: computer, kind: kind as ComputerConfig["kind"] }, s), { proxies: [], unknown: [], computers: [{ ...s, kind }] });
+    }
+    const r = await apiGet(deps, "/egress");
+    if (!r.ok) return apiError(r, "Egress status");
+    const o = r.data as EgressOverview;
+    const lines = [
+      ...(o.proxies.length ? o.proxies.map((p) => `- ${p.name}: ${p.reachable ? "reachable from this server" : "UNREACHABLE from this server (browsers go out directly; profiles signed in through it pause)"}`
+        + `; agents: ${p.agents.join(", ") || "none"}${p.hostComputers.length ? `; host computers: ${p.hostComputers.join(", ")}` : ""}`) : ["No egress proxies (settings.egressProxies): every browser goes out directly."]),
+      ...(o.unknown.length ? [`Agents naming a proxy that does not exist: ${o.unknown.map((u) => `${u.agent} (${u.proxy})`).join(", ")}`] : []),
+      ...(o.computers.length ? ["Remote computers (through Tailscale in their VM):", ...o.computers.map((s) => `- ${describeComputerEgress({ id: s!.computerId, kind: s!.kind as ComputerConfig["kind"] }, s!)}`)] : []),
+    ];
+    return ok(lines.join("\n"), o as unknown as Record<string, unknown>);
   });
 
   tool("computers", "polpo_computer_delete", {

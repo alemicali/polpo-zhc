@@ -163,9 +163,10 @@ Computers are persistent machines agents work on (Daytona or E2B; see `docs/comp
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_computers_list` | "host" (this server) and each computer with its live status (running, stopped, paused, archived, creating, error; missing = not created yet), last use, uptime and the agents using it; with `id`, one computer. | read-only |
-| `polpo_computer_save` | Create a computer (`kind` needed) or change one (only the fields given; `null` clears). `start: true` creates the machine now; otherwise it is created on first use. | write, idempotent |
-| `polpo_computer_control` | `start`, `stop`, `restart`, or `reset` (delete the machine and create a new one: needs `confirm: true`). | destructive, open world |
+| `polpo_computers_list` | "host" (this server) and each computer with its live status (running, stopped, paused, hibernated, archived, creating, error; missing = not created yet), last use, uptime, last snapshot and the agents using it; with `id`, one computer. | read-only |
+| `polpo_computer_save` | Create a computer (`kind` needed) or change one (only the fields given; `null` clears). `start: true` creates the machine now; otherwise it is created on first use. A network allowlist is checked when saved with the provider's rules (an entry that is not a host name is refused; Daytona v2 takes host names only). A changed network applies at the next start or wake on Daytona v2, after a reset elsewhere (the note says which). | write, idempotent |
+| `polpo_computer_control` | `start`, `stop`, `restart`, or `reset` (delete the machine and create a new one: needs `confirm: true`). A reset whose wipe is done reports success (with a note when the new machine comes on its next use). | destructive, open world |
+| `polpo_egress_status` | Where browsers go out: each egress proxy (reachable from this server, the agents and host computers using it), agents naming a proxy that does not exist, and each remote computer's egress through Tailscale in its VM (tailnet, node, path, proxy reachable, where its browser goes out; a hibernated or stopped computer is not started: "checked again when it wakes"). With `computer`, one computer. | read-only |
 | `polpo_computer_delete` | Delete a computer and its machine (`confirm: true`); refused while it is an agent's default. | destructive |
 
 An agent's computer is set with `polpo_agent_update` (`defaultComputer`, `computers`).
