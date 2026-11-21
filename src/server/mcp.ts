@@ -19,14 +19,23 @@ import { registerMissionTools } from "./mcp-server/missions.js";
 import { registerAdminTools } from "./mcp-server/admin.js";
 import { registerConfigTools } from "./mcp-server/config.js";
 import { registerTeamTools } from "./mcp-server/team.js";
+import { registerRoomTools } from "./mcp-server/rooms.js";
+import { registerChatTools } from "./mcp-server/chat.js";
+import { registerBrainTools, registerLearningTools, registerMemoryTools } from "./mcp-server/knowledge.js";
+import { registerSkillTools } from "./mcp-server/skills.js";
+import { registerAutomationTools, registerWatcherTools } from "./mcp-server/automation.js";
+import { registerConnectorTools } from "./mcp-server/connectors.js";
+import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
+import { registerAppTools } from "./mcp-server/apps.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, ToolsetName } from "./mcp-server/kit.js";
 export { MAX_RESULT_CHARS, TOOLSETS, DEFAULT_TOOLSETS, resolveToolsets, hasScope, scopeFor } from "./mcp-server/kit.js";
 export { MAX_INLINE_FILE_BYTES, AGENT_CARD_URI } from "./mcp-server/core-tools.js";
 export { matchesOperationPath, isBlockedGet } from "./mcp-server/admin.js";
 
-const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, artifacts, data, approvals, files). "
-  + "Use the specific polpo_* tools for reads and actions. For anything open-ended, polpo_ask delegates to Polpo itself, "
+const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, artifacts, data, approvals, files, rooms, chats, "
+  + "memory, skills, schedules, connectors, channels). Use the specific polpo_* tools for reads and actions: they act directly, "
+  + "like the dashboard. For anything open-ended, polpo_ask delegates to Polpo itself, "
   + "which can do everything the instance can; when a turn returns status needs_input (a question or a preview to approve), "
   + "show it to the person and reply with polpo_answer. Long work runs in the background: create it, then follow it with the "
   + "wait and get tools. Destructive actions need confirm: true, given only after the person agreed.";
@@ -48,6 +57,18 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerConfigTools(tool, deps);
+  registerRoomTools(tool, deps);
+  registerChatTools(tool, deps);
+  registerMemoryTools(tool, deps);
+  registerSkillTools(tool, deps);
+  registerAutomationTools(tool, deps);
+  registerConnectorTools(tool, deps);
+  registerChannelTools(tool, deps);
+  registerBrainTools(tool, deps);
+  registerLearningTools(tool, deps);
+  registerWatcherTools(tool, deps);
+  registerVaultTools(tool, deps);
+  registerAppTools(tool, deps);
   registerAdminTools(tool, deps);
   return server;
 }

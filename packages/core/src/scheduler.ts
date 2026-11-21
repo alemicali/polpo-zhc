@@ -112,6 +112,21 @@ export class Scheduler {
     return entry;
   }
 
+  /**
+   * Run a scheduled mission now, out of turn: the next scheduled run stays as it is. Throws when
+   * the mission has no schedule or nothing can execute it.
+   */
+  runNow(missionId: string): ScheduleEntry {
+    const entry = this.schedules.get(`sched-${missionId}`);
+    if (!entry) throw new Error(`No schedule for mission "${missionId}"`);
+    if (!this.executeMissionFn) throw new Error("The scheduler cannot execute missions on this instance");
+    this.ctx.emitter.emit("schedule:triggered", { scheduleId: entry.id, missionId, expression: entry.expression });
+    this.executeMissionFn(missionId);
+    entry.lastRunAt = new Date().toISOString();
+    this.ctx.emitter.emit("schedule:completed", { scheduleId: entry.id, missionId });
+    return entry;
+  }
+
   unregisterMission(missionId: string): boolean {
     const schedId = `sched-${missionId}`;
     const removed = this.schedules.delete(schedId);

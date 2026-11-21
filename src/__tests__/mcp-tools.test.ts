@@ -166,7 +166,7 @@ describe("the tools offered", () => {
     for (const n of ["polpo_task_update", "polpo_config_update", "polpo_branding_update", "polpo_agent_update"]) expect(a[n]).toMatchObject({ idempotentHint: true, destructiveHint: false });
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
-    expect(tools.length).toBeLessThanOrEqual(60);
+    expect(tools.length).toBeLessThanOrEqual(93);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {

@@ -6,6 +6,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
+import { EGRESS_PROXY_NAME, EGRESS_PROXY_URL } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
 import {
   BAD_CURSOR, READ, UPDATE, apiError, apiGet, apiSend, cursorParam, fail, limitParam, ok, page, pageOutput, qs, short,
@@ -94,8 +95,14 @@ type Settings = Record<string, unknown> & {
 /** The settings people choose, without secrets or internals. */
 function publicSettings(s: Settings): Record<string, unknown> {
   const keys = ["orchestratorModel", "imageModel", "reasoning", "maxRetries", "maxConcurrency", "taskTimeout", "enableScheduler",
-    "defaultQualityThreshold", "voiceReplies", "maxFixAttempts", "logRetentionDays", "storage", "mcp"];
-  return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, s[k]]));
+    "defaultQualityThreshold", "voiceReplies", "maxFixAttempts", "logRetentionDays", "storage", "mcp", "egressProxies"];
+  return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, k === "egressProxies" ? maskProxies(s[k]) : s[k]]));
+}
+
+/** Egress proxies without the credentials a URL may carry (user:password@). */
+export function maskProxies(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, String(v).replace(/\/\/[^@/\s]*@/, "//•••@")]));
 }
 
 const modelSpec = z.union([
@@ -158,22 +165,26 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("config", "polpo_config_update", {
     title: "Update settings",
-    description: "Change Polpo's own model (and fallbacks), the image model or the reasoning level. Only the fields given change; "
-      + "models are checked against the catalog (polpo_models_list). The result lists what changed. Needs the admin scope.",
+    description: "Change Polpo's own model (and fallbacks), the image model, the reasoning level or the egress proxies agents' browsers can use "
+      + "(agent.browserEgress picks one). Only the fields given change; models are checked against the catalog (polpo_models_list). "
+      + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
       orchestrator_model: modelSpec.optional().describe("Polpo's model: provider:model, or { primary, fallbacks }"),
       image_model: z.string().nullable().optional().describe("The model for images (provider:model), or null for the default"),
       reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional().describe("How much Polpo reasons before answering"),
+      egress_proxies: z.record(z.string().regex(EGRESS_PROXY_NAME, "letters, digits, - and _"), z.string().regex(EGRESS_PROXY_URL, "a proxy URL like socks5://100.101.55.7:1080"))
+        .nullable().optional().describe("Named proxies for agents' browsers, e.g. { home: 'socks5://100.101.55.7:1080' }: replaces them all; null removes them"),
       allow_unlisted: z.boolean().optional().describe("true to accept a model that is not in the catalog (e.g. a gateway's own model)"),
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_model, image_model, reasoning, allow_unlisted }) => {
+  }, async ({ orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted }) => {
     const body: Record<string, unknown> = {};
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
     if (image_model !== undefined) body.imageModel = image_model;
     if (reasoning !== undefined) body.reasoning = reasoning;
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give orchestrator_model, image_model or reasoning.");
+    if (egress_proxies !== undefined) body.egressProxies = egress_proxies;
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give orchestrator_model, image_model, reasoning or egress_proxies.");
     if (!allow_unlisted) {
       const specs = [
         ...(typeof orchestrator_model === "string" ? [orchestrator_model] : orchestrator_model ? [orchestrator_model.primary, ...(orchestrator_model.fallbacks ?? [])] : []),
@@ -187,10 +198,11 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "PATCH", "/config/settings", body);
     if (!r.ok) return apiError(r, "Updating the settings");
     const next = ((r.data as { settings?: Settings })?.settings ?? {}) as Settings;
-    const changed = ["orchestratorModel", "imageModel", "reasoning"].filter((k) => JSON.stringify(prev[k]) !== JSON.stringify(next[k]));
+    const changed = ["orchestratorModel", "imageModel", "reasoning", "egressProxies"].filter((k) => JSON.stringify(prev[k]) !== JSON.stringify(next[k]));
     const settings = publicSettings(next);
+    const show = (k: string, v: unknown) => JSON.stringify((k === "egressProxies" ? maskProxies(v) : v) ?? "default");
     return ok(changed.length
-      ? `Changed ${changed.map((k) => `${k}: ${JSON.stringify(prev[k] ?? "default")} → ${JSON.stringify(next[k] ?? "default")}`).join("; ")}.`
+      ? `Changed ${changed.map((k) => `${k}: ${show(k, prev[k])} → ${show(k, next[k])}`).join("; ")}.`
       : "Nothing changed (the values were the same).", { changed, settings });
   });
 

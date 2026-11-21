@@ -13,6 +13,7 @@ import {
   removeOrchestratorSkill,
   createOrchestratorSkill,
   updateOrchestratorSkill,
+  updateAgentSkill,
   getSkillByName,
   updateSkillIndex,
   loadSkillIndex,
@@ -176,6 +177,50 @@ export function skillRoutes(getDeps: () => {
     });
     deps.emit("skill:changed", { scope: "agent", action: "created", skillName: body.name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name: body.name, path: skillPath } }, 201);
+  });
+
+  // PUT /skills/:name — update an agent skill (only the fields given change)
+  const updateSkillRoute = createRoute({
+    method: "put",
+    path: "/{name}",
+    tags: ["Skills"],
+    summary: "Update skill",
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              description: z.string().min(1).optional(),
+              content: z.string().min(1).optional(),
+              allowedTools: z.array(z.string()).optional(),
+              global: z.boolean().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string(), updated: z.boolean() }) }) } },
+        description: "Skill updated",
+      },
+      404: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Skill not found",
+      },
+    },
+  });
+
+  app.openapi(updateSkillRoute, (c) => {
+    const deps = getDeps();
+    const { name } = c.req.valid("param");
+    const { global, ...updates } = c.req.valid("json");
+    if (!updateAgentSkill(deps.polpoDir, name, updates, global)) {
+      return c.json({ ok: false, error: `Skill "${name}" not found${global ? " in the global pool" : ""}`, code: "NOT_FOUND" }, 404);
+    }
+    deps.emit("skill:changed", { scope: "agent", action: "updated", skillName: name, timestamp: new Date().toISOString() });
+    return c.json({ ok: true, data: { name, updated: true } }, 200);
   });
 
   // DELETE /skills/:name — remove a skill from the pool

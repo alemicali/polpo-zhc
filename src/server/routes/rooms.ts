@@ -137,9 +137,10 @@ export function roomRoutes(getDeps: () => RoomRoutesDeps): OpenAPIHono {
     if (room.kind !== "web") return fail(c, 400, "Telegram rooms are written from Telegram");
     const parsed = PostSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return fail(c, 400, parsed.error.issues[0]?.message ?? "Invalid message");
-    const message = await parsed.data.replyToId
+    // await the post itself (not the replyToId): the answer carries the stored message
+    const message = await (parsed.data.replyToId
       ? getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text, { replyToId: parsed.data.replyToId })
-      : getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text);
+      : getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text));
     return c.json({ ok: true, data: message }, 201);
   });
 

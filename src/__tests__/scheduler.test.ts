@@ -502,3 +502,30 @@ describe("Scheduler", () => {
     expect(updated!.status).toBe("completed");
   });
 });
+
+describe("Scheduler.runNow", () => {
+  it("runs a scheduled mission out of turn and keeps its next run", async () => {
+    const store = new MissionAwareStore();
+    const ctx = createMockCtx(store);
+    const scheduler = new Scheduler(ctx, { checkIntervalMs: 0 });
+    const execute = vi.fn();
+    const events: string[] = [];
+    ctx.emitter.on("schedule:triggered", () => events.push("triggered"));
+    try {
+      expect(() => scheduler.runNow("none")).toThrow(/No schedule/);
+      const mission = await store.saveMission({ name: "digest", data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }), status: "recurring" });
+      Object.assign(mission, { schedule: "0 9 * * *" });
+      const entry = scheduler.registerMission(mission)!;
+      expect(() => scheduler.runNow(mission.id)).toThrow(/cannot execute/);
+      scheduler.setExecutor(execute);
+      const next = entry.nextRunAt;
+      const ran = scheduler.runNow(mission.id);
+      expect(execute).toHaveBeenCalledWith(mission.id);
+      expect(ran.lastRunAt).toEqual(expect.any(String));
+      expect(ran.nextRunAt).toBe(next);
+      expect(events).toEqual(["triggered"]);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+});

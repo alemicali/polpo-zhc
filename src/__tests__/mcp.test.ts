@@ -117,8 +117,16 @@ describe("Polpo MCP server", () => {
       "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create",
       "polpo_data_sources_list", "polpo_data_query",
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
-      "polpo_agent_get", "polpo_agent_create", "polpo_agent_update",
+      "polpo_agent_get", "polpo_agent_create", "polpo_agent_update", "polpo_agent_delete", "polpo_agent_avatar_set", "polpo_teams_list", "polpo_team_save", "polpo_team_delete",
       "polpo_config_get", "polpo_config_update", "polpo_branding_get", "polpo_branding_update", "polpo_providers_list", "polpo_models_list",
+      "polpo_rooms_list", "polpo_room_create", "polpo_room_update", "polpo_room_delete", "polpo_room_messages", "polpo_room_post", "polpo_room_wait",
+      "polpo_chat_sessions_list", "polpo_chat_messages", "polpo_chat_session_update", "polpo_chat_session_delete",
+      "polpo_memory_get", "polpo_memory_update",
+      "polpo_skills_list", "polpo_skill_get", "polpo_skill_create", "polpo_skill_update", "polpo_skill_install", "polpo_skill_delete", "polpo_skill_assign",
+      "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
+      "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel",
+      "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
+      "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.polpo_file_write!.annotations).toMatchObject({ destructiveHint: true, title: "Write a file" });
@@ -276,10 +284,12 @@ describe("Polpo MCP server", () => {
 
 describe("toolsets and scopes", () => {
   it("resolves configured toolsets", () => {
-    expect(resolveToolsets()).toEqual(["core", "tasks", "missions", "artifacts", "data", "files", "team", "config"]);
+    const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels"];
+    expect(resolveToolsets()).toEqual(defaults);
     expect(resolveToolsets("core, admin")).toEqual(["core", "admin"]);
-    expect(resolveToolsets(undefined, ["all"])).toContain("admin");
-    expect(resolveToolsets("default,admin")).toEqual(["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "admin"]);
+    expect(resolveToolsets(undefined, ["all"])).toEqual([...defaults, "brain", "learning", "watchers", "vault", "apps", "admin"]);
+    expect(resolveToolsets("default,admin")).toEqual([...defaults, "admin"]);
+    expect(resolveToolsets("default,brain,vault")).toEqual([...defaults, "brain", "vault"]);
     expect(resolveToolsets("nonsense")).toEqual(resolveToolsets());
     expect(resolveToolsets("tasks", ["admin"])).toEqual(["tasks"]); // the env wins over settings
   });

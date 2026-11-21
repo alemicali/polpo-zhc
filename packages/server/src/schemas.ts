@@ -228,6 +228,8 @@ export const UpdateSettingsSchema = z.object({
     tagline: z.string().trim().max(120).optional(),
     logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
   }).optional(),
+  /** Named egress proxies for agents' browsers ({ home: "socks5://…" }); replaces them all, null removes them. */
+  egressProxies: z.record(z.string(), z.string()).nullable().optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────
