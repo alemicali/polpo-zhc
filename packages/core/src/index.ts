@@ -240,3 +240,4 @@ export type {
   ConnectorConfig, ConnectorIcon, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
   ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
 } from "./connectors.js";
+export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egress-proxies.js";

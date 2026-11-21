@@ -981,6 +981,19 @@ export function createOrchestratorSkill(
 }
 
 /**
+ * Update an existing skill in the agents' pool (.polpo/skills/, or the global one).
+ * Only provided fields are changed. Returns true if updated, false if not found.
+ */
+export function updateAgentSkill(
+  polpoDir: string,
+  name: string,
+  updates: { description?: string; content?: string; allowedTools?: string[] },
+  global = false,
+): boolean {
+  return updateSkillIn(global ? join(getGlobalPolpoDir(), "skills") : join(polpoDir, "skills"), name, updates);
+}
+
+/**
  * Update an existing skill in the orchestrator's pool.
  * Only provided fields are changed. Returns true if updated, false if not found.
  */
@@ -993,6 +1006,14 @@ export function updateOrchestratorSkill(
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
+  return updateSkillIn(targetBase, name, updates);
+}
+
+function updateSkillIn(
+  targetBase: string,
+  name: string,
+  updates: { description?: string; content?: string; allowedTools?: string[] },
+): boolean {
   if (!isSafeSkillName(name)) return false;
   const skillFile = join(targetBase, name, "SKILL.md");
 

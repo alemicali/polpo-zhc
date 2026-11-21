@@ -142,6 +142,55 @@ export class ConversationCheckManager {
     return this.store.updateCheck(id, { state: "cancelled" });
   }
 
+  /**
+   * Change an active or proposed check: what it does (prompt or message), its schedule (every N
+   * minutes, or a cron in a timezone: the next run is computed again) or its limits. Throws on bad
+   * input; undefined when there is no such check.
+   */
+  async update(id: string, patch: {
+    prompt?: string; message?: string | null; everyMinutes?: number; cron?: string | null; timezone?: string | null;
+    maxRuns?: number | null; endsAt?: string | null;
+  }): Promise<ConversationCheck | undefined> {
+    const check = await this.store.getCheck(id);
+    if (!check) return undefined;
+    if (check.state !== "active" && check.state !== "proposed") throw new Error(`The check is ${check.state}: only active or proposed checks change`);
+    const next: Partial<ConversationCheck> = {};
+    if (patch.prompt !== undefined) {
+      if (!patch.prompt.trim()) throw new Error("The instructions cannot be empty");
+      next.prompt = patch.prompt.trim();
+    }
+    if (patch.message !== undefined) next.message = patch.message?.trim() || undefined;
+    if (patch.maxRuns !== undefined) {
+      if (patch.maxRuns !== null && !(patch.maxRuns >= 1)) throw new Error("maxRuns must be at least 1");
+      next.maxRuns = patch.maxRuns ?? undefined;
+    }
+    if (patch.endsAt !== undefined) {
+      if (patch.endsAt !== null && Number.isNaN(Date.parse(patch.endsAt))) throw new Error("endsAt must be an ISO date");
+      next.endsAt = patch.endsAt ?? undefined;
+    }
+    const cron = patch.cron === undefined ? check.cron : patch.cron?.trim() || undefined;
+    const timezone = patch.timezone === undefined ? check.timezone : patch.timezone?.trim() || undefined;
+    const scheduleChanged = patch.cron !== undefined || patch.timezone !== undefined || patch.everyMinutes !== undefined;
+    if (scheduleChanged) {
+      if (cron) {
+        let at: Date | null;
+        try {
+          at = nextCronRun(cron, timezone, new Date());
+        } catch (err) {
+          throw new Error(`Invalid cron "${cron}"${timezone ? ` or timezone "${timezone}"` : ""}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        if (!at) throw new Error(`The cron "${cron}" has no next time`);
+        Object.assign(next, { cron, timezone, everyMinutes: 0, nextRunAt: at.toISOString() });
+      } else {
+        const every = patch.everyMinutes ?? check.everyMinutes;
+        if (!(every >= MIN_CHECK_INTERVAL_MINUTES)) throw new Error(`Say how often it runs: every_minutes of at least ${MIN_CHECK_INTERVAL_MINUTES}, or a cron`);
+        Object.assign(next, { cron: undefined, timezone: undefined, everyMinutes: every, nextRunAt: new Date(Date.now() + every * 60_000).toISOString() });
+      }
+    }
+    if (Object.keys(next).length === 0) return check;
+    return this.store.updateCheck(id, next);
+  }
+
   /** Say yes to a proposed check: it runs from now on (at its time, or now when that has passed). */
   async confirm(id: string): Promise<ConversationCheck | undefined> {
     const check = await this.store.getCheck(id);

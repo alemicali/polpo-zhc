@@ -2,6 +2,7 @@ import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
+import { parseEgressProxies } from "@polpo-ai/core";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
@@ -58,6 +59,10 @@ const updateSettingsRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Settings updated",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Invalid settings (e.g. an egress proxy)",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -317,9 +322,18 @@ export function configRoutes(getDeps: () => {
   app.openapi(updateSettingsRoute, async (c) => {
     const deps = getDeps();
     const body = c.req.valid("json");
+    let egressProxies: Record<string, string> | null | undefined;
+    if (body.egressProxies !== undefined) {
+      try {
+        egressProxies = body.egressProxies === null ? null : parseEgressProxies(body.egressProxies);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    }
 
     const result = await mutateConfig(deps, (config) => {
       const settings = config.settings ?? {};
+      if (egressProxies !== undefined) settings.egressProxies = egressProxies === null || Object.keys(egressProxies).length === 0 ? undefined : egressProxies;
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;

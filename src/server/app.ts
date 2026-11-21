@@ -71,6 +71,7 @@ import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { roomRoutes } from "./routes/rooms.js";
 import { learningRoutes } from "./routes/learning.js";
+import { checkRoutes, telegramRoutes } from "./routes/checks.js";
 import { driveRoutes } from "./routes/drive.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
@@ -1364,6 +1365,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/watchers", watcherRoutes(() => ({
     getWatcherManager: () => o.getWatcherManager(),
     taskStore: o.getStore(),
+  })));
+
+  authed.route("/checks", checkRoutes(() => ({
+    checks: o.getConversationCheckManager(),
+    sessions: o.getSessionStore(),
+    agentNames: async () => (await o.getAgents()).map((a) => a.name),
+    resolveChatTarget: (to, opts) => o.resolveChatTarget(to, opts),
+  })));
+  authed.route("/telegram", telegramRoutes(() => ({
+    listChats: () => o.listChats(),
+    chatBots: () => o.chatBots(),
+    resolveChatTarget: (to, opts) => o.resolveChatTarget(to, opts),
+    sendToChat: (target, text, agent, files) => o.sendToChat(target, text, agent, files),
   })));
 
   authed.route("/background-waits", backgroundWaitRoutes(o));
