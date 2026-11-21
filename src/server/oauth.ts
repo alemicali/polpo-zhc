@@ -257,13 +257,23 @@ export class OAuthServer {
   }
 
   /** A valid access token for this resource: who allowed it, or null. */
-  verifyAccessToken(accessToken: string | undefined, resource: string): { subject: string; client_id: string } | null {
+  verifyAccessToken(accessToken: string | undefined, resource: string): { subject: string; client_id: string; scope: string } | null {
     if (!accessToken) return null;
     const now = Math.floor(Date.now() / 1000);
     const hash = sha256(accessToken);
     const found = this.read().tokens.find((t) => t.kind === "access" && t.hash === hash && t.expires_at > now);
     if (!found || found.resource.replace(/\/+$/, "") !== resource.replace(/\/+$/, "")) return null;
-    return { subject: found.subject, client_id: found.client_id };
+    return { subject: found.subject, client_id: found.client_id, scope: found.scope };
+  }
+
+  /** A client's name for people: its registered name, else the host of its metadata URL, else its id. */
+  clientName(clientId: string): string {
+    const known = this.read().clients.find((c) => c.client_id === clientId);
+    if (known?.client_name) return known.client_name;
+    if (clientId.startsWith("https://")) {
+      try { return new URL(clientId).hostname; } catch { /* not a URL */ }
+    }
+    return clientId;
   }
 
   /** Revoke a token (RFC 7009): always succeeds. */

@@ -47,8 +47,8 @@ import {
 } from "@polpo-ai/server";
 import { getCookie } from "hono/cookie";
 import { createHmac } from "node:crypto";
-import { handleMcpRequest } from "./mcp.js";
-import { authorizationServerMetadata, consentPage, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
+import { handleMcpRequest, resolveToolsets, type McpPrincipal } from "./mcp.js";
+import { authorizationServerMetadata, consentPage, OAUTH_SCOPE, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
 import { hasValidApiKey } from "./middleware/instance-auth.js";
 import { reactionHint, telegramFilesHint } from "../notifications/telegram-reactions.js";
 // Node.js-only routes (stay in src/server/routes/)
@@ -775,39 +775,55 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Streamable HTTP, stateless. The tools call this server's REST API in process, so they follow
   // the same rules; the caller is authenticated here: an API or MCP key (Bearer or X-API-Key), an OAuth
   // token or a dashboard session, or nothing when the server has no auth and no key at all (localhost-only).
+  // Who calls, for attribution (events' `by`, approvals' resolvedBy, artifacts' author) and scopes:
+  // an OAuth client (and the person who allowed it), an API or MCP key, a dashboard session, or
+  // nobody on a server without auth and keys (localhost-only). Null: not allowed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any Hono context
-  const mcpAuthorized = (c: any): boolean => {
+  const mcpPrincipal = (c: any): McpPrincipal | null => {
     const keys = mcpKeys();
     const instanceAuth = isInstanceAuthEnabled();
-    if (!instanceAuth && keys.length === 0) return true;
-    if (hasValidApiKey(c.req.raw, keys)) return true;
+    if (hasValidApiKey(c.req.raw, keys)) return { kind: "key", actor: "mcp-key", scopes: [OAUTH_SCOPE] };
     // an OAuth access token issued for this endpoint (Claude, ChatGPT and other connectors)
     const auth = c.req.header("authorization") as string | undefined;
     const bearer = auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined;
-    if (bearer?.startsWith("polpo_at_") && oauthServer().verifyAccessToken(bearer, `${publicOrigin(c)}/mcp`)) return true;
-    return instanceAuth && !!opts?.workDir && !!validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME));
+    const grant = bearer?.startsWith("polpo_at_") ? oauthServer().verifyAccessToken(bearer, `${publicOrigin(c)}/mcp`) : null;
+    if (grant) {
+      const client = oauthServer().clientName(grant.client_id);
+      const actor = grant.subject.includes("@") ? `${grant.subject} via ${client}`
+        : grant.subject === "api-key" ? `${client} (MCP key)` : `${client} (MCP)`;
+      return { kind: "oauth", actor, subject: grant.subject, client, scopes: grant.scope.split(/\s+/).filter(Boolean) };
+    }
+    const session = instanceAuth && opts?.workDir ? validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME)) : null;
+    if (session) return { kind: "session", actor: session.email, subject: session.email, scopes: [OAUTH_SCOPE] };
+    if (!instanceAuth && keys.length === 0) return { kind: "open", actor: "mcp", scopes: [OAUTH_SCOPE] };
+    return null;
   };
   app.all("/mcp", async (c) => {
-    if (!mcpAuthorized(c)) {
-      c.header("WWW-Authenticate", `Bearer resource_metadata="${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp"`);
+    const principal = mcpPrincipal(c);
+    if (!principal) {
+      c.header("WWW-Authenticate", `Bearer resource_metadata="${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp", scope="${OAUTH_SCOPE}"`);
       return c.json({ error: "Authentication required: send Authorization: Bearer <your Polpo API key>" }, 401);
     }
     if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized. Complete setup first." }, 503);
-    return withEventOrigin({ source: "api", by: "mcp" }, () => handleMcpRequest(c.req.raw, {
+    return withEventOrigin({ source: "api", by: principal.actor }, () => handleMcpRequest(c.req.raw, {
       version: POLPO_PACKAGE_VERSION,
       log: (line) => console.log(`[polpo/mcp] ${line}`),
       routes: () => app.routes,
+      principal,
+      toolsets: resolveToolsets(process.env.POLPO_MCP_TOOLSETS, orchestrator.getConfig()?.settings?.mcp?.toolsets),
+      publicUrl: publicOrigin(c),
       api: async (method, path, body, headers) => {
         const form = body instanceof FormData;
+        const binary = body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
         const res = await app.request(path, {
           method,
           headers: {
-            ...(body !== undefined && !form ? { "content-type": "application/json" } : {}),
+            ...(body !== undefined && !form && !binary ? { "content-type": "application/json" } : {}),
             ...trustedApiCallHeaders(),
             ...(opts?.apiKeys?.[0] ? { authorization: `Bearer ${opts.apiKeys[0]}` } : {}),
             ...headers,
           },
-          ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
+          ...(body !== undefined ? { body: form || binary ? body as BodyInit : JSON.stringify(body) } : {}),
         });
         const bytes = new Uint8Array(await res.arrayBuffer());
         const raw = new TextDecoder().decode(bytes);
@@ -1363,8 +1379,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     author: (c) => {
       const email = c.get("polpoUserEmail" as never) as string | undefined;
       if (email) return `person:${email}`;
-      // made through the MCP connector (the server calls the API for an authenticated client)
-      return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? "person:mcp" : "person:dashboard";
+      // made through the MCP connector (the server calls the API for an authenticated client): who that is
+      return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? `person:${currentEventOrigin()?.by ?? "mcp"}` : "person:dashboard";
     },
     emit: (payload) => orchestrator.emit("artifact:changed", payload),
   })));
