@@ -196,6 +196,9 @@ export type {
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
   StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider, SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack, SandboxVolumeStrategy, SandboxVolumeSelection, ResolvedSandboxVolume,
 } from "./sandbox.js";
+// Computers: a persistent machine per agent (settings.computers)
+export * from "./computers.js";
+export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
 export type { RuntimeSandboxOptions, RuntimeSandboxLifecycleOptions, RuntimeSandboxVolumeSelection } from "./runtime-sandbox.js";

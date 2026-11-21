@@ -60,7 +60,7 @@ import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage
 import { CONNECTOR_TOOLS, executeConnectorTool } from "../tools/connector-tools.js";
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
-import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
+import { computerContext, normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
@@ -4224,7 +4224,8 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
       : s.network.mode === "open" ? " (public destinations only, via proxy)"
       : s.network.mode === "unrestricted" ? " (whole machine network, local services included)" : "";
     const fallback = s.fallback ? ` (WEAKER than set: ${s.fallback.from} is not available on this server)` : "";
-    return `${s.provider}${fallback}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
+    const onComputer = s.computer ? ` on computer "${s.computer.id}"` : "";
+    return `${s.provider}${onComputer}${fallback}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
   };
   const lines = [
     `Available on this server: ${[...availableProviders()].join(", ")}`,
@@ -4235,7 +4236,7 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
   for (const agent of await polpo.getAgents()) {
     if (wanted && agent.name !== wanted) continue;
     const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
-    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
+    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, polpo.getConfig()?.settings) }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, polpo.getConfig()?.settings) }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
   }
   const refused = polpo.getNetworkDenied?.() ?? [];
   if (refused.length) lines.push(`Refused recently: ${refused.slice(0, 8).map((r) => `${r.host}${r.port ? `:${r.port}` : ""} (${r.agentName ?? "?"}, ${r.reason}, x${r.count})`).join("; ")}. A person can approve them in Settings → Sandbox.`);

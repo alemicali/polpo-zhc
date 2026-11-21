@@ -17,6 +17,7 @@ import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { configureRemoteProviders } from "../sandbox/remote-providers.js";
 import { SandboxReaper } from "../sandbox/reaper.js";
+import { ComputerUpkeep, computerManagerWithEvents } from "../sandbox/computers.js";
 import { closeAllConnectorManagers } from "../mcp/manager.js";
 
 /**
@@ -47,6 +48,7 @@ export class PolpoServer {
   private supervisorRun: Promise<void> | null = null;
   private storage: StorageRuntime | null = null;
   private sandboxReaper: SandboxReaper | null = null;
+  private computerUpkeep: ComputerUpkeep | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -98,6 +100,16 @@ export class PolpoServer {
       onError: (message) => o.emit("log", { level: "warn", message: `[sandbox] ${message}` }),
     });
     this.sandboxReaper.start();
+
+    // Computers (persistent machines): stop the ones nobody used for their idle time (never
+    // delete them), announce status changes made by task runners
+    this.computerUpkeep?.stop();
+    this.computerUpkeep = new ComputerUpkeep(
+      computerManagerWithEvents(polpoDir, (payload) => o.emit("computer:changed", payload)),
+      () => o.getConfig()?.settings?.computers ?? [],
+      (message) => o.emit("log", { level: "warn", message: `[computers] ${message}` }),
+    );
+    this.computerUpkeep.start();
 
     // Start the SSE bridge. After a setup from the dashboard, reuse the placeholder bridge:
     // the routes and the connected browsers hold that instance, and a new bridge would
@@ -241,6 +253,7 @@ export class PolpoServer {
     }
     // Unmount buckets after the runners stopped using them.
     this.sandboxReaper?.stop();
+    this.computerUpkeep?.stop();
     await this.storage?.shutdown().catch((err) => {
       console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
     });

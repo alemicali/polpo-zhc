@@ -43,6 +43,12 @@ export interface CreateSpec {
   keep: boolean;
   /** Something requested could not be applied as asked (e.g. resources fixed by the image). */
   onWarning?: (message: string) => void;
+  /**
+   * A computer (persistent): never deleted by the provider, stopped (Daytona container) or
+   * paused (E2B, Daytona VM class) after idleStopMinutes without use; Daytona archives it after
+   * autoArchiveDays stopped.
+   */
+  persistent?: { idleStopMinutes: number; autoArchiveDays?: number };
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -54,7 +60,8 @@ export interface RemoteAdapter {
   /** Stop/pause a VM by id (the reaper stops idle pooled VMs). */
   suspendById(remoteId: string): Promise<void>;
   create(spec: CreateSpec): Promise<RemoteDriver>;
-  connect(remoteId: string): Promise<RemoteDriver>;
+  /** Reconnect (starting/resuming it); `timeoutMs`: E2B's idle timeout from now (computers). */
+  connect(remoteId: string, opts?: { timeoutMs?: number }): Promise<RemoteDriver>;
   list(labels: Record<string, string>): Promise<RemoteVmSummary[]>;
   remove(remoteId: string): Promise<void>;
 }
@@ -207,10 +214,14 @@ class DaytonaAdapter implements RemoteAdapter {
     // network rules are checked before anything is created
     const networkParams = daytonaNetworkParams(network);
     const client = await this.client();
+    const persistent = spec.persistent;
     const params: Record<string, unknown> = {
-      autoStopInterval: spec.lifetimeMinutes,
+      autoStopInterval: persistent ? persistent.idleStopMinutes : spec.lifetimeMinutes,
       labels: spec.labels,
-      ...(spec.keep ? { autoDeleteInterval: spec.deleteAfterStopMinutes ?? 60 } : { ephemeral: true }),
+      // a computer is never deleted by Daytona (negative: auto-delete off); archived after N days stopped
+      ...(persistent
+        ? { autoDeleteInterval: -1, ...(persistent.autoArchiveDays ? { autoArchiveInterval: persistent.autoArchiveDays * 24 * 60 } : {}) }
+        : spec.keep ? { autoDeleteInterval: spec.deleteAfterStopMinutes ?? 60 } : { ephemeral: true }),
       ...(spec.sandbox.providerOptions.snapshot ? { snapshot: String(spec.sandbox.providerOptions.snapshot) } : {}),
     };
     Object.assign(params, networkParams);
@@ -220,13 +231,24 @@ class DaytonaAdapter implements RemoteAdapter {
     if (image && !params.snapshot) params.image = image;
     if (sized.resources) params.resources = sized.resources;
     if (sized.warning) spec.onWarning?.(sized.warning);
-    return this.driver(await client.create(params, { timeout: 180 }));
+    const sandbox = await client.create(params, { timeout: 180 });
+    // VM-class snapshots (linux-vm) pause instead of stopping: memory and processes survive
+    if (persistent && sandbox.sandboxClass === "linux-vm") {
+      try {
+        await sandbox.setAutostopInterval(0);
+        await sandbox.setAutoPauseInterval(persistent.idleStopMinutes);
+      } catch (err) {
+        spec.onWarning?.(`Daytona: could not switch the computer to auto-pause (${(err as Error).message}); it stops after ${persistent.idleStopMinutes} idle minutes instead`);
+      }
+    }
+    return this.driver(sandbox);
   }
 
   async connect(remoteId: string): Promise<RemoteDriver> {
     const client = await this.client();
     const sandbox = await client.get(remoteId);
-    if (sandbox.state !== "started") await sandbox.start(120);
+    // stopped, paused and archived sandboxes all start with start() (archived ones take longer)
+    if (sandbox.state !== "started") await sandbox.start(sandbox.state === "archived" ? 600 : 120);
     return this.driver(sandbox);
   }
 
@@ -270,6 +292,8 @@ class DaytonaAdapter implements RemoteAdapter {
       writeFile: async (path, data) => { await sandbox.fs.uploadFile(Buffer.from(data), path); },
       // pause keeps memory but container sandboxes do not support it: stop keeps the files
       suspend: async () => { await sandbox.pause(60).catch(() => sandbox.stop(120)); },
+      // activity resets Daytona's auto-stop timer
+      keepAlive: async () => { await sandbox.refreshActivity?.(); },
       resume: async () => { await sandbox.refreshData?.().catch(() => undefined); if (sandbox.state !== "started") await sandbox.start(120); },
       destroy: async () => { await sandbox.delete(); },
     };
@@ -294,7 +318,9 @@ class E2BAdapter implements RemoteAdapter {
     const { mod, conn, template: defaultTemplate } = await this.sdk();
     const { network } = spec.sandbox;
     // pooled VMs pause when their timeout hits (files kept) instead of dying; the reaper deletes them later
-    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { lifecycle: { onTimeout: "pause" } } : {}) };
+    // computers pause too, and are never deleted
+    const minutes = spec.persistent ? spec.persistent.idleStopMinutes : spec.lifetimeMinutes;
+    const opts: Record<string, unknown> = { ...conn, timeoutMs: minutes * 60_000, metadata: spec.labels, ...(spec.keep || spec.persistent ? { lifecycle: { onTimeout: "pause" } } : {}) };
     Object.assign(opts, e2bNetworkOpts(network));
     const { cpus, memoryMb, diskMb } = spec.sandbox.resources;
     if (cpus || memoryMb || diskMb) {
@@ -302,13 +328,14 @@ class E2BAdapter implements RemoteAdapter {
     }
     const template = (spec.sandbox.providerOptions.template as string | undefined) || defaultTemplate || undefined;
     const sbx = template ? await mod.Sandbox.create(template, opts as any) : await mod.Sandbox.create(opts as any);
-    return this.driver(mod, conn, sbx, spec.lifetimeMinutes);
+    return this.driver(mod, conn, sbx, minutes);
   }
 
-  async connect(remoteId: string): Promise<RemoteDriver> {
+  async connect(remoteId: string, o?: { timeoutMs?: number }): Promise<RemoteDriver> {
     const { mod, conn } = await this.sdk();
     // connecting resumes a paused sandbox
-    return this.driver(mod, conn, await mod.Sandbox.connect(remoteId, conn as any), undefined);
+    const sbx = await mod.Sandbox.connect(remoteId, { ...conn, ...(o?.timeoutMs ? { timeoutMs: o.timeoutMs } : {}) } as any);
+    return this.driver(mod, conn, sbx, o?.timeoutMs ? o.timeoutMs / 60_000 : undefined);
   }
 
   async list(labels: Record<string, string>): Promise<RemoteVmSummary[]> {

@@ -164,6 +164,13 @@ describe("Daytona resources", () => {
 describe("DaytonaAdapter", () => {
   const spec = (s: EffectiveSandbox, onWarning?: (m: string) => void) => ({ sandbox: s, labels: { polpo: "1" }, lifetimeMinutes: 20, keep: false, onWarning });
 
+  test("a computer: never deleted (auto-delete off), stops after its idle time, archives after N days", async () => {
+    await remoteAdapter("daytona").create({ ...spec(sandbox({ providerOptions: { snapshot: "polpo-runner-1" } })), keep: true, persistent: { idleStopMinutes: 15, autoArchiveDays: 7 } });
+    const { params } = daytona.created[0];
+    expect(params).toMatchObject({ autoStopInterval: 15, autoDeleteInterval: -1, autoArchiveInterval: 7 * 24 * 60, snapshot: "polpo-runner-1" });
+    expect(params.ephemeral).toBeUndefined();
+  });
+
   test("create sends domainAllowList (no resolved IPs) and the snapshot", async () => {
     await remoteAdapter("daytona").create(spec(sandbox({ network: allow("*.github.com", "registry.npmjs.org"), providerOptions: { snapshot: "polpo-runner-1" } })));
     const { params, opts } = daytona.created[0];
@@ -233,5 +240,11 @@ describe("E2BAdapter", () => {
     expect(template).toBe("polpo-runner");
     expect(opts).toMatchObject({ apiKey: "key-e2b", timeoutMs: 600_000, metadata: { polpo: "1" }, lifecycle: { onTimeout: "pause" }, network: { allowOut: ["github.com", "*.github.com"], denyOut: ["0.0.0.0/0"] } });
     expect(warnings[0]).toMatch(/E2B sizes a sandbox by its template/);
+  });
+
+  test("a computer pauses after its idle time (E2B keeps paused sandboxes)", async () => {
+    await remoteAdapter("e2b").create({ sandbox: sandbox({ provider: "e2b" }), labels: { "polpo-computer": "i:nina" }, lifetimeMinutes: 90, keep: true, persistent: { idleStopMinutes: 20 } });
+    const [opts] = e2b.created[0];
+    expect(opts).toMatchObject({ timeoutMs: 20 * 60_000, metadata: { "polpo-computer": "i:nina" }, lifecycle: { onTimeout: "pause" } });
   });
 });

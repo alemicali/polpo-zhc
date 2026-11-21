@@ -31,6 +31,7 @@ import { remoteAdapter, type RemoteAdapter, type RemoteDriver } from "./remote-a
 import { SandboxLease, DEFAULT_IDLE_SUSPEND_MS } from "./lease.js";
 import { ShellBackedFileSystem } from "./shell-backed-fs.js";
 import { SandboxPool, instanceLabel, poolFilePath, poolKey } from "./pool.js";
+import { computerManager } from "./computers.js";
 
 export type { RemoteDriver } from "./remote-adapters.js";
 
@@ -43,12 +44,12 @@ const KEEP_ON_RESET = ["node_modules", ".venv"];
 export { DEFAULT_IDLE_SUSPEND_MS } from "./lease.js";
 
 export type RemoteWorkspaceEvent =
-  | { kind: "ready"; message: string; durationMs: number; steps: Record<string, number>; remoteId: string; source: "created" | "pool" | "warm" | "shared" }
+  | { kind: "ready"; message: string; durationMs: number; steps: Record<string, number>; remoteId: string; source: "created" | "pool" | "warm" | "shared" | "computer" }
   | { kind: "synced"; message: string; durationMs: number }
   | { kind: "warning"; message: string }
   | { kind: "suspended"; remoteId: string; idleMs: number }
   | { kind: "resumed"; remoteId: string; durationMs: number }
-  | { kind: "released"; remoteId: string; outcome: "pooled" | "destroyed" | "shared"; runningMs: number; durationMs: number }
+  | { kind: "released"; remoteId: string; outcome: "pooled" | "destroyed" | "shared" | "kept"; runningMs: number; durationMs: number }
   | { kind: "volume"; step: "prepared" | "checkpointed" | "finalized" | "conflict"; name: string; revision?: number; message?: string };
 
 export interface RemoteWorkspaceOptions {
@@ -68,6 +69,8 @@ export interface RemoteWorkspaceOptions {
   syncEachExec?: boolean;
   /** Provider adapter (tests inject one). */
   adapter?: RemoteAdapter;
+  /** Computers' manager (tests inject one; default: the project's). */
+  computers?: import("./computers.js").ComputerManager;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -102,8 +105,8 @@ export class RemoteVmSession implements SandboxSession {
   /** Why the run ends ("error" → destroyed rather than pooled). */
   releaseReason?: string;
   private driver!: RemoteDriver;
-  private source: "created" | "pool" | "warm" | "shared" = "created";
-  private releaseOutcome?: "pooled" | "destroyed" | "shared";
+  private source: "created" | "pool" | "warm" | "shared" | "computer" = "created";
+  private releaseOutcome?: "pooled" | "destroyed" | "shared" | "kept";
   private marker = `/tmp/.polpo-context-${nanoid(8)}`;
   private shared = false;
   /** Hydrated volumes: the revision each was copied at. */
@@ -159,12 +162,12 @@ export class RemoteVmSession implements SandboxSession {
 
   lifecycleInfo(): SandboxLifecycleInfo {
     return {
-      acquisitionSource: this.source === "warm" ? "pool" : this.source,
-      ...(this.releaseOutcome ? { releaseOutcome: this.releaseOutcome === "shared" ? "pooled" : this.releaseOutcome } : {}),
+      acquisitionSource: this.source === "warm" || this.source === "computer" ? "pool" : this.source,
+      ...(this.releaseOutcome ? { releaseOutcome: this.releaseOutcome === "shared" || this.releaseOutcome === "kept" ? "pooled" : this.releaseOutcome } : {}),
     };
   }
 
-  get outcome(): "pooled" | "destroyed" | "shared" | undefined {
+  get outcome(): "pooled" | "destroyed" | "shared" | "kept" | undefined {
     return this.releaseOutcome;
   }
 
@@ -180,8 +183,15 @@ export class RemoteVmSession implements SandboxSession {
     };
   }
 
-  /** By isolation: the shared VM, a VM this agent released (reuse), a warm VM, or a new one. */
-  private async acquire(): Promise<{ driver: RemoteDriver; source: "created" | "pool" | "warm" | "shared" }> {
+  /** By isolation: the shared VM, a VM this agent released (reuse), a warm VM, or a new one; a computer's own machine. */
+  private async acquire(): Promise<{ driver: RemoteDriver; source: "created" | "pool" | "warm" | "shared" | "computer" }> {
+    const computer = this.vm.opts.sandbox.computer;
+    if (computer && (computer.kind === "daytona" || computer.kind === "e2b")) {
+      const polpoDir = this.vm.opts.pool?.polpoDir;
+      if (!polpoDir) throw new Error(`Computer "${computer.id}" needs the project directory`);
+      const manager = this.vm.opts.computers ?? computerManager(polpoDir);
+      return { driver: await manager.attach(computer, this.vm.opts.sandbox, (message) => this.vm.emit({ kind: "warning", message })), source: "computer" };
+    }
     const key = poolKey(this.vm.provider, this.vm.opts.sandbox);
     const pool = this.vm.pool;
     const lease = { runId: this.vm.opts.pool?.runId, sessionKey: this.vm.opts.pool?.sessionKey };
@@ -258,11 +268,15 @@ export class RemoteVmSession implements SandboxSession {
 
       this.vm.emit({
         kind: "ready", remoteId: driver.remoteId, source,
-        message: `${this.vm.provider} sandbox ${driver.remoteId} ready (${source === "created" ? "new" : source === "pool" ? "reused" : source}, ${this.remoteVolumes().length} volume(s), ${Math.round(uploaded / 1024)} KB of context)`,
+        message: source === "computer"
+          ? `computer ${this.vm.opts.sandbox.computer?.id} (${this.vm.provider} ${driver.remoteId}) ready (${this.remoteVolumes().length} volume(s), ${Math.round(uploaded / 1024)} KB of context)`
+          : `${this.vm.provider} sandbox ${driver.remoteId} ready (${source === "created" ? "new" : source === "pool" ? "reused" : source}, ${this.remoteVolumes().length} volume(s), ${Math.round(uploaded / 1024)} KB of context)`,
         durationMs: Date.now() - t0, steps: { acquireMs: created, syncMs: synced, volumesMs: mounted },
       });
     } catch (err) {
-      if (this.shared) {
+      if (source === "computer") {
+        // a computer is never deleted by a run
+      } else if (this.shared) {
         await this.vm.pool?.leaveShared(driver.remoteId, this.vm.releaseTimes, this.vm.workspaceId).catch(() => undefined);
       } else {
         await driver.destroy().catch(() => undefined);
@@ -360,12 +374,13 @@ export class RemoteVmSession implements SandboxSession {
             ...(readOnly ? ["--read-only"] : ["--allow-overwrite", "--allow-delete"]),
           ];
           const awsEnv = { AWS_ACCESS_KEY_ID: r.credentials.accessKeyId, AWS_SECRET_ACCESS_KEY: r.credentials.secretAccessKey, ...(r.credentials.sessionToken ? { AWS_SESSION_TOKEN: r.credentials.sessionToken } : {}) };
-          cmd = `${mk} && mount-s3 ${q(r.bucket)} ${q(v.mountPath)} ${flags.join(" ")}`;
+          cmd = `mountpoint -q ${q(v.mountPath)} 2>/dev/null || { ${mk} && mount-s3 ${q(r.bucket)} ${q(v.mountPath)} ${flags.join(" ")}; }`;
           const res = await driver.exec(cmd, { env: awsEnv, timeoutMs: 120_000 });
           if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be mounted: ${(res.stderr || res.stdout).trim().slice(0, 300)}`);
         } else {
           const flags = ["--daemon", "--vfs-cache-mode", "writes", "--dir-cache-time", "30s", ...(readOnly ? ["--read-only"] : [])];
-          cmd = `${mk} && rclone mount ${q(this.remoteSource(v))} ${q(v.mountPath)} ${flags.join(" ")} && sleep 1 && mountpoint -q ${q(v.mountPath)}`;
+          // a computer keeps its mounts between runs: an existing mount is reused
+          cmd = `mountpoint -q ${q(v.mountPath)} 2>/dev/null || { ${mk} && rclone mount ${q(this.remoteSource(v))} ${q(v.mountPath)} ${flags.join(" ")} && sleep 1 && mountpoint -q ${q(v.mountPath)}; }`;
           const res = await driver.exec(cmd, { env, timeoutMs: 120_000 });
           if (res.exitCode !== 0) throw new Error(`Volume "${v.name}" could not be mounted: ${(res.stderr || res.stdout).trim().slice(0, 300) || "FUSE not available"}`);
         }
@@ -444,6 +459,11 @@ export class RemoteVmSession implements SandboxSession {
     for (const v of this.remoteVolumes().filter((x) => x.strategy === "hydrated" && x.access === "read-write" && x.writeBack !== "manual")) {
       try { await this.writeBackVolume(driver, v, "finalized"); }
       catch (err) { this.vm.emit({ kind: "warning", message: (err as Error).message }); }
+    }
+    // a computer keeps its volumes mounted (other runs may use them) and its machine
+    if (this.source === "computer") {
+      this.releaseOutcome = "kept";
+      return;
     }
     await this.detachVolumes(driver);
     let outcome: "pooled" | "destroyed" | "shared" = "destroyed";
@@ -530,7 +550,9 @@ export class RemoteVmProvider implements SandboxProvider {
     this.isolation = opts.sandbox.isolation ?? DEFAULT_ISOLATION;
     this.pool = opts.pool ? new SandboxPool(poolFilePath(opts.pool.polpoDir)) : undefined;
     this.adapter = opts.adapter ?? remoteAdapter(provider);
-    this.idleSuspendMs = opts.idleSuspendMs ?? (this.adapter.fastSuspend ? DEFAULT_IDLE_SUSPEND_MS : 0);
+    // a computer is shared by its agent's chats and tasks: it is stopped by the server when
+    // nobody uses it, never suspended between one run's tools
+    this.idleSuspendMs = opts.sandbox.computer ? 0 : opts.idleSuspendMs ?? (this.adapter.fastSuspend ? DEFAULT_IDLE_SUSPEND_MS : 0);
     this.defaultTimeoutMs = opts.sandbox.resources.timeoutMin ? opts.sandbox.resources.timeoutMin * 60_000 : undefined;
   }
 
