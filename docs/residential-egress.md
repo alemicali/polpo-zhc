@@ -84,7 +84,9 @@ In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
 - `tailscale` / `tailscaled` 1.104.7: in the runner images (`scripts/build-sandbox-images.mjs`: Daytona
   v0 snapshot, E2B template, and the Daytona v2 image `polpo-runner-vm-2`); otherwise downloaded on
   first use from `pkgs.tailscale.com` and checked against a pinned SHA-256. Computers run on Daytona
-  v0 (containers) and E2B; Daytona v2 is refused for computers (not persistent).
+  v0 (containers), E2B and Daytona v2 (Linux VMs that hibernate: their memory snapshot keeps
+  tailscaled running, and every wake checks the tailnet again: when the ephemeral node was removed
+  meanwhile, `tailscale up` runs again with the key).
 - `tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 --state=mem:`: no TUN device,
   no root; the state is in memory, so the node leaves with the VM (ephemeral key).
 - `tailscale up --auth-key=file:… --hostname=<prefix>-<project>-<computer> --advertise-tags=… --accept-dns=false`.

@@ -87,7 +87,7 @@ export function ComputerDialog({
           {!editing && (
             <Field label="Runs on">
               <select className={selectClass} value={kind} onChange={(e) => set("kind", e.target.value as ComputerKind)} aria-label="Runs on">
-                <option value="daytona">Daytona (v0: stops when idle; not on v2)</option>
+                <option value="daytona">Daytona (v0: stops when idle; v2: hibernates, wakes in a few seconds)</option>
                 <option value="e2b">E2B (pauses when idle, memory kept)</option>
                 <option value="host">This server</option>
               </select>

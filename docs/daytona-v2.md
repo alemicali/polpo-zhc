@@ -9,8 +9,8 @@ Daytona has two services. Polpo talks to either, per instance, with
 | Key | organization API key | **project** API key (`dtn_…`) |
 | Machines from | a **snapshot** (`providers.daytona.snapshot`, e.g. `polpo-runner-0.3.13`) or a Docker image | an **image** of the project (`providers.daytona.image`, default `polpo-runner-vm-2`) |
 | Class | container or linux-vm, as the snapshot was built | always a **Linux VM** (`linux-vm`) |
-| Idle | container: stopped (disk kept); linux-vm: paused | **not persistent** on the plans seen so far: pause and stop are refused (409); an idle VM is deleted |
-| Computers | yes | **no** (refused: use v0 or E2B) |
+| Idle | container: stopped (disk kept); linux-vm: paused | **not persistent** on the plans seen so far: pause, stop and fork are refused (409); an idle pooled VM is deleted |
+| Computers | yes (stop / pause) | yes: they **hibernate** (memory and disk snapshot, VM deleted; wakes in ~3 s) |
 | Longest life | none | the plan's maximum wall clock (86400 s seen; `providers.daytona.maxTimeoutSeconds`), then deleted |
 | Size | fixed by the snapshot | per sandbox (`resources`; default 2 vCPU, 4 GB, 10 GB) |
 | Network allowlist | host names **or** IPv4 addresses (not both) | host names and addresses together; can change while the VM exists |
@@ -24,13 +24,30 @@ is a one-line change.
 
 - **Create**: `daytona.v2.create(image, { labels, resources: { cpuMax, memoryMax, diskMax },
   lifecyclePolicy, networkPolicy, region?, name? })`. Every sandbox is a Linux VM.
-- **Not persistent.** Live on our plan, a Linux v2 sandbox refuses `pause()` (409 "sandbox is not
-  persistent; pause is unavailable") and `stop()` (409 "warm stop is unavailable (delete
-  instead)"), its lifecycle policy accepts only `"delete"`, and its wall-clock timeout (at most
-  86400 s) deletes it. So Polpo never pauses or stops a v2 VM, and **computers are refused on v2**
-  ("Daytona v2 Linux sandboxes can't be paused or stopped on this plan: use Daytona v0 or E2B for
-  computers") when the config loads, by `POST/PATCH /computers`, by `PATCH /config/settings`
-  (switching to v2 while Daytona computers exist) and at start, stop and reset.
+- **Not persistent.** Live on our plan, a Linux v2 sandbox refuses `pause()`, `stop()` and
+  `fork()` (409 "sandbox is not persistent"), its lifecycle policy accepts only `"delete"`, and
+  its wall-clock timeout (at most 86400 s) deletes it. So Polpo never pauses or stops a v2 VM.
+- **Computers hibernate.** Memory and disk snapshots work and are fast (measured live):
+  `sandbox.createSnapshot(name)` answers in ~0.25 s with status `building`, `snapshots.get(id)`
+  reports `ready` ~2 s later (memory ~224 MB for a 4 GB VM); `client.delete(id)` ~2 s;
+  `createFromSnapshot(id, { name, labels, lifecyclePolicy, waitSeconds })` starts a VM in ~2.4 s
+  with the files **and the running processes** (a background loop kept counting). Deleting the
+  source before the snapshot is ready makes the snapshot fail, so Polpo deletes a computer's VM
+  only once its snapshot is `ready`. The whole model (hibernate when idle or stopped, wake on use,
+  rotation before the 24 h wall clock, safety snapshots, restore of a vanished VM, snapshot
+  cleanup, settings `providers.daytona.hibernate`) is in
+  [Computers → Hibernation](computers.md#hibernation-daytona-v2).
+  - A computer's VM: lifecycle `{ timeoutSeconds: min(maxTimeoutSeconds, 86400), onTimeout:
+    "delete", idleExpirySeconds: -1 }` (at create and at every wake).
+  - Snapshot names: `polpo-computer-<instance>-<id>-<UTC yyyymmddhhmmssSSS>` (snapshots carry no
+    labels: Polpo only ever touches names of its own instance and computer).
+  - A named v2 create derives a **permanent** idempotency key from the name; a computer gets a new
+    VM under the same name after every hibernation, so Polpo passes a fresh `idempotencyKey` per
+    VM (create: `<name>:<time>`, wake: `<name>:wake:<snapshot>:<time>`).
+  - `createFromSnapshot` takes no network policy: the computer's rule is applied right after
+    (`updateNetworkPolicy`); a VM that cannot get it is deleted again.
+  - Costs: snapshot storage (~memory + disk per snapshot, `keepSnapshots` of them, default 1)
+    while hibernated; a wake is ~3 s.
 - **Lifecycle policy** (v2 requires a wall-clock timeout, capped at
   `providers.daytona.maxTimeoutSeconds`, default 86400, the plan's maximum):
   - one-run sandbox: idle or timeout after the run's lifetime (task timeout + 15 min) → delete;
@@ -42,8 +59,9 @@ is a one-line change.
 - **Start**: a running VM reused from the pool gets its wall-clock budget re-armed when less than
   half is left.
 - **Find**: by label with `search({ labels })` (falls back to listing every sandbox where search is
-  not served). Computers also get a stable name (`polpo-computer-<instance>-<id>`): a repeated
-  create returns the same VM, so a search that lags right after a create never makes a second one.
+  not served). Computers also get a stable name (`polpo-computer-<instance>-<id>`, the `name`
+  label) and their known VM is read by id as well (a search that lags right after a create or a
+  wake never makes a second VM).
 - **Commands**: `exec({ argv: ["bash", "-c", command] }, { cwd, env, timeoutSeconds,
   executionTimeoutSeconds })`; stdout, stderr and the exit code come back separately; a timeout is
   exit code 124.
@@ -103,9 +121,11 @@ is a one-line change.
 
    With `"api": "v2"` an `apiUrl` is refused (when the file loads and by the API) with a message
    saying why.
-5. **Computers.** Daytona computers do not run on v2 (its Linux sandboxes are not persistent):
-   the switch is refused while the instance has `daytona` computers. Keep the instance on v0 for
-   them, or move them to E2B (`kind: "e2b"`), or delete them first.
+5. **Computers.** `daytona` computers hibernate on v2. A computer whose machine lives on v0 is not
+   found by v2: after the switch its next use makes a new v2 VM from the image (the v0 machine and
+   its disk stay on v0; delete it there, or switch back to reach it). The project key must be
+   allowed to take snapshots (`write:snapshots`, `read:snapshots`, with `write:sandboxes`); without
+   that hibernation fails with the API's error and the VM keeps running.
 6. **Old v0 sandboxes** (pool, warm) are not reachable from v2: the pool forgets them, and Daytona v0
    deletes them by itself (`autoDeleteInterval` / `ephemeral`). Switch when no task runs.
 

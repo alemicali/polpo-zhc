@@ -194,7 +194,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
                 <div className="flex h-8 items-center rounded-md border border-border/40 bg-muted/20 px-2 text-xs" data-testid="daytona-vm-class">
                   {v2 ? "Linux VM (linux-vm)" : "From the snapshot"}
                 </div>
-                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Not persistent: deleted when idle; no computers" : "Container stops, linux-vm pauses"}</span>
+                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Computers hibernate (snapshot); pooled VMs deleted when idle" : "Container stops, linux-vm pauses"}</span>
               </div>
             </div>
           )}
