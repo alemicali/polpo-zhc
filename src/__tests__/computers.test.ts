@@ -388,3 +388,57 @@ describe("runs on a computer", () => {
     expect(provider.created).toHaveLength(1);
   });
 });
+
+// ── Polpo's tools ────────────────────────────────────────────────────────
+
+describe("Polpo's computer tools", () => {
+  function fakePolpo(agents: any[]) {
+    const polpoDir = tmp("polpo-dir-");
+    writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "p", settings: { egressProxies: { home: "socks5://100.1.2.3:1080" } } }));
+    let settings: any = {};
+    const events: any[] = [];
+    const polpo = {
+      agents, events,
+      getPolpoDir: () => polpoDir,
+      getAgents: async () => agents,
+      getConfig: () => ({ settings }),
+      reloadConfig: async () => { settings = JSON.parse(readFileSync(join(polpoDir, "polpo.json"), "utf8")).settings; return true; },
+      updateAgent: async (name: string, updates: Record<string, unknown>) => { const a = agents.find((x) => x.name === name); Object.assign(a, updates); return a; },
+      emit: (event: string, payload: unknown) => events.push({ event, payload }),
+    } as any;
+    return polpo;
+  }
+
+  test("computer_create, computer_assign, computers_list, computer_stop", async () => {
+    const { executeOrchestratorTool } = await import("../llm/orchestrator-tools.js");
+    const { setComputerManager } = await import("../sandbox/computers.js");
+    const polpo = fakePolpo([{ name: "sitoinchat" }, { name: "dev" }]);
+    const provider = new FakeDaytona();
+    setComputerManager(polpo.getPolpoDir(), new ComputerManager(polpo.getPolpoDir(), { adapter: () => provider }));
+    try {
+      expect(await executeOrchestratorTool("computer_create", { id: "nina", name: "Nina", kind: "daytona", idleStopMinutes: 20 }, polpo)).toMatch(/created/);
+      expect(polpo.getConfig().settings.computers).toEqual([{ id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 20 } }]);
+      expect(polpo.events).toContainEqual({ event: "computer:changed", payload: { id: "nina", action: "created", status: "missing" } });
+      expect(await executeOrchestratorTool("computer_create", { id: "nina", kind: "e2b" }, polpo)).toMatch(/already exists/);
+      expect(await executeOrchestratorTool("computer_create", { id: "x", kind: "daytona", egress: "home" }, polpo)).toMatch(/Error/);
+
+      expect(await executeOrchestratorTool("computer_assign", { agent: "sitoinchat", computer: "nina" }, polpo)).toMatch(/now works on computer "nina"/);
+      expect(polpo.agents[0]).toMatchObject({ defaultComputer: "nina", computers: ["nina"] });
+      expect(await executeOrchestratorTool("computer_assign", { agent: "sitoinchat", computer: "zed" }, polpo)).toMatch(/no computer "zed"/);
+
+      const list = await executeOrchestratorTool("computers_list", {}, polpo);
+      expect(list).toContain("host (this server): running; default of dev");
+      expect(list).toMatch(/nina "Nina" \(daytona\): missing.*agents: sitoinchat \(default\)/);
+
+      // no Daytona key on this test machine: start says so, nothing is created
+      expect(await executeOrchestratorTool("computer_start", { id: "nina" }, polpo)).toMatch(/no API key/);
+      expect(provider.created).toHaveLength(0);
+      expect(await executeOrchestratorTool("computer_stop", { id: "host" }, polpo)).toMatch(/this server/);
+
+      expect(await executeOrchestratorTool("computer_assign", { agent: "sitoinchat", computer: "host" }, polpo)).toMatch(/this server again/);
+      expect(polpo.agents[0].defaultComputer).toBeUndefined();
+    } finally {
+      setComputerManager(polpo.getPolpoDir(), undefined);
+    }
+  });
+});

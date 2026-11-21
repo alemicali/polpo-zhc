@@ -27,6 +27,7 @@ import { registerAutomationTools, registerWatcherTools } from "./mcp-server/auto
 import { registerConnectorTools } from "./mcp-server/connectors.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
+import { registerComputerTools } from "./mcp-server/computers.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, ToolsetName } from "./mcp-server/kit.js";
 export { MAX_RESULT_CHARS, TOOLSETS, DEFAULT_TOOLSETS, resolveToolsets, hasScope, scopeFor } from "./mcp-server/kit.js";
@@ -69,6 +70,7 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
   registerWatcherTools(tool, deps);
   registerVaultTools(tool, deps);
   registerAppTools(tool, deps);
+  registerComputerTools(tool, deps);
   registerAdminTools(tool, deps);
   return server;
 }

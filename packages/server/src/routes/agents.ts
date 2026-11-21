@@ -177,6 +177,10 @@ export function agentRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean() }) }) } },
         description: "Agent added",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid input (e.g. an unknown computer)",
+      },
     },
   });
 
@@ -465,6 +469,10 @@ export function agentRoutes(getDeps: () => {
       200: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
         description: "Agent updated",
+      },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid input (e.g. an unknown computer)",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
