@@ -27,6 +27,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-21-mcp-everything",
+    date: "2026-11-21",
+    kind: "improved",
+    title: "Tutto Polpo da MCP, senza passare da Polpo",
+    summary: "Agenti, team, gruppi, memoria, skill, schedulazioni, connettori e canali hanno strumenti diretti nel connettore MCP.",
+    body: [
+      "Dal connettore MCP (Claude, ChatGPT, Codex) ora configuri tutto direttamente, senza chiedere a Polpo: niente doppia inferenza.",
+      "",
+      "- **Team e agenti**: crei, modifichi ed elimini agenti e team, assegni le skill.",
+      "- **Gruppi**: crei e modifichi i gruppi, leggi i messaggi, scrivi e aspetti le risposte degli agenti.",
+      "- **Memoria e skill**: leggi e aggiorni la memoria, crei e installi skill.",
+      "- **Automazioni**: schedulazioni (anche \"esegui ora\") e check ricorrenti.",
+      "- **Connettori e canali**: aggiungi connettori, gestisci gli accessi, invii messaggi su Telegram e gli altri canali.",
+      "- Brain, vault (solo nomi), watcher e app sono disponibili su richiesta. Le password non passano mai dalla conversazione.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-21-mcp-tools",
     date: "2026-11-21",
     kind: "improved",
