@@ -126,7 +126,7 @@ snapshots: a missing image fails the create with the command that builds it.
 - MCP (`computers` toolset): `polpo_computers_list`, `polpo_computer_save`, `polpo_computer_control`,
   `polpo_computer_delete`; `polpo_agent_update` takes `defaultComputer`.
 - Event `computer:changed` `{ id, action: created | updated | deleted | status, status?, remoteId?, error? }`.
-- Dashboard: **Computers** page; an agent's computer is chosen in its **Sandbox** tab.
+- Dashboard: **Computers** page; an agent's computers (status, Start/Stop/Restart/Reset, default, add or create one for it) are in its **Computer** tab.
 
 ## Migration: computer `nina` for `sitoinchat` (lumea)
 

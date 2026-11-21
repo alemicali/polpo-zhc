@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Computer tab on each agent**: where the agent works now, its computers with live status and Start/Stop/Restart/Reset, make default, remove, and add an existing or new computer for it. The default-computer picker moved here from the Sandbox tab; the agent page keeps the open tab in `?tab=`.
 - **Daytona v2: sandboxes and computers as Linux VMs on Daytona's new service.** `settings.sandbox.providers.daytona.api: "v2"` (default `"v0"`: existing instances do not change) creates every Daytona sandbox and computer on `https://api.daytona.com` as a Linux VM (`linux-vm`) with a **project** API key from the vault, from the image `providers.daytona.image` (default the runner image `polpo-runner-vm-1`, built with `node scripts/build-sandbox-images.mjs --provider daytona-v2`), sized per sandbox by `resources`.
   - Idle machines are **paused** (memory, processes and disk kept) and resumed on the next command; a computer is never deleted (its lifecycle policy pauses on idle and on the wall-clock timeout). One-run sandboxes are deleted after their lifetime, pooled ones paused then deleted, as on v0.
   - Commands return stdout, stderr and the exit code natively; network allowlists take host names and addresses together, and a computer's rule is re-applied when it starts or resumes; computers get a stable name so a repeated create returns the same machine.

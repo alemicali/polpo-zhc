@@ -1,6 +1,6 @@
 /**
  * Computers (persistent machines agents work on) — thin client for /api/v1/computers plus the
- * pure helpers the Computers page and the agent's Sandbox tab share (status labels and tones,
+ * pure helpers the Computers page and the agent's Computer tab share (status labels and tones,
  * uptime, the create/edit form and its validation).
  *
  * Same envelope ({ ok, data } / { ok, error }) and auth as the other page clients.
@@ -169,11 +169,21 @@ export function formFromComputer(c: Computer): ComputerForm {
   };
 }
 
+const RESERVED_COMPUTER_IDS = ["host", "ephemeral"];
+
+/** A free computer id from an agent's name ("Nina Bot" → "nina-bot", "nina-bot-2" if taken). */
+export function suggestComputerId(name: string, taken: string[]): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "computer";
+  let id = base;
+  for (let i = 2; taken.includes(id) || RESERVED_COMPUTER_IDS.includes(id); i++) id = `${base}-${i}`;
+  return id;
+}
+
 export function validateComputerForm(form: ComputerForm, existingIds: string[] = [], editing = false): Partial<Record<keyof ComputerForm, string>> {
   const errors: Partial<Record<keyof ComputerForm, string>> = {};
   if (!editing) {
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(form.id)) errors.id = "Lowercase letters, digits and -, e.g. nina";
-    else if (form.id === "host" || form.id === "ephemeral") errors.id = "This id is reserved";
+    else if (RESERVED_COMPUTER_IDS.includes(form.id)) errors.id = "This id is reserved";
     else if (existingIds.includes(form.id)) errors.id = "A computer with this id exists";
   }
   if (form.kind !== "host") {

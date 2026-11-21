@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   RefreshCw,
   ChevronRight,
+  Monitor,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 // Provider + context hook
@@ -45,6 +46,7 @@ import { AgentInstructionsTab } from "@/components/agents/agent-instructions-tab
 import { AgentToolsTab } from "@/components/agents/agent-tools-tab";
 import { AgentCredentialsTab } from "@/components/agents/agent-credentials-tab";
 import { AgentConfigTab } from "@/components/agents/agent-config-tab";
+import { AgentComputerTab } from "@/components/agents/agent-computer-tab";
 import { AgentSandboxTab } from "@/components/agents/agent-sandbox-tab";
 import { AgentLearningTab } from "@/components/agents/agent-learning-tab";
 import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
@@ -120,9 +122,15 @@ function AgentDetailContent() {
   const {
     state: { agent, process, taskStats, sortedTasks, enabledCategories, vaultEntries },
   } = useAgentDetail();
-  // ?tab=credentials opens a tab directly (e.g. from a vault picker's "add it" link)
-  const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") ?? "overview";
+  // ?tab=credentials opens a tab directly (e.g. from a vault picker's "add it" link, or the
+  // Sandbox tab's "manage in the Computer tab"); switching tabs keeps it in the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") ?? "overview";
+  const selectTab = (value: string) => setSearchParams((params) => {
+    const next = new URLSearchParams(params);
+    next.set("tab", value);
+    return next;
+  }, { replace: true });
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -140,7 +148,7 @@ function AgentDetailContent() {
         </Card>
       )}
 
-      <Tabs defaultValue={initialTab} className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs value={tab} onValueChange={selectTab} className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
@@ -162,6 +170,10 @@ function AgentDetailContent() {
           </TabsTrigger>
           <TabsTrigger value="learning">Learning</TabsTrigger>
           <TabsTrigger value="goals">Goals</TabsTrigger>
+          <TabsTrigger value="computer">
+            <Monitor className="h-3.5 w-3.5 mr-1" />
+            Computer
+          </TabsTrigger>
           <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="tasks">
@@ -198,6 +210,10 @@ function AgentDetailContent() {
 
         <TabsContent value="goals" className="mt-4 flex-1 min-h-0">
           <AgentDriveTab />
+        </TabsContent>
+
+        <TabsContent value="computer" className="mt-4 flex-1 min-h-0">
+          <AgentComputerTab />
         </TabsContent>
 
         <TabsContent value="sandbox" className="mt-4 flex-1 min-h-0">
