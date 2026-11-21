@@ -123,11 +123,14 @@ export function ComputerDialog({
               )}
             </div>
           )}
-          {kind === "host" && (
-            <Field label="Egress proxy" hint="The browser of its agents goes out through this proxy (a name from settings.egressProxies)">
-              <Input value={form.egress} onChange={(e) => set("egress", e.target.value)} placeholder="home" />
-            </Field>
-          )}
+          <Field
+            label="Egress proxy"
+            hint={kind === "host"
+              ? "The browser of its agents goes out through this proxy (a name from settings.egressProxies)"
+              : "Optional. Its browser goes out through this proxy, reached through Tailscale inside the VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"}
+          >
+            <Input value={form.egress} onChange={(e) => set("egress", e.target.value)} placeholder="home" />
+          </Field>
           {!editing && kind !== "host" && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.start} onChange={(e) => set("start", e.target.checked)} />

@@ -7,6 +7,8 @@
  *   - agent-browser + its Chromium, with every shared library Chromium needs, and fonts;
  *     playwright-core (pdf_create renders HTML with that Chromium, in the VM)
  *   - mountpoint-s3, rclone and FUSE (storage mounts)
+ *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
+ *     through a tailnet-only egress proxy join the tailnet from inside the VM
  *   - git, curl, python3 (+ edge-tts), poppler-utils, sudo, node 22
  *
  * Daytona v0: a snapshot built from the SDK's declarative Image, named "polpo-runner-<version>".
@@ -43,7 +45,7 @@ export const DAYTONA_SNAPSHOT = `polpo-runner-${version}`;
  * DAYTONA_V2_RUNNER_IMAGE in packages/core/src/sandbox.ts must match; a test checks it). A named
  * v2 image with other contents cannot be rebuilt under the same name.
  */
-export const DAYTONA_V2_IMAGE = "polpo-runner-vm-1";
+export const DAYTONA_V2_IMAGE = "polpo-runner-vm-2";
 export const E2B_TEMPLATE = `polpo-runner-${version.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 
 /** Debian packages: baseline tools, PDF text, python for edge-tts, FUSE, every library agent-browser's Chromium links against, fonts. */
@@ -57,6 +59,21 @@ const APT_PACKAGES = [
   "fonts-liberation", "fonts-dejavu-core", "fonts-noto-color-emoji",
 ];
 
+/**
+ * Tailscale for computers going out through a tailnet-only proxy (src/sandbox/tailnet-egress.ts
+ * pins the same release for VMs without it; a test checks they match).
+ */
+export const TAILSCALE_VERSION = "1.104.7";
+export const TAILSCALE_SHA256 = {
+  amd64: "e56693ff74a64f2591b7e819c280635a100aae1ddfb0ef058fcd052b7cd8d16c",
+  arm64: "d6bed2720310b328b861f943d7b4016c5358a9bad60575eb51e8143b79068484",
+};
+const TAILSCALE_STEP =
+  `case "$(uname -m)" in x86_64|amd64) A=amd64; S=${TAILSCALE_SHA256.amd64};; aarch64|arm64) A=arm64; S=${TAILSCALE_SHA256.arm64};; *) echo "unsupported architecture" >&2; exit 1;; esac`
+  + ` && F=tailscale_${TAILSCALE_VERSION}_$A && curl -fsSL -o /tmp/ts.tgz "https://pkgs.tailscale.com/stable/$F.tgz"`
+  + ` && echo "$S  /tmp/ts.tgz" | sha256sum -c - && tar xzf /tmp/ts.tgz -C /tmp`
+  + ` && install -m 755 "/tmp/$F/tailscale" "/tmp/$F/tailscaled" /usr/local/bin/ && rm -rf /tmp/ts.tgz "/tmp/$F" && tailscale version`;
+
 /** Steps run as root, in order (shared by both providers and the printed Dockerfile). */
 export const ROOT_STEPS = [
   `apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${APT_PACKAGES.join(" ")} && rm -rf /var/lib/apt/lists/*`,
@@ -64,6 +81,8 @@ export const ROOT_STEPS = [
   `ARCH=$(uname -m) && curl -fsSL "https://s3.amazonaws.com/mountpoint-s3-release/latest/$ARCH/mount-s3.deb" -o /tmp/mount-s3.deb && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/mount-s3.deb && rm -rf /tmp/mount-s3.deb /var/lib/apt/lists/*`,
   // rclone (what Polpo mounts granted buckets with)
   "curl -fsSL https://rclone.org/install.sh | bash",
+  // tailscale (userspace networking: no TUN, no root needed when it runs)
+  TAILSCALE_STEP,
   // edge-tts: free voices for audio_speak (slim Debian is PEP 668 locked)
   "pip install --no-cache-dir --break-system-packages edge-tts",
   // agent-browser CLI (its Chromium is downloaded per user, below); playwright-core for pdf_create

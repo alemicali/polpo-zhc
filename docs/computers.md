@@ -32,13 +32,13 @@ Every agent has the implicit computer **`host`**: this server, with the sandbox 
 | `id` | Slug (`a-z`, `0-9`, `-`, up to 40). `host` and `ephemeral` are reserved. |
 | `name`, `description` | Shown in the dashboard. |
 | `kind` | `daytona`, `e2b`, or `host` (this server: useful with an egress proxy). Cannot change. |
-| `snapshot` / `image` | Daytona v0: a snapshot (default: the instance's `settings.sandbox.providers.daytona.snapshot`) or a Docker image (sized by `resources`). Daytona v2: `image` is an image of the Daytona project (default: the instance's `providers.daytona.image`, else the Polpo runner image `polpo-runner-vm-1`); `snapshot` is ignored. |
+| `snapshot` / `image` | Daytona v0: a snapshot (default: the instance's `settings.sandbox.providers.daytona.snapshot`) or a Docker image (sized by `resources`). Daytona v2: `image` is an image of the Daytona project (default: the instance's `providers.daytona.image`, else the Polpo runner image `polpo-runner-vm-2`); `snapshot` is ignored. |
 | `template` | E2B template (default: the instance's). |
 | `resources` | `{ cpus, memoryMb, diskMb }`: Daytona v0 with an image only (snapshots and templates have their own size); Daytona v2 always (default 2 vCPU, 4 GB, 10 GB). |
 | `lifecycle.idleStopMinutes` | Stop (Daytona v0 container) or pause (E2B, Daytona v0 VM class, Daytona v2) after this many minutes without use. Default 15. |
 | `lifecycle.autoArchiveDays` | Daytona v0: archive after this many days stopped (the disk moves to object storage: free, slower to start). Default: Daytona's (7). Ignored on v2 (nothing is archived; a paused VM keeps its disk and memory). |
 | `network` | `{ mode, allow }` as in the sandbox settings. Default: the instance's. Daytona v0 and E2B: fixed when the machine is created. Daytona v2: applied again whenever the machine starts or resumes, so a changed rule takes effect on the next start. |
-| `egress` | `host` computers only: the egress proxy (`settings.egressProxies`) the browser of its agents goes out through. Remote computers going out through a home proxy is phase 2. |
+| `egress` | The egress proxy (`settings.egressProxies`) the browser of its agents goes out through. A remote computer (Daytona, E2B) reaches it through **Tailscale inside its VM**: it needs `settings.tailscale` (an auth key in the vault), a SOCKS5 proxy on a tailnet address, and a network that is not `deny` — see [Remote computers through Tailscale](residential-egress.md#remote-computers-daytona-e2b-through-tailscale). |
 | `volumes` | Volumes attached to runs on the computer (names granted to the agent, as in the sandbox settings). |
 
 Agents:
@@ -121,8 +121,11 @@ snapshots: a missing image fails the create with the command that builds it.
 - REST: `GET/POST /api/v1/computers`, `GET/PATCH/DELETE /api/v1/computers/:id` (delete with
   `{ "confirm": true }`), `POST /api/v1/computers/:id/{start,stop,restart,reset}` (reset with
   `{ "confirm": true }`). Agents: `defaultComputer` and `computers` on `POST /agents` and
-  `PATCH /agents/:name` (`""` clears the default).
-- Polpo: `computers_list`, `computer_create`, `computer_assign`, `computer_start`, `computer_stop`.
+  `PATCH /agents/:name` (`""` clears the default). `GET /api/v1/computers/:id/egress`: a remote
+  computer's egress through Tailscale (tailnet up/down, node, direct or DERP path, proxy reachable,
+  where its browser goes out now; it looks inside a running machine only).
+- Polpo: `computers_list`, `computer_create`, `computer_assign`, `computer_start`, `computer_stop`;
+  `egress_status` (proxies, and remote computers' tailnet egress).
 - MCP (`computers` toolset): `polpo_computers_list`, `polpo_computer_save`, `polpo_computer_control`,
   `polpo_computer_delete`; `polpo_agent_update` takes `defaultComputer`.
 - Event `computer:changed` `{ id, action: created | updated | deleted | status, status?, remoteId?, error? }`.
@@ -163,3 +166,21 @@ What to check live: the first create on lumea (snapshot `polpo-runner-0.3.13`, r
 inactive), that a second chat reuses the same machine (`remoteId` unchanged), that the machine
 stops after 15 idle minutes and starts again on the next message with its files, and the browser
 profile surviving a stop.
+
+## Home egress for `nina` (lumea)
+
+`nina`'s browser can go out through the `home` proxy (ahp0, a residential line) the way host browsers
+do, with Tailscale running inside its VM. Once: the ACL and the auth key in the Tailscale admin console,
+the key in the vault, `settings.tailscale`; then `{"egress": "home"}` on the computer. The full steps,
+with the commands that move the key from `~/deploy/tailscale-sandbox.key` into the vault without
+printing it, are in [Remote computers through Tailscale](residential-egress.md#remote-computers-daytona-e2b-through-tailscale).
+
+```bash
+# after the key is in the vault (owner polpo-infra, service tailscale-sandbox)
+curl -sS -X PATCH "$URL/api/v1/config/settings" -H "authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"tailscale":{"authKey":{"owner":"polpo-infra","service":"tailscale-sandbox"}}}'
+curl -sS -X PATCH "$URL/api/v1/computers/nina" -H "authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"egress":"home"}'
+# after sitoinchat's next browser command
+curl -sS "$URL/api/v1/computers/nina/egress" -H "authorization: Bearer $KEY"
+```

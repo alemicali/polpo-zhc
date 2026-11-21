@@ -170,7 +170,7 @@ export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
  * created from when `providers.daytona.image` is not set. The suffix is the recipe revision: it
  * changes only when the image contents change, not with every Polpo release.
  */
-export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-1";
+export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-2";
 
 /** The Daytona API version of provider options (settings.sandbox.providers.daytona). */
 export function daytonaApiVersion(options: Record<string, unknown> | undefined): DaytonaApiVersion {

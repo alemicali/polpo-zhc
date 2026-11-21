@@ -207,8 +207,9 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
     out.image = form.imageKind === "image" && image ? image : editing ? null : undefined;
   }
   if (form.kind === "e2b") out.template = image || (editing ? null : undefined);
-  if (form.kind === "host") out.egress = form.egress.trim() || (editing ? null : undefined);
-  else {
+  // remote computers reach their egress proxy through Tailscale in their VM (settings.tailscale)
+  out.egress = form.egress.trim() || (editing ? null : undefined);
+  if (form.kind !== "host") {
     const lifecycle: Record<string, number> = { idleStopMinutes: Number(form.idleStopMinutes) };
     if (form.kind === "daytona" && form.autoArchiveDays !== "") lifecycle.autoArchiveDays = Number(form.autoArchiveDays);
     out.lifecycle = lifecycle;

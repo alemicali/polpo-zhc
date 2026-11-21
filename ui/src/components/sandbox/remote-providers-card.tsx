@@ -20,7 +20,7 @@ type FieldMeta = { key: TextField; label: string; placeholder: string; hint?: st
 /** Daytona v2 (the new service): its own fields, key page and what it creates. */
 const DAYTONA_V2 = {
   fields: [
-    { key: "image", label: "Image", placeholder: "polpo-runner-vm-1", hint: "Empty: the Polpo runner image" },
+    { key: "image", label: "Image", placeholder: "polpo-runner-vm-2", hint: "Empty: the Polpo runner image" },
     { key: "region", label: "Region", placeholder: "project default", hint: "Optional" },
   ] as FieldMeta[],
   keyUrl: "https://app.daytona.io/dashboard",

@@ -95,7 +95,7 @@ type Settings = Record<string, unknown> & {
 /** The settings people choose, without secrets or internals. */
 function publicSettings(s: Settings): Record<string, unknown> {
   const keys = ["orchestratorModel", "imageModel", "reasoning", "maxRetries", "maxConcurrency", "taskTimeout", "enableScheduler",
-    "defaultQualityThreshold", "voiceReplies", "maxFixAttempts", "logRetentionDays", "storage", "mcp", "egressProxies"];
+    "defaultQualityThreshold", "voiceReplies", "maxFixAttempts", "logRetentionDays", "storage", "mcp", "egressProxies", "tailscale"];
   return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, k === "egressProxies" ? maskProxies(s[k]) : s[k]]));
 }
 

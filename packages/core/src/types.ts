@@ -733,7 +733,7 @@ export interface RunnerConfig {
   /** Email domain allowlist (from settings or agent config). */
   emailAllowedDomains?: string[];
   /** The agent's browser egress proxy (settings.egressProxies[agent.browserEgress]). */
-  browserEgress?: { name: string; url: string };
+  browserEgress?: { name: string; url: string; tailnet?: import("./tailnet.js").TailnetEgressRef };
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
   /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
@@ -966,6 +966,8 @@ export interface PolpoSettings {
   emailAllowedDomains?: string[];
   /** Named egress proxies for agents' browsers (agent.browserEgress): { home: "socks5://100.101.55.7:1080" }. */
   egressProxies?: Record<string, string>;
+  /** Tailscale inside remote computers, so their browser can reach a tailnet-only egress proxy (see tailnet.ts). */
+  tailscale?: import("./tailnet.js").TailscaleSettings;
   /** Connectors (MCP servers): network policy and defaults. */
   connectors?: {
     /** Allow remote connectors on private / local network addresses (and http:// on localhost). Default false. */

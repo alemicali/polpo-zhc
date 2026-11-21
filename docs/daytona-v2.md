@@ -7,7 +7,7 @@ Daytona has two services. Polpo talks to either, per instance, with
 |---|---|---|
 | Endpoint | `https://app.daytona.io/api`, or a custom `apiUrl` (self-hosted) | `https://api.daytona.com` (Daytona Cloud only: no `apiUrl`) |
 | Key | organization API key | **project** API key (`dtn_…`) |
-| Machines from | a **snapshot** (`providers.daytona.snapshot`, e.g. `polpo-runner-0.3.13`) or a Docker image | an **image** of the project (`providers.daytona.image`, default `polpo-runner-vm-1`) |
+| Machines from | a **snapshot** (`providers.daytona.snapshot`, e.g. `polpo-runner-0.3.13`) or a Docker image | an **image** of the project (`providers.daytona.image`, default `polpo-runner-vm-2`) |
 | Class | container or linux-vm, as the snapshot was built | always a **Linux VM** (`linux-vm`) |
 | Idle | container: stopped (disk kept); linux-vm: paused | **paused**: memory, processes and disk kept |
 | Size | fixed by the snapshot | per sandbox (`resources`; default 2 vCPU, 4 GB, 10 GB) |
@@ -66,7 +66,7 @@ is a one-line change.
    # optional: DAYTONA_V2_REGION=<region id>; --force rebuilds
    ```
 
-   It builds `polpo-runner-vm-1` (the same tools as the v0 runner: agent-browser + Chromium,
+   It builds `polpo-runner-vm-2` (the same tools as the v0 runner: agent-browser + Chromium,
    playwright-core, rclone, mount-s3, FUSE, git, python3, node 22) and waits until it is ready
    (several minutes). Running it again does nothing when the image exists.
 4. **Switch the provider.** Settings → Sandbox → Daytona: set **API** to *v2 · new service*, choose

@@ -56,7 +56,7 @@ describe("Settings → Sandbox → Daytona", () => {
     fireEvent.change(select, { target: { value: "v2" } });
     expect(screen.getByTestId("daytona-vm-class").textContent).toBe("Linux VM (linux-vm)");
     expect(screen.queryByDisplayValue("https://app.daytona.io/api")).toBeNull();
-    expect(screen.getByPlaceholderText("polpo-runner-vm-1")).toBeTruthy();
+    expect(screen.getByPlaceholderText("polpo-runner-vm-2")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: /Save/ })[0]);
     await waitFor(() => expect(api.saved).toHaveLength(1));
     expect(api.saved[0]).toEqual({ id: "daytona", settings: { credential, api: "v2", target: "us", snapshot: "polpo-runner-0.3.13" } });

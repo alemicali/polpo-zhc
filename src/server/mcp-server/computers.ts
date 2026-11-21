@@ -62,7 +62,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       }).nullable().optional().describe("When it stops and archives by itself (it is never deleted automatically)"),
       network: z.object({ mode: z.enum(["deny", "allowlist", "open", "unrestricted"]), allow: z.array(z.string()).optional() }).nullable().optional()
         .describe("Network rule (fixed when the machine is created); default the instance's"),
-      egress: z.string().nullable().optional().describe("host computers only: egress proxy name (settings.egressProxies) for its agents' browsers"),
+      egress: z.string().nullable().optional().describe("Egress proxy name (settings.egressProxies) for its agents' browsers; a remote computer reaches it through Tailscale in its VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"),
       volumes: z.array(z.union([z.string(), looseObject])).nullable().optional().describe("Volumes attached to runs on it (names granted to the agent)"),
       start: z.boolean().optional().describe("Create: start the machine now"),
     },

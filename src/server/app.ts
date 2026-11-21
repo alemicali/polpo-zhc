@@ -66,7 +66,7 @@ import { audioRoutes } from "./routes/audio.js";
 import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
-import { agentEgressName, computerContext } from "@polpo-ai/core/sandbox";
+import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerRoutes } from "./routes/computers.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerSandbox } from "../sandbox/manager.js";
@@ -405,7 +405,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         : undefined;
       // The chat's sandbox provider: anything but "local" keeps secret values away from the model
       // (vault_get → bash env_from_vault). If it cannot be resolved, fail closed.
-      const chatSandboxProvider = await o.chatSandbox(agentConfig).then((c) => c.sandbox.provider, () => "bwrap");
+      const chatResolved = await o.chatSandbox(agentConfig).catch(() => undefined);
+      const chatSandboxProvider = chatResolved?.sandbox.provider ?? "bwrap";
+      const chatComputer = chatResolved?.sandbox.computer;
       // commands (bash, grep, glob, the browser in Cowork chats) run in this agent's chat sandbox;
       // Cowork chats keep their files in the remote VM: every tool that touches files goes there too
       const chatShell = o.chatShell(agentConfig, context?.sessionId);
@@ -417,7 +419,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         browserSession: agentConfig.name,
         browserProfileDir,
         browserNetwork: await o.chatBrowserNetwork(agentConfig),
-        browserEgress: resolveBrowserEgress({ browserEgress: agentEgressName(agentConfig, o.getConfig()?.settings) }, o.getConfig()?.settings?.egressProxies),
+        // a remote computer's egress (through Tailscale in its VM), else the agent's own or its host computer's
+        browserEgress: tailnetEgressFor(chatComputer, o.getConfig()?.settings, o.getConfig()?.project)
+          ?? resolveBrowserEgress({ browserEgress: agentEgressName(agentConfig, o.getConfig()?.settings) }, o.getConfig()?.settings?.egressProxies),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
@@ -1463,6 +1467,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       await o.reloadConfig();
     },
     sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
+    instance: () => o.getConfig()?.project,
     emit: (payload) => o.emit("computer:changed", payload),
   }));
   authed.route("/app-preview", appPreviewRoutes(() => ({

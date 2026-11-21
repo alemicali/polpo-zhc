@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
-import { agentEgressName, computerContext, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
+import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
@@ -627,8 +627,10 @@ export class TaskRunner {
       }
     }
 
-    // the browser's egress proxy: the agent's own, else its host computer's
-    const egressName = agentEgressName(agent, this.ctx.config.settings);
+    // the browser's egress proxy: a remote computer's (through Tailscale in its VM), else the
+    // agent's own, else its host computer's
+    const remoteEgress = tailnetEgressFor(sandbox.computer, this.ctx.config.settings, this.ctx.config.project);
+    const egressName = remoteEgress ? undefined : agentEgressName(agent, this.ctx.config.settings);
     const runnerConfig: RunnerConfig = {
       runId,
       taskId: task.id,
@@ -641,6 +643,7 @@ export class TaskRunner {
       databaseUrl: this.ctx.config.settings.databaseUrl,
       notifySocket: this.ctx.notifySocketPath,
       emailAllowedDomains: agent.emailAllowedDomains ?? this.ctx.config.settings.emailAllowedDomains,
+      ...(remoteEgress ? { browserEgress: remoteEgress } : {}),
       ...(egressName && this.ctx.config.settings.egressProxies?.[egressName]
         ? { browserEgress: { name: egressName, url: this.ctx.config.settings.egressProxies[egressName]! } } : {}),
       reasoning: this.ctx.config.settings.reasoning,

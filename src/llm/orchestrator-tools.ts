@@ -1273,7 +1273,7 @@ const computerCreateTool: Tool = {
     template: Type.Optional(Type.String({ description: "E2B template (default: the instance's)" })),
     idleStopMinutes: Type.Optional(Type.Number({ description: "Stop/pause after this many minutes without use (default 15)" })),
     autoArchiveDays: Type.Optional(Type.Number({ description: "Daytona: archive after this many days stopped (default Daytona's, 7)" })),
-    egress: Type.Optional(Type.String({ description: "host only: egress proxy name (settings.egressProxies) its agents' browsers go out through" })),
+    egress: Type.Optional(Type.String({ description: "Egress proxy name (settings.egressProxies) its agents' browsers go out through. A remote computer reaches it through Tailscale in its VM: needs settings.tailscale and a SOCKS5 proxy on a tailnet address (egress_status)" })),
     start: Type.Optional(Type.Boolean({ description: "Create the machine now instead of on first use" })),
   }),
 };
@@ -1299,7 +1299,8 @@ const computerStopTool: Tool = {
 const egressStatusTool: Tool = {
   name: "egress_status",
   description: "The egress proxies agents' browsers can go out through (settings.egressProxies, e.g. \"home\": a residential line over Tailscale), "
-    + "whether each is reachable now, and which agents use it (agent browserEgress, set with update_agent).",
+    + "whether each is reachable now, which agents use it (agent browserEgress, set with update_agent), and for remote computers with an egress "
+    + "(through Tailscale in their VM): tailnet up/down, node name, path (direct or DERP relay), proxy reachable and where their browser goes out now.",
   parameters: Type.Object({}),
 };
 const setCheckInsTool: Tool = {
@@ -7202,7 +7203,8 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   }
   const existing = t.computers();
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
-  if (computer.egress && !polpo.getConfig()?.settings?.egressProxies?.[computer.egress]) return `Error: there is no egress proxy "${computer.egress}" (egress_status)`;
+  const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
+  if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
   if (args.start === true && t.core.isRemoteComputer(computer)) {
@@ -7255,7 +7257,24 @@ async function execEgressStatus(polpo: Orchestrator): Promise<string> {
       + `used by ${users.length ? users.join(", ") : "no agent"}`;
   }));
   const unknown = agents.filter((a) => a.browserEgress && !proxies[a.browserEgress]).map((a) => `${a.name} (${a.browserEgress})`);
-  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "");
+  // remote computers reach their proxy through Tailscale in their VM: what each one sees from there
+  const settings = polpo.getConfig()?.settings;
+  const remote = (settings?.computers ?? []).filter((c) => (c.kind === "daytona" || c.kind === "e2b") && c.egress);
+  const remoteLines: string[] = [];
+  if (remote.length) {
+    const t = await computerTools(polpo);
+    const { computerEgressStatus } = await import("../sandbox/computers.js");
+    for (const c of remote) {
+      const s = await computerEgressStatus(t.manager(), c, settings, polpo.getConfig()?.project).catch((err) => ({ error: (err as Error).message } as const));
+      if (!s) continue;
+      if (!("proxy" in s)) { remoteLines.push(`- computer ${c.id} (${c.kind}) → ${c.egress}: could not be checked (${s.error})`); continue; }
+      const path = s.path ? `, path ${s.path === "derp" ? `DERP relay${s.relay ? ` ${s.relay}` : ""}` : s.path}` : "";
+      remoteLines.push(`- computer ${c.id} (${c.kind}) → ${s.proxy}: tailnet ${s.tailnet}${s.node ? ` as ${s.node}` : ""}${path}, `
+        + `proxy ${s.proxyReachable ? "reachable" : "not reachable"}; browser goes out ${s.effective}${s.error ? ` (${s.error})` : ""}`);
+    }
+  }
+  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "")
+    + (remoteLines.length ? `\nRemote computers (through Tailscale in their VM):\n${remoteLines.join("\n")}` : "");
 }
 
 // ── Primary bot check-ins ──

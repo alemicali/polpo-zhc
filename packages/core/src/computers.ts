@@ -17,6 +17,9 @@
  */
 import type { SandboxNetwork, SandboxResources, SandboxVolumeSelection } from "./sandbox.js";
 import { normalizeSandboxSettings } from "./sandbox.js";
+import { remoteEgressProblem } from "./tailnet.js";
+
+export * from "./tailnet.js";
 
 export type ComputerKind = "host" | "daytona" | "e2b";
 export const COMPUTER_KINDS: readonly ComputerKind[] = ["host", "daytona", "e2b"];
@@ -57,7 +60,8 @@ export interface ComputerConfig {
   network?: SandboxNetwork;
   /**
    * Egress proxy name (settings.egressProxies): the browser of agents on this computer goes out
-   * through it. Host computers only for now: remote computers reaching a home proxy is phase 2.
+   * through it. A remote computer (Daytona, E2B) reaches it through Tailscale inside its VM: that
+   * needs settings.tailscale and a SOCKS5 proxy on a tailnet address (computerEgressProblem).
    */
   egress?: string;
   /** Volumes attached to runs on this computer (names granted to the agent on their storage entry). */
@@ -155,7 +159,6 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
   if (r.egress !== undefined && r.egress !== null && r.egress !== "") {
     const egress = str(r.egress);
     if (!egress || !/^[A-Za-z0-9_-]+$/.test(egress)) throw new ComputerConfigError(`${where}.egress must be the name of a proxy in settings.egressProxies`);
-    if (out.kind !== "host") throw new ComputerConfigError(`${where}.egress: only computers on this server ("host") go out through an egress proxy for now`);
     out.egress = egress;
   }
   if (r.volumes !== undefined && r.volumes !== null) {
@@ -167,6 +170,28 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
     throw new ComputerConfigError(`${where}: a computer on this server ("host") has no size, lifecycle or volumes of its own (the agent's sandbox settings apply)`);
   }
   return out;
+}
+
+/**
+ * Why a computer's egress cannot work with these settings (null: it can, or it has none): the
+ * proxy must exist; a remote computer reaches it through Tailscale in its VM (settings.tailscale,
+ * a SOCKS5 proxy on a tailnet address, and a network that lets the VM out).
+ */
+export function computerEgressProblem(
+  computer: Pick<ComputerConfig, "id" | "kind" | "egress" | "network">,
+  settings: { egressProxies?: Record<string, string>; tailscale?: unknown } | undefined,
+): string | null {
+  if (!computer.egress) return null;
+  const url = settings?.egressProxies?.[computer.egress];
+  const proxies = Object.keys(settings?.egressProxies ?? {});
+  if (!url) return `There is no egress proxy "${computer.egress}" (settings.egressProxies${proxies.length ? `: ${proxies.join(", ")}` : " is empty"})`;
+  if (!isRemoteComputer(computer)) return null;
+  const problem = remoteEgressProblem(computer.egress, url, settings);
+  if (problem) return `Computer "${computer.id}": ${problem}`;
+  if (computer.network?.mode === "deny") {
+    return `Computer "${computer.id}" has no network (network.mode "deny"): Tailscale in its VM cannot reach the tailnet, so it cannot go out through "${computer.egress}"`;
+  }
+  return null;
 }
 
 /** settings.computers from raw input: valid computers with unique ids, or an error. */
@@ -219,8 +244,9 @@ export function computerContext(
 }
 
 /**
- * The egress proxy name for an agent's browser: its own browserEgress, else the egress of its
- * default computer when that computer runs on this server.
+ * The egress proxy name for an agent's browser on this server: its own browserEgress, else the
+ * egress of its default computer when that computer runs on this server. (A remote computer's
+ * egress goes through Tailscale in its VM: tailnetEgressFor.)
  */
 export function agentEgressName(
   agent: { browserEgress?: string; defaultComputer?: string },

@@ -104,9 +104,10 @@ describe("computer config", () => {
     expect(() => parseComputer({ id: "x", kind: "daytona", image: "a", snapshot: "b" })).toThrow(/not both/);
     expect(() => parseComputer({ id: "x", kind: "e2b", lifecycle: { autoArchiveDays: 3 } })).toThrow(/Daytona/);
     expect(() => parseComputer({ id: "x", kind: "daytona", lifecycle: { idleStopMinutes: 0 } })).toThrow(/idleStopMinutes/);
-    // egress: host computers only for now (remote egress through a home proxy is phase 2)
+    // egress: any kind (a remote one goes through Tailscale in its VM: computerEgressProblem checks the settings)
     expect(parseComputer({ id: "home", kind: "host", egress: "home" }).egress).toBe("home");
-    expect(() => parseComputer({ id: "x", kind: "daytona", egress: "home" })).toThrow(/host/);
+    expect(parseComputer({ id: "x", kind: "daytona", egress: "home" }).egress).toBe("home");
+    expect(() => parseComputer({ id: "x", kind: "daytona", egress: "ho me" })).toThrow(/egressProxies/);
     expect(() => parseComputers([{ id: "a", kind: "e2b" }, { id: "a", kind: "e2b" }])).toThrow(/twice/);
   });
 

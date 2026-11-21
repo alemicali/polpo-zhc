@@ -18,12 +18,24 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COMPUTER_LABEL, computerIdleStopMinutes, isRemoteComputer,
+  COMPUTER_LABEL, computerEgressProblem, computerIdleStopMinutes, isRemoteComputer, tailnetEgressFor,
   type ComputerConfig, type ComputerStatus, type EffectiveSandbox, type RemoteSandboxProvider,
 } from "@polpo-ai/core/sandbox";
 import { acquireFileLock } from "./file-lock.js";
 import { instanceLabel } from "./pool.js";
 import { remoteAdapter, type RemoteAdapter, type RemoteDriver, type RemoteVmSummary } from "./remote-adapters.js";
+import { onComputerStarted, tailnetEgress, type TailnetHost, type TailnetStatus } from "./tailnet-egress.js";
+
+/** A computer's machine as a host for the tailnet runtime (commands and uploads through the provider). */
+export function driverHost(driver: RemoteDriver): TailnetHost {
+  return {
+    exec: async (command, o = {}) => {
+      const r = await driver.exec(command, { env: o.env, timeoutMs: o.timeoutMs });
+      return { exitCode: r.timedOut ? 124 : r.exitCode, stdout: r.stdout, stderr: r.stderr };
+    },
+    writeFile: (path, data) => driver.writeFile(path, data),
+  };
+}
 
 export interface ComputerRuntime {
   provider: RemoteSandboxProvider;
@@ -244,6 +256,8 @@ export class ComputerManager {
           await adapter.updateNetwork(driver.remoteId, sandbox.network).catch((err) => onWarning?.(`Could not apply the computer's network rule: ${(err as Error).message}`));
         }
         await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: new Date(this.now()).toISOString(), ...(found.createdAt ? { createdAt: found.createdAt } : {}) });
+        // started or resumed: its tailnet daemons may be gone (checked again, brought up in the background)
+        if (!wasRunning) this.started(c, driver);
         return driver;
       }
       await this.setStatus(c, "creating");
@@ -255,11 +269,30 @@ export class ComputerManager {
       });
       const now = new Date(this.now()).toISOString();
       await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: now, createdAt: now });
+      this.started(c, driver);
       return driver;
     } catch (err) {
       await this.setStatus(c, "error", { lastError: (err as Error).message ?? String(err) }).catch(() => undefined);
       throw err;
     }
+  }
+
+  /** After a start, resume or create (tests replace it). */
+  started(c: ComputerConfig, driver: RemoteDriver): void {
+    try { onComputerStarted(c, driverHost(driver)); } catch { /* never changes the start */ }
+  }
+
+  /**
+   * Run fn on the computer's machine when it is running now (never starts or resumes it):
+   * undefined when it is not running.
+   */
+  async whenRunning<T>(c: ComputerConfig, fn: (driver: RemoteDriver) => Promise<T>): Promise<T | undefined> {
+    if (!isRemoteComputer(c)) return undefined;
+    const provider = c.kind as RemoteSandboxProvider;
+    const running = (await this.machines(c)).find((m) => computerStatusOf(provider, m.state) === "running");
+    if (!running) return undefined;
+    const driver = await this.adapter(provider).connect(running.remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+    return fn(driver);
   }
 
   /** The computer's machine, running (started, resumed or created). */
@@ -371,7 +404,22 @@ export class ComputerManager {
 
   private async removeMachines(c: ComputerConfig): Promise<void> {
     const provider = c.kind as RemoteSandboxProvider;
-    for (const m of await this.machines(c)) await this.adapter(provider).remove(m.remoteId);
+    for (const m of await this.machines(c)) {
+      // a machine in the tailnet leaves it first (best effort; an ephemeral node also goes by itself)
+      if (c.egress && computerStatusOf(provider, m.state) === "running") await this.leaveTailnet(c, m.remoteId);
+      await this.adapter(provider).remove(m.remoteId);
+    }
+    tailnetEgress.invalidate(c.id);
+  }
+
+  private async leaveTailnet(c: ComputerConfig, remoteId: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const driver = await this.adapter(c.kind as RemoteSandboxProvider).connect(remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+      await Promise.race([tailnetEgress.logout(driverHost(driver), c.id), new Promise((r) => { timer = setTimeout(r, 30_000); })]);
+    } catch { /* best effort */ } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -447,6 +495,57 @@ export class ComputerManager {
     }
     this.lastSeen = snapshot;
   }
+}
+
+/** A remote computer's egress through the tailnet, as people and Polpo see it. */
+export interface ComputerEgressStatus extends Partial<Omit<TailnetStatus, "computerId" | "tailnet">> {
+  computerId: string;
+  /** The proxy's name (settings.egressProxies). */
+  proxy: string;
+  /** "off": the computer is not running (its tailnet comes up when it is next used). */
+  tailnet: TailnetStatus["tailnet"] | "off" | "unknown";
+  proxyReachable: boolean;
+  /** Where its browser goes out now: "via home", "direct (home unreachable)"… */
+  effective: string;
+  /** The computer's machine status. */
+  machine: ComputerStatus;
+}
+
+/**
+ * The tailnet egress of a remote computer with `egress` (undefined otherwise). Looks inside the
+ * machine only when it is running (never starts or resumes it).
+ */
+export async function computerEgressStatus(
+  manager: ComputerManager,
+  c: ComputerConfig,
+  settings: { egressProxies?: Record<string, string>; tailscale?: unknown } | undefined,
+  instance?: string,
+): Promise<ComputerEgressStatus | undefined> {
+  if (!isRemoteComputer(c) || !c.egress) return undefined;
+  const proxy = c.egress;
+  const egress = tailnetEgressFor(c, settings, instance);
+  const machine = manager.live(c.id).status;
+  if (!egress) {
+    const error = computerEgressProblem(c, settings) ?? "Tailscale is not set up (settings.tailscale)";
+    return { computerId: c.id, proxy, tailnet: "unknown", proxyReachable: false, effective: `direct (${proxy} not usable)`, machine, error };
+  }
+  const label = (s: { tailnet: string; proxyReachable: boolean }) => (s.tailnet === "up" && s.proxyReachable ? `via ${proxy}` : `direct (${proxy} unreachable; profiles signed in through it pause)`);
+  let live: TailnetStatus | undefined;
+  try {
+    live = await manager.whenRunning(c, (d) => tailnetEgress.inspect(driverHost(d), egress.tailnet));
+  } catch (err) {
+    return { computerId: c.id, proxy, tailnet: "unknown", proxyReachable: false, effective: label({ tailnet: "unknown", proxyReachable: false }), machine, error: (err as Error).message };
+  }
+  if (!live) {
+    const last = tailnetEgress.last(c.id);
+    return {
+      computerId: c.id, proxy, tailnet: "off", proxyReachable: false, machine: machine === "running" ? "stopped" : machine,
+      effective: `comes up when the computer is next used (it is ${machine === "running" ? "not running" : machine})`,
+      ...(last?.node ? { node: last.node } : {}), ...(last?.checkedAt ? { checkedAt: last.checkedAt } : {}),
+    };
+  }
+  const { computerId: _id, ...rest } = live;
+  return { computerId: c.id, proxy, ...rest, effective: label(live), machine: "running" };
 }
 
 const managers = new Map<string, ComputerManager>();
