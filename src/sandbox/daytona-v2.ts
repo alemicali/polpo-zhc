@@ -34,7 +34,10 @@ export const DAYTONA_V2_DEFAULT_RESOURCES = { cpus: 2, memoryMb: 4096, diskMb: 1
  * A computer's wall-clock budget per start/resume (v2 requires one): after a day running without
  * a pause it is paused (memory kept), never deleted. Re-armed whenever we reconnect.
  */
-export const DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS = 24 * 60 * 60;
+/** A computer's wall-clock budget (re-armed on every use; Linux cannot pause on it). */
+export const DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS = 20 * 24 * 60 * 60;
+/** The SDK's DISABLED (-1): clears an idle trigger instead of inheriting the project default. */
+export const DAYTONA_V2_DISABLED = -1;
 /** Waits for create/start/resume/pause/delete, in seconds. */
 const WAIT_SECONDS = 180;
 
@@ -92,25 +95,22 @@ export function daytonaV2Resources(sandbox: Pick<EffectiveSandbox, "resources">)
 }
 
 /**
- * The v2 lifecycle policy for a create.
- * - Computer: idle → pause after idleStopMinutes; wall clock (a day, re-armed) → pause. Never deleted.
- * - Pooled/warm VM (may outlive the run): idle → pause after the run's lifetime; wall clock →
- *   delete after lifetime + deleteAfterStop (the reaper normally deletes it first).
+ * The v2 lifecycle policy for a create. Linux VMs accept only "delete" as a policy action (pause is
+ * an explicit call, which our idle reaper makes), and fields left out are inherited from the
+ * project's dashboard defaults, so the idle trigger is always set: armed with "delete", or DISABLED.
+ * - Computer: no idle action (the reaper pauses it); a long wall clock, re-armed on every use, with
+ *   the class default action. Never deleted by us.
+ * - Pooled/warm VM (may outlive the run): no idle action (the reaper pauses, then deletes it);
+ *   wall clock → delete after lifetime + deleteAfterStop.
  * - One-run VM: idle or wall clock → delete after the run's lifetime.
  */
 export function daytonaV2Lifecycle(spec: Pick<CreateSpec, "persistent" | "keep" | "lifetimeMinutes" | "deleteAfterStopMinutes">): LifecyclePolicyOptions {
   if (spec.persistent) {
-    return {
-      timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, onTimeout: "pause",
-      idleExpirySeconds: Math.max(60, spec.persistent.idleStopMinutes * 60), onIdleTimeout: "pause",
-    };
+    return { timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: DAYTONA_V2_DISABLED };
   }
   const lifetime = Math.max(60, spec.lifetimeMinutes * 60);
   if (spec.keep) {
-    return {
-      timeoutSeconds: lifetime + (spec.deleteAfterStopMinutes ?? 60) * 60, onTimeout: "delete",
-      idleExpirySeconds: lifetime, onIdleTimeout: "pause",
-    };
+    return { timeoutSeconds: lifetime + (spec.deleteAfterStopMinutes ?? 60) * 60, onTimeout: "delete", idleExpirySeconds: DAYTONA_V2_DISABLED };
   }
   return { timeoutSeconds: lifetime, onTimeout: "delete", idleExpirySeconds: lifetime, onIdleTimeout: "delete" };
 }

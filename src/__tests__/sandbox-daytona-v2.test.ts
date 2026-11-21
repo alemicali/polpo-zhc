@@ -283,9 +283,13 @@ describe("v2 sizing and lifecycle", () => {
 
   test("one run: deleted after its lifetime; pooled: paused when idle, deleted later; computer: paused, never deleted", () => {
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })).toEqual({ timeoutSeconds: 1200, onTimeout: "delete", idleExpirySeconds: 1200, onIdleTimeout: "delete" });
-    expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true, deleteAfterStopMinutes: 30 })).toEqual({ timeoutSeconds: 3000, onTimeout: "delete", idleExpirySeconds: 1200, onIdleTimeout: "pause" });
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true, deleteAfterStopMinutes: 30 })).toEqual({ timeoutSeconds: 3000, onTimeout: "delete", idleExpirySeconds: -1 });
     const computer = daytonaV2Lifecycle({ lifetimeMinutes: 15, keep: true, persistent: { idleStopMinutes: 15 } });
-    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, onTimeout: "pause", idleExpirySeconds: 900, onIdleTimeout: "pause" });
+    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
+    // Linux VMs accept only "delete" as a policy action: never "pause" or "stop"
+    for (const p of [computer, daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true }), daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })]) {
+      expect([p.onTimeout, p.onIdleTimeout].filter((a) => a && a !== "delete")).toEqual([]);
+    }
     expect(JSON.stringify(computer)).not.toMatch(/delete/);
   });
 });
@@ -303,7 +307,7 @@ describe("Daytona v2 adapter", () => {
     expect(opts).toMatchObject({
       labels: { polpo: "1" },
       resources: { cpuMax: 1, memoryMax: 4, diskMax: 10 },
-      lifecyclePolicy: { onIdleTimeout: "pause", onTimeout: "delete" },
+      lifecyclePolicy: { onTimeout: "delete", idleExpirySeconds: -1 },
       networkPolicy: { blockAll: true, allowDomains: ["*.github.com"] },
     });
     expect(opts.name).toBeUndefined();
@@ -470,7 +474,7 @@ describe("computers on Daytona v2", () => {
     expect(opts.name).toBe(computerMachineName(m.labelValue("nina")));
     expect(opts.name).toMatch(/^polpo-computer-[a-z0-9-]+-nina$/);
     expect(opts.labels["polpo-computer"]).toBe(m.labelValue("nina"));
-    expect(opts.lifecyclePolicy).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, onTimeout: "pause", idleExpirySeconds: 900, onIdleTimeout: "pause" });
+    expect(opts.lifecyclePolicy).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
     expect(opts.networkPolicy).toEqual({ blockAll: true, allowDomains: ["example.com"] });
     expect(m.live("nina").status).toBe("running");
   });
