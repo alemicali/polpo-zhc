@@ -18,12 +18,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COMPUTER_LABEL, computerEgressProblem, computerIdleStopMinutes, isRemoteComputer, tailnetEgressFor,
+  COMPUTER_LABEL, DAYTONA_V2_COMPUTERS_UNSUPPORTED, computerEgressProblem, computerIdleStopMinutes, isRemoteComputer, tailnetEgressFor,
   type ComputerConfig, type ComputerStatus, type EffectiveSandbox, type RemoteSandboxProvider,
 } from "@polpo-ai/core/sandbox";
 import { acquireFileLock } from "./file-lock.js";
 import { instanceLabel } from "./pool.js";
 import { remoteAdapter, type RemoteAdapter, type RemoteDriver, type RemoteVmSummary } from "./remote-adapters.js";
+import { remoteProviderCredentials } from "./remote-providers.js";
 import { onComputerStarted, tailnetEgress, type TailnetHost, type TailnetStatus } from "./tailnet-egress.js";
 
 /** A computer's machine as a host for the tailnet runtime (commands and uploads through the provider). */
@@ -295,9 +296,21 @@ export class ComputerManager {
     return fn(driver);
   }
 
+  /**
+   * Daytona computers run on Daytona v0 only: a v2 Linux sandbox cannot be paused or stopped (409)
+   * and its wall-clock timeout deletes it, which a persistent machine cannot live with. Checked at
+   * run time too (the settings may have switched to v2 after the computer was created).
+   */
+  private async refuseDaytonaV2(c: ComputerConfig): Promise<void> {
+    if (c.kind !== "daytona") return;
+    const creds = await Promise.resolve(remoteProviderCredentials("daytona")).catch(() => undefined);
+    if (creds?.api === "v2") throw new Error(`Computer "${c.id}": ${DAYTONA_V2_COMPUTERS_UNSUPPORTED}`);
+  }
+
   /** The computer's machine, running (started, resumed or created). */
-  ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
-    if (!isRemoteComputer(c)) return Promise.reject(new Error(`Computer "${c.id}" is this server: there is no machine to start`));
+  async ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
+    if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: there is no machine to start`);
+    await this.refuseDaytonaV2(c);
     return this.exclusive(c.id, () => this.ensureLocked(c, sandbox, onWarning, onProgress));
   }
 
@@ -361,6 +374,7 @@ export class ComputerManager {
   /** Stop (Daytona container: disk kept) or pause (E2B, Daytona VM: memory kept). Never deletes. */
   async stop(c: ComputerConfig): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be stopped`);
+    await this.refuseDaytonaV2(c);
     return this.exclusive(c.id, async () => {
       const provider = c.kind as RemoteSandboxProvider;
       const machines = await this.machines(c);
@@ -385,6 +399,7 @@ export class ComputerManager {
   /** Delete the machine and create a new one (everything on its disk is lost). */
   async reset(c: ComputerConfig, sandbox: EffectiveSandbox): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be reset`);
+    await this.refuseDaytonaV2(c);
     return this.exclusive(c.id, async () => {
       await this.removeMachines(c);
       await this.update(c.id, c.kind as RemoteSandboxProvider, (cur) => ({ provider: cur.provider, status: "missing", uptimeMs: 0, updatedAt: cur.updatedAt }));

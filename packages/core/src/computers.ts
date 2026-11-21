@@ -16,7 +16,7 @@
  * network than the computer has gets an ephemeral sandbox with that network instead.
  */
 import type { SandboxNetwork, SandboxResources, SandboxVolumeSelection } from "./sandbox.js";
-import { normalizeSandboxSettings } from "./sandbox.js";
+import { DAYTONA_V2_COMPUTERS_UNSUPPORTED, daytonaApiVersion, normalizeSandboxSettings } from "./sandbox.js";
 import { remoteEgressProblem } from "./tailnet.js";
 
 export * from "./tailnet.js";
@@ -170,6 +170,19 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
     throw new ComputerConfigError(`${where}: a computer on this server ("host") has no size, lifecycle or volumes of its own (the agent's sandbox settings apply)`);
   }
   return out;
+}
+
+/**
+ * Why a computer cannot run on the instance's provider settings (null: it can): a Daytona computer
+ * needs Daytona v0 (v2 Linux sandboxes cannot be paused or stopped, and their timeout deletes them).
+ */
+export function computerProviderProblem(
+  computer: Pick<ComputerConfig, "id" | "kind">,
+  settings: { sandbox?: { providers?: Partial<Record<string, Record<string, unknown>>> } } | undefined,
+): string | null {
+  if (computer.kind !== "daytona") return null;
+  if (daytonaApiVersion(settings?.sandbox?.providers?.daytona) !== "v2") return null;
+  return `Computer "${computer.id}": ${DAYTONA_V2_COMPUTERS_UNSUPPORTED} (settings.sandbox.providers.daytona.api is "v2")`;
 }
 
 /**

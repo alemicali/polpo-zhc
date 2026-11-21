@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
-  DAYTONA_V2_RUNNER_IMAGE, daytonaApiVersion, daytonaProviderErrors,
+  DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, computerProviderProblem, daytonaApiVersion, daytonaProviderErrors,
   type ComputerConfig, type EffectiveSandbox, type SandboxNetwork,
 } from "@polpo-ai/core/sandbox";
 
@@ -124,13 +124,13 @@ vi.mock("@daytona/sdk", () => ({
 vi.mock("../sandbox/remote-providers.js", () => ({
   remoteProviderCredentials: async (id: string) => {
     const o = providerOptions.value;
-    return { apiKey: `key-${id}`, ...(o.api === "v2" ? { api: "v2" } : {}), ...(typeof o.image === "string" ? { image: o.image } : {}), ...(typeof o.region === "string" ? { region: o.region } : {}) };
+    return { apiKey: `key-${id}`, ...(o.api === "v2" ? { api: "v2" } : {}), ...(typeof o.image === "string" ? { image: o.image } : {}), ...(typeof o.region === "string" ? { region: o.region } : {}), ...(typeof o.maxTimeoutSeconds === "number" ? { maxTimeoutSeconds: o.maxTimeoutSeconds } : {}) };
   },
 }));
 
 const { remoteAdapter, resetRemoteAdapters, SandboxNetworkConfigError } = await import("../sandbox/remote-adapters.js");
 const { daytonaV2NetworkPolicy, daytonaV2Resources, daytonaV2Lifecycle, DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS } = await import("../sandbox/daytona-v2.js");
-const { ComputerManager, computerMachineName, computerStatusOf } = await import("../sandbox/computers.js");
+const { ComputerManager } = await import("../sandbox/computers.js");
 const { poolKey } = await import("../sandbox/pool.js");
 
 const allow = (...hosts: string[]): SandboxNetwork => ({ mode: "allowlist", allow: hosts });
@@ -170,6 +170,8 @@ describe("providers.daytona.api", () => {
     expect(daytonaProviderErrors({ api: "v2", class: "container" })[0]).toMatch(/always Linux VMs \("linux-vm"\)/);
     expect(daytonaProviderErrors({ api: "v2", class: "linux-vm" })).toEqual([]);
     expect(daytonaProviderErrors({ image: 3 })[0]).toMatch(/image must be a string/);
+    expect(daytonaProviderErrors({ api: "v2", maxTimeoutSeconds: 43_200 })).toEqual([]);
+    expect(daytonaProviderErrors({ api: "v2", maxTimeoutSeconds: 10 })[0]).toMatch(/maxTimeoutSeconds must be a whole number of seconds, at least 60/);
   });
 
   test("loading polpo.json refuses v2 with an API URL; v0 settings load as before", async () => {
@@ -281,11 +283,16 @@ describe("v2 sizing and lifecycle", () => {
     expect(daytonaV2Resources({ resources: { cpus: 3 } }).cpuMax).toBe(1.5);
   });
 
-  test("one run: deleted after its lifetime; pooled: paused when idle, deleted later; computer: paused, never deleted", () => {
+  test("one run: deleted after its lifetime; pooled: deleted later; every wall clock capped at the plan's maximum", () => {
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })).toEqual({ timeoutSeconds: 1200, onTimeout: "delete", idleExpirySeconds: 1200, onIdleTimeout: "delete" });
     expect(daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true, deleteAfterStopMinutes: 30 })).toEqual({ timeoutSeconds: 3000, onTimeout: "delete", idleExpirySeconds: -1 });
     const computer = daytonaV2Lifecycle({ lifetimeMinutes: 15, keep: true, persistent: { idleStopMinutes: 15 } });
-    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
+    expect(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS).toBeGreaterThan(DAYTONA_V2_MAX_TIMEOUT_SECONDS);
+    expect(computer).toEqual({ timeoutSeconds: DAYTONA_V2_MAX_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
+    // the cap: 86400 s by default (the plan's maximum), providers.daytona.maxTimeoutSeconds otherwise
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 2000, keep: false }).timeoutSeconds).toBe(86_400);
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 2000, keep: true, deleteAfterStopMinutes: 60 }, 3600).timeoutSeconds).toBe(3600);
+    expect(daytonaV2Lifecycle({ lifetimeMinutes: 120, keep: false }, 3600)).toEqual({ timeoutSeconds: 3600, onTimeout: "delete", idleExpirySeconds: 3600, onIdleTimeout: "delete" });
     // Linux VMs accept only "delete" as a policy action: never "pause" or "stop"
     for (const p of [computer, daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: true }), daytonaV2Lifecycle({ lifetimeMinutes: 20, keep: false })]) {
       expect([p.onTimeout, p.onIdleTimeout].filter((a) => a && a !== "delete")).toEqual([]);
@@ -361,17 +368,26 @@ describe("Daytona v2 adapter", () => {
     expect(v2.calls).toContain("write /b.txt 3");
   });
 
-  test("suspend pauses (memory kept), never stops; resume starts a paused VM; keepAlive pushes the idle timer", async () => {
+  test("never pauses or stops (not persistent): suspend is a no-op; the reaper's idle stop deletes a pooled VM; keepAlive pushes the idle timer", async () => {
     const driver = await remoteAdapter("daytona").create(spec(sandbox()));
     await driver.suspend();
-    expect(v2.calls).toContain("pause sbx_1");
-    expect(v2.calls.some((c) => c.startsWith("stop"))).toBe(false);
     await driver.resume();
-    expect(v2.calls).toContain("start sbx_1 from paused");
     await driver.keepAlive!(60_000);
     expect(v2.calls).toContain("idle-reset sbx_1");
     await remoteAdapter("daytona").suspendById("sbx_1");
-    expect(v2.calls.filter((c) => c === "pause sbx_1")).toHaveLength(2);
+    expect(v2.calls).toContain("delete sbx_1");
+    // a VM already gone: nothing to do
+    await remoteAdapter("daytona").suspendById("sbx_1");
+    // a computer's machine (made before computers were refused on v2) is never deleted by an idle stop
+    addSandbox({ id: "sbx_pc", labels: { "polpo-computer": "i:nina" } });
+    await expect(remoteAdapter("daytona").suspendById("sbx_pc")).rejects.toThrow(/can't be paused or stopped on this plan: use Daytona v0 or E2B for computers/);
+    expect(v2.calls.some((c) => c.startsWith("pause") || c.startsWith("stop") || c === "delete sbx_pc")).toBe(false);
+  });
+
+  test("create caps the wall clock at providers.daytona.maxTimeoutSeconds", async () => {
+    providerOptions.value = { api: "v2", maxTimeoutSeconds: 7200 };
+    await remoteAdapter("daytona").create(spec(sandbox(), { lifetimeMinutes: 600, keep: false }));
+    expect(v2.creates[0].opts.lifecyclePolicy).toMatchObject({ timeoutSeconds: 7200, onTimeout: "delete" });
   });
 
   test("connect resumes a paused VM, re-arms a running one's wall clock when it runs low, refuses a deleted one", async () => {
@@ -453,56 +469,57 @@ describe("v0 stays as it was", () => {
   });
 });
 
-// ── computers on v2 ─────────────────────────────────────────────────────
+// ── computers on v2: refused ────────────────────────────────────────────
 
-describe("computers on Daytona v2", () => {
-  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 }, network: allow("example.com") };
-  const sb = () => sandbox({ network: nina.network!, computer: nina });
+describe("computers on Daytona v2 (Linux sandboxes are not persistent)", () => {
+  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 } };
+  const sb = () => sandbox({ computer: nina });
   const manager = () => {
     const dir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-computer-"));
     dirs.push(dir);
-    let now = Date.parse("2026-11-21T10:00:00Z");
-    const m = new ComputerManager(dir, { now: () => now });
-    return { m, advance: (ms: number) => { now += ms; } };
+    return new ComputerManager(dir);
   };
+  const refusal = /Daytona v2 Linux sandboxes can't be paused or stopped on this plan: use Daytona v0 or E2B for computers/;
 
-  test("first use creates a Linux VM with a stable name, its label and a pause-only lifecycle", async () => {
-    const { m } = manager();
-    await m.ensure(nina, sb());
-    expect(v2.creates).toHaveLength(1);
-    const { opts } = v2.creates[0];
-    expect(opts.name).toBe(computerMachineName(m.labelValue("nina")));
-    expect(opts.name).toMatch(/^polpo-computer-[a-z0-9-]+-nina$/);
-    expect(opts.labels["polpo-computer"]).toBe(m.labelValue("nina"));
-    expect(opts.lifecyclePolicy).toEqual({ timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: -1 });
-    expect(opts.networkPolicy).toEqual({ blockAll: true, allowDomains: ["example.com"] });
-    expect(m.live("nina").status).toBe("running");
+  test("a Daytona computer is refused on v2: by the rule, at start, stop and reset (nothing created, paused or deleted)", async () => {
+    expect(computerProviderProblem(nina, { sandbox: { providers: { daytona: { api: "v2" } } } })).toMatch(refusal);
+    expect(computerProviderProblem(nina, { sandbox: { providers: { daytona: {} } } })).toBeNull();
+    expect(computerProviderProblem({ id: "box", kind: "e2b" }, { sandbox: { providers: { daytona: { api: "v2" } } } })).toBeNull();
+    const m = manager();
+    await expect(m.ensure(nina, sb())).rejects.toThrow(refusal);
+    await expect(m.stop(nina)).rejects.toThrow(refusal);
+    await expect(m.reset(nina, sb())).rejects.toThrow(refusal);
+    expect(v2.creates).toHaveLength(0);
+    expect(v2.calls).toEqual([]);
   });
 
-  test("idle → paused (never stopped, never deleted); next use resumes the same VM and applies its current network rule", async () => {
-    const { m, advance } = manager();
-    await m.ensure(nina, sb());
-    advance(16 * 60_000);
-    await m.idleTick([nina]);
-    expect(v2.calls).toContain("pause sbx_1");
-    expect(v2.calls.some((c) => c.startsWith("stop") || c.startsWith("delete"))).toBe(false);
-    expect(m.live("nina").status).toBe("paused");
-    expect(computerStatusOf("daytona", "paused")).toBe("paused");
+  test("polpo.json, POST /computers and PATCH /config/settings refuse a Daytona computer on v2", async () => {
+    const { parseConfig } = await import("../core/config.js");
+    const workDir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-config-"));
+    dirs.push(workDir);
+    mkdirSync(join(workDir, ".polpo"), { recursive: true });
+    const write = (settings: unknown) => writeFileSync(join(workDir, ".polpo", "polpo.json"), JSON.stringify({ project: "p", settings }));
+    write({ sandbox: { providers: { daytona: { api: "v2" } } }, computers: [{ id: "nina", name: "Nina", kind: "daytona" }] });
+    await expect(parseConfig(workDir)).rejects.toThrow(refusal);
+    write({ sandbox: { providers: { daytona: { api: "v2" } } }, computers: [{ id: "box", name: "Box", kind: "e2b" }] });
+    expect((await parseConfig(workDir)).settings.computers?.[0]?.id).toBe("box");
 
-    const wider = { ...nina, network: allow("example.com", "api.example.com") };
-    await m.ensure(wider, sandbox({ network: wider.network, computer: wider }));
-    expect(v2.creates).toHaveLength(1); // the same machine
-    expect(v2.calls).toContain("start sbx_1 from paused");
-    expect(v2.networkUpdates).toEqual([{ policy: { blockAll: true, allowDomains: ["example.com", "api.example.com"] }, ifMatch: "\"etag-sbx_1\"" }]);
-    expect(m.live("nina").status).toBe("running");
-  });
+    const { computerRoutes } = await import("../server/routes/computers.js");
+    const state = { computers: [] as ComputerConfig[] };
+    const routes = computerRoutes({
+      computers: () => state.computers, settings: () => ({ sandbox: { providers: { daytona: { api: "v2" } } } }) as any, agents: async () => [],
+      manager: () => manager(), save: async (list) => { state.computers = list; }, sandboxFor: () => ({ error: "no key" }), emit: () => {},
+    });
+    const res = await routes.request("/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "nina", kind: "daytona" }) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(refusal);
 
-  test("stop pauses; reset deletes and makes a new VM under the same name", async () => {
-    const { m } = manager();
-    await m.ensure(nina, sb());
-    expect((await m.stop(nina)).status).toBe("paused");
-    await m.reset(nina, sb());
-    expect(v2.calls).toContain("delete sbx_1");
-    expect(v2.creates.map((c) => c.opts.name)).toEqual([computerMachineName(m.labelValue("nina")), computerMachineName(m.labelValue("nina"))]);
+    const { configRoutes } = await import("@polpo-ai/server");
+    let config: any = { project: "p", teams: [], settings: { computers: [{ id: "nina", name: "Nina", kind: "daytona" }] } };
+    const app = configRoutes(() => ({ getConfig: () => config, reloadConfig: async () => true, saveConfig: async (c: any) => { config = c; }, getNotificationRouter: () => null } as any));
+    const patch = await app.request("/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ sandbox: { providers: { daytona: { api: "v2" } } } }) });
+    expect(patch.status).toBe(400);
+    expect((await patch.json()).error).toMatch(/Move or delete the Daytona computers first, or keep api "v0"/);
+    expect(config.settings.sandbox).toBeUndefined();
   });
 });

@@ -82,8 +82,9 @@ browser in the VM ──socks5──▶ 127.0.0.1:1081 (forwarder) ──socks5 
 In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
 
 - `tailscale` / `tailscaled` 1.104.7: in the runner images (`scripts/build-sandbox-images.mjs`: Daytona
-  v0 snapshot, Daytona v2 image `polpo-runner-vm-2`, E2B template); otherwise downloaded on first use
-  from `pkgs.tailscale.com` and checked against a pinned SHA-256.
+  v0 snapshot, E2B template, and the Daytona v2 image `polpo-runner-vm-2`); otherwise downloaded on
+  first use from `pkgs.tailscale.com` and checked against a pinned SHA-256. Computers run on Daytona
+  v0 (containers) and E2B; Daytona v2 is refused for computers (not persistent).
 - `tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 --state=mem:`: no TUN device,
   no root; the state is in memory, so the node leaves with the VM (ephemeral key).
 - `tailscale up --auth-key=file:… --hostname=<prefix>-<project>-<computer> --advertise-tags=… --accept-dns=false`.

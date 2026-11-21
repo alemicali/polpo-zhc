@@ -6,7 +6,7 @@
  * template). The key itself stays in that vault entry and is read when a VM is created.
  */
 import type { VaultStore } from "@polpo-ai/core";
-import { DAYTONA_V2_RUNNER_IMAGE, DAYTONA_V2_SANDBOX_CLASS, type DaytonaApiVersion } from "@polpo-ai/core/sandbox";
+import { DAYTONA_V2_RUNNER_IMAGE, DAYTONA_V2_SANDBOX_CLASS, daytonaV2MaxTimeoutSeconds, type DaytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 
 export type RemoteProviderId = "daytona" | "e2b";
@@ -30,6 +30,8 @@ export interface RemoteProviderSettings {
   snapshot?: string;
   /** Daytona: image (v2: a registered image name or id, default the Polpo runner image; v0: a Docker image). */
   image?: string;
+  /** Daytona v2: the longest wall clock a sandbox may get (the plan's maximum; default 86400 s). */
+  maxTimeoutSeconds?: number;
   /** E2B: custom domain (self-hosted). */
   domain?: string;
   /** E2B: default template. */
@@ -80,6 +82,7 @@ export function remoteProviderSettings(id: RemoteProviderId): RemoteProviderSett
     if (typeof raw[f] === "string" && (raw[f] as string).trim()) out[f] = (raw[f] as string).trim();
   }
   if (id === "daytona" && raw.api === "v2") out.api = "v2";
+  if (id === "daytona" && raw.maxTimeoutSeconds !== undefined) out.maxTimeoutSeconds = daytonaV2MaxTimeoutSeconds(raw);
   return out;
 }
 

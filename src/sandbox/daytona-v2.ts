@@ -5,14 +5,16 @@
  * API URL, which v0 settings allow).
  *
  * What changes from v0 (see remote-adapters.ts for the v0 adapter):
- * - Every sandbox is a Linux VM (`sandboxClass` "linux"; Polpo calls the class "linux-vm"): it
- *   pauses with its memory and processes and resumes; a Linux v2 sandbox cannot be "stopped".
- *   Our "suspend"/"stop" is a pause.
+ * - Every sandbox is a Linux VM (`sandboxClass` "linux"; Polpo calls the class "linux-vm"). On the
+ *   plans seen live it is NOT persistent: pause() and stop() are refused (409 "sandbox is not
+ *   persistent" / "warm stop is unavailable"), so Polpo never pauses a v2 VM: suspend is a no-op,
+ *   the reaper's idle stop deletes a pooled VM, and computers (persistent machines) are refused on
+ *   v2 (DAYTONA_V2_COMPUTERS_UNSUPPORTED; use Daytona v0 or E2B).
  * - It is created from a registered image (`providers.daytona.image`, default the Polpo runner
  *   image `DAYTONA_V2_RUNNER_IMAGE`) and sized per sandbox (`resources`), whatever the image.
- * - Lifecycle is a policy set at create: a wall-clock timeout (cannot be disabled, re-armed on
- *   every start/resume) and an idle timeout, each with an action (pause or delete). Computers are
- *   never deleted by it: both actions pause them.
+ * - Lifecycle is a policy set at create: a wall-clock timeout (cannot be disabled; capped at
+ *   providers.daytona.maxTimeoutSeconds, default 86400, the plan's maximum) and an idle timeout;
+ *   Linux VMs accept only "delete" as an action, and the timeout deletes the VM.
  * - Network: `networkPolicy` with domains and CIDRs together (default-deny once a list is given),
  *   changeable while the sandbox runs (`updateNetwork`).
  * - exec returns stdout, stderr and the exit code apart: no stderr wrapper as on v0.
@@ -21,7 +23,7 @@
  */
 import type { NetworkPolicyInput, LifecyclePolicyOptions, Resources, Sandbox, SandboxState } from "@daytona/sdk-v2/v2";
 import type { DaytonaV2Client } from "@daytona/sdk-v2";
-import { DAYTONA_V2_RUNNER_IMAGE, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
+import { COMPUTER_LABEL, DAYTONA_V2_COMPUTERS_UNSUPPORTED, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
 import { remoteProviderCredentials } from "./remote-providers.js";
 import {
   classifyAllowEntries, SandboxNetworkConfigError,
@@ -30,11 +32,7 @@ import {
 
 /** Size of a v2 sandbox when nothing is asked: the v0 runner snapshot's (2 vCPU, 4 GiB, 10 GiB). */
 export const DAYTONA_V2_DEFAULT_RESOURCES = { cpus: 2, memoryMb: 4096, diskMb: 10240 } as const;
-/**
- * A computer's wall-clock budget per start/resume (v2 requires one): after a day running without
- * a pause it is paused (memory kept), never deleted. Re-armed whenever we reconnect.
- */
-/** A computer's wall-clock budget (re-armed on every use; Linux cannot pause on it). */
+/** A computer's wall-clock budget (capped by maxTimeoutSeconds; computers are refused on v2 anyway). */
 export const DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS = 20 * 24 * 60 * 60;
 /** The SDK's DISABLED (-1): clears an idle trigger instead of inheriting the project default. */
 export const DAYTONA_V2_DISABLED = -1;
@@ -104,13 +102,18 @@ export function daytonaV2Resources(sandbox: Pick<EffectiveSandbox, "resources">)
  *   wall clock → delete after lifetime + deleteAfterStop.
  * - One-run VM: idle or wall clock → delete after the run's lifetime.
  */
-export function daytonaV2Lifecycle(spec: Pick<CreateSpec, "persistent" | "keep" | "lifetimeMinutes" | "deleteAfterStopMinutes">): LifecyclePolicyOptions {
+export function daytonaV2Lifecycle(
+  spec: Pick<CreateSpec, "persistent" | "keep" | "lifetimeMinutes" | "deleteAfterStopMinutes">,
+  maxTimeoutSeconds: number = DAYTONA_V2_MAX_TIMEOUT_SECONDS,
+): LifecyclePolicyOptions {
+  // the plan caps a sandbox's wall clock (86400 s on the plans seen so far): a longer one is refused
+  const cap = (seconds: number) => Math.min(seconds, maxTimeoutSeconds);
   if (spec.persistent) {
-    return { timeoutSeconds: DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS, idleExpirySeconds: DAYTONA_V2_DISABLED };
+    return { timeoutSeconds: cap(DAYTONA_V2_COMPUTER_TIMEOUT_SECONDS), idleExpirySeconds: DAYTONA_V2_DISABLED };
   }
-  const lifetime = Math.max(60, spec.lifetimeMinutes * 60);
+  const lifetime = cap(Math.max(60, spec.lifetimeMinutes * 60));
   if (spec.keep) {
-    return { timeoutSeconds: lifetime + (spec.deleteAfterStopMinutes ?? 60) * 60, onTimeout: "delete", idleExpirySeconds: DAYTONA_V2_DISABLED };
+    return { timeoutSeconds: cap(lifetime + (spec.deleteAfterStopMinutes ?? 60) * 60), onTimeout: "delete", idleExpirySeconds: DAYTONA_V2_DISABLED };
   }
   return { timeoutSeconds: lifetime, onTimeout: "delete", idleExpirySeconds: lifetime, onIdleTimeout: "delete" };
 }
@@ -122,20 +125,20 @@ export class DaytonaV2Adapter implements RemoteAdapter {
   private cached?: { key: string; client: DaytonaV2Client; image?: string; region?: string };
 
   /** The v2 client for the current key (a project API key; the vault entry may change). */
-  private async client(): Promise<{ client: DaytonaV2Client; image?: string; region?: string }> {
+  private async client(): Promise<{ client: DaytonaV2Client; image?: string; region?: string; maxTimeoutSeconds: number }> {
     const creds = await Promise.resolve(remoteProviderCredentials("daytona"));
     if (!creds?.apiKey) throw new Error("Daytona has no API key (Settings → Sandbox)");
     if (this.cached?.key !== creds.apiKey) {
       const { Daytona } = await import("@daytona/sdk-v2");
       this.cached = { key: creds.apiKey, client: new Daytona({ apiKey: creds.apiKey }).v2 };
     }
-    return { client: this.cached.client, image: creds.image, region: creds.region };
+    return { client: this.cached.client, image: creds.image, region: creds.region, maxTimeoutSeconds: creds.maxTimeoutSeconds ?? DAYTONA_V2_MAX_TIMEOUT_SECONDS };
   }
 
   async create(spec: CreateSpec): Promise<RemoteDriver> {
     // network rules are checked before anything is created
     const networkPolicy = daytonaV2NetworkPolicy(spec.sandbox.network);
-    const { client, image: instanceImage, region } = await this.client();
+    const { client, image: instanceImage, region, maxTimeoutSeconds } = await this.client();
     const opts = spec.sandbox.providerOptions;
     const image = (typeof opts.image === "string" && opts.image.trim()) || instanceImage || DAYTONA_V2_RUNNER_IMAGE;
     const sandboxRegion = (typeof opts.region === "string" && opts.region.trim()) || region;
@@ -145,7 +148,7 @@ export class DaytonaV2Adapter implements RemoteAdapter {
         ...(spec.name ? { name: spec.name } : {}),
         labels: spec.labels,
         resources: daytonaV2Resources(spec.sandbox),
-        lifecyclePolicy: daytonaV2Lifecycle(spec),
+        lifecyclePolicy: daytonaV2Lifecycle(spec, maxTimeoutSeconds),
         ...(networkPolicy ? { networkPolicy } : {}),
         ...(sandboxRegion ? { region: sandboxRegion } : {}),
         waitSeconds: WAIT_SECONDS,
@@ -216,11 +219,23 @@ export class DaytonaV2Adapter implements RemoteAdapter {
     }
   }
 
-  /** Pause (memory and processes kept): a Linux v2 sandbox cannot be stopped. */
+  /**
+   * The reaper's idle stop of a pooled VM. A Linux v2 sandbox is not persistent (pause and stop are
+   * refused with 409), so it is deleted instead: the pool then finds it gone and makes a new one.
+   * A computer's machine is never deleted here (computers do not run on v2: refused).
+   */
   async suspendById(remoteId: string): Promise<void> {
     const { client } = await this.client();
-    const sandbox = await client.get(remoteId);
-    if (sandbox.state === "started") await sandbox.pause({ timeoutSeconds: WAIT_SECONDS });
+    let sandbox: Sandbox;
+    try {
+      sandbox = await client.get(remoteId);
+    } catch (err) {
+      if (isNotFound(err)) return;
+      throw err;
+    }
+    if (GONE.has(sandbox.state)) return;
+    if (sandbox.labels?.[COMPUTER_LABEL]) throw new Error(DAYTONA_V2_COMPUTERS_UNSUPPORTED);
+    await this.remove(remoteId);
   }
 
   /** Change a sandbox's network rule while it exists (full replacement; "open" resets it). */
@@ -259,8 +274,9 @@ export class DaytonaV2Adapter implements RemoteAdapter {
       },
       readFile: async (path) => sandbox.fs.readBytes(path),
       writeFile: async (path, data) => { await sandbox.fs.writeBytes(path, data); },
-      // a Linux VM pauses with its memory; there is no stop
-      suspend: async () => { await sandbox.pause({ timeoutSeconds: WAIT_SECONDS }); },
+      // never paused: a Linux v2 sandbox is not persistent (pause and stop are refused); an idle
+      // pooled or warm VM keeps running until the reaper deletes it or its wall clock does
+      suspend: async () => {},
       resume: async () => {
         await sandbox.refreshData().catch(() => undefined);
         if (sandbox.state !== "started") await sandbox.start({ timeoutSeconds: WAIT_SECONDS });

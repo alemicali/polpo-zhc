@@ -35,7 +35,7 @@ Every agent has the implicit computer **`host`**: this server, with the sandbox 
 | `snapshot` / `image` | Daytona v0: a snapshot (default: the instance's `settings.sandbox.providers.daytona.snapshot`) or a Docker image (sized by `resources`). Daytona v2: `image` is an image of the Daytona project (default: the instance's `providers.daytona.image`, else the Polpo runner image `polpo-runner-vm-2`); `snapshot` is ignored. |
 | `template` | E2B template (default: the instance's). |
 | `resources` | `{ cpus, memoryMb, diskMb }`: Daytona v0 with an image only (snapshots and templates have their own size); Daytona v2 always (default 2 vCPU, 4 GB, 10 GB). |
-| `lifecycle.idleStopMinutes` | Stop (Daytona v0 container) or pause (E2B, Daytona v0 VM class, Daytona v2) after this many minutes without use. Default 15. |
+| `lifecycle.idleStopMinutes` | Stop (Daytona v0 container) or pause (E2B, Daytona v0 VM class) after this many minutes without use. Default 15. |
 | `lifecycle.autoArchiveDays` | Daytona v0: archive after this many days stopped (the disk moves to object storage: free, slower to start). Default: Daytona's (7). Ignored on v2 (nothing is archived; a paused VM keeps its disk and memory). |
 | `network` | `{ mode, allow }` as in the sandbox settings. Default: the instance's. Daytona v0 and E2B: fixed when the machine is created. Daytona v2: applied again whenever the machine starts or resumes, so a changed rule takes effect on the next start. |
 | `egress` | The egress proxy (`settings.egressProxies`) the browser of its agents goes out through. A remote computer (Daytona, E2B) reaches it through **Tailscale inside its VM**: it needs `settings.tailscale` (an auth key in the vault), a SOCKS5 proxy on a tailnet address, and a network that is not `deny` — see [Remote computers through Tailscale](residential-egress.md#remote-computers-daytona-e2b-through-tailscale). |
@@ -55,9 +55,10 @@ There is no `class` field. Which Daytona service a `daytona` computer uses is th
   with the snapshot (`snapshot.create({ sandboxClass: "linux-vm" })`). A computer built from a
   `linux-vm` snapshot is switched to auto-pause (memory kept) after creation; from a container
   snapshot (our `polpo-runner-*` today) it stops (disk kept, processes not).
-- **v2**: every computer is a **Linux VM** (`linux-vm`). Idle, it is **paused**: memory, running
-  processes and disk are kept, and the next command resumes it. A Linux v2 machine cannot be
-  "stopped" (that is macOS-only on v2), so Stop pauses it too.
+- **v2**: **not for computers.** Its Linux sandboxes are not persistent on the plans seen so far
+  (pause and stop are refused, the wall clock deletes them), so a `daytona` computer is refused
+  while `providers.daytona.api` is `"v2"`: when the config loads, by the API and at start. Use
+  Daytona v0 or E2B for computers.
 
 ## Which machine a run uses
 
@@ -83,20 +84,17 @@ fallback).
   reaper never deletes it.
 - First use (or **Start**): created with that label, auto-delete off (Daytona v0
   `autoDeleteInterval: -1`; E2B `lifecycle.onTimeout: "pause"`), `autoStopInterval` = the idle time,
-  `autoArchiveInterval` = the archive days. Daytona v2: created with the stable name
-  `polpo-computer-<instance>-<id>` (a repeated create returns the same VM, so two processes racing
-  never make two) and the lifecycle policy `{ idleExpirySeconds: idle time, onIdleTimeout: "pause",
-  timeoutSeconds: 86400, onTimeout: "pause" }`: both actions pause, none deletes (v2 requires a
-  wall-clock timeout; it is re-armed on every resume). Later uses: started (or resumed, or
-  unarchived) if it is not running; created again only if the provider has none.
+  `autoArchiveInterval` = the archive days. (Daytona v2 is refused for computers.) Later uses:
+  started (or resumed, or unarchived) if it is not running; created again only if the provider has
+  none.
 - Creating, starting, stopping and resetting are serialized per computer (in the process and, with
   a lock file under `.polpo/computers/`, across the task runners). Commands run concurrently: a chat
   and a task can use the computer at the same time.
 - Every command and file operation keeps it in use (`lastUsedAt`, and the provider's own idle timer);
   a long command keeps it in use while it runs. After a minute without checking, the next operation
   verifies it still runs and starts it again if it was stopped meanwhile.
-- The server stops idle computers once a minute (Daytona v0 container: stop; E2B, Daytona v0 VM
-  class and Daytona v2: pause). **Nothing deletes a computer automatically.**
+- The server stops idle computers once a minute (Daytona v0 container: stop; E2B and Daytona v0 VM
+  class: pause). **Nothing deletes a computer automatically.**
 - The working directory is **not wiped** between runs, and mounted volumes stay mounted.
   Deliverables still go to the run's output directory, copied back as for sandboxes.
 - The browser profile lives in the machine's home (`~/.polpo/browser-profiles/<agent>`): it survives

@@ -7203,7 +7203,7 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   }
   const existing = t.computers();
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
-  const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
+  const egressProblem = t.core.computerProviderProblem(computer, polpo.getConfig()?.settings as any) ?? t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
   if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });

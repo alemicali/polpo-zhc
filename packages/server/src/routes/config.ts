@@ -2,7 +2,7 @@ import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
-import { computerEgressProblem, parseComputers, parseEgressProxies, parseTailscaleSettings, type TailscaleSettings } from "@polpo-ai/core";
+import { computerEgressProblem, computerProviderProblem, parseComputers, parseEgressProxies, parseTailscaleSettings, type TailscaleSettings } from "@polpo-ai/core";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
@@ -326,6 +326,11 @@ export function configRoutes(getDeps: () => {
     if (body.sandbox && typeof body.sandbox === "object") {
       const errors = daytonaProviderErrors((body.sandbox as { providers?: { daytona?: unknown } }).providers?.daytona);
       if (errors.length) return c.json({ ok: false, error: errors.join("; ") }, 400);
+      // Daytona computers cannot run on v2 (its Linux sandboxes cannot be paused or stopped)
+      let computers: ReturnType<typeof parseComputers> = [];
+      try { computers = parseComputers(deps.getConfig()?.settings?.computers); } catch { /* reported where computers are edited */ }
+      const stuck = computers.map((x) => computerProviderProblem(x, { sandbox: body.sandbox as never })).filter((p): p is string => !!p);
+      if (stuck.length) return c.json({ ok: false, error: `${stuck.join("; ")}. Move or delete the Daytona computers first, or keep api "v0".` }, 400);
     }
     let egressProxies: Record<string, string> | null | undefined;
     if (body.egressProxies !== undefined) {

@@ -19,7 +19,7 @@
  */
 import { Hono, type Context } from "hono";
 import {
-  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
+  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerProviderProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
 import { computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
@@ -230,11 +230,12 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
 }
 
 /**
- * An error when a computer's egress cannot work: an unknown proxy; for a remote computer, no
+ * An error when a computer cannot work with the settings: a Daytona computer on Daytona v2 (Linux
+ * sandboxes there cannot pause or stop); its egress: an unknown proxy; for a remote computer, no
  * Tailscale settings, a proxy that is not SOCKS5 on a tailnet address, or no network.
  */
 function checkEgress(computer: ComputerConfig, settings: PolpoSettings | undefined): string | null {
-  return computerEgressProblem(computer, settings);
+  return computerProviderProblem(computer, settings as Parameters<typeof computerProviderProblem>[1]) ?? computerEgressProblem(computer, settings);
 }
 
 export { ComputerConfigError };

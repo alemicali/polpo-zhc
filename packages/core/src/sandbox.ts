@@ -158,8 +158,10 @@ export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["dayt
  *   `apiUrl`, e.g. self-hosted), organization API keys, `snapshot` images, container or linux-vm
  *   class depending on the snapshot.
  * - "v2": Daytona's new service (https://api.daytona.com, Daytona Cloud only, no custom URL),
- *   project API keys, registered `image`s, and every sandbox is a Linux VM: it pauses (memory and
- *   processes kept) and resumes; it is never "stopped".
+ *   project API keys, registered `image`s, and every sandbox is a Linux VM. On the plans seen so
+ *   far a Linux v2 sandbox is NOT persistent: pause and stop are refused (409), the lifecycle
+ *   policy accepts only "delete", and its wall-clock timeout (at most the plan's, 86400 s) deletes
+ *   it. So computers (persistent machines) cannot run on v2, and Polpo never pauses a v2 VM.
  */
 export type DaytonaApiVersion = "v0" | "v2";
 export const DAYTONA_API_VERSIONS: readonly DaytonaApiVersion[] = ["v0", "v2"];
@@ -171,6 +173,19 @@ export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
  * changes only when the image contents change, not with every Polpo release.
  */
 export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-2";
+
+/** Default (and the plans' usual maximum) wall-clock budget of a v2 sandbox: providers.daytona.maxTimeoutSeconds. */
+export const DAYTONA_V2_MAX_TIMEOUT_SECONDS = 86_400;
+
+/** Why a Daytona computer cannot use the v2 service. */
+export const DAYTONA_V2_COMPUTERS_UNSUPPORTED =
+  "Daytona v2 Linux sandboxes can't be paused or stopped on this plan: use Daytona v0 or E2B for computers";
+
+/** The wall-clock cap for v2 sandboxes (providers.daytona.maxTimeoutSeconds, default 86400). */
+export function daytonaV2MaxTimeoutSeconds(options: Record<string, unknown> | undefined): number {
+  const v = options?.maxTimeoutSeconds;
+  return typeof v === "number" && Number.isInteger(v) && v >= 60 ? v : DAYTONA_V2_MAX_TIMEOUT_SECONDS;
+}
 
 /** The Daytona API version of provider options (settings.sandbox.providers.daytona). */
 export function daytonaApiVersion(options: Record<string, unknown> | undefined): DaytonaApiVersion {
@@ -191,6 +206,10 @@ export function daytonaProviderErrors(raw: unknown, where = "settings.sandbox.pr
   }
   for (const key of ["apiUrl", "target", "region", "image", "snapshot"] as const) {
     if (r[key] !== undefined && r[key] !== null && typeof r[key] !== "string") errors.push(`${where}.${key} must be a string`);
+  }
+  if (r.maxTimeoutSeconds !== undefined && r.maxTimeoutSeconds !== null
+    && (typeof r.maxTimeoutSeconds !== "number" || !Number.isInteger(r.maxTimeoutSeconds) || r.maxTimeoutSeconds < 60)) {
+    errors.push(`${where}.maxTimeoutSeconds must be a whole number of seconds, at least 60 (v2: the plan's maximum sandbox lifetime, default ${DAYTONA_V2_MAX_TIMEOUT_SECONDS})`);
   }
   if (r.api === "v2") {
     if (typeof r.apiUrl === "string" && r.apiUrl.trim()) {
