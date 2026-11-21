@@ -87,7 +87,7 @@ export function ComputerDialog({
           {!editing && (
             <Field label="Runs on">
               <select className={selectClass} value={kind} onChange={(e) => set("kind", e.target.value as ComputerKind)} aria-label="Runs on">
-                <option value="daytona">Daytona (stops when idle; archived after days)</option>
+                <option value="daytona">Daytona (v0: stops when idle; v2: Linux VM, pauses with memory)</option>
                 <option value="e2b">E2B (pauses when idle, memory kept)</option>
                 <option value="host">This server</option>
               </select>
@@ -101,7 +101,7 @@ export function ComputerDialog({
                   <option value="image">Docker image</option>
                 </select>
               </Field>
-              <Field label={form.imageKind === "snapshot" ? "Snapshot" : "Image"} hint={form.imageKind === "snapshot" ? "Empty: the instance's (Settings → Sandbox)" : "e.g. node:22-bookworm-slim"}>
+              <Field label={form.imageKind === "snapshot" ? "Snapshot" : "Image"} hint={form.imageKind === "snapshot" ? "Daytona v0. Empty: the instance's (Settings → Sandbox)" : "v0: a Docker image (node:22); v2: an image of your Daytona project"}>
                 <Input value={form.image} onChange={(e) => set("image", e.target.value)} placeholder={form.imageKind === "snapshot" ? "polpo-runner-…" : "node:22"} />
               </Field>
             </div>
@@ -117,7 +117,7 @@ export function ComputerDialog({
                 <Input inputMode="numeric" value={form.idleStopMinutes} onChange={(e) => set("idleStopMinutes", e.target.value)} aria-invalid={!!visible.idleStopMinutes} />
               </Field>
               {kind === "daytona" && (
-                <Field label="Archive after (days stopped)" hint="Empty: Daytona's (7)" error={visible.autoArchiveDays}>
+                <Field label="Archive after (days stopped)" hint="Daytona v0 only. Empty: Daytona's (7)" error={visible.autoArchiveDays}>
                   <Input inputMode="numeric" value={form.autoArchiveDays} onChange={(e) => set("autoArchiveDays", e.target.value)} aria-invalid={!!visible.autoArchiveDays} />
                 </Field>
               )}
