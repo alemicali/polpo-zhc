@@ -9712,6 +9712,39 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "tailscale": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "authKey": {
+                        "type": "object",
+                        "properties": {
+                          "owner": {
+                            "type": "string"
+                          },
+                          "service": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "owner",
+                          "service"
+                        ]
+                      },
+                      "tags": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "hostnamePrefix": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "authKey"
+                    ]
                   }
                 }
               }

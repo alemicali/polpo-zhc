@@ -8,9 +8,17 @@
  *   process and across the task runners, with a lock file); commands run concurrently.
  * - Kept warm while used: every command or file operation touches it (lastUsedAt, and the
  *   provider's own idle timer); after lifecycle.idleStopMinutes without use the server stops it
- *   (Daytona v0 container) or pauses it (E2B, Daytona v0 VM class, Daytona v2: always a Linux VM,
- *   memory kept). It is NEVER deleted automatically:
- *   only reset (delete + recreate) and delete, both asked for by a person.
+ *   (Daytona v0 container) or pauses it (E2B, Daytona v0 VM class, memory kept). It is NEVER
+ *   deleted automatically: only reset (delete + recreate) and delete, both asked for by a person.
+ * - Daytona v2 hibernates instead (its Linux VMs cannot pause, and their wall clock, at most
+ *   24 h, deletes them): stop/idle = a memory and disk snapshot, ready in seconds, then the VM is
+ *   deleted ("hibernated"); the next use (or start) makes a VM from the newest snapshot (files and
+ *   running processes kept, ~3 s), re-applies its network rule and checks its tailnet again, and
+ *   only then deletes older snapshots (providers.daytona.hibernate.keepSnapshots). A failed
+ *   snapshot keeps the VM running (retried later). While it runs: a safety snapshot every few
+ *   hours, and before the wall clock ends a rotation (snapshot, new VM) at a quiet moment. A VM
+ *   that vanished anyway is restored from the last snapshot (with a notice). Commands that arrive
+ *   while it hibernates or rotates wait for the new VM.
  * - The working directory is not wiped between runs (see remote.ts: computers skip the reset).
  * - Runtime state (status, remote id, last use, uptime as a rough cost signal) lives in
  *   .polpo/computers-state.json; the provider is the truth, the file a cache for the dashboard.
@@ -18,12 +26,24 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COMPUTER_LABEL, computerIdleStopMinutes, isRemoteComputer,
+  COMPUTER_LABEL, computerEgressProblem, computerIdleStopMinutes, isRemoteComputer, tailnetEgressFor,
   type ComputerConfig, type ComputerStatus, type EffectiveSandbox, type RemoteSandboxProvider,
 } from "@polpo-ai/core/sandbox";
 import { acquireFileLock } from "./file-lock.js";
 import { instanceLabel } from "./pool.js";
-import { remoteAdapter, type RemoteAdapter, type RemoteDriver, type RemoteVmSummary } from "./remote-adapters.js";
+import { remoteAdapter, snapshotFailed, type Hibernation, type MachineSnapshot, type RemoteAdapter, type RemoteDriver, type RemoteVmSummary } from "./remote-adapters.js";
+import { onComputerStarted, tailnetEgress, type TailnetHost, type TailnetStatus } from "./tailnet-egress.js";
+
+/** A computer's machine as a host for the tailnet runtime (commands and uploads through the provider). */
+export function driverHost(driver: RemoteDriver): TailnetHost {
+  return {
+    exec: async (command, o = {}) => {
+      const r = await driver.exec(command, { env: o.env, timeoutMs: o.timeoutMs });
+      return { exitCode: r.timedOut ? 124 : r.exitCode, stdout: r.stdout, stderr: r.stderr };
+    },
+    writeFile: (path, data) => driver.writeFile(path, data),
+  };
+}
 
 export interface ComputerRuntime {
   provider: RemoteSandboxProvider;
@@ -36,7 +56,30 @@ export interface ComputerRuntime {
   uptimeMs: number;
   createdAt?: string;
   lastError?: string;
+  /** Daytona v2: this computer's snapshots, oldest first (the newest ready one is what it wakes from). */
+  snapshots?: ComputerSnapshotRecord[];
+  /** Daytona v2: the snapshot the current machine was made from. */
+  restoredFrom?: string;
+  /** Daytona v2: when the current machine's wall clock deletes it (it is rotated before). */
+  timeoutAt?: string;
+  /** Daytona v2: no hibernation or safety snapshot before this (the last one failed). */
+  retryAt?: string;
+  /** Something worth knowing that is not an error (a VM restored after it vanished, a forced rotation). */
+  notice?: string;
+  /** Daytona v2: its VM vanished while it ran (found by a refresh); the next wake says so. */
+  vanished?: boolean;
   updatedAt: string;
+}
+
+/** A memory and disk snapshot of a computer's VM (Daytona v2). */
+export interface ComputerSnapshotRecord {
+  id: string;
+  name: string;
+  /** When it was taken. */
+  at: string;
+  status: "building" | "ready";
+  diskBytes?: number;
+  memoryBytes?: number;
 }
 
 interface StateFile { version: 1; computers: Record<string, ComputerRuntime> }
@@ -52,6 +95,10 @@ export interface ComputerLive {
   lastError?: string;
   /** Daytona: the snapshot a new machine would be created from is not active (it is activated on the next create). */
   snapshotState?: string;
+  /** Daytona v2: the newest snapshot of its VM (what it wakes from when hibernated). */
+  lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number };
+  /** Something worth knowing that is not an error (a VM restored after it vanished, a forced rotation). */
+  notice?: string;
 }
 
 /** Between two checks that the machine still runs (a long chat may outlive the idle stop). */
@@ -67,6 +114,34 @@ export function computerMachineName(labelValue: string): string {
   return `polpo-computer-${slug}`.slice(0, 63);
 }
 
+/** A snapshot's name: `polpo-computer-<instance>-<id>-<UTC yyyymmddhhmmssSSS>` (snapshots carry no labels). */
+export function computerSnapshotName(labelValue: string, at: number): string {
+  return `${computerMachineName(labelValue)}-${new Date(at).toISOString().replace(/\D/g, "").slice(0, 17)}`;
+}
+
+/** Whether a snapshot name is one of this computer's (never another computer's or instance's). */
+export function isComputerSnapshotName(labelValue: string, name: string): boolean {
+  const prefix = `${computerMachineName(labelValue)}-`;
+  return name.startsWith(prefix) && /^\d{17}$/.test(name.slice(prefix.length));
+}
+
+/** When a snapshot was taken, from its name (0 when it has none). */
+function snapshotStamp(name: string): number {
+  const m = /-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{3})$/.exec(name);
+  return m ? Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!, +m[7]!) : 0;
+}
+
+const READY = /^(ready|active|available)$/i;
+
+/** The newest ready snapshot of a computer's runtime. */
+function lastReady(rt: Pick<ComputerRuntime, "snapshots"> | undefined): ComputerSnapshotRecord | undefined {
+  return [...(rt?.snapshots ?? [])].filter((x) => x.status === "ready").sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+}
+
+function snapshotView(x: ComputerSnapshotRecord): NonNullable<ComputerLive["lastSnapshot"]> {
+  return { at: x.at, ...(x.diskBytes !== undefined ? { diskBytes: x.diskBytes } : {}), ...(x.memoryBytes !== undefined ? { memoryBytes: x.memoryBytes } : {}) };
+}
+
 /** Provider states as computer statuses (Daytona v0 and v2 share most names). */
 export function computerStatusOf(provider: RemoteSandboxProvider, state: string | undefined): ComputerStatus {
   const s = String(state ?? "").toLowerCase();
@@ -75,6 +150,7 @@ export function computerStatusOf(provider: RemoteSandboxProvider, state: string 
     case "started": return "running";
     case "stopped": return "stopped";
     case "paused": return "paused";
+    case "hibernated": return "hibernated";
     case "archived": return "archived";
     case "queued": case "creating": case "pending_build": case "building_snapshot": case "pulling_snapshot": return "creating";
     case "starting": case "resuming": case "restoring": return "starting";
@@ -92,18 +168,34 @@ export function uptimeMinutes(rt: Pick<ComputerRuntime, "uptimeMs" | "status" | 
 }
 
 export interface ComputerManagerOptions {
-  /** Tests inject adapters and a clock. */
+  /** Tests inject adapters, a clock and the waits. */
   adapter?: (provider: RemoteSandboxProvider) => RemoteAdapter;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
+
+/** How often a building snapshot is checked. */
+const SNAPSHOT_POLL_MS = 1_000;
+/** How long a hibernation waits for the commands of this process to finish (a forced rotation: then it goes on). */
+const DRAIN_MS = 60_000;
 
 export class ComputerManager {
   /** Called when a computer's status, machine or error changes (the server emits computer:changed). */
   onChange?: (id: string, live: ComputerLive) => void;
+  /** Hibernation news for the logs (rotations, failed snapshots, restored VMs). */
+  onNotice?: (id: string, level: "info" | "warn", message: string) => void;
   private readonly file: string;
   private readonly instance: string;
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly touched = new Map<string, number>();
+  /** Commands running now per computer (this process). */
+  private readonly inFlight = new Map<string, number>();
+  /** A hibernation or rotation in progress: commands wait for it. */
+  private readonly gates = new Map<string, Promise<void>>();
+  /** Bumped when a computer's VM is replaced or deleted (attached drivers reconnect). */
+  private readonly epochs = new Map<string, number>();
+  /** The sandbox each computer last ran with (a rotation makes the new VM with it). */
+  private readonly sandboxes = new Map<string, EffectiveSandbox>();
   private lastSeen = "";
 
   constructor(readonly polpoDir: string, private readonly opts: ComputerManagerOptions = {}) {
@@ -117,6 +209,15 @@ export class ComputerManager {
 
   private now(): number {
     return (this.opts.now ?? Date.now)();
+  }
+
+  private sleep(ms: number): Promise<void> {
+    if (this.opts.sleep) return this.opts.sleep(ms);
+    return new Promise((resolve) => { const t = setTimeout(resolve, ms); t.unref?.(); });
+  }
+
+  private iso(ms = this.now()): string {
+    return new Date(ms).toISOString();
   }
 
   /** The label value that finds this computer's machine: `<instance>:<id>`. */
@@ -159,7 +260,7 @@ export class ComputerManager {
     } finally {
       release();
     }
-    if (!after || before?.status !== after.status || before?.remoteId !== after.remoteId || before?.lastError !== after.lastError) {
+    if (!after || before?.status !== after.status || before?.remoteId !== after.remoteId || before?.lastError !== after.lastError || before?.notice !== after.notice) {
       this.announce(id, after);
     }
     return after;
@@ -178,6 +279,8 @@ export class ComputerManager {
       uptimeMinutes: uptimeMinutes(rt, this.now()),
       ...(rt?.createdAt ? { createdAt: rt.createdAt } : {}),
       ...(rt?.lastError ? { lastError: rt.lastError } : {}),
+      ...(lastReady(rt) ? { lastSnapshot: snapshotView(lastReady(rt)!) } : {}),
+      ...(rt?.notice ? { notice: rt.notice } : {}),
     };
   }
 
@@ -214,17 +317,33 @@ export class ComputerManager {
 
   // ── Provider ───────────────────────────────────────────────────────
 
-  /** This computer's machines at the provider (normally one), running first, then newest. */
-  private async machines(c: ComputerConfig): Promise<RemoteVmSummary[]> {
+  /** Hibernation, when the computer's provider (as configured now) hibernates instead of pausing (Daytona v2). */
+  private async hibernation(c: ComputerConfig): Promise<Hibernation | undefined> {
+    if (c.kind !== "daytona") return undefined;
+    try {
+      return await this.adapter("daytona").hibernation?.();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * This computer's machines at the provider (normally one): running first, then the one the state
+   * file knows, then newest. With hibernation the known machine is also read by id (the label
+   * search may lag a VM made seconds ago).
+   */
+  private async machines(c: ComputerConfig, h?: Hibernation): Promise<RemoteVmSummary[]> {
+    const provider = c.kind as RemoteSandboxProvider;
     const label = this.labelValue(c.id);
-    const vms = await this.adapter(c.kind as RemoteSandboxProvider).list({ [COMPUTER_LABEL]: label });
-    return vms
-      .filter((v) => v.labels?.[COMPUTER_LABEL] === label && computerStatusOf(c.kind as RemoteSandboxProvider, v.state) !== "missing")
-      .sort((a, b) => {
-        const ra = computerStatusOf(c.kind as RemoteSandboxProvider, a.state) === "running" ? 0 : 1;
-        const rb = computerStatusOf(c.kind as RemoteSandboxProvider, b.state) === "running" ? 0 : 1;
-        return ra - rb || Date.parse(b.createdAt ?? "0") - Date.parse(a.createdAt ?? "0");
-      });
+    const vms = (await this.adapter(provider).list({ [COMPUTER_LABEL]: label }))
+      .filter((v) => v.labels?.[COMPUTER_LABEL] === label && computerStatusOf(provider, v.state) !== "missing");
+    const known = this.read()[c.id]?.remoteId;
+    if (h && known && !vms.some((v) => v.remoteId === known)) {
+      const m = await h.machine(known);
+      if (m) vms.push({ remoteId: known, state: m.state, labels: { [COMPUTER_LABEL]: label } });
+    }
+    const rank = (v: RemoteVmSummary) => (computerStatusOf(provider, v.state) === "running" ? 0 : 2) + (v.remoteId === known ? 0 : 1);
+    return vms.sort((a, b) => rank(a) - rank(b) || Date.parse(b.createdAt ?? "0") - Date.parse(a.createdAt ?? "0"));
   }
 
   /** Find by label; start or resume; create only when there is none. Call under exclusive(). */
@@ -233,6 +352,8 @@ export class ComputerManager {
     const adapter = this.adapter(provider);
     const idle = computerIdleStopMinutes(c);
     try {
+      const h = await this.hibernation(c);
+      if (h) return await this.ensureHibernating(c, sandbox, h, onWarning, onProgress);
       const [found] = await this.machines(c);
       if (found) {
         const wasRunning = computerStatusOf(provider, found.state) === "running";
@@ -243,18 +364,16 @@ export class ComputerManager {
         if (!wasRunning && adapter.updateNetwork) {
           await adapter.updateNetwork(driver.remoteId, sandbox.network).catch((err) => onWarning?.(`Could not apply the computer's network rule: ${(err as Error).message}`));
         }
-        await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: new Date(this.now()).toISOString(), ...(found.createdAt ? { createdAt: found.createdAt } : {}) });
+        await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: this.iso(), ...(found.createdAt ? { createdAt: found.createdAt } : {}) });
+        // started or resumed: its tailnet daemons may be gone (checked again, brought up in the background)
+        if (!wasRunning) this.started(c, driver);
         return driver;
       }
       await this.setStatus(c, "creating");
-      const driver = await adapter.create({
-        sandbox, labels: this.labels(c.id), lifetimeMinutes: idle, keep: true, onWarning, onProgress,
-        // Daytona v2: a stable name makes the create get-or-create (v0 and E2B ignore it)
-        name: computerMachineName(this.labelValue(c.id)),
-        persistent: { idleStopMinutes: idle, ...(c.lifecycle?.autoArchiveDays ? { autoArchiveDays: c.lifecycle.autoArchiveDays } : {}) },
-      });
-      const now = new Date(this.now()).toISOString();
+      const driver = await this.createMachine(c, sandbox, onWarning, onProgress);
+      const now = this.iso();
       await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: now, createdAt: now });
+      this.started(c, driver);
       return driver;
     } catch (err) {
       await this.setStatus(c, "error", { lastError: (err as Error).message ?? String(err) }).catch(() => undefined);
@@ -262,38 +381,361 @@ export class ComputerManager {
     }
   }
 
-  /** The computer's machine, running (started, resumed or created). */
-  ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
-    if (!isRemoteComputer(c)) return Promise.reject(new Error(`Computer "${c.id}" is this server: there is no machine to start`));
+  /** A new machine from the image or snapshot of the settings. */
+  private createMachine(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
+    const idle = computerIdleStopMinutes(c);
+    const name = computerMachineName(this.labelValue(c.id));
+    return this.adapter(c.kind as RemoteSandboxProvider).create({
+      sandbox, labels: this.labels(c.id), lifetimeMinutes: idle, keep: true, onWarning, onProgress,
+      // Daytona v2: a stable name (labels.name) for the machine; v0 and E2B ignore it. Its create
+      // key is fresh per machine: a named create's own key is permanent, and the same name gets
+      // a new machine after a hibernation, a reset or a lost VM
+      name,
+      idempotencyKey: `${name}:${this.now()}`,
+      persistent: { idleStopMinutes: idle, ...(c.lifecycle?.autoArchiveDays ? { autoArchiveDays: c.lifecycle.autoArchiveDays } : {}) },
+    });
+  }
+
+  // ── Hibernation (Daytona v2) ────────────────────────────────────────
+
+  /**
+   * ensure() where machines hibernate: the running VM; else wake from the newest snapshot; else a
+   * new VM from the image. Call under exclusive().
+   */
+  private async ensureHibernating(c: ComputerConfig, sandbox: EffectiveSandbox, h: Hibernation, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
+    const provider = c.kind as RemoteSandboxProvider;
+    const adapter = this.adapter(provider);
+    const before = this.read()[c.id];
+    const machines = await this.machines(c, h);
+    const live = machines.find((m) => ["running", "creating", "starting"].includes(computerStatusOf(provider, m.state)));
+    if (live) {
+      const driver = await adapter.connect(live.remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+      const fresh = before?.status !== "running" || before.remoteId !== driver.remoteId;
+      const timeoutAt = fresh || !before?.timeoutAt ? (await h.machine(driver.remoteId).catch(() => undefined))?.timeoutAt : before.timeoutAt;
+      await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: this.iso(), ...(timeoutAt ? { timeoutAt } : {}) });
+      if (fresh) this.started(c, driver);
+      return driver;
+    }
+    // a VM of this computer that failed goes (its snapshots stay); one in another state (not seen
+    // on v2) is left alone: a VM is never deleted without a snapshot (reset and delete remove it)
+    for (const m of machines.filter((x) => computerStatusOf(provider, x.state) === "error")) await adapter.remove(m.remoteId).catch(() => undefined);
+    // its VM was there (not hibernated by us): it vanished (wall clock, provider)
+    const vanished = !!before?.vanished || (!!before?.remoteId && ["running", "starting", "stopping"].includes(before.status));
+    return this.wake(c, sandbox, h, { vanished, onWarning, onProgress });
+  }
+
+  /**
+   * The snapshots it may wake from, newest first: the ones the state knows and the provider's
+   * listing of this computer's names (the state file may be lost; the listing may lag).
+   */
+  private async wakeCandidates(c: ComputerConfig, h: Hibernation): Promise<Array<ComputerSnapshotRecord & { tracked: boolean }>> {
+    const tracked = (this.read()[c.id]?.snapshots ?? []).map((x) => ({ ...x, tracked: true }));
+    const label = this.labelValue(c.id);
+    const listed = (await h.listSnapshots((name) => isComputerSnapshotName(label, name)).catch(() => [] as MachineSnapshot[]))
+      .filter((x) => READY.test(x.status) && !tracked.some((t) => t.id === x.id))
+      .map((x) => ({ ...this.record(x, snapshotStamp(x.name) || Date.parse(x.createdAt ?? "") || 0), tracked: false }));
+    return [...tracked, ...listed].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  }
+
+  private record(x: MachineSnapshot, at: number): ComputerSnapshotRecord {
+    return {
+      id: x.id, name: x.name, at: this.iso(at), status: READY.test(x.status) ? "ready" : "building",
+      ...(x.bytes !== undefined ? { diskBytes: x.bytes } : {}), ...(x.memoryBytes !== undefined ? { memoryBytes: x.memoryBytes } : {}),
+    };
+  }
+
+  /**
+   * A new VM from the newest snapshot that still exists, with the computer's name, labels and
+   * network rule; its tailnet is checked again; only then older snapshots are deleted. No snapshot
+   * at all: a new VM from the image.
+   */
+  private async wake(c: ComputerConfig, sandbox: EffectiveSandbox, h: Hibernation, o: { vanished?: boolean; onWarning?: (message: string) => void; onProgress?: (message: string) => void }): Promise<RemoteDriver> {
+    const label = this.labelValue(c.id);
+    const name = computerMachineName(label);
+    const candidates = await this.wakeCandidates(c, h);
+    const lost: string[] = [];
+    for (const cand of candidates) {
+      let snap = await h.getSnapshot(cand.id);
+      if (snap && !READY.test(snap.status) && !snapshotFailed(snap.status)) snap = await this.waitReady(h, cand.id).catch(() => undefined);
+      if (!snap || !READY.test(snap.status)) {
+        // one the listing still shows after its deletion is not news; one the state knew is
+        if (cand.tracked) lost.push(cand.name);
+        await this.forgetSnapshot(c, cand.id);
+        continue;
+      }
+      await this.setStatus(c, "starting", { remoteId: undefined, timeoutAt: undefined });
+      o.onProgress?.(`Waking the computer from its snapshot of ${cand.at}`);
+      const driver = await h.restore(cand.id, { name, labels: this.labels(c.id), network: sandbox.network, idempotencyKey: `${name}:wake:${cand.id}:${this.now()}` });
+      const timeoutAt = (await h.machine(driver.remoteId).catch(() => undefined))?.timeoutAt;
+      const notice = o.vanished
+        ? `Its VM was gone (wall clock or provider): restored from the snapshot of ${cand.at}; changes made after it are lost`
+        : lost.length ? `Newer snapshots were gone (${lost.join(", ")}): woke from the snapshot of ${cand.at}` : undefined;
+      const { tracked: _tracked, ...rec } = cand;
+      await this.update(c.id, "daytona", (cur) => ({ ...cur, snapshots: (cur.snapshots ?? []).some((x) => x.id === rec.id) ? cur.snapshots : [...(cur.snapshots ?? []), { ...rec, status: "ready" }] }));
+      await this.setStatus(c, "running", {
+        remoteId: driver.remoteId, restoredFrom: cand.id, lastUsedAt: this.iso(), timeoutAt, notice, retryAt: undefined, vanished: undefined,
+      });
+      this.bump(c.id);
+      if (notice) this.onNotice?.(c.id, "warn", notice);
+      // its tailnet daemons came back with the memory: checked again (brought up when they did not)
+      this.started(c, driver);
+      // older snapshots go only now that a VM runs from this one
+      await this.pruneSnapshots(c, h, cand.id).catch((err) => this.onNotice?.(c.id, "warn", `Could not delete old snapshots: ${(err as Error).message}`));
+      return driver;
+    }
+    // first use, or every snapshot is gone: a new VM from the image
+    await this.setStatus(c, "creating", { remoteId: undefined, timeoutAt: undefined, restoredFrom: undefined });
+    const driver = await this.createMachine(c, sandbox, o.onWarning, o.onProgress);
+    const timeoutAt = (await h.machine(driver.remoteId).catch(() => undefined))?.timeoutAt;
+    const notice = o.vanished || lost.length ? `Its VM and its snapshots were gone: a new VM from the image (its files are lost)` : undefined;
+    const now = this.iso();
+    await this.setStatus(c, "running", { remoteId: driver.remoteId, lastUsedAt: now, createdAt: now, timeoutAt, notice, retryAt: undefined, vanished: undefined });
+    this.bump(c.id);
+    if (notice) this.onNotice?.(c.id, "warn", notice);
+    this.started(c, driver);
+    return driver;
+  }
+
+  private bump(id: string): void {
+    this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
+  }
+
+  /** Wait until a snapshot is ready (bounded by snapshotTimeoutSeconds); throws when it fails or takes too long. */
+  private async waitReady(h: Hibernation, id: string): Promise<MachineSnapshot> {
+    const deadline = this.now() + h.settings.snapshotTimeoutSeconds * 1000;
+    for (;;) {
+      const snap = await h.getSnapshot(id);
+      if (!snap) throw new Error("the snapshot is gone");
+      if (READY.test(snap.status)) return snap;
+      if (snapshotFailed(snap.status)) throw new Error(`the snapshot ${snap.status}${snap.error ? `: ${snap.error}` : ""}`);
+      if (this.now() >= deadline) throw new Error(`the snapshot was not ready after ${h.settings.snapshotTimeoutSeconds} s (still ${snap.status || "building"})`);
+      await this.sleep(SNAPSHOT_POLL_MS);
+    }
+  }
+
+  /**
+   * A memory and disk snapshot of the running VM, ready (the VM keeps running). Recorded in the
+   * state while it builds; a failed one is deleted and forgotten, and the error thrown.
+   */
+  private async takeSnapshot(c: ComputerConfig, h: Hibernation, remoteId: string): Promise<ComputerSnapshotRecord> {
+    const at = this.now();
+    const name = computerSnapshotName(this.labelValue(c.id), at);
+    const started = await h.snapshot(remoteId, name);
+    const building = this.record(started, at);
+    await this.update(c.id, "daytona", (cur) => ({ ...cur, snapshots: [...(cur.snapshots ?? []), { ...building, status: "building" }] }));
+    try {
+      const ready = READY.test(started.status) ? started : await this.waitReady(h, started.id);
+      const rec = { ...this.record(ready, at), status: "ready" as const };
+      await this.update(c.id, "daytona", (cur) => ({ ...cur, snapshots: (cur.snapshots ?? []).map((x) => (x.id === rec.id ? rec : x)) }));
+      return rec;
+    } catch (err) {
+      await h.deleteSnapshot(started.id).catch(() => undefined);
+      await this.forgetSnapshot(c, started.id);
+      throw err;
+    }
+  }
+
+  private forgetSnapshot(c: ComputerConfig, id: string): Promise<unknown> {
+    return this.update(c.id, "daytona", (cur) => ({ ...cur, snapshots: (cur.snapshots ?? []).filter((x) => x.id !== id) }));
+  }
+
+  /**
+   * Delete this computer's snapshots but the newest keepSnapshots ready ones and `keep` (the one
+   * its VM runs from). Only snapshots named for this computer are ever touched.
+   */
+  private async pruneSnapshots(c: ComputerConfig, h: Hibernation, keep?: string): Promise<void> {
+    const label = this.labelValue(c.id);
+    const tracked = this.read()[c.id]?.snapshots ?? [];
+    const listed = await h.listSnapshots((name) => isComputerSnapshotName(label, name)).catch(() => [] as MachineSnapshot[]);
+    const all = new Map<string, { id: string; at: number; ready: boolean }>();
+    for (const x of listed) if (!/building|pending|creat/i.test(x.status)) all.set(x.id, { id: x.id, at: snapshotStamp(x.name), ready: READY.test(x.status) });
+    for (const x of tracked) if (x.status === "ready") all.set(x.id, { id: x.id, at: Date.parse(x.at), ready: true });
+    const newest = [...all.values()].filter((x) => x.ready).sort((a, b) => b.at - a.at).slice(0, h.settings.keepSnapshots).map((x) => x.id);
+    const keepIds = new Set([...newest, ...(keep ? [keep] : [])]);
+    for (const x of all.values()) {
+      if (keepIds.has(x.id)) continue;
+      await h.deleteSnapshot(x.id);
+      await this.forgetSnapshot(c, x.id);
+    }
+  }
+
+  /** Every snapshot of this computer (tracked or listed by its name): reset and delete. */
+  private async deleteSnapshots(c: ComputerConfig, h: Hibernation): Promise<void> {
+    const label = this.labelValue(c.id);
+    const ids = new Set((this.read()[c.id]?.snapshots ?? []).map((x) => x.id));
+    for (const x of await h.listSnapshots((name) => isComputerSnapshotName(label, name))) ids.add(x.id);
+    for (const id of ids) {
+      await h.deleteSnapshot(id);
+      await this.forgetSnapshot(c, id);
+    }
+  }
+
+  /** Commands of this process on the computer finish (at most maxMs). */
+  private async drain(id: string, maxMs: number): Promise<boolean> {
+    const until = this.now() + maxMs;
+    while ((this.inFlight.get(id) ?? 0) > 0) {
+      if (this.now() >= until) return false;
+      await this.sleep(250);
+    }
+    return true;
+  }
+
+  /** Run fn while commands on the computer wait (they reconnect after it). */
+  private async gated<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const prev = this.gates.get(id);
+    this.gates.set(id, gate);
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      open();
+      if (this.gates.get(id) === gate) this.gates.delete(id);
+    }
+  }
+
+  /**
+   * Hibernate (call under exclusive and gated): a ready snapshot of the running VM, then the VM is
+   * deleted. When the snapshot fails the VM keeps running (lastError, retried after retryMinutes)
+   * and the error is thrown.
+   */
+  private async hibernateLocked(c: ComputerConfig, h: Hibernation, why: "stop" | "idle" | "rotate", force = false): Promise<"hibernated" | "nothing"> {
+    const provider = c.kind as RemoteSandboxProvider;
+    const running = (await this.machines(c, h)).filter((m) => computerStatusOf(provider, m.state) === "running");
+    const [m] = running;
+    if (!m) {
+      await this.refreshLocked(c, h);
+      return "nothing";
+    }
+    if (!(await this.drain(c.id, force ? DRAIN_MS : why === "rotate" ? DRAIN_MS / 2 : DRAIN_MS))) {
+      if (!force) throw new Error("commands are still running on it");
+      this.onNotice?.(c.id, "warn", "Rotating while commands still run: they are cut");
+    }
+    await this.setStatus(c, "stopping", { remoteId: m.remoteId });
+    try {
+      await this.takeSnapshot(c, h, m.remoteId);
+    } catch (err) {
+      const message = `Could not hibernate (${why}): ${(err as Error).message}. It keeps running; tried again in ${h.settings.retryMinutes} min`;
+      await this.setStatus(c, "running", { remoteId: m.remoteId, lastError: message, retryAt: this.iso(this.now() + h.settings.retryMinutes * 60_000) });
+      throw new Error(message);
+    }
+    // its memory and disk saved: the VM can go (only that one: a VM is never deleted without a snapshot)
+    tailnetEgress.invalidate(c.id);
+    try {
+      await this.adapter(provider).remove(m.remoteId);
+    } catch (err) {
+      const message = `Its snapshot is saved, but its VM could not be deleted (${why}): ${(err as Error).message}. It keeps running; tried again in ${h.settings.retryMinutes} min`;
+      await this.setStatus(c, "running", { remoteId: m.remoteId, lastError: message, retryAt: this.iso(this.now() + h.settings.retryMinutes * 60_000) });
+      throw new Error(message);
+    }
+    this.bump(c.id);
+    await this.setStatus(c, "hibernated", { remoteId: undefined, timeoutAt: undefined, retryAt: undefined, notice: undefined });
+    return "hibernated";
+  }
+
+  /**
+   * Before the VM's wall clock deletes it: snapshot it and make the new VM from that snapshot
+   * (a pause of a few seconds; commands wait). Without a sandbox to make the VM with, it stays
+   * hibernated until its next use.
+   */
+  private async rotate(c: ComputerConfig, h: Hibernation, sandbox: EffectiveSandbox | undefined, force: boolean): Promise<void> {
+    await this.gated(c.id, () => this.exclusive(c.id, async () => {
+      if ((await this.hibernateLocked(c, h, "rotate", force)) !== "hibernated") return;
+      const message = force
+        ? "Rotated through a snapshot before its VM's wall clock while it was busy: a pause of a few seconds"
+        : "Rotated through a snapshot before its VM's wall clock";
+      this.onNotice?.(c.id, force ? "warn" : "info", message);
+      if (!sandbox) return;
+      await this.wake(c, sandbox, h, {});
+      if (force) await this.update(c.id, "daytona", (cur) => ({ ...cur, notice: message }));
+    }));
+  }
+
+  /** A safety snapshot while it runs (the VM keeps running); older ones are pruned. */
+  private async safetySnapshot(c: ComputerConfig, h: Hibernation): Promise<void> {
+    await this.exclusive(c.id, async () => {
+      const provider = c.kind as RemoteSandboxProvider;
+      const m = (await this.machines(c, h)).find((x) => computerStatusOf(provider, x.state) === "running");
+      if (!m) return;
+      try {
+        await this.takeSnapshot(c, h, m.remoteId);
+      } catch (err) {
+        const message = `Safety snapshot failed: ${(err as Error).message}. Tried again in ${h.settings.retryMinutes} min`;
+        await this.update(c.id, "daytona", (cur) => ({ ...cur, retryAt: this.iso(this.now() + h.settings.retryMinutes * 60_000) }));
+        this.onNotice?.(c.id, "warn", message);
+        return;
+      }
+      await this.pruneSnapshots(c, h, this.read()[c.id]?.restoredFrom).catch(() => undefined);
+    });
+  }
+
+  /** After a start, resume or create (tests replace it). */
+  started(c: ComputerConfig, driver: RemoteDriver): void {
+    try { onComputerStarted(c, driverHost(driver)); } catch { /* never changes the start */ }
+  }
+
+  /**
+   * Run fn on the computer's machine when it is running now (never starts or resumes it):
+   * undefined when it is not running.
+   */
+  async whenRunning<T>(c: ComputerConfig, fn: (driver: RemoteDriver) => Promise<T>): Promise<T | undefined> {
+    if (!isRemoteComputer(c)) return undefined;
+    const provider = c.kind as RemoteSandboxProvider;
+    const running = (await this.machines(c, await this.hibernation(c))).find((m) => computerStatusOf(provider, m.state) === "running");
+    if (!running) return undefined;
+    const driver = await this.adapter(provider).connect(running.remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+    return fn(driver);
+  }
+
+  /** The computer's machine, running (started, resumed, woken from its snapshot or created). */
+  async ensure(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
+    if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: there is no machine to start`);
+    this.sandboxes.set(c.id, sandbox);
     return this.exclusive(c.id, () => this.ensureLocked(c, sandbox, onWarning, onProgress));
   }
 
   /**
    * A driver for a run (chat or task) on the computer: commands and file operations keep it in use
    * and, after a minute, check it still runs (starting it again if it was stopped meanwhile).
+   * While it hibernates or rotates, commands wait and then go to the new VM.
    * Suspending and destroying are no-ops: the computer outlives every run.
    */
   async attach(c: ComputerConfig, sandbox: EffectiveSandbox, onWarning?: (message: string) => void, onProgress?: (message: string) => void): Promise<RemoteDriver> {
     let inner = await this.ensure(c, sandbox, onWarning, onProgress);
+    let epoch = this.epochs.get(c.id) ?? 0;
     let verifiedAt = this.now();
-    const fresh = async (): Promise<RemoteDriver> => {
-      if (this.now() - verifiedAt > VERIFY_EVERY_MS) {
+    const fresh = async (force = false): Promise<RemoteDriver> => {
+      await this.gates.get(c.id);
+      if (force || (this.epochs.get(c.id) ?? 0) !== epoch || this.now() - verifiedAt > VERIFY_EVERY_MS) {
         inner = await this.ensure(c, sandbox, onWarning, onProgress);
+        epoch = this.epochs.get(c.id) ?? 0;
         verifiedAt = this.now();
       }
       return inner;
     };
     const use = async <T>(fn: (d: RemoteDriver) => Promise<T>): Promise<T> => {
-      const d = await fresh();
+      let d = await fresh();
+      this.inFlight.set(c.id, (this.inFlight.get(c.id) ?? 0) + 1);
       this.touch(c, d);
       const beat = setInterval(() => this.touch(c, d, true), HEARTBEAT_MS);
       beat.unref?.();
       try {
-        const out = await fn(d);
+        let out: T;
+        try {
+          out = await fn(d);
+        } catch (err) {
+          // its VM was replaced or hibernated meanwhile (by another process): once more on the new one
+          const now = this.read()[c.id];
+          if (!now || now.remoteId === d.remoteId || !["running", "hibernated"].includes(now.status)) throw err;
+          d = await fresh(true);
+          out = await fn(d);
+        }
         verifiedAt = this.now();
         return out;
       } finally {
         clearInterval(beat);
+        this.inFlight.set(c.id, Math.max(0, (this.inFlight.get(c.id) ?? 1) - 1));
         this.touch(c, d);
       }
     };
@@ -320,14 +762,23 @@ export class ComputerManager {
 
   // ── Explicit operations (people, Polpo, MCP) ────────────────────────
 
+  /** Start, resume, or wake from its snapshot (Daytona v2). */
   async start(c: ComputerConfig, sandbox: EffectiveSandbox): Promise<ComputerLive> {
     await this.ensure(c, sandbox);
     return this.live(c.id);
   }
 
-  /** Stop (Daytona container: disk kept) or pause (E2B, Daytona VM: memory kept). Never deletes. */
-  async stop(c: ComputerConfig): Promise<ComputerLive> {
+  /**
+   * Stop (Daytona v0 container: disk kept), pause (E2B, Daytona v0 VM: memory kept) or hibernate
+   * (Daytona v2: memory and disk snapshot, then the VM is deleted). Never loses the machine.
+   */
+  async stop(c: ComputerConfig, why: "stop" | "idle" = "stop"): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be stopped`);
+    const h = await this.hibernation(c);
+    if (h) {
+      await this.gated(c.id, () => this.exclusive(c.id, () => this.hibernateLocked(c, h, why)));
+      return this.live(c.id);
+    }
     return this.exclusive(c.id, async () => {
       const provider = c.kind as RemoteSandboxProvider;
       const machines = await this.machines(c);
@@ -349,9 +800,10 @@ export class ComputerManager {
     return this.start(c, sandbox);
   }
 
-  /** Delete the machine and create a new one (everything on its disk is lost). */
+  /** Delete the machine (and, Daytona v2, every snapshot of it) and create a new one: everything on its disk is lost. */
   async reset(c: ComputerConfig, sandbox: EffectiveSandbox): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be reset`);
+    this.sandboxes.set(c.id, sandbox);
     return this.exclusive(c.id, async () => {
       await this.removeMachines(c);
       await this.update(c.id, c.kind as RemoteSandboxProvider, (cur) => ({ provider: cur.provider, status: "missing", uptimeMs: 0, updatedAt: cur.updatedAt }));
@@ -360,18 +812,38 @@ export class ComputerManager {
     });
   }
 
-  /** Delete the machine for good (and its runtime state). */
+  /** Delete the machine for good (and its snapshots and runtime state). */
   async delete(c: ComputerConfig): Promise<void> {
     if (!isRemoteComputer(c)) return;
     await this.exclusive(c.id, async () => {
       await this.removeMachines(c);
       await this.update(c.id, c.kind as RemoteSandboxProvider, () => null);
     });
+    this.sandboxes.delete(c.id);
   }
 
+  /** Its machines (leaving the tailnet first) and, where it hibernates, every snapshot of it. */
   private async removeMachines(c: ComputerConfig): Promise<void> {
     const provider = c.kind as RemoteSandboxProvider;
-    for (const m of await this.machines(c)) await this.adapter(provider).remove(m.remoteId);
+    const h = await this.hibernation(c);
+    for (const m of await this.machines(c, h)) {
+      // a machine in the tailnet leaves it first (best effort; an ephemeral node also goes by itself)
+      if (c.egress && computerStatusOf(provider, m.state) === "running") await this.leaveTailnet(c, m.remoteId);
+      await this.adapter(provider).remove(m.remoteId);
+    }
+    if (h) await this.deleteSnapshots(c, h);
+    this.bump(c.id);
+    tailnetEgress.invalidate(c.id);
+  }
+
+  private async leaveTailnet(c: ComputerConfig, remoteId: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const driver = await this.adapter(c.kind as RemoteSandboxProvider).connect(remoteId, { timeoutMs: computerIdleStopMinutes(c) * 60_000 });
+      await Promise.race([tailnetEgress.logout(driverHost(driver), c.id), new Promise((r) => { timer = setTimeout(r, 30_000); })]);
+    } catch { /* best effort */ } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -381,7 +853,9 @@ export class ComputerManager {
    */
   async refresh(c: ComputerConfig, snapshot?: string): Promise<ComputerLive> {
     if (!isRemoteComputer(c)) return { id: c.id, status: "running", uptimeMinutes: 0 };
-    const live = await this.refreshLocked(c);
+    // an operation in progress here writes the state itself (no flicker from a half-done hibernation)
+    if (this.chains.has(c.id)) return this.live(c.id);
+    const live = await this.refreshLocked(c, await this.hibernation(c));
     if (c.kind === "daytona" && snapshot && (live.status === "missing" || live.status === "error")) {
       const state = await this.snapshotState(snapshot);
       if (state && state !== "active") return { ...live, snapshotState: state };
@@ -400,19 +874,33 @@ export class ComputerManager {
     return state;
   }
 
-  private async refreshLocked(c: ComputerConfig): Promise<ComputerLive> {
+  /**
+   * The provider's view written to the state. Where machines hibernate, no machine but a ready
+   * snapshot is "hibernated"; a VM that vanished while running says so (its next use restores it).
+   */
+  private async refreshLocked(c: ComputerConfig, h?: Hibernation): Promise<ComputerLive> {
     const provider = c.kind as RemoteSandboxProvider;
     let machines: RemoteVmSummary[];
     try {
-      machines = await this.machines(c);
+      machines = await this.machines(c, h);
     } catch (err) {
       return { ...this.live(c.id), status: "unknown", lastError: (err as Error).message ?? String(err) };
     }
     const [m] = machines;
-    const status = m ? computerStatusOf(provider, m.state) : "missing";
     const cur = this.read()[c.id];
+    let status: ComputerStatus = m ? computerStatusOf(provider, m.state) : "missing";
+    let notice: string | undefined;
+    if (!m && h && lastReady(cur)) {
+      status = "hibernated";
+      if (cur?.remoteId && cur.status === "running") {
+        notice = `Its VM is gone (wall clock or provider): its next use restores it from the snapshot of ${lastReady(cur)!.at}`;
+      }
+    }
     if (!cur || cur.status !== status || cur.remoteId !== m?.remoteId) {
-      await this.setStatus(c, status, m ? { remoteId: m.remoteId, ...(m.createdAt ? { createdAt: m.createdAt } : {}) } : { remoteId: undefined });
+      await this.setStatus(c, status, m
+        ? { remoteId: m.remoteId, ...(m.createdAt ? { createdAt: m.createdAt } : {}) }
+        : { remoteId: undefined, timeoutAt: undefined, ...(notice ? { notice, vanished: true } : {}) });
+      if (notice) this.onNotice?.(c.id, "warn", notice);
     }
     return this.live(c.id);
   }
@@ -420,19 +908,29 @@ export class ComputerManager {
   // ── Server upkeep ──────────────────────────────────────────────────
 
   /**
-   * Stop computers nobody used for their idle time (never delete), and announce changes other
-   * processes (task runners) made to the state file.
+   * Stop computers nobody used for their idle time (never delete; Daytona v2: hibernate), keep
+   * running v2 computers safe (safety snapshots, rotation before the wall clock), and announce
+   * changes other processes (task runners) made to the state file. `sandboxFor`: the sandbox a
+   * rotated computer's new VM is made with (else the one it last ran with).
    */
-  async idleTick(computers: readonly ComputerConfig[]): Promise<void> {
-    const now = this.now();
+  async idleTick(computers: readonly ComputerConfig[], sandboxFor?: (c: ComputerConfig) => EffectiveSandbox | { error: string } | undefined): Promise<void> {
     const state = this.read();
     for (const c of computers) {
       if (!isRemoteComputer(c)) continue;
       const rt = state[c.id];
       if (rt?.status !== "running") continue;
-      const last = Date.parse(rt.lastUsedAt ?? rt.runningSince ?? rt.updatedAt);
-      if (now - last < computerIdleStopMinutes(c) * 60_000) continue;
-      await this.stop(c).catch(() => undefined);
+      const now = this.now();
+      const idleMs = now - Date.parse(rt.lastUsedAt ?? rt.runningSince ?? rt.updatedAt);
+      const h = await this.hibernation(c);
+      if (!h) {
+        if (idleMs >= computerIdleStopMinutes(c) * 60_000) await this.stop(c, "idle").catch(() => undefined);
+        continue;
+      }
+      try {
+        await this.upkeepHibernating(c, h, rt, idleMs, sandboxFor);
+      } catch (err) {
+        this.onNotice?.(c.id, "warn", (err as Error).message);
+      }
     }
     // changes written by other processes
     const snapshot = JSON.stringify(this.read());
@@ -447,6 +945,95 @@ export class ComputerManager {
     }
     this.lastSeen = snapshot;
   }
+
+  /** One minute of a running Daytona v2 computer: hibernate when idle, rotate before the wall clock, safety snapshots. */
+  private async upkeepHibernating(
+    c: ComputerConfig, h: Hibernation, rt: ComputerRuntime, idleMs: number,
+    sandboxFor?: (c: ComputerConfig) => EffectiveSandbox | { error: string } | undefined,
+  ): Promise<void> {
+    const now = this.now();
+    const s = h.settings;
+    const retrying = !!rt.retryAt && now < Date.parse(rt.retryAt);
+    // the wall clock: read again when it looks close (a re-armed policy may have pushed it)
+    let left = rt.timeoutAt ? Date.parse(rt.timeoutAt) - now : Infinity;
+    if (left < s.rotateBeforeMinutes * 60_000 && rt.remoteId) {
+      const m = await h.machine(rt.remoteId).catch(() => undefined);
+      if (m?.timeoutAt && m.timeoutAt !== rt.timeoutAt) {
+        await this.update(c.id, "daytona", (cur) => ({ ...cur, timeoutAt: m.timeoutAt }));
+        left = Date.parse(m.timeoutAt) - now;
+      }
+    }
+    const busy = (this.inFlight.get(c.id) ?? 0) > 0;
+    if (idleMs >= computerIdleStopMinutes(c) * 60_000 && !busy) {
+      if (!retrying || left < s.forceRotateMinutes * 60_000) await this.stop(c, "idle");
+      return;
+    }
+    if (left < s.rotateBeforeMinutes * 60_000) {
+      const force = left < s.forceRotateMinutes * 60_000;
+      const quiet = !busy && idleMs >= s.rotateIdleGapSeconds * 1000;
+      if (force || (quiet && !retrying)) {
+        const asked = sandboxFor?.(c);
+        const sandbox = asked && !("error" in asked) ? asked : this.sandboxes.get(c.id);
+        await this.rotate(c, h, sandbox, force);
+      }
+      return;
+    }
+    if (s.safetySnapshotHours > 0 && !retrying) {
+      const since = Math.max(Date.parse(lastReady(rt)?.at ?? "") || 0, Date.parse(rt.runningSince ?? "") || 0);
+      if (now - since >= s.safetySnapshotHours * 3_600_000) await this.safetySnapshot(c, h);
+    }
+  }
+}
+
+/** A remote computer's egress through the tailnet, as people and Polpo see it. */
+export interface ComputerEgressStatus extends Partial<Omit<TailnetStatus, "computerId" | "tailnet">> {
+  computerId: string;
+  /** The proxy's name (settings.egressProxies). */
+  proxy: string;
+  /** "off": the computer is not running (its tailnet comes up when it is next used). */
+  tailnet: TailnetStatus["tailnet"] | "off" | "unknown";
+  proxyReachable: boolean;
+  /** Where its browser goes out now: "via home", "direct (home unreachable)"… */
+  effective: string;
+  /** The computer's machine status. */
+  machine: ComputerStatus;
+}
+
+/**
+ * The tailnet egress of a remote computer with `egress` (undefined otherwise). Looks inside the
+ * machine only when it is running (never starts or resumes it).
+ */
+export async function computerEgressStatus(
+  manager: ComputerManager,
+  c: ComputerConfig,
+  settings: { egressProxies?: Record<string, string>; tailscale?: unknown } | undefined,
+  instance?: string,
+): Promise<ComputerEgressStatus | undefined> {
+  if (!isRemoteComputer(c) || !c.egress) return undefined;
+  const proxy = c.egress;
+  const egress = tailnetEgressFor(c, settings, instance);
+  const machine = manager.live(c.id).status;
+  if (!egress) {
+    const error = computerEgressProblem(c, settings) ?? "Tailscale is not set up (settings.tailscale)";
+    return { computerId: c.id, proxy, tailnet: "unknown", proxyReachable: false, effective: `direct (${proxy} not usable)`, machine, error };
+  }
+  const label = (s: { tailnet: string; proxyReachable: boolean }) => (s.tailnet === "up" && s.proxyReachable ? `via ${proxy}` : `direct (${proxy} unreachable; profiles signed in through it pause)`);
+  let live: TailnetStatus | undefined;
+  try {
+    live = await manager.whenRunning(c, (d) => tailnetEgress.inspect(driverHost(d), egress.tailnet));
+  } catch (err) {
+    return { computerId: c.id, proxy, tailnet: "unknown", proxyReachable: false, effective: label({ tailnet: "unknown", proxyReachable: false }), machine, error: (err as Error).message };
+  }
+  if (!live) {
+    const last = tailnetEgress.last(c.id);
+    return {
+      computerId: c.id, proxy, tailnet: "off", proxyReachable: false, machine: machine === "running" ? "stopped" : machine,
+      effective: `comes up when the computer is next used (it is ${machine === "running" ? "not running" : machine})`,
+      ...(last?.node ? { node: last.node } : {}), ...(last?.checkedAt ? { checkedAt: last.checkedAt } : {}),
+    };
+  }
+  const { computerId: _id, ...rest } = live;
+  return { computerId: c.id, proxy, ...rest, effective: label(live), machine: "running" };
 }
 
 const managers = new Map<string, ComputerManager>();
@@ -461,13 +1048,21 @@ export function computerManager(polpoDir: string): ComputerManager {
   return m;
 }
 
-/** The project's manager, announcing status changes as computer:changed (once per process). */
+/**
+ * The project's manager, announcing status changes as computer:changed (once per process) and,
+ * given `log`, hibernation news (rotations, failed snapshots, restored VMs) as log lines.
+ */
 export function computerManagerWithEvents(
   polpoDir: string,
-  emit: (payload: { id: string; action: "status"; status: ComputerStatus; remoteId?: string; error?: string }) => void,
+  emit: (payload: { id: string; action: "status"; status: ComputerStatus; remoteId?: string; error?: string; notice?: string }) => void,
+  log?: (level: "info" | "warn", message: string) => void,
 ): ComputerManager {
   const m = computerManager(polpoDir);
-  m.onChange ??= (id, live) => emit({ id, action: "status", status: live.status, ...(live.remoteId ? { remoteId: live.remoteId } : {}), ...(live.lastError ? { error: live.lastError } : {}) });
+  m.onChange ??= (id, live) => emit({
+    id, action: "status", status: live.status,
+    ...(live.remoteId ? { remoteId: live.remoteId } : {}), ...(live.lastError ? { error: live.lastError } : {}), ...(live.notice ? { notice: live.notice } : {}),
+  });
+  if (log) m.onNotice ??= (id, level, message) => log(level, `Computer "${id}": ${message}`);
   return m;
 }
 
@@ -477,11 +1072,17 @@ export function setComputerManager(polpoDir: string, manager: ComputerManager | 
   else managers.delete(polpoDir);
 }
 
-/** Server upkeep: the idle stop of every computer, once a minute. */
+/** Server upkeep, once a minute: the idle stop (or hibernation) of every computer, Daytona v2 safety snapshots and rotations. */
 export class ComputerUpkeep {
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
-  constructor(private readonly manager: ComputerManager, private readonly computers: () => readonly ComputerConfig[], private readonly onError?: (message: string) => void) {}
+  constructor(
+    private readonly manager: ComputerManager,
+    private readonly computers: () => readonly ComputerConfig[],
+    private readonly onError?: (message: string) => void,
+    /** The sandbox a rotated computer's new VM is made with. */
+    private readonly sandboxFor?: (c: ComputerConfig) => EffectiveSandbox | { error: string } | undefined,
+  ) {}
 
   start(): void {
     if (this.timer) return;
@@ -497,7 +1098,7 @@ export class ComputerUpkeep {
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    try { await this.manager.idleTick(this.computers()); }
+    try { await this.manager.idleTick(this.computers(), this.sandboxFor); }
     catch (err) { this.onError?.(`Computers upkeep failed: ${(err as Error).message}`); }
     finally { this.running = false; }
   }

@@ -6,21 +6,24 @@
  *   POST   /computers                 create { id, name, kind, image?, snapshot?, template?, resources?, lifecycle?, network?, egress?, volumes?, start? }
  *   GET    /computers/:id
  *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes (id and kind stay)
- *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk, and the computer
- *   POST   /computers/:id/start       start or resume it (created if it has no machine yet)
- *   POST   /computers/:id/stop        stop (Daytona container) or pause (E2B, Daytona VM); never deletes
+ *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk (Daytona v2: and its snapshots), and the computer
+ *   POST   /computers/:id/start       start, resume, or wake it from its snapshot (Daytona v2); created if it has no machine yet
+ *   POST   /computers/:id/stop        stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2:
+ *                                     memory and disk snapshot, then the VM is deleted); never loses the machine
  *   POST   /computers/:id/restart
- *   POST   /computers/:id/reset       { confirm: true }: delete the machine and create a new one (its disk is lost)
+ *   POST   /computers/:id/reset       { confirm: true }: delete the machine (and its snapshots) and create a new one (its disk is lost)
+ *   GET    /computers/:id/egress      a remote computer's egress through Tailscale: tailnet up/down, node, path (direct/DERP),
+ *                                     proxy reachable, where its browser goes out now (looks inside only a running machine)
  *
  * "host" (this server) is listed as a built-in computer; it cannot be changed, started or stopped.
  * Machines are created on first use (an agent's chat or task) or on start, never on every call.
  */
 import { Hono, type Context } from "hono";
 import {
-  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerUsers, isRemoteComputer, parseComputer,
+  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
-import type { ComputerLive, ComputerManager } from "../../sandbox/computers.js";
+import { computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
 
 export interface ComputerRouteDeps {
   computers: () => ComputerConfig[];
@@ -32,6 +35,8 @@ export interface ComputerRouteDeps {
   /** The sandbox a computer's machine is created with, or why it cannot be (no API key). */
   sandboxFor: (computer: ComputerConfig) => EffectiveSandbox | { error: string };
   emit: (payload: PolpoEventMap["computer:changed"]) => void;
+  /** The instance's name (the project): part of the computers' node names in the tailnet. */
+  instance?: () => string | undefined;
 }
 
 const LIVE_TIMEOUT_MS = 8_000;
@@ -210,17 +215,27 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   app.post("/:id/restart", control("restart"));
   app.post("/:id/reset", control("reset"));
 
+  app.get("/:id/egress", async (c) => {
+    const id = c.req.param("id");
+    const computer = find(id);
+    if (!computer) return fail(c, 404, `There is no computer "${id}"`, "NOT_FOUND");
+    if (!computer.egress) return c.json({ ok: true, data: { computerId: id, egress: null } });
+    if (!isRemoteComputer(computer)) {
+      return c.json({ ok: true, data: { computerId: id, proxy: computer.egress, tailnet: null, note: "a computer on this server uses the proxy directly (egress_status)" } });
+    }
+    const status = await computerEgressStatus(deps.manager(), computer, deps.settings(), deps.instance?.());
+    return c.json({ ok: true, data: status });
+  });
+
   return app;
 }
 
-/** An error when a computer's egress names a proxy the settings do not have. */
+/**
+ * An error when a computer's egress cannot work: an unknown proxy; for a remote computer, no
+ * Tailscale settings, a proxy that is not SOCKS5 on a tailnet address, or no network.
+ */
 function checkEgress(computer: ComputerConfig, settings: PolpoSettings | undefined): string | null {
-  if (!computer.egress) return null;
-  const proxies = Object.keys(settings?.egressProxies ?? {});
-  if (!proxies.includes(computer.egress)) {
-    return `There is no egress proxy "${computer.egress}" (settings.egressProxies${proxies.length ? `: ${proxies.join(", ")}` : " is empty"})`;
-  }
-  return null;
+  return computerEgressProblem(computer, settings);
 }
 
 export { ComputerConfigError };

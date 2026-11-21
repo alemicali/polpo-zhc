@@ -11,15 +11,25 @@ type Computer = {
   id: string; name: string; kind: string; status: string; builtin?: boolean; snapshot?: string; image?: string; template?: string;
   lastUsedAt?: string; uptimeMinutes?: number; lastError?: string; agents?: Array<{ name: string; isDefault: boolean }>;
   lifecycle?: { idleStopMinutes?: number; autoArchiveDays?: number }; note?: string;
+  lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number }; notice?: string;
 };
+
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(bytes >= 10 * 1024 ** 3 ? 0 : 1)} GB`;
+
+/** "snapshot 2026-11-21T22:18:55Z (0.2 GB memory + 1.4 GB disk)" */
+function snapshotLine(s: NonNullable<Computer["lastSnapshot"]>): string {
+  const sizes = [s.memoryBytes !== undefined ? `${gb(s.memoryBytes)} memory` : "", s.diskBytes !== undefined ? `${gb(s.diskBytes)} disk` : ""].filter(Boolean).join(" + ");
+  return `last snapshot ${s.at}${sizes ? ` (${sizes})` : ""}`;
+}
 
 const computerItem = z.object({ id: z.string(), name: z.string(), kind: z.string(), status: z.string() }).passthrough();
 
 const line = (c: Computer) => {
   const image = c.snapshot ? `snapshot ${c.snapshot}` : c.image ? `image ${c.image}` : c.template ? `template ${c.template}` : "";
   const users = (c.agents ?? []).map((a) => `${a.name}${a.isDefault ? " (default)" : ""}`).join(", ");
-  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}`
+  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}${c.status === "hibernated" ? " (resumes in a few seconds on its next use)" : ""}`
     + `${c.lastUsedAt ? `, last used ${c.lastUsedAt}` : ""}${c.uptimeMinutes ? `, ${c.uptimeMinutes} min running so far` : ""}`
+    + `${c.lastSnapshot ? `, ${snapshotLine(c.lastSnapshot)}` : ""}${c.notice ? `, note: ${c.notice}` : ""}`
     + `${c.lastError ? `, error: ${c.lastError}` : ""}${users ? ` · agents: ${users}` : ""}`;
 };
 
@@ -29,7 +39,8 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
   tool("computers", "polpo_computers_list", {
     title: "List computers",
     description: "The computers agents work on: \"host\" (this server) and persistent machines (Daytona, E2B) with their live status "
-      + "(running, stopped, paused, archived, creating, error; missing = not created yet), last use, uptime (a rough cost signal) and the agents using each. With id, one computer.",
+      + "(running, stopped, paused, hibernated, archived, creating, error; missing = not created yet), last use, uptime (a rough cost signal), "
+      + "the last snapshot (Daytona v2: time, memory and disk size) and the agents using each. With id, one computer.",
     inputSchema: { id: z.string().optional().describe("One computer") },
     outputSchema: { items: z.array(computerItem) },
     annotations: READ,
@@ -62,7 +73,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       }).nullable().optional().describe("When it stops and archives by itself (it is never deleted automatically)"),
       network: z.object({ mode: z.enum(["deny", "allowlist", "open", "unrestricted"]), allow: z.array(z.string()).optional() }).nullable().optional()
         .describe("Network rule (fixed when the machine is created); default the instance's"),
-      egress: z.string().nullable().optional().describe("host computers only: egress proxy name (settings.egressProxies) for its agents' browsers"),
+      egress: z.string().nullable().optional().describe("Egress proxy name (settings.egressProxies) for its agents' browsers; a remote computer reaches it through Tailscale in its VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"),
       volumes: z.array(z.union([z.string(), looseObject])).nullable().optional().describe("Volumes attached to runs on it (names granted to the agent)"),
       start: z.boolean().optional().describe("Create: start the machine now"),
     },
@@ -89,8 +100,9 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
 
   tool("computers", "polpo_computer_control", {
     title: "Start, stop, restart or reset a computer",
-    description: "Start (or resume) a computer's machine, stop it (Daytona: disk kept; E2B/VM: paused, memory kept), restart it, or reset it: "
-      + "delete the machine and create a new one — everything on its disk is lost, so reset needs confirm: true.",
+    description: "Start (or resume, or wake a hibernated one) a computer's machine, stop it (Daytona v0: disk kept; E2B/VM: paused, memory kept; "
+      + "Daytona v2: hibernated = memory and disk snapshot, VM deleted, wakes in a few seconds), restart it, or reset it: "
+      + "delete the machine (and its snapshots) and create a new one — everything on its disk is lost, so reset needs confirm: true.",
     inputSchema: {
       id: z.string().min(1).describe("The computer's id (polpo_computers_list)"),
       action: z.enum(["start", "stop", "restart", "reset"]).describe("What to do"),

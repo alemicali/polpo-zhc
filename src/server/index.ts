@@ -16,8 +16,11 @@ import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { configureRemoteProviders } from "../sandbox/remote-providers.js";
+import { configureTailnetEgress } from "../sandbox/tailnet-egress.js";
+import { tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { SandboxReaper } from "../sandbox/reaper.js";
 import { ComputerUpkeep, computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerSandbox } from "../sandbox/manager.js";
 import { closeAllConnectorManagers } from "../mcp/manager.js";
 
 /**
@@ -86,6 +89,12 @@ export class PolpoServer {
     // Remote sandbox providers (Daytona, E2B): settings in settings.sandbox.providers, keys in
     // the vault entry each one references.
     configureRemoteProviders(o.getVaultStore(), () => o.getConfig()?.settings?.sandbox?.providers as Record<string, unknown> | undefined);
+    // Tailscale in remote computers (egress through a tailnet-only proxy): the auth key's vault, and
+    // each computer's tailnet egress from the current settings (brought up when it starts or resumes)
+    configureTailnetEgress({
+      vaultStore: o.getVaultStore() ?? undefined,
+      egressFor: (computer) => tailnetEgressFor(computer, o.getConfig()?.settings, o.getConfig()?.project),
+    });
 
     // Remote VM pool upkeep: expired and orphaned VMs, warm VMs (server process only)
     this.sandboxReaper?.stop();
@@ -102,12 +111,14 @@ export class PolpoServer {
     this.sandboxReaper.start();
 
     // Computers (persistent machines): stop the ones nobody used for their idle time (never
-    // delete them), announce status changes made by task runners
+    // delete them; Daytona v2: hibernate, safety snapshots, rotation before the wall clock),
+    // announce status changes made by task runners
     this.computerUpkeep?.stop();
     this.computerUpkeep = new ComputerUpkeep(
-      computerManagerWithEvents(polpoDir, (payload) => o.emit("computer:changed", payload)),
+      computerManagerWithEvents(polpoDir, (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` })),
       () => o.getConfig()?.settings?.computers ?? [],
       (message) => o.emit("log", { level: "warn", message: `[computers] ${message}` }),
+      (c) => computerSandbox(c, o.getConfig()?.settings),
     );
     this.computerUpkeep.start();
 

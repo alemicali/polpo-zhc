@@ -230,6 +230,15 @@ export const UpdateSettingsSchema = z.object({
   }).optional(),
   /** Named egress proxies for agents' browsers ({ home: "socks5://…" }); replaces them all, null removes them. */
   egressProxies: z.record(z.string(), z.string()).nullable().optional(),
+  /**
+   * Tailscale inside remote computers (their browser reaches a tailnet-only egress proxy):
+   * { authKey: { owner, service } (a vault entry holding the key), tags?, hostnamePrefix? }; null removes it.
+   */
+  tailscale: z.object({
+    authKey: z.object({ owner: z.string(), service: z.string() }),
+    tags: z.array(z.string()).optional(),
+    hostnamePrefix: z.string().optional(),
+  }).nullable().optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────

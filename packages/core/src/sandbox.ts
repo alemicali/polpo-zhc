@@ -158,8 +158,12 @@ export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["dayt
  *   `apiUrl`, e.g. self-hosted), organization API keys, `snapshot` images, container or linux-vm
  *   class depending on the snapshot.
  * - "v2": Daytona's new service (https://api.daytona.com, Daytona Cloud only, no custom URL),
- *   project API keys, registered `image`s, and every sandbox is a Linux VM: it pauses (memory and
- *   processes kept) and resumes; it is never "stopped".
+ *   project API keys, registered `image`s, and every sandbox is a Linux VM. On the plans seen so
+ *   far a Linux v2 sandbox is NOT persistent: pause and stop are refused (409), the lifecycle
+ *   policy accepts only "delete", and its wall-clock timeout (at most the plan's, 86400 s) deletes
+ *   it. Polpo never pauses a v2 VM. Computers (persistent machines) HIBERNATE instead: a memory
+ *   and disk snapshot, then the VM is deleted; their next use creates a VM from that snapshot
+ *   (files and running processes kept, a few seconds). See providers.daytona.hibernate.
  */
 export type DaytonaApiVersion = "v0" | "v2";
 export const DAYTONA_API_VERSIONS: readonly DaytonaApiVersion[] = ["v0", "v2"];
@@ -170,7 +174,87 @@ export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
  * created from when `providers.daytona.image` is not set. The suffix is the recipe revision: it
  * changes only when the image contents change, not with every Polpo release.
  */
-export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-1";
+export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-2";
+
+/** Default (and the plans' usual maximum) wall-clock budget of a v2 sandbox: providers.daytona.maxTimeoutSeconds. */
+export const DAYTONA_V2_MAX_TIMEOUT_SECONDS = 86_400;
+
+/**
+ * How Daytona v2 computers hibernate (providers.daytona.hibernate). A v2 Linux VM cannot pause
+ * and its wall clock (at most maxTimeoutSeconds) deletes it, so a computer is kept as memory and
+ * disk snapshots of its VM:
+ * - keepSnapshots: snapshots kept per computer (the newest; storage is billed, roughly the VM's
+ *   memory plus its disk each). Older ones are deleted only after a VM woke from a newer one.
+ * - safetySnapshotHours: while it runs, a snapshot this often (0: never), so a VM that vanishes
+ *   (wall clock, provider) loses at most that window.
+ * - rotateBeforeMinutes: this long before the VM's wall clock ends it is rotated (snapshot, new
+ *   VM from it): at once when idle, else at the first quiet gap of rotateIdleGapSeconds, and in
+ *   any case once forceRotateMinutes are left (a pause of a few seconds; running commands break).
+ * - snapshotTimeoutSeconds: how long a snapshot may take to become ready; past it the hibernation
+ *   fails, the VM keeps running and it is tried again after retryMinutes.
+ */
+export interface DaytonaV2HibernateSettings {
+  keepSnapshots: number;
+  safetySnapshotHours: number;
+  rotateBeforeMinutes: number;
+  rotateIdleGapSeconds: number;
+  forceRotateMinutes: number;
+  snapshotTimeoutSeconds: number;
+  retryMinutes: number;
+}
+
+export const DAYTONA_V2_HIBERNATE_DEFAULTS: Readonly<DaytonaV2HibernateSettings> = Object.freeze({
+  keepSnapshots: 1,
+  safetySnapshotHours: 6,
+  rotateBeforeMinutes: 60,
+  rotateIdleGapSeconds: 90,
+  forceRotateMinutes: 10,
+  snapshotTimeoutSeconds: 300,
+  retryMinutes: 10,
+});
+
+/** Bounds of each hibernate setting (whole numbers). */
+const HIBERNATE_BOUNDS: Record<keyof DaytonaV2HibernateSettings, [number, number]> = {
+  keepSnapshots: [1, 10],
+  safetySnapshotHours: [0, 24],
+  rotateBeforeMinutes: [5, 600],
+  rotateIdleGapSeconds: [10, 3600],
+  forceRotateMinutes: [2, 120],
+  snapshotTimeoutSeconds: [30, 3600],
+  retryMinutes: [1, 1440],
+};
+
+/** providers.daytona.hibernate with the defaults filled in (invalid values fall back to them). */
+export function daytonaV2HibernateSettings(options: Record<string, unknown> | undefined): DaytonaV2HibernateSettings {
+  const raw = options?.hibernate && typeof options.hibernate === "object" ? options.hibernate as Record<string, unknown> : {};
+  const out = { ...DAYTONA_V2_HIBERNATE_DEFAULTS };
+  for (const key of Object.keys(HIBERNATE_BOUNDS) as (keyof DaytonaV2HibernateSettings)[]) {
+    const v = raw[key];
+    const [min, max] = HIBERNATE_BOUNDS[key];
+    if (typeof v === "number" && Number.isInteger(v) && v >= min && v <= max) out[key] = v;
+  }
+  // forced rotation happens inside the rotation window
+  if (out.forceRotateMinutes >= out.rotateBeforeMinutes) out.forceRotateMinutes = Math.max(2, Math.floor(out.rotateBeforeMinutes / 2));
+  return out;
+}
+
+function hibernateErrors(raw: unknown, where: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw)) return [`${where} must be an object`];
+  const errors: string[] = [];
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    const bounds = HIBERNATE_BOUNDS[key as keyof DaytonaV2HibernateSettings];
+    if (!bounds) { errors.push(`${where}.${key} is not a hibernate setting (${Object.keys(HIBERNATE_BOUNDS).join(", ")})`); continue; }
+    if (typeof v !== "number" || !Number.isInteger(v) || v < bounds[0] || v > bounds[1]) errors.push(`${where}.${key} must be a whole number from ${bounds[0]} to ${bounds[1]}`);
+  }
+  return errors;
+}
+
+/** The wall-clock cap for v2 sandboxes (providers.daytona.maxTimeoutSeconds, default 86400). */
+export function daytonaV2MaxTimeoutSeconds(options: Record<string, unknown> | undefined): number {
+  const v = options?.maxTimeoutSeconds;
+  return typeof v === "number" && Number.isInteger(v) && v >= 60 ? v : DAYTONA_V2_MAX_TIMEOUT_SECONDS;
+}
 
 /** The Daytona API version of provider options (settings.sandbox.providers.daytona). */
 export function daytonaApiVersion(options: Record<string, unknown> | undefined): DaytonaApiVersion {
@@ -192,6 +276,11 @@ export function daytonaProviderErrors(raw: unknown, where = "settings.sandbox.pr
   for (const key of ["apiUrl", "target", "region", "image", "snapshot"] as const) {
     if (r[key] !== undefined && r[key] !== null && typeof r[key] !== "string") errors.push(`${where}.${key} must be a string`);
   }
+  if (r.maxTimeoutSeconds !== undefined && r.maxTimeoutSeconds !== null
+    && (typeof r.maxTimeoutSeconds !== "number" || !Number.isInteger(r.maxTimeoutSeconds) || r.maxTimeoutSeconds < 60)) {
+    errors.push(`${where}.maxTimeoutSeconds must be a whole number of seconds, at least 60 (v2: the plan's maximum sandbox lifetime, default ${DAYTONA_V2_MAX_TIMEOUT_SECONDS})`);
+  }
+  errors.push(...hibernateErrors(r.hibernate, `${where}.hibernate`));
   if (r.api === "v2") {
     if (typeof r.apiUrl === "string" && r.apiUrl.trim()) {
       errors.push(`${where}.apiUrl: Daytona v2 only talks to Daytona Cloud (https://api.daytona.com) and takes no API URL. Remove apiUrl, or keep api "v0" for a custom or self-hosted Daytona`);

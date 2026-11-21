@@ -11,7 +11,7 @@ import { apiUrl, config } from "@/lib/config";
 
 export type ComputerKind = "host" | "daytona" | "e2b";
 export type ComputerStatus =
-  | "running" | "stopped" | "paused" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
+  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
 
 export interface ComputerNetwork {
   mode: "deny" | "allowlist" | "open" | "unrestricted";
@@ -40,6 +40,10 @@ export interface Computer {
   lastError?: string;
   /** Daytona: the snapshot a new machine comes from is not active ("inactive": activated on the next start). */
   snapshotState?: string;
+  /** Daytona v2: the newest memory and disk snapshot of its VM (what a hibernated computer wakes from). */
+  lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number };
+  /** Something worth knowing that is not an error (e.g. its VM vanished and was restored from the snapshot). */
+  notice?: string;
   /** "host": this server, always there. */
   builtin?: boolean;
   agents: Array<{ name: string; isDefault: boolean }>;
@@ -94,7 +98,7 @@ export const computersApi = {
 export const KIND_LABELS: Record<ComputerKind, string> = { host: "This server", daytona: "Daytona", e2b: "E2B" };
 
 export const STATUS_LABELS: Record<ComputerStatus, string> = {
-  running: "Running", stopped: "Stopped", paused: "Paused", archived: "Archived", creating: "Creating", starting: "Starting",
+  running: "Running", stopped: "Stopped", paused: "Paused", hibernated: "Hibernated (resumes in a few seconds)", archived: "Archived", creating: "Creating", starting: "Starting",
   stopping: "Stopping", error: "Error", missing: "Not created yet", unknown: "Unknown",
 };
 
@@ -127,6 +131,18 @@ export function formatUptime(minutes: number | undefined): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/** "1.4 GB", "230 MB". */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+/** A snapshot as the card shows it: "5 min ago · 224 MB memory + 1.4 GB disk". */
+export function formatSnapshot(s: NonNullable<Computer["lastSnapshot"]>, now = Date.now()): string {
+  const sizes = [s.memoryBytes !== undefined ? `${formatBytes(s.memoryBytes)} memory` : "", s.diskBytes !== undefined ? `${formatBytes(s.diskBytes)} disk` : ""].filter(Boolean).join(" + ");
+  return `${formatLastUsed(s.at, now)}${sizes ? ` · ${sizes}` : ""}`;
 }
 
 /** "just now", "5 min ago", "3 h ago", "2 d ago", "never". */
@@ -207,8 +223,9 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
     out.image = form.imageKind === "image" && image ? image : editing ? null : undefined;
   }
   if (form.kind === "e2b") out.template = image || (editing ? null : undefined);
-  if (form.kind === "host") out.egress = form.egress.trim() || (editing ? null : undefined);
-  else {
+  // remote computers reach their egress proxy through Tailscale in their VM (settings.tailscale)
+  out.egress = form.egress.trim() || (editing ? null : undefined);
+  if (form.kind !== "host") {
     const lifecycle: Record<string, number> = { idleStopMinutes: Number(form.idleStopMinutes) };
     if (form.kind === "daytona" && form.autoArchiveDays !== "") lifecycle.autoArchiveDays = Number(form.autoArchiveDays);
     out.lifecycle = lifecycle;

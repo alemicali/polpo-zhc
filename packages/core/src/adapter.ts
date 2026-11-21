@@ -64,7 +64,7 @@ export interface SpawnContext {
   /** Email domain allowlist — restricts email_send tool to these domains. */
   emailAllowedDomains?: string[];
   /** The agent's browser egress proxy (a residential line, see tools/browser-egress.ts). */
-  browserEgress?: { name: string; url: string };
+  browserEgress?: { name: string; url: string; tailnet?: import("./tailnet.js").TailnetEgressRef };
   /** Global reasoning level from settings — used as fallback when agent doesn't specify one. */
   reasoning?: ReasoningLevel;
   /** Instance compaction settings; the agent's own settings apply on top. */

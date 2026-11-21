@@ -20,7 +20,7 @@ type FieldMeta = { key: TextField; label: string; placeholder: string; hint?: st
 /** Daytona v2 (the new service): its own fields, key page and what it creates. */
 const DAYTONA_V2 = {
   fields: [
-    { key: "image", label: "Image", placeholder: "polpo-runner-vm-1", hint: "Empty: the Polpo runner image" },
+    { key: "image", label: "Image", placeholder: "polpo-runner-vm-2", hint: "Empty: the Polpo runner image" },
     { key: "region", label: "Region", placeholder: "project default", hint: "Optional" },
   ] as FieldMeta[],
   keyUrl: "https://app.daytona.io/dashboard",
@@ -194,7 +194,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
                 <div className="flex h-8 items-center rounded-md border border-border/40 bg-muted/20 px-2 text-xs" data-testid="daytona-vm-class">
                   {v2 ? "Linux VM (linux-vm)" : "From the snapshot"}
                 </div>
-                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Idle: paused, memory kept" : "Container stops, linux-vm pauses"}</span>
+                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Computers hibernate (snapshot); pooled VMs deleted when idle" : "Container stops, linux-vm pauses"}</span>
               </div>
             </div>
           )}

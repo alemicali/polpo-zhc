@@ -9,7 +9,7 @@ import { Monitor, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/computers/status-badge";
 import {
-  KIND_LABELS, availableActions, formatLastUsed, formatUptime, type Computer, type ComputerAction,
+  KIND_LABELS, availableActions, formatLastUsed, formatSnapshot, formatUptime, type Computer, type ComputerAction,
 } from "@/lib/computers-api";
 
 const ACTION_META: Record<ComputerAction, { label: string; icon: typeof Play }> = {
@@ -47,6 +47,7 @@ export function ComputerCard({
         <StatusBadge computer={computer} />
       </div>
       {computer.lastError && computer.status === "error" && <p className="text-xs text-destructive" role="alert">{computer.lastError}</p>}
+      {computer.notice && <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="computer-notice">{computer.notice}</p>}
       {computer.snapshotState && computer.snapshotState !== "active" && (
         <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="computer-snapshot">
           Snapshot {computer.snapshotState}{computer.snapshotState === "inactive" ? ": it is activated on the next start (a few minutes longer)" : ""}
@@ -67,6 +68,14 @@ export function ComputerCard({
             <dt className="text-muted-foreground">Uptime</dt><dd title="Time it ran (what the provider bills, roughly)">{formatUptime(computer.uptimeMinutes)}</dd>
             {computer.kind !== "host" && (
               <><dt className="text-muted-foreground">Stops after</dt><dd>{computer.lifecycle?.idleStopMinutes ?? 15} idle min</dd></>
+            )}
+            {computer.lastSnapshot && (
+              <>
+                <dt className="text-muted-foreground">Last snapshot</dt>
+                <dd className="truncate" data-testid="computer-last-snapshot" title={`Memory and disk saved at ${computer.lastSnapshot.at} (snapshot storage is billed)`}>
+                  {formatSnapshot(computer.lastSnapshot)}
+                </dd>
+              </>
             )}
             {computer.egress && (
               <><dt className="text-muted-foreground">Egress</dt><dd className="truncate" data-testid="computer-egress">via {computer.egress} proxy</dd></>

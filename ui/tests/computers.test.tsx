@@ -28,7 +28,7 @@ vi.mock("@polpo-ai/react", async () => {
 import { MemoryRouter } from "react-router-dom";
 import { ComputersPage } from "../src/pages/computers";
 import {
-  EMPTY_COMPUTER_FORM, availableActions, computerInput, formatLastUsed, formatUptime, validateComputerForm,
+  EMPTY_COMPUTER_FORM, availableActions, computerInput, formatLastUsed, formatSnapshot, formatUptime, validateComputerForm,
   type Computer,
 } from "../src/lib/computers-api";
 
@@ -125,7 +125,9 @@ test("actions by status, uptime and last use, form validation and body", () => {
   expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina", image: "polpo-runner-1", autoArchiveDays: "7", start: true }))
     .toEqual({ id: "nina", name: "Nina", kind: "daytona", snapshot: "polpo-runner-1", lifecycle: { idleStopMinutes: 15, autoArchiveDays: 7 }, start: true });
   // editing clears what was emptied
-  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina" }, true)).toEqual({ name: "Nina", snapshot: null, image: null, lifecycle: { idleStopMinutes: 15 } });
+  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina" }, true)).toEqual({ name: "Nina", snapshot: null, image: null, egress: null, lifecycle: { idleStopMinutes: 15 } });
+  // a remote computer may go out through an egress proxy (Tailscale in its VM)
+  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina", egress: " home " }, true)).toMatchObject({ egress: "home" });
 });
 
 // ── Page ────────────────────────────────────────────────────────────────────
@@ -197,4 +199,21 @@ test("a computer whose snapshot is inactive says so", async () => {
   server.computers = [HOST, nina({ status: "missing", snapshotState: "inactive" })];
   await render(<ComputersPage />);
   expect(card("nina").querySelector('[data-testid="computer-snapshot"]')!.textContent).toMatch(/inactive: it is activated on the next start/);
+});
+
+test("a hibernated computer (Daytona v2): its label, last snapshot (time and size), notice; Start wakes it", async () => {
+  installFetch();
+  const at = new Date(Date.now() - 5 * 60_000).toISOString();
+  server.computers = [HOST, nina({ status: "hibernated", lastSnapshot: { at, memoryBytes: 224 * 1024 ** 2, diskBytes: 1.5 * 1024 ** 3 }, notice: "Its VM was gone: restored from the snapshot" })];
+  expect(availableActions({ status: "hibernated", kind: "daytona" })).toEqual(["start", "reset"]);
+  expect(formatSnapshot({ at, memoryBytes: 224 * 1024 ** 2, diskBytes: 1.5 * 1024 ** 3 })).toBe("5 min ago · 224 MB memory + 1.5 GB disk");
+  await render(<ComputersPage />);
+  const n = card("nina");
+  expect(n.querySelector('[data-testid="computer-status"]')!.textContent).toBe("Hibernated (resumes in a few seconds)");
+  expect(n.querySelector('[data-testid="computer-last-snapshot"]')!.textContent).toBe("5 min ago · 224 MB memory + 1.5 GB disk");
+  expect(n.querySelector('[data-testid="computer-notice"]')!.textContent).toMatch(/restored from the snapshot/);
+  await click(button("Start Nina"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "POST" && c.path === "/computers/nina/start")).toBe(true);
+  expect(card("nina").querySelector('[data-testid="computer-status"]')!.textContent).toBe("Running");
 });

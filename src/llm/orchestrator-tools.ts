@@ -1256,7 +1256,8 @@ const browserProfileLoginTool: Tool = {
 const computersListTool: Tool = {
   name: "computers_list",
   description: "The computers (persistent machines agents work on: settings.computers) with their live status (running, stopped, paused, "
-    + "archived, creating, error, missing = not created yet), provider, last use, uptime and the agents using each. \"host\" is this server.",
+    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet), provider, last use, uptime, "
+    + "last snapshot and the agents using each. \"host\" is this server.",
   parameters: Type.Object({}),
 };
 const computerCreateTool: Tool = {
@@ -1273,7 +1274,7 @@ const computerCreateTool: Tool = {
     template: Type.Optional(Type.String({ description: "E2B template (default: the instance's)" })),
     idleStopMinutes: Type.Optional(Type.Number({ description: "Stop/pause after this many minutes without use (default 15)" })),
     autoArchiveDays: Type.Optional(Type.Number({ description: "Daytona: archive after this many days stopped (default Daytona's, 7)" })),
-    egress: Type.Optional(Type.String({ description: "host only: egress proxy name (settings.egressProxies) its agents' browsers go out through" })),
+    egress: Type.Optional(Type.String({ description: "Egress proxy name (settings.egressProxies) its agents' browsers go out through. A remote computer reaches it through Tailscale in its VM: needs settings.tailscale and a SOCKS5 proxy on a tailnet address (egress_status)" })),
     start: Type.Optional(Type.Boolean({ description: "Create the machine now instead of on first use" })),
   }),
 };
@@ -1293,13 +1294,15 @@ const computerStartTool: Tool = {
 };
 const computerStopTool: Tool = {
   name: "computer_stop",
-  description: "Stop (Daytona) or pause (E2B) a computer's machine now: its disk is kept, nothing is deleted; it starts again on next use.",
+  description: "Stop (Daytona v0), pause (E2B) or hibernate (Daytona v2: memory and disk snapshot, its VM deleted) a computer's machine now: "
+    + "nothing is lost; it starts (wakes) again on next use.",
   parameters: Type.Object({ id: Type.String({ description: "Computer id" }) }),
 };
 const egressStatusTool: Tool = {
   name: "egress_status",
   description: "The egress proxies agents' browsers can go out through (settings.egressProxies, e.g. \"home\": a residential line over Tailscale), "
-    + "whether each is reachable now, and which agents use it (agent browserEgress, set with update_agent).",
+    + "whether each is reachable now, which agents use it (agent browserEgress, set with update_agent), and for remote computers with an egress "
+    + "(through Tailscale in their VM): tailnet up/down, node name, path (direct or DERP relay), proxy reachable and where their browser goes out now.",
   parameters: Type.Object({}),
 };
 const setCheckInsTool: Tool = {
@@ -7176,6 +7179,13 @@ async function computerTools(polpo: Orchestrator) {
   };
 }
 
+/** " (0.2 GB memory + 1.4 GB disk)" for a Daytona v2 snapshot, "" when the sizes are unknown. */
+function snapshotSizes(s: { memoryBytes?: number; diskBytes?: number }): string {
+  const gb = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GB`;
+  const parts = [s.memoryBytes !== undefined ? `${gb(s.memoryBytes)} memory` : "", s.diskBytes !== undefined ? `${gb(s.diskBytes)} disk` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(" + ")})` : "";
+}
+
 async function execComputersList(polpo: Orchestrator): Promise<string> {
   const t = await computerTools(polpo);
   const agents = await polpo.getAgents();
@@ -7186,7 +7196,8 @@ async function execComputersList(polpo: Orchestrator): Promise<string> {
     const users = t.core.computerUsers(c.id, agents).map((u) => `${u.name}${u.isDefault ? " (default)" : ""}`);
     lines.push(`- ${c.id} "${c.name}" (${c.kind}${c.snapshot ? `, snapshot ${c.snapshot}` : c.image ? `, image ${c.image}` : c.template ? `, template ${c.template}` : ""}): ${live.status}`
       + `${live.lastUsedAt ? `, last used ${live.lastUsedAt}` : ""}${live.uptimeMinutes ? `, ${live.uptimeMinutes} min running so far` : ""}`
-      + `${live.lastError ? `, error: ${live.lastError}` : ""}; stops after ${t.core.computerIdleStopMinutes(c)} idle min; agents: ${users.join(", ") || "none"}`);
+      + `${live.lastSnapshot ? `, last snapshot ${live.lastSnapshot.at}${snapshotSizes(live.lastSnapshot)}` : ""}`
+      + `${live.notice ? `, note: ${live.notice}` : ""}${live.lastError ? `, error: ${live.lastError}` : ""}; stops after ${t.core.computerIdleStopMinutes(c)} idle min; agents: ${users.join(", ") || "none"}`);
   }
   return `Computers:\n${lines.join("\n")}`;
 }
@@ -7202,7 +7213,8 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   }
   const existing = t.computers();
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
-  if (computer.egress && !polpo.getConfig()?.settings?.egressProxies?.[computer.egress]) return `Error: there is no egress proxy "${computer.egress}" (egress_status)`;
+  const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
+  if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
   if (args.start === true && t.core.isRemoteComputer(computer)) {
@@ -7234,7 +7246,10 @@ async function execComputerControl(polpo: Orchestrator, op: "start" | "stop", ar
   if (!computer) return id === "host" ? "Error: \"host\" is this server: there is no machine to start or stop" : `Error: there is no computer "${id}" (computers_list)`;
   if (!t.core.isRemoteComputer(computer)) return `Error: "${id}" runs on this server: there is no machine to ${op}`;
   try {
-    if (op === "stop") return `Computer "${id}": ${(await t.manager().stop(computer)).status} (disk kept).`;
+    if (op === "stop") {
+      const live = await t.manager().stop(computer);
+      return `Computer "${id}": ${live.status} (${live.status === "hibernated" ? "memory and disk saved in a snapshot; it wakes in a few seconds on its next use" : "disk kept"}).`;
+    }
     const sandbox = t.sandbox(computer);
     if ("error" in sandbox) return `Error: ${sandbox.error}`;
     return `Computer "${id}": ${(await t.manager().start(computer, sandbox)).status}.`;
@@ -7255,7 +7270,24 @@ async function execEgressStatus(polpo: Orchestrator): Promise<string> {
       + `used by ${users.length ? users.join(", ") : "no agent"}`;
   }));
   const unknown = agents.filter((a) => a.browserEgress && !proxies[a.browserEgress]).map((a) => `${a.name} (${a.browserEgress})`);
-  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "");
+  // remote computers reach their proxy through Tailscale in their VM: what each one sees from there
+  const settings = polpo.getConfig()?.settings;
+  const remote = (settings?.computers ?? []).filter((c) => (c.kind === "daytona" || c.kind === "e2b") && c.egress);
+  const remoteLines: string[] = [];
+  if (remote.length) {
+    const t = await computerTools(polpo);
+    const { computerEgressStatus } = await import("../sandbox/computers.js");
+    for (const c of remote) {
+      const s = await computerEgressStatus(t.manager(), c, settings, polpo.getConfig()?.project).catch((err) => ({ error: (err as Error).message } as const));
+      if (!s) continue;
+      if (!("proxy" in s)) { remoteLines.push(`- computer ${c.id} (${c.kind}) → ${c.egress}: could not be checked (${s.error})`); continue; }
+      const path = s.path ? `, path ${s.path === "derp" ? `DERP relay${s.relay ? ` ${s.relay}` : ""}` : s.path}` : "";
+      remoteLines.push(`- computer ${c.id} (${c.kind}) → ${s.proxy}: tailnet ${s.tailnet}${s.node ? ` as ${s.node}` : ""}${path}, `
+        + `proxy ${s.proxyReachable ? "reachable" : "not reachable"}; browser goes out ${s.effective}${s.error ? ` (${s.error})` : ""}`);
+    }
+  }
+  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "")
+    + (remoteLines.length ? `\nRemote computers (through Tailscale in their VM):\n${remoteLines.join("\n")}` : "");
 }
 
 // ── Primary bot check-ins ──
