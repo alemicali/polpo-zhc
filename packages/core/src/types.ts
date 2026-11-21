@@ -967,6 +967,11 @@ export interface PolpoSettings {
     /** Default tool call timeout in ms (per-connector toolTimeoutMs wins). Default 60000. */
     toolTimeoutMs?: number;
   };
+  /** Polpo's own MCP server (/mcp). */
+  mcp?: {
+    /** Toolsets offered to MCP clients ("all", "default" or names such as core, tasks, admin). Default: every toolset except admin. POLPO_MCP_TOOLSETS wins. */
+    toolsets?: string[];
+  };
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

@@ -421,6 +421,9 @@ function parseSettings(raw: any): PolpoSettings {
     if (typeof raw.connectors.toolTimeoutMs === "number" && raw.connectors.toolTimeoutMs > 0) connectors.toolTimeoutMs = raw.connectors.toolTimeoutMs;
     settings.connectors = connectors;
   }
+  if (raw?.mcp && typeof raw.mcp === "object" && Array.isArray(raw.mcp.toolsets)) {
+    settings.mcp = { toolsets: (raw.mcp.toolsets as unknown[]).filter((t): t is string => typeof t === "string") };
+  }
 
   // Storage backend.
   // Default to "sqlite" so new installs get the indexed/transactional store
