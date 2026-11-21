@@ -1,5 +1,5 @@
 /**
- * Computers for the Computers page and the agent's Sandbox tab: the list with live status, kept
+ * Computers for the Computers page and the agent's Computer and Sandbox tabs: the list with live status, kept
  * fresh by `computer:changed` over the app's single SSE stream (status changes come from the
  * cached state, without asking the providers again).
  */

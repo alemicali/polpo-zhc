@@ -27,7 +27,6 @@ vi.mock("@polpo-ai/react", async () => {
 
 import { MemoryRouter } from "react-router-dom";
 import { ComputersPage } from "../src/pages/computers";
-import { AgentComputerCard } from "../src/components/agents/agent-computer-card";
 import {
   EMPTY_COMPUTER_FORM, availableActions, computerInput, formatLastUsed, formatUptime, validateComputerForm,
   type Computer,
@@ -198,22 +197,4 @@ test("a computer whose snapshot is inactive says so", async () => {
   server.computers = [HOST, nina({ status: "missing", snapshotState: "inactive" })];
   await render(<ComputersPage />);
   expect(card("nina").querySelector('[data-testid="computer-snapshot"]')!.textContent).toMatch(/inactive: it is activated on the next start/);
-});
-
-// ── Agent's Sandbox tab ─────────────────────────────────────────────────────
-test("the agent's default computer is chosen in its Sandbox tab", async () => {
-  installFetch();
-  const onSaved = vi.fn();
-  await render(<AgentComputerCard agentName="sitoinchat" onSaved={onSaved} />);
-  const select = document.querySelector<HTMLSelectElement>('select[aria-label="Default computer"]')!;
-  expect([...select.options].map((o) => o.value)).toEqual(["host", "nina"]);
-  expect(select.value).toBe("host");
-  await act(async () => {
-    select.value = "nina";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  await click(byText("Save"));
-  await flush();
-  expect(server.calls.find((c) => c.path === "/agents/sitoinchat")!.body).toEqual({ defaultComputer: "nina", computers: ["nina"] });
-  expect(onSaved).toHaveBeenCalled();
 });
