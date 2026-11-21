@@ -403,6 +403,10 @@ export const AddAgentSchema = z.object({
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
+  /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
+  computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
+  /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
+  defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
@@ -449,6 +453,10 @@ export const UpdateAgentSchema = z.object({
   pipeline: PipelineSchema.optional(),
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
+  /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
+  computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
+  /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
+  defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
 });

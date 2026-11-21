@@ -43,6 +43,14 @@ export interface CreateSpec {
   keep: boolean;
   /** Something requested could not be applied as asked (e.g. resources fixed by the image). */
   onWarning?: (message: string) => void;
+  /**
+   * A computer (persistent): never deleted by the provider, stopped (Daytona container) or
+   * paused (E2B, Daytona VM class) after idleStopMinutes without use; Daytona archives it after
+   * autoArchiveDays stopped.
+   */
+  persistent?: { idleStopMinutes: number; autoArchiveDays?: number };
+  /** Slow steps worth telling (e.g. reactivating an inactive Daytona snapshot). */
+  onProgress?: (message: string) => void;
 }
 
 export interface RemoteVmSummary { remoteId: string; state: string; labels: Record<string, string>; createdAt?: string }
@@ -54,12 +62,32 @@ export interface RemoteAdapter {
   /** Stop/pause a VM by id (the reaper stops idle pooled VMs). */
   suspendById(remoteId: string): Promise<void>;
   create(spec: CreateSpec): Promise<RemoteDriver>;
-  connect(remoteId: string): Promise<RemoteDriver>;
+  /** Reconnect (starting/resuming it); `timeoutMs`: E2B's idle timeout from now (computers). */
+  connect(remoteId: string, opts?: { timeoutMs?: number }): Promise<RemoteDriver>;
   list(labels: Record<string, string>): Promise<RemoteVmSummary[]>;
   remove(remoteId: string): Promise<void>;
+  /** Daytona: a snapshot's state ("active", "inactive", …), undefined when it cannot be read. */
+  snapshotState?(name: string): Promise<string | undefined>;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** Daytona deactivates snapshots nobody used for a while: creating from one then fails. */
+export function isInactiveSnapshotError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /snapshot\b.*\bis inactive|snapshot\b.*\binactive\b|inactive snapshot/i.test(message);
+}
+
+/** A Daytona snapshot that is inactive and could not be activated (or did not become active in time). */
+export class SnapshotActivationError extends Error {
+  constructor(readonly snapshot: string, reason: string) {
+    super(`Daytona snapshot "${snapshot}" is inactive and could not be activated: ${reason}. Activate it in the Daytona dashboard (Snapshots), or choose another snapshot in Settings → Sandbox.`);
+    this.name = "SnapshotActivationError";
+  }
+}
+
+/** How long a snapshot may take to become active again, and how often its state is checked. */
+export const SNAPSHOT_ACTIVATION = { timeoutMs: 5 * 60_000, pollMs: 3_000 };
 
 /** A network rule this provider cannot enforce as written: the VM is not created. */
 export class SandboxNetworkConfigError extends Error {
@@ -207,10 +235,14 @@ class DaytonaAdapter implements RemoteAdapter {
     // network rules are checked before anything is created
     const networkParams = daytonaNetworkParams(network);
     const client = await this.client();
+    const persistent = spec.persistent;
     const params: Record<string, unknown> = {
-      autoStopInterval: spec.lifetimeMinutes,
+      autoStopInterval: persistent ? persistent.idleStopMinutes : spec.lifetimeMinutes,
       labels: spec.labels,
-      ...(spec.keep ? { autoDeleteInterval: spec.deleteAfterStopMinutes ?? 60 } : { ephemeral: true }),
+      // a computer is never deleted by Daytona (negative: auto-delete off); archived after N days stopped
+      ...(persistent
+        ? { autoDeleteInterval: -1, ...(persistent.autoArchiveDays ? { autoArchiveInterval: persistent.autoArchiveDays * 24 * 60 } : {}) }
+        : spec.keep ? { autoDeleteInterval: spec.deleteAfterStopMinutes ?? 60 } : { ephemeral: true }),
       ...(spec.sandbox.providerOptions.snapshot ? { snapshot: String(spec.sandbox.providerOptions.snapshot) } : {}),
     };
     Object.assign(params, networkParams);
@@ -220,13 +252,73 @@ class DaytonaAdapter implements RemoteAdapter {
     if (image && !params.snapshot) params.image = image;
     if (sized.resources) params.resources = sized.resources;
     if (sized.warning) spec.onWarning?.(sized.warning);
-    return this.driver(await client.create(params, { timeout: 180 }));
+    let sandbox: any;
+    try {
+      sandbox = await client.create(params, { timeout: 180 });
+    } catch (err) {
+      // the snapshot was deactivated (unused for a while): activate it, wait, try once more
+      if (!params.snapshot || !isInactiveSnapshotError(err)) throw err;
+      await this.activateSnapshot(client, String(params.snapshot), spec.onProgress);
+      sandbox = await client.create(params, { timeout: 180 });
+    }
+    // VM-class snapshots (linux-vm) pause instead of stopping: memory and processes survive
+    if (persistent && sandbox.sandboxClass === "linux-vm") {
+      try {
+        await sandbox.setAutostopInterval(0);
+        await sandbox.setAutoPauseInterval(persistent.idleStopMinutes);
+      } catch (err) {
+        spec.onWarning?.(`Daytona: could not switch the computer to auto-pause (${(err as Error).message}); it stops after ${persistent.idleStopMinutes} idle minutes instead`);
+      }
+    }
+    return this.driver(sandbox);
+  }
+
+  /** Activate an inactive snapshot and wait (bounded) until it is active. */
+  private async activateSnapshot(client: any, name: string, onProgress?: (message: string) => void): Promise<void> {
+    const t0 = Date.now();
+    onProgress?.(`Daytona snapshot "${name}" is inactive: activating it (this can take a few minutes)…`);
+    try {
+      await client.snapshot.activate(name);
+    } catch (err) {
+      // already being activated by someone else is fine: wait for it below
+      if (!/already|activ/i.test((err as Error).message ?? "")) throw new SnapshotActivationError(name, (err as Error).message ?? String(err));
+    }
+    let state = "";
+    let reported = t0;
+    while (Date.now() - t0 < SNAPSHOT_ACTIVATION.timeoutMs) {
+      try {
+        state = String((await client.snapshot.get(name))?.state ?? "");
+      } catch (err) {
+        throw new SnapshotActivationError(name, (err as Error).message ?? String(err));
+      }
+      if (state === "active") {
+        onProgress?.(`Daytona snapshot "${name}" is active again (${Math.round((Date.now() - t0) / 1000)} s)`);
+        return;
+      }
+      if (state === "error" || state === "build_failed") throw new SnapshotActivationError(name, `its state is ${state}`);
+      if (Date.now() - reported >= 30_000) {
+        reported = Date.now();
+        onProgress?.(`Daytona snapshot "${name}" is still ${state || "activating"} (${Math.round((Date.now() - t0) / 1000)} s)…`);
+      }
+      await new Promise((r) => setTimeout(r, SNAPSHOT_ACTIVATION.pollMs));
+    }
+    throw new SnapshotActivationError(name, `still ${state || "inactive"} after ${Math.round(SNAPSHOT_ACTIVATION.timeoutMs / 60_000)} minutes`);
+  }
+
+  async snapshotState(name: string): Promise<string | undefined> {
+    const client = await this.client();
+    try {
+      return String((await client.snapshot.get(name))?.state ?? "") || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async connect(remoteId: string): Promise<RemoteDriver> {
     const client = await this.client();
     const sandbox = await client.get(remoteId);
-    if (sandbox.state !== "started") await sandbox.start(120);
+    // stopped, paused and archived sandboxes all start with start() (archived ones take longer)
+    if (sandbox.state !== "started") await sandbox.start(sandbox.state === "archived" ? 600 : 120);
     return this.driver(sandbox);
   }
 
@@ -270,6 +362,8 @@ class DaytonaAdapter implements RemoteAdapter {
       writeFile: async (path, data) => { await sandbox.fs.uploadFile(Buffer.from(data), path); },
       // pause keeps memory but container sandboxes do not support it: stop keeps the files
       suspend: async () => { await sandbox.pause(60).catch(() => sandbox.stop(120)); },
+      // activity resets Daytona's auto-stop timer
+      keepAlive: async () => { await sandbox.refreshActivity?.(); },
       resume: async () => { await sandbox.refreshData?.().catch(() => undefined); if (sandbox.state !== "started") await sandbox.start(120); },
       destroy: async () => { await sandbox.delete(); },
     };
@@ -294,7 +388,9 @@ class E2BAdapter implements RemoteAdapter {
     const { mod, conn, template: defaultTemplate } = await this.sdk();
     const { network } = spec.sandbox;
     // pooled VMs pause when their timeout hits (files kept) instead of dying; the reaper deletes them later
-    const opts: Record<string, unknown> = { ...conn, timeoutMs: spec.lifetimeMinutes * 60_000, metadata: spec.labels, ...(spec.keep ? { lifecycle: { onTimeout: "pause" } } : {}) };
+    // computers pause too, and are never deleted
+    const minutes = spec.persistent ? spec.persistent.idleStopMinutes : spec.lifetimeMinutes;
+    const opts: Record<string, unknown> = { ...conn, timeoutMs: minutes * 60_000, metadata: spec.labels, ...(spec.keep || spec.persistent ? { lifecycle: { onTimeout: "pause" } } : {}) };
     Object.assign(opts, e2bNetworkOpts(network));
     const { cpus, memoryMb, diskMb } = spec.sandbox.resources;
     if (cpus || memoryMb || diskMb) {
@@ -302,13 +398,14 @@ class E2BAdapter implements RemoteAdapter {
     }
     const template = (spec.sandbox.providerOptions.template as string | undefined) || defaultTemplate || undefined;
     const sbx = template ? await mod.Sandbox.create(template, opts as any) : await mod.Sandbox.create(opts as any);
-    return this.driver(mod, conn, sbx, spec.lifetimeMinutes);
+    return this.driver(mod, conn, sbx, minutes);
   }
 
-  async connect(remoteId: string): Promise<RemoteDriver> {
+  async connect(remoteId: string, o?: { timeoutMs?: number }): Promise<RemoteDriver> {
     const { mod, conn } = await this.sdk();
     // connecting resumes a paused sandbox
-    return this.driver(mod, conn, await mod.Sandbox.connect(remoteId, conn as any), undefined);
+    const sbx = await mod.Sandbox.connect(remoteId, { ...conn, ...(o?.timeoutMs ? { timeoutMs: o.timeoutMs } : {}) } as any);
+    return this.driver(mod, conn, sbx, o?.timeoutMs ? o.timeoutMs / 60_000 : undefined);
   }
 
   async list(labels: Record<string, string>): Promise<RemoteVmSummary[]> {

@@ -52,6 +52,7 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
       { to: "/missions", icon: Target, label: "Missions" },
       { to: "/agents", icon: Bot, label: "Agents" },
       { to: "/connectors", icon: Plug, label: "Connectors" },
+      { to: "/computers", icon: Monitor, label: "Computers" },
       { to: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
     ],
   },

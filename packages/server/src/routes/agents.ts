@@ -82,8 +82,18 @@ export function agentRoutes(getDeps: () => {
   runStore: any;
   polpoDir: string;
   fs?: FileSystem;
+  /** The instance's computer ids (settings.computers), to check agents' computers and defaultComputer. */
+  computerIds?: () => string[];
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  /** An error for computers/defaultComputer naming a computer the instance does not have, else null. */
+  const badComputers = (deps: { computerIds?: () => string[] }, body: { computers?: string[]; defaultComputer?: string }): string | null => {
+    if (body.computers === undefined && body.defaultComputer === undefined) return null;
+    const known = new Set(["host", ...(deps.computerIds?.() ?? [])]);
+    const unknown = [...(body.computers ?? []), ...(body.defaultComputer ? [body.defaultComputer] : [])].filter((id) => !known.has(id));
+    return unknown.length ? `Unknown computer${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (create ${unknown.length > 1 ? "them" : "it"} first: POST /computers)` : null;
+  };
 
   // GET /agents — list agents
   const listAgentsRoute = createRoute({
@@ -167,12 +177,18 @@ export function agentRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean() }) }) } },
         description: "Agent added",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid input (e.g. an unknown computer)",
+      },
     },
   });
 
   app.openapi(addAgentRoute, async (c) => {
     const deps = getDeps();
     const body = c.req.valid("json");
+    const computersError = badComputers(deps, body);
+    if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
     const teamName = c.req.query("team");
 
     await deps.addAgent({
@@ -191,6 +207,8 @@ export function agentRoutes(getDeps: () => {
       reportsTo: body.reportsTo,
       browserProfile: body.browserProfile,
       browserEgress: body.browserEgress,
+      ...(body.computers !== undefined && { computers: body.computers }),
+      ...(body.defaultComputer ? { defaultComputer: body.defaultComputer } : {}),
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
       ...(body.learning !== undefined && { learning: body.learning }),
       ...(body.drive !== undefined && { drive: body.drive }),
@@ -452,6 +470,10 @@ export function agentRoutes(getDeps: () => {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
         description: "Agent updated",
       },
+      400: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+        description: "Invalid input (e.g. an unknown computer)",
+      },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
         description: "Agent not found",
@@ -468,6 +490,8 @@ export function agentRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
+    const computersError = badComputers(deps, { computers: body.computers, defaultComputer: body.defaultComputer || undefined });
+    if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
 
     // Handle reportsTo: empty string clears it
     let reportsTo: string | undefined = undefined;
@@ -497,6 +521,9 @@ export function agentRoutes(getDeps: () => {
       ...(body.pipeline !== undefined && { pipeline: body.pipeline }),
       ...(body.browserProfile !== undefined && { browserProfile: body.browserProfile }),
       ...(body.browserEgress !== undefined && { browserEgress: body.browserEgress }),
+      ...(body.computers !== undefined && { computers: body.computers }),
+      // "" clears it (back to this server)
+      ...(body.defaultComputer !== undefined && { defaultComputer: body.defaultComputer || undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
       ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),
       ...(body.team !== undefined && { team: body.team }),

@@ -408,6 +408,10 @@ export interface AgentConfig {
   drive?: AgentDrive;
   /** Where this agent's tools run (sandbox), set by a person: overrides the instance default. */
   sandbox?: import("./sandbox.js").SandboxSettings;
+  /** Computers (settings.computers ids) this agent may use; "host" (this server) always. */
+  computers?: string[];
+  /** The machine its chats and tasks run on by default: a computer id, or "host" (unset: this server, with the sandbox cascade). */
+  defaultComputer?: string;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -940,6 +944,8 @@ export interface PolpoSettings {
   compaction?: import("./context-compactor.js").CompactionSettings;
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
+  /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */
+  computers?: import("./computers.js").ComputerConfig[];
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */

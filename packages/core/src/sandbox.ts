@@ -10,6 +10,7 @@
  */
 import { resolveRuntimeSandboxOptions, type RuntimeSandboxLifecycleOptions, type RuntimeSandboxOptions, type RuntimeSandboxVolumeSelection, type SandboxIsolation, type SandboxVolumeAccess, type SandboxVolumeWriteBack } from "./runtime-sandbox.js";
 import type { SandboxVolumeStrategy } from "./sandbox-provider.js";
+import { EPHEMERAL_COMPUTER, HOST_COMPUTER_ID, isRemoteComputer, type ComputerConfig, type ComputerContext } from "./computers.js";
 
 // ── Workspace ────────────────────────────────────────────────────────────
 
@@ -137,6 +138,12 @@ export interface SandboxSettings {
   warm?: Partial<Record<RemoteSandboxProvider, number>>;
   /** Provider-specific options (image, template, region…); never secrets. */
   providers?: Partial<Record<SandboxProviderId, Record<string, unknown>>>;
+  /**
+   * Mission and task levels: the machine this run uses instead of the agent's default computer.
+   * "ephemeral": a sandbox from the cascade (not the agent's computer); a computer id: that one,
+   * if the agent may use it; "host": this server.
+   */
+  computer?: string;
 }
 
 /** The settings a workspace is created with, after the cascade. */
@@ -151,6 +158,7 @@ export type {
 } from "./runtime-sandbox.js";
 export { SANDBOX_VOLUME_NAME_PATTERN, SANDBOX_VOLUMES_MAX, SANDBOX_IDLE_TTL_MINUTES_MAX, SandboxVolumeGrantError, resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
 export type { SandboxVolumeStrategy } from "./sandbox-provider.js";
+export * from "./computers.js";
 /** What happens after a run releases its remote sandbox (open Polpo's lifecycle options). */
 export type SandboxLifecycleSettings = RuntimeSandboxLifecycleOptions;
 /** One selected volume (open Polpo's volume selection). */
@@ -204,6 +212,11 @@ export interface EffectiveSandbox {
   volumes?: SandboxVolumeSelection[];
   /** The provider the settings chose is not available here: `provider` is what runs instead. */
   fallback?: { from: SandboxProviderId; reason: "unavailable" };
+  /**
+   * The computer this run uses (see computers.ts). Remote kinds: the persistent VM found by its
+   * label, never deleted by the run; "host" kinds: this server (provider from the cascade).
+   */
+  computer?: ComputerConfig;
 }
 
 export interface SandboxCascade {
@@ -286,11 +299,21 @@ function domainAllowed(requested: string, allow: string[]): boolean {
  */
 export function resolveSandbox(
   cascade: SandboxCascade,
-  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProviderId> },
+  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProviderId>; computers?: ComputerContext },
 ): EffectiveSandbox {
+  const denied: EffectiveSandbox["denied"] = [];
+  // computers first (precedence in computers.ts): a remote computer is the whole answer
+  const selection = computerSelection(cascade, context.computers);
+  if (selection.denied) denied.push(selection.denied);
+  if (selection.computer && isRemoteComputer(selection.computer)) {
+    const remote = remoteComputerSandbox(selection.computer, cascade, context);
+    if (remote) return { ...remote, denied: [...denied, ...remote.denied] };
+  }
+  // a host computer is this server: its network (if it has one) stands for the agent level's
+  const hostComputer = selection.computer?.kind === "host" && selection.computer.id !== HOST_COMPUTER_ID ? selection.computer : undefined;
+  if (hostComputer?.network) cascade = { ...cascade, agent: { ...(cascade.agent ?? {}), network: hostComputer.network } };
   const instance = cascade.instance ?? {};
   const agent = cascade.agent ?? {};
-  const denied: EffectiveSandbox["denied"] = [];
 
   const allowed = new Set<SandboxProviderId>(agent.allowedProviders ?? instance.allowedProviders ?? ["local", "bwrap", "docker", "daytona", "e2b"]);
   let provider: SandboxProviderId = agent.provider ?? instance.provider ?? "local";
@@ -360,6 +383,85 @@ export function resolveSandbox(
     lifecycle,
     ...(volumes ? { volumes } : {}),
     ...(fallbackFrom ? { fallback: { from: fallbackFrom, reason: "unavailable" as const } } : {}),
+    ...(hostComputer ? { computer: hostComputer } : {}),
+  };
+}
+
+/** True when `requested` is a stricter network than `have` (or an allowlist `have` does not cover). */
+function stricterNetwork(requested: SandboxNetwork, have: SandboxNetwork): boolean {
+  if (NETWORK_STRICTNESS[requested.mode] > NETWORK_STRICTNESS[have.mode]) return true;
+  if (requested.mode === "allowlist" && have.mode === "allowlist") {
+    const want = new Set(requested.allow ?? []);
+    return (have.allow ?? []).some((d) => !want.has(d));
+  }
+  return false;
+}
+
+/**
+ * Which computer a run uses (precedence in computers.ts): none when the task or mission asks for
+ * an ephemeral sandbox, one it names (if the agent may use it), else the agent's default.
+ */
+export function computerSelection(cascade: SandboxCascade, ctx: ComputerContext | undefined): { computer?: ComputerConfig; denied?: EffectiveSandbox["denied"][number] } {
+  if (!ctx) return {};
+  const find = (id: string): ComputerConfig | undefined => id === HOST_COMPUTER_ID ? { id: HOST_COMPUTER_ID, name: "This server", kind: "host" } : ctx.computers.find((c) => c.id === id);
+  for (const level of ["task", "mission"] as const) {
+    const s = cascade[level];
+    if (!s) continue;
+    if (s.computer === EPHEMERAL_COMPUTER || s.provider || s.isolation === "fresh") return {};
+    if (s.computer) {
+      const c = find(s.computer);
+      if (c && ctx.allowed.includes(c.id)) return { computer: c };
+      // not one of the agent's computers: its default applies
+      const fallback = ctx.defaultComputer ? find(ctx.defaultComputer) : undefined;
+      return { ...(fallback ? { computer: fallback } : {}), denied: { level, field: "computer", requested: s.computer, applied: fallback?.id ?? HOST_COMPUTER_ID } };
+    }
+  }
+  return ctx.defaultComputer ? { computer: find(ctx.defaultComputer) } : {};
+}
+
+/**
+ * The sandbox of a run on a remote computer: its provider, image and network, the volumes it
+ * attaches. Undefined when it cannot be used here (the provider has no key on this server) or a
+ * task/mission asked for a stricter network than the computer has: the cascade applies then.
+ */
+function remoteComputerSandbox(
+  computer: ComputerConfig,
+  cascade: SandboxCascade,
+  context: { available?: ReadonlySet<SandboxProviderId> },
+): EffectiveSandbox | undefined {
+  const provider = computer.kind as RemoteSandboxProvider;
+  if (context.available && !context.available.has(provider)) return undefined;
+  const instance = cascade.instance ?? {};
+  const agent = cascade.agent ?? {};
+  // a computer may serve several agents: its own rule, else the instance default (never one agent's)
+  const network: SandboxNetwork = computer.network ?? instance.network ?? { mode: "open" };
+  for (const level of ["mission", "task"] as const) {
+    const requested = cascade[level]?.network;
+    if (requested && stricterNetwork(requested, network)) return undefined;
+  }
+  const denied: EffectiveSandbox["denied"] = [];
+  for (const level of ["mission", "task"] as const) {
+    const r = cascade[level]?.resources;
+    for (const key of ["cpus", "memoryMb", "diskMb"] as const) {
+      if (r?.[key] !== undefined && r[key] !== computer.resources?.[key]) denied.push({ level, field: `resources.${key}`, requested: r[key], applied: computer.resources?.[key] ?? "the computer's size" });
+    }
+  }
+  const providerOptions: Record<string, unknown> = { ...(instance.providers?.[provider] ?? {}) };
+  if (computer.image) { providerOptions.image = computer.image; delete providerOptions.snapshot; }
+  if (computer.snapshot) { providerOptions.snapshot = computer.snapshot; delete providerOptions.image; }
+  if (computer.template) providerOptions.template = computer.template;
+  const runtime = resolveRuntimeLevels(cascade);
+  const timeoutMin = cascade.task?.resources?.timeoutMin ?? cascade.mission?.resources?.timeoutMin ?? agent.resources?.timeoutMin ?? instance.resources?.timeoutMin;
+  return {
+    provider,
+    network,
+    resources: { ...(computer.resources ?? {}), ...(timeoutMin ? { timeoutMin } : {}) },
+    providerOptions,
+    denied,
+    isolation: "reuse",
+    lifecycle: effectiveLifecycle(undefined),
+    ...(computer.volumes ? { volumes: computer.volumes } : runtime?.volumes ? { volumes: runtime.volumes } : {}),
+    computer,
   };
 }
 
@@ -466,6 +568,7 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
   if (typeof r.confineExternalContent === "boolean") out.confineExternalContent = r.confineExternalContent;
   if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
   if (typeof r.chatRemote === "boolean") out.chatRemote = r.chatRemote;
+  if (typeof r.computer === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(r.computer)) out.computer = r.computer;
   // isolation, lifecycle and volumes are validated by open Polpo's resolver
   const runtime = resolveRuntimeSandboxOptions({ sandbox: r as RuntimeSandboxOptions });
   if (runtime?.isolation) out.isolation = runtime.isolation;

@@ -14,6 +14,7 @@ import { useSandboxOverview } from "@/hooks/use-sandbox-overview";
 import { compactSandbox, describeSandbox, sandboxApi, PLACEMENT_INFO, toolPlacement, type SandboxSettings, type ToolPlacement } from "@/lib/sandbox-api";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
+import { AgentComputerCard } from "./agent-computer-card";
 
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
 const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*"];
@@ -56,6 +57,12 @@ export function AgentSandboxTab() {
   return (
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
+        <AgentComputerCard
+          agentName={agentName}
+          defaultComputer={(agent as { defaultComputer?: string }).defaultComputer}
+          computers={(agent as { computers?: string[] }).computers}
+          onSaved={async () => { await Promise.all([refetch(), reload()]); }}
+        />
         <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
           <CardContent className="py-3 px-4 space-y-1.5 text-xs">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Effective sandbox</div>

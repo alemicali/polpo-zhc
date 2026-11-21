@@ -4,7 +4,11 @@ import type { EffectiveSandbox, SandboxNetwork } from "@polpo-ai/core/sandbox";
 
 // ── mocked SDKs (no network, no credentials) ────────────────────────────
 
-const daytona = vi.hoisted(() => ({ created: [] as any[], ctor: [] as any[], exec: [] as any[] }));
+const daytona = vi.hoisted(() => ({
+  created: [] as any[], ctor: [] as any[], exec: [] as any[],
+  // inactive snapshots: creates that fail first, states get() returns in turn, activate calls
+  inactiveCreates: 0, snapshotStates: [] as string[], activated: [] as string[], activateError: "" as string,
+}));
 const e2b = vi.hoisted(() => ({ created: [] as any[] }));
 
 /** Daytona's executeCommand: one string with stdout and stderr interleaved, and the exit code. */
@@ -16,7 +20,12 @@ function runLikeDaytona(command: string, cwd?: string, env?: Record<string, stri
 vi.mock("@daytona/sdk", () => ({
   Daytona: class {
     constructor(opts: unknown) { daytona.ctor.push(opts); }
+    snapshot = {
+      activate: async (name: string) => { daytona.activated.push(name); if (daytona.activateError) throw new Error(daytona.activateError); return { name, state: "pending" }; },
+      get: async (name: string) => ({ name, state: daytona.snapshotStates.length ? daytona.snapshotStates.shift() : "active" }),
+    };
     async create(params: any, opts: any) {
+      if (daytona.inactiveCreates > 0) { daytona.inactiveCreates--; throw new Error(`Snapshot ${params.snapshot} is inactive`); }
       daytona.created.push({ params, opts });
       return {
         id: "dt-1", state: "started",
@@ -48,7 +57,7 @@ vi.mock("../sandbox/remote-providers.js", () => ({
 
 const {
   DAYTONA_NETWORK_LIMITS, SandboxNetworkConfigError, classifyAllowEntries, daytonaExecWrapper, daytonaNetworkParams,
-  daytonaResources, e2bNetworkOpts, remoteAdapter, resetRemoteAdapters, splitDaytonaOutput,
+  daytonaResources, e2bNetworkOpts, remoteAdapter, resetRemoteAdapters, splitDaytonaOutput, SNAPSHOT_ACTIVATION, SnapshotActivationError, isInactiveSnapshotError,
 } = await import("../sandbox/remote-adapters.js");
 
 const allow = (...hosts: string[]): SandboxNetwork => ({ mode: "allowlist", allow: hosts });
@@ -60,6 +69,11 @@ function sandbox(over: Partial<EffectiveSandbox> = {}): EffectiveSandbox {
 beforeEach(() => {
   daytona.created.length = 0;
   daytona.exec.length = 0;
+  daytona.inactiveCreates = 0;
+  daytona.snapshotStates = [];
+  daytona.activated = [];
+  daytona.activateError = "";
+  SNAPSHOT_ACTIVATION.pollMs = 1;
   e2b.created.length = 0;
   resetRemoteAdapters();
 });
@@ -164,6 +178,57 @@ describe("Daytona resources", () => {
 describe("DaytonaAdapter", () => {
   const spec = (s: EffectiveSandbox, onWarning?: (m: string) => void) => ({ sandbox: s, labels: { polpo: "1" }, lifetimeMinutes: 20, keep: false, onWarning });
 
+  test("an inactive snapshot is activated, waited for, and the create retried once", async () => {
+    daytona.inactiveCreates = 1;
+    daytona.snapshotStates = ["pending", "pulling", "active"];
+    const progress: string[] = [];
+    const driver = await remoteAdapter("daytona").create({ ...spec(sandbox({ providerOptions: { snapshot: "polpo-runner-0.3.13" } })), onProgress: (m) => progress.push(m) });
+    expect(driver.remoteId).toBe("dt-1");
+    expect(daytona.activated).toEqual(["polpo-runner-0.3.13"]);
+    expect(daytona.created).toHaveLength(1);
+    expect(progress[0]).toMatch(/"polpo-runner-0.3.13" is inactive: activating it/);
+    expect(progress.at(-1)).toMatch(/is active again/);
+  });
+
+  test("activation that fails or never finishes is a clear error; other create errors are not retried", async () => {
+    daytona.inactiveCreates = 1;
+    daytona.activateError = "forbidden";
+    await expect(remoteAdapter("daytona").create(spec(sandbox({ providerOptions: { snapshot: "snap" } })))).rejects.toThrow(SnapshotActivationError);
+
+    daytona.inactiveCreates = 1;
+    daytona.activateError = "";
+    daytona.snapshotStates = ["error"];
+    await expect(remoteAdapter("daytona").create(spec(sandbox({ providerOptions: { snapshot: "snap" } })))).rejects.toThrow(/could not be activated: its state is error/);
+
+    const { timeoutMs } = SNAPSHOT_ACTIVATION;
+    SNAPSHOT_ACTIVATION.timeoutMs = 20;
+    try {
+      daytona.inactiveCreates = 1;
+      daytona.snapshotStates = Array(1000).fill("pending");
+      await expect(remoteAdapter("daytona").create(spec(sandbox({ providerOptions: { snapshot: "snap" } })))).rejects.toThrow(/still pending after/);
+    } finally {
+      SNAPSHOT_ACTIVATION.timeoutMs = timeoutMs;
+    }
+    // a second "inactive" after activation is not retried again
+    daytona.snapshotStates = [];
+    daytona.inactiveCreates = 2;
+    await expect(remoteAdapter("daytona").create(spec(sandbox({ providerOptions: { snapshot: "snap" } })))).rejects.toThrow(/is inactive/);
+    expect(isInactiveSnapshotError(new Error("Snapshot polpo-runner-0.3.13 is inactive"))).toBe(true);
+    expect(isInactiveSnapshotError(new Error("quota exceeded"))).toBe(false);
+  });
+
+  test("snapshotState reads the snapshot's state", async () => {
+    daytona.snapshotStates = ["inactive"];
+    expect(await remoteAdapter("daytona").snapshotState!("snap")).toBe("inactive");
+  });
+
+  test("a computer: never deleted (auto-delete off), stops after its idle time, archives after N days", async () => {
+    await remoteAdapter("daytona").create({ ...spec(sandbox({ providerOptions: { snapshot: "polpo-runner-1" } })), keep: true, persistent: { idleStopMinutes: 15, autoArchiveDays: 7 } });
+    const { params } = daytona.created[0];
+    expect(params).toMatchObject({ autoStopInterval: 15, autoDeleteInterval: -1, autoArchiveInterval: 7 * 24 * 60, snapshot: "polpo-runner-1" });
+    expect(params.ephemeral).toBeUndefined();
+  });
+
   test("create sends domainAllowList (no resolved IPs) and the snapshot", async () => {
     await remoteAdapter("daytona").create(spec(sandbox({ network: allow("*.github.com", "registry.npmjs.org"), providerOptions: { snapshot: "polpo-runner-1" } })));
     const { params, opts } = daytona.created[0];
@@ -233,5 +298,11 @@ describe("E2BAdapter", () => {
     expect(template).toBe("polpo-runner");
     expect(opts).toMatchObject({ apiKey: "key-e2b", timeoutMs: 600_000, metadata: { polpo: "1" }, lifecycle: { onTimeout: "pause" }, network: { allowOut: ["github.com", "*.github.com"], denyOut: ["0.0.0.0/0"] } });
     expect(warnings[0]).toMatch(/E2B sizes a sandbox by its template/);
+  });
+
+  test("a computer pauses after its idle time (E2B keeps paused sandboxes)", async () => {
+    await remoteAdapter("e2b").create({ sandbox: sandbox({ provider: "e2b" }), labels: { "polpo-computer": "i:nina" }, lifetimeMinutes: 90, keep: true, persistent: { idleStopMinutes: 20 } });
+    const [opts] = e2b.created[0];
+    expect(opts).toMatchObject({ timeoutMs: 20 * 60_000, metadata: { "polpo-computer": "i:nina" }, lifecycle: { onTimeout: "pause" } });
   });
 });

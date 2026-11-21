@@ -10,7 +10,7 @@
  */
 import { hostname } from "node:os";
 import {
-  DEFAULT_LIFECYCLE, REMOTE_SANDBOX_PROVIDERS, resolveSandbox, normalizeSandboxSettings,
+  COMPUTER_LABEL, DEFAULT_LIFECYCLE, REMOTE_SANDBOX_PROVIDERS, resolveSandbox, normalizeSandboxSettings,
   type RemoteSandboxProvider, type SandboxSettings,
 } from "@polpo-ai/core/sandbox";
 import { SandboxPool, instanceLabel, poolFilePath, poolKey, type PoolEntry } from "./pool.js";
@@ -196,6 +196,8 @@ export class SandboxReaper {
       for (const vm of vms) {
         if (known.has(vm.remoteId)) continue;
         if (vm.labels["polpo-instance"] !== this.instance) continue;
+        // computers are persistent: never orphans (they carry no pool entry by design)
+        if (vm.labels[COMPUTER_LABEL]) continue;
         const age = vm.createdAt ? this.now() - Date.parse(vm.createdAt) : Infinity;
         if (age < ORPHAN_GRACE_MS) continue;
         await this.adapter(provider).remove(vm.remoteId).catch((err) => this.opts.onError?.(`Could not delete orphan ${provider} VM ${vm.remoteId}: ${(err as Error).message}`));

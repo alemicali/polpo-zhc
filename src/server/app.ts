@@ -66,6 +66,10 @@ import { audioRoutes } from "./routes/audio.js";
 import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
+import { agentEgressName, computerContext } from "@polpo-ai/core/sandbox";
+import { computerRoutes } from "./routes/computers.js";
+import { computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
@@ -413,7 +417,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         browserSession: agentConfig.name,
         browserProfileDir,
         browserNetwork: await o.chatBrowserNetwork(agentConfig),
-        browserEgress: resolveBrowserEgress(agentConfig, o.getConfig()?.settings?.egressProxies),
+        browserEgress: resolveBrowserEgress({ browserEgress: agentEgressName(agentConfig, o.getConfig()?.settings) }, o.getConfig()?.settings?.egressProxies),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
@@ -1132,8 +1136,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const { normalizeSandboxSettings } = await import("@polpo-ai/core/sandbox");
     const instance = normalizeSandboxSettings(o.getConfig()?.settings?.sandbox);
     const agents = await o.getAgents();
+    // Daytona deactivates snapshots nobody used for a while: say so (the next create reactivates it)
+    const available = availableProviders();
+    const daytonaSnapshot = instance?.providers?.daytona?.snapshot;
+    let snapshot: { provider: "daytona"; name: string; state: string } | undefined;
+    if (available.has("daytona") && typeof daytonaSnapshot === "string" && daytonaSnapshot) {
+      const { remoteAdapter } = await import("../sandbox/remote-adapters.js");
+      const state = await Promise.race([
+        remoteAdapter("daytona").snapshotState?.(daytonaSnapshot).catch(() => undefined),
+        new Promise<undefined>((r) => setTimeout(() => r(undefined), 5_000).unref?.()),
+      ]);
+      if (state) snapshot = { provider: "daytona", name: daytonaSnapshot, state };
+    }
     return c.json({ ok: true, data: {
-      available: [...availableProviders()],
+      ...(snapshot ? { snapshot } : {}),
+      available: [...available],
       settings: instance ?? null,
       polpo: effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : ["http_fetch"] }),
       agents: agents.map((agent) => {
@@ -1141,8 +1158,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return {
           name: agent.name,
           settings: cascade.agent ?? null,
-          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }),
-          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }),
+          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, o.getConfig()?.settings) }),
+          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, o.getConfig()?.settings) }),
         };
       }),
     } });
@@ -1249,6 +1266,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     taskStore: o.getStore(),
     runStore: o.getRunStore(),
     polpoDir: o.getPolpoDir(),
+    computerIds: () => (o.getConfig()?.settings?.computers ?? []).map((c) => c.id),
     fs: new NodeFileSystem(),
   })));
 
@@ -1433,6 +1451,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     manager: () => connectorManagerFor(o),
     settings: () => o.getConfig()?.settings,
     redirectUri: (c) => `${publicOrigin(c)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+  }));
+  authed.route("/computers", computerRoutes({
+    computers: () => o.getConfig()?.settings?.computers ?? [],
+    settings: () => o.getConfig()?.settings,
+    agents: () => o.getAgents(),
+    manager: () => computerManagerWithEvents(o.getPolpoDir(), (payload) => o.emit("computer:changed", payload)),
+    save: async (computers) => {
+      const { savePolpoSettingsKey } = await import("../core/config.js");
+      savePolpoSettingsKey(o.getPolpoDir(), "computers", computers.length ? computers : undefined);
+      await o.reloadConfig();
+    },
+    sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
+    emit: (payload) => o.emit("computer:changed", payload),
   }));
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),

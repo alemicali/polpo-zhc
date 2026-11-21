@@ -123,7 +123,7 @@ import { protectPolpoDir } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
-import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
+import { computerContext, normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
@@ -368,6 +368,8 @@ export class Orchestrator extends TypedEmitter {
       cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
       // Polpo reads messages from people on channels: treat it like an agent reading external content
       agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
+      // the agent's default computer: its chats run there too
+      computers: computerContext(agent, this.config?.settings),
     });
     // Polpo's own commands manage this instance: they never run in a remote VM
     if (!agent && (sandbox.provider === "daytona" || sandbox.provider === "e2b")) sandbox = { ...sandbox, provider: "bwrap" };
@@ -440,6 +442,7 @@ export class Orchestrator extends TypedEmitter {
       case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
       case "volume": this.emit("sandbox:volume", { ...base, step: e.step, name: e.name, revision: e.revision, message: e.message }); break;
       case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
+      case "progress": this.emit("log", { level: "info", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
       default: break;
     }
   }

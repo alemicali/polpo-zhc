@@ -83,6 +83,7 @@ export const TOOLSETS = {
   automation: { default: true, description: "Mission schedules (run now, pause, resume) and recurring checks" },
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need admin scope)" },
   channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (channel changes need admin scope)" },
+  computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
@@ -116,7 +117,7 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "connectors", "channels", "learning", "vault"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "connectors", "channels", "learning", "vault", "computers"]);
 /** Toolsets whose reads too need "polpo:admin". */
 const ADMIN_ONLY = new Set<string>(["admin", "vault"]);
 

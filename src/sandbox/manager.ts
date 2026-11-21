@@ -12,6 +12,9 @@ import {
   type ResolvedSandboxVolume,
   type StorageMountSpec,
   type Workspace,
+  type ComputerContext,
+  type ComputerConfig,
+  normalizeSandboxSettings,
 } from "@polpo-ai/core/sandbox";
 import type { NetworkDenial } from "./net-proxy.js";
 import { bashSafeEnv } from "../tools/safe-env.js";
@@ -59,9 +62,9 @@ export function hostVolumeMounts(volumes: ResolvedSandboxVolume[] | undefined): 
   return (volumes ?? []).filter((v) => v.hostPath).map((v) => ({ name: v.name, path: v.hostPath!, hostPath: v.hostPath, readOnly: v.access === "read-only" }));
 }
 
-/** Resolve the cascade for a request on this machine. */
-export function effectiveSandbox(req: Pick<WorkspaceRequest, "scope" | "cascade" | "agentTools">): EffectiveSandbox {
-  return resolveSandbox(req.cascade, { scope: req.scope, agentTools: req.agentTools, available: availableProviders() });
+/** Resolve the cascade (and the agent's computer, when given) for a request on this machine. */
+export function effectiveSandbox(req: Pick<WorkspaceRequest, "scope" | "cascade" | "agentTools"> & { computers?: ComputerContext }): EffectiveSandbox {
+  return resolveSandbox(req.cascade, { scope: req.scope, agentTools: req.agentTools, available: availableProviders(), computers: req.computers });
 }
 
 const PROVIDER_NAMES: Record<SandboxProviderId, string> = { local: "this machine", bwrap: "bubblewrap", docker: "Docker", daytona: "Daytona", e2b: "E2B" };
@@ -126,4 +129,19 @@ export { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 /** Remote workspaces keep files in the VM: file tools must go through the workspace. */
 export function isRemoteWorkspace(workspace: Workspace | undefined): boolean {
   return workspace?.provider === "daytona" || workspace?.provider === "e2b";
+}
+
+/**
+ * The sandbox a computer's machine is created and started with (explicit start, reset), or why
+ * it cannot be: its provider has no API key on this server.
+ */
+export function computerSandbox(computer: ComputerConfig, settings: { sandbox?: unknown } | undefined): EffectiveSandbox | { error: string } {
+  const s = effectiveSandbox({
+    scope: "task",
+    cascade: { instance: normalizeSandboxSettings(settings?.sandbox) },
+    computers: { computers: [computer], defaultComputer: computer.id, allowed: [computer.id] },
+  });
+  if (s.computer?.id === computer.id && s.provider === computer.kind) return s;
+  const name = PROVIDER_NAMES[computer.kind as SandboxProviderId] ?? computer.kind;
+  return { error: `${name} has no API key on this server: choose one in Settings → Sandbox` };
 }

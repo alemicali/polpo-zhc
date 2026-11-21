@@ -67,6 +67,8 @@ export interface EffectiveSandbox {
   resources: { cpus?: number; memoryMb?: number; diskMb?: number; timeoutMin?: number };
   /** The provider the settings chose is not available on the server: `provider` runs instead (weaker isolation). */
   fallback?: { from: SandboxProvider; reason: "unavailable" };
+  /** The agent's computer this runs on (a persistent machine), when it has one. */
+  computer?: { id: string; name: string; kind: string };
 }
 
 export interface SandboxOverview {
@@ -74,6 +76,8 @@ export interface SandboxOverview {
   settings: SandboxSettings | null;
   polpo: EffectiveSandbox;
   agents: Array<{ name: string; settings: SandboxSettings | null; task: EffectiveSandbox; chat: EffectiveSandbox }>;
+  /** The instance's Daytona snapshot and its state, when the server could read it ("inactive": activated on the next create). */
+  snapshot?: { provider: "daytona"; name: string; state: string };
 }
 
 export const SANDBOX_PROVIDERS: Array<{ id: SandboxProvider; label: string; description: string; remote?: boolean }> = [
@@ -116,7 +120,8 @@ export function describeSandbox(sandbox: EffectiveSandbox): string {
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min` : null,
   ].filter(Boolean).join(", ");
   const fallback = sandbox.fallback ? ` (instead of ${providerLabel(sandbox.fallback.from)}: not available on this server)` : "";
-  return `${providerLabel(sandbox.provider)}${fallback} · network ${network}${limits ? ` · ${limits}` : ""}`;
+  const computer = sandbox.computer ? ` · computer ${sandbox.computer.name || sandbox.computer.id}` : "";
+  return `${providerLabel(sandbox.provider)}${computer}${fallback} · network ${network}${limits ? ` · ${limits}` : ""}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

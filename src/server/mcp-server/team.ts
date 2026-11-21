@@ -27,6 +27,10 @@ const agentFields = {
   maxTurns: z.number().int().positive().max(1000).optional().describe("Most steps per run"),
   browserEgress: z.string().regex(/^[A-Za-z0-9_-]*$/, "the name of an egress proxy").optional()
     .describe("Where its browser goes out to the internet: the name of a proxy in the settings' egress proxies (polpo_config_get); '' for direct"),
+  computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional()
+    .describe("Computers it may use (ids from polpo_computers_list); \"host\" (this server) always"),
+  defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional()
+    .describe("The computer its chats and tasks run on (polpo_computers_list); \"host\" or '' for this server"),
 };
 
 /** An error when browserEgress names a proxy the settings do not have, else null. */
@@ -91,7 +95,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools, skills, identity, manager or browser egress proxy. Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools, skills, identity, manager, browser egress proxy or computer (defaultComputer). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. It applies to its next runs.",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
