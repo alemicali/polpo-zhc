@@ -17,6 +17,8 @@ import { registerAgentTools, registerApprovalTools, registerArtifactTools, regis
 import { registerTaskTools } from "./mcp-server/tasks.js";
 import { registerMissionTools } from "./mcp-server/missions.js";
 import { registerAdminTools } from "./mcp-server/admin.js";
+import { registerConfigTools } from "./mcp-server/config.js";
+import { registerTeamTools } from "./mcp-server/team.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, ToolsetName } from "./mcp-server/kit.js";
 export { MAX_RESULT_CHARS, TOOLSETS, DEFAULT_TOOLSETS, resolveToolsets, hasScope, scopeFor } from "./mcp-server/kit.js";
@@ -44,6 +46,8 @@ export function createPolpoMcpServer(deps: McpDeps): McpServer {
   registerArtifactTools(tool, deps);
   registerDataTools(tool, deps);
   registerFileTools(tool, deps);
+  registerTeamTools(tool, deps);
+  registerConfigTools(tool, deps);
   registerAdminTools(tool, deps);
   return server;
 }

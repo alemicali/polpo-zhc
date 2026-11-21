@@ -42,6 +42,14 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   return { ok: true, card };
 }
 
+/** The card's main parts (the widget reads the rest). */
+const cardOutput = {
+  agent: z.object({ name: z.string(), role: z.string().optional() }).passthrough().describe("Who the agent is"),
+  current: looseObject.nullable().optional().describe("The task at hand"),
+  goal: looseObject.nullable().optional().describe("Its main goal"),
+  next: looseObject.nullable().optional().describe("What it plans next"),
+};
+
 const cardResult = (card: AgentCard) => ({
   content: [{ type: "text" as const, text: agentCardText(card) }],
   structuredContent: card as unknown as Record<string, unknown>,
@@ -95,6 +103,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
       + "and its main goal; it opens to its tasks, goals and routine. Use it when the person asks how an agent is doing (polpo_agents_list for names).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name or display name") },
     annotations: { title: "Show an agent", ...READ },
+    outputSchema: cardOutput,
     _meta: { ui: { resourceUri: AGENT_CARD_URI } },
   }, async ({ agent }) => {
     const r = await loadAgentCard(deps, agent);
@@ -107,6 +116,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
     description: "The agent card's own refresh (called by its UI).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name") },
     annotations: { title: "Refresh an agent card", ...READ },
+    outputSchema: cardOutput,
     _meta: { ui: { resourceUri: AGENT_CARD_URI, visibility: ["app"] } },
   }, async ({ agent }) => {
     const r = await loadAgentCard(deps, agent);
@@ -123,12 +133,13 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
       action: z.enum(["confirm", "cancel"]).describe("confirm or cancel"),
     },
     annotations: { title: "Confirm or cancel an agent's plan", ...DESTRUCTIVE },
+    outputSchema: cardOutput,
     _meta: { ui: { resourceUri: AGENT_CARD_URI, visibility: ["app"] } },
   }, async ({ agent, id, action }) => {
     const done = await apiSend(deps, "POST", `/drive/${enc(agent)}/intentions/${enc(id)}/${action}`);
     if (!done.ok) return apiError(done, `${action} of ${id}`);
     const r = await loadAgentCard(deps, agent);
-    return r.ok ? cardResult(r.card) : ok(`${action}: ${id} done.`);
+    return r.ok ? cardResult(r.card) : ok(`${action}: ${id} done.`, { agent: { name: agent } });
   });
 }
 
