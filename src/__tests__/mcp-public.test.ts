@@ -285,4 +285,37 @@ describe("tasks, missions and configuration on a real instance", () => {
     expect(reset.structuredContent.branding).toEqual({ productName: "Shoplix", logoUrl: "/api/v1/config/branding/logo" });
     expect((await tool("polpo_providers_list")).structuredContent.setup_url).toBe(`${PUBLIC}/config?section=providers`);
   });
+
+  it("sets egress proxies and an agent's browser egress through the real routes", async () => {
+    const set = await tool("polpo_config_update", { egress_proxies: { home: "socks5://100.101.55.7:1080" } });
+    expect(set.structuredContent.changed).toEqual(["egressProxies"]);
+    expect((await tool("polpo_config_get")).structuredContent.settings.egressProxies).toEqual({ home: "socks5://100.101.55.7:1080" });
+    const agent = await tool("polpo_agent_update", { name: "agent-1", browserEgress: "home" });
+    expect(agent.structuredContent).toMatchObject({ changed: ["browserEgress"], agent: { browserEgress: "home" } });
+    expect((await tool("polpo_agent_update", { name: "agent-1", browserEgress: "office" })).isError).toBe(true);
+  });
+
+  it("rooms, memory, skills and teams through the real routes", async () => {
+    const room = await tool("polpo_room_create", { title: "Launch", agents: ["agent-1"], goal: "Ship the page" });
+    expect(room.isError).toBeFalsy();
+    const id = room.structuredContent.room.id as string;
+    const posted = await tool("polpo_room_post", { id, text: "hello team" });
+    expect(posted.structuredContent.message).toMatchObject({ text: "hello team", author: "mcp-key", author_kind: "person" });
+    const read = await tool("polpo_room_messages", { id });
+    expect(read.structuredContent.items.map((m: { id: string }) => m.id)).toContain(posted.structuredContent.message.id);
+    expect((await tool("polpo_rooms_list", { id })).structuredContent.items[0]).toMatchObject({ id, goal: "Ship the page" });
+
+    await tool("polpo_memory_update", { mode: "append", content: "We ship on Fridays." });
+    expect((await tool("polpo_memory_get")).structuredContent.content).toContain("We ship on Fridays.");
+
+    expect((await tool("polpo_skill_create", { name: "launch-checklist", description: "Before a launch", content: "# Steps\n1. Check", assign_to: ["agent-1"] })).isError).toBeFalsy();
+    expect((await tool("polpo_skill_update", { name: "launch-checklist", content: "# Steps\n1. Check twice" })).structuredContent.changed).toEqual(["content"]);
+    expect((await tool("polpo_skill_get", { name: "launch-checklist" })).structuredContent.skill.content).toContain("Check twice");
+    expect((await tool("polpo_skills_list", { agent: "agent-1" })).structuredContent.items.map((s: { name: string }) => s.name)).toContain("launch-checklist");
+
+    const teams = await tool("polpo_teams_list");
+    expect(teams.structuredContent.items[0].agents).toContain("agent-1");
+    expect((await tool("polpo_team_save", { name: "growth" })).structuredContent).toMatchObject({ created: true, team: { name: "growth", agents: [] } });
+    expect((await tool("polpo_team_delete", { name: "growth", confirm: true })).structuredContent).toEqual({ name: "growth", removed: true });
+  });
 });

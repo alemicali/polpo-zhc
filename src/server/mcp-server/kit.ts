@@ -74,8 +74,20 @@ export const TOOLSETS = {
   artifacts: { default: true, description: "Artifacts: documents, html dashboards and designs, diagrams" },
   data: { default: true, description: "Structured data sources and queries" },
   files: { default: true, description: "The instance's files: browse, search, read, write" },
-  team: { default: true, description: "Agents' configuration: read, create, update (changes need admin scope)" },
+  team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
   config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
+  rooms: { default: true, description: "Group chats of people and agents: rooms, their messages, posting and waiting for replies" },
+  chat: { default: true, description: "Chat sessions with Polpo and agents: list, read, rename, star, delete" },
+  memory: { default: true, description: "Shared and per-agent memory: read, write, clear" },
+  skills: { default: true, description: "Skills: list, read, create, update, install, delete, assign to agents (changes need admin scope)" },
+  automation: { default: true, description: "Mission schedules (run now, pause, resume) and recurring checks" },
+  connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need admin scope)" },
+  channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (channel changes need admin scope)" },
+  brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
+  learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
+  watchers: { default: false, description: "Watchers that act when a task reaches a status" },
+  vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs admin scope)" },
+  apps: { default: false, description: "Registered apps (start, stop, restart) and browser profiles" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
 
@@ -104,11 +116,13 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "connectors", "channels", "learning", "vault"]);
+/** Toolsets whose reads too need "polpo:admin". */
+const ADMIN_ONLY = new Set<string>(["admin", "vault"]);
 
-/** The scope a tool needs: reads "polpo:read" (the admin toolset "polpo:admin"), writes "polpo:work" or, for the instance's own setup, "polpo:admin". */
+/** The scope a tool needs: reads "polpo:read" (the admin and vault toolsets "polpo:admin"), writes "polpo:work" or, for the instance's own setup, "polpo:admin". */
 export function scopeFor(toolset: ToolsetName, annotations: ToolAnnotations): string {
-  if (toolset === "admin") return "polpo:admin";
+  if (ADMIN_ONLY.has(toolset)) return "polpo:admin";
   if (annotations.readOnlyHint) return "polpo:read";
   return ADMIN_WRITES.has(toolset) ? "polpo:admin" : "polpo:work";
 }
@@ -232,6 +246,24 @@ export function page<T>(items: T[], limit: number, cursor: string | undefined): 
   return { items: slice, next_cursor: next, total: items.length };
 }
 
+/**
+ * One page of a list kept oldest first (a transcript), read from the newest end: the first page is
+ * the latest items, next_cursor goes back to older ones.
+ */
+export function pageBackwards<T>(items: T[], limit: number, cursor: string | undefined): { items: T[]; next_cursor: string | null; total: number } | null {
+  const c = decodeCursor(cursor);
+  if (!c) return null;
+  const skip = c.o ?? 0; // how many of the newest items were already returned
+  const end = Math.max(0, items.length - skip);
+  const start = Math.max(0, end - limit);
+  return { items: items.slice(start, end), next_cursor: start > 0 ? encodeCursor({ o: items.length - start }) : null, total: items.length };
+}
+
+/** A link into the dashboard (absolute when the public URL is known). */
+export function dashboardLink(deps: McpDeps, path: string): string {
+  return deps.publicUrl ? `${deps.publicUrl.replace(/\/+$/, "")}${path}` : path;
+}
+
 /** Output schema pieces. */
 export const pageOutput = <T extends z.ZodTypeAny>(item: T) => ({
   items: z.array(item),
@@ -249,6 +281,8 @@ export interface ToolSpec<I extends z.ZodRawShape> {
   inputSchema: I;
   outputSchema?: z.ZodRawShape;
   annotations: ToolAnnotations;
+  /** The scope it needs, when not the toolset's rule (e.g. sending a message, in a toolset whose changes need admin, needs polpo:work). */
+  scope?: string;
   _meta?: Record<string, unknown>;
 }
 
@@ -266,7 +300,7 @@ export type Register = <I extends z.ZodRawShape>(
  */
 export function registrar(server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal): Register {
   return (toolset, name, spec, handler) => {
-    if (!enabled.has(toolset) || !hasScope(principal, scopeFor(toolset, spec.annotations))) return;
+    if (!enabled.has(toolset) || !hasScope(principal, spec.scope ?? scopeFor(toolset, spec.annotations))) return;
     server.registerTool(name, {
       title: spec.title,
       description: spec.description,

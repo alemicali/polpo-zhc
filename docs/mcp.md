@@ -56,9 +56,14 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | Tool | What it does | Annotations |
 |---|---|---|
 | `polpo_agent_get` | An agent's configuration: role, model, instructions, tools, skills, identity. | read-only |
-| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity or manager. | write |
-| `polpo_config_get` | Settings (Polpo's model and fallbacks, image model, reasoning, retries…), branding, and a summary of notification channels, rules and approval gates. Never secrets. | read-only |
-| `polpo_config_update` | Polpo's model (and fallbacks), the image model, the reasoning level; models are checked against the catalog. Returns what changed. | write, idempotent |
+| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity, manager or browser egress proxy (`browserEgress`, a name from the settings' egress proxies). | write |
+| `polpo_agent_delete` | Remove an agent (`confirm: true`). | destructive |
+| `polpo_agent_avatar_set` | An agent's picture, from a public https URL, a file of the instance or base64 (checked by its bytes); `remove: true` removes it. | write, idempotent |
+| `polpo_teams_list` | The teams and their agents. | read-only |
+| `polpo_team_save` | Create a team, rename it (`new_name`), move agents into it (`add_agents`). | write |
+| `polpo_team_delete` | Delete an empty team (`confirm: true`). | destructive |
+| `polpo_config_get` | Settings (Polpo's model and fallbacks, image model, reasoning, retries, egress proxies without credentials…), branding, and a summary of notification channels, rules and approval gates. Never secrets. | read-only |
+| `polpo_config_update` | Polpo's model (and fallbacks), the image model, the reasoning level, the egress proxies agents' browsers can use (`egress_proxies`: `{ name: "socks5://host:port" }`, `null` removes them); models are checked against the catalog. Returns what changed. | write, idempotent |
 | `polpo_branding_get`, `polpo_branding_update` | Product name, tagline and logo. The logo comes from a public https URL (fetched by the server: never from private addresses, also after redirects; at most 4 MB), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF, checked by its bytes. | read-only / write, idempotent |
 | `polpo_providers_list`, `polpo_models_list` | LLM providers (with or without a key) and the model catalog (`provider:model`). | read-only |
 
@@ -72,6 +77,99 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_data_sources_list`, `polpo_data_query` | Structured data. |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `polpo_file_write`, `polpo_file_manage` | Create a file (text or base64; replacing one needs `overwrite: true`), make folders, rename, delete (`confirm: true`). |
+
+The tools below act directly, like the dashboard: they call the instance's own REST API, never Polpo's model. Only `polpo_ask` (and `polpo_agent_chat`, which is the agent's own turn) run a model.
+
+### rooms (on by default)
+
+Group chats of people and agents (the dashboard's groups).
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_rooms_list` | Rooms, newest first; with `id`, one room in full (agents, goal, owner, reply settings, who is answering now). | read-only |
+| `polpo_room_create`, `polpo_room_update` | Open a room with agents, a goal and an owner; rename it, change its agents, goal, owner or reply settings. | write / write, idempotent |
+| `polpo_room_delete` | Delete a web room and its transcript (`confirm: true`); Telegram groups are not deleted here. | destructive |
+| `polpo_room_messages` | The transcript, latest page first, older pages with `cursor`; `latest_id` is where to wait from. | read-only |
+| `polpo_room_post` | Write as the connected person (the principal's name): `@agent` mentions and `reply_to_id` call agents in, as on the web. Returns the message id. | write, open world |
+| `polpo_room_wait` | Wait (at most 55 s) for messages after `after_id`: by default until an agent answered and none is still typing. | read-only |
+
+### chat (on by default)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_chat_sessions_list` | Conversations with Polpo and agents (filter by agent, starred, words). Continue one with `polpo_ask` / `polpo_agent_chat` and its `session_id`. | read-only |
+| `polpo_chat_messages` | A conversation's messages, paged backwards: text, the tools used, attachments; never tool arguments. | read-only |
+| `polpo_chat_session_update` | Rename, star or unstar. | write, idempotent |
+| `polpo_chat_session_delete` | Delete a conversation (`confirm: true`). | destructive |
+
+### memory (on by default)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_memory_get` | The shared memory, or one agent's own (`agent`). | read-only |
+| `polpo_memory_update` | `append` a note; `replace` it all or `clear` it (both need `confirm: true` when there is something to lose). | destructive |
+
+### skills (on by default; changes need `polpo:admin`)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_skills_list`, `polpo_skill_get` | The pool (who uses each skill, tags); one skill with its instructions. | read-only |
+| `polpo_skill_create`, `polpo_skill_update` | Write a skill (and assign it); change its description, instructions, tools, tags or category. | write / write, idempotent |
+| `polpo_skill_install` | Install skills from a GitHub repository or a path on the server. | write, idempotent, open world |
+| `polpo_skill_assign` | Assign a skill to agents, or unassign it. | write, idempotent |
+| `polpo_skill_delete` | Remove a skill from the pool (`confirm: true`). | destructive |
+
+### automation (on by default)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_schedules_list` | Scheduled missions (cron or a time, paused or not, next and last run); with `mission_id`, its recent runs' tasks. | read-only |
+| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`). | write / write, idempotent |
+| `polpo_schedule_run` | Run a scheduled mission now (the next scheduled run stays). | write, open world |
+| `polpo_schedule_delete` | Remove the schedule; the mission stays as a draft (`confirm: true`). | destructive |
+| `polpo_checks_list` | Recurring checks and reminders: what Polpo or an agent does on a schedule and reports in a chat; proposed ones wait for a yes. | read-only |
+| `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. | write |
+| `polpo_check_update` | Change the instructions, message, schedule or limits; `confirm: true` approves a proposed check. | write, idempotent |
+| `polpo_check_cancel` | Stop a check for good (`confirm: true`). | destructive |
+
+### connectors (on by default; changes need `polpo:admin`)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_connectors_list` | Connectors with their status, auth (authorized? token set?), tool count and who may use them; with `id`, its tools and their policy. Never secrets. | read-only |
+| `polpo_connector_catalog` | Well-known remote MCP servers to add in one step, and what each needs. | read-only |
+| `polpo_connector_add` | Add from the catalog or a remote https URL (never a local process). OAuth ones return `authorization_url` for the person to open; token-based ones are finished in the dashboard (`setup_url`). | write, open world |
+| `polpo_connector_update` | Who may use it (agents, Polpo), on or off, name, per-tool policy (`allow`, `ask`, `off`). | write, idempotent |
+| `polpo_connector_test` | Connect now and list its tools. | write, idempotent, open world |
+| `polpo_connector_connect` | A fresh OAuth link (new, or `needs_reauth`). | write, open world |
+| `polpo_connector_disconnect`, `polpo_connector_remove` | Sign it out (tokens revoked), or delete it with its secrets (`confirm: true`). | destructive |
+
+**Connector secrets never go through MCP**: there is no parameter for a token, a header value or an OAuth app's client secret. The person enters them on the dashboard's Connectors page (`setup_url`).
+
+### channels (on by default; channel and rule changes need `polpo:admin`, sending `polpo:work`)
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_channels_list` | Notification channels (name and type, never their tokens) and rules, the Telegram bots and the groups, topics and people they reach, WhatsApp profiles. | read-only |
+| `polpo_channel_test` | Send a test notification on a channel. | write, open world |
+| `polpo_message_send` | Send now on Telegram (with files), WhatsApp (text or a file) or email (with the agent's mail account and attachments), as Polpo or an agent. Without `confirm: true` it shows what it would send. | destructive, open world |
+| `polpo_notification_rule_save`, `polpo_notification_rule_delete` | Create or replace a rule (events → channels, severity, template, cooldown); delete one (`confirm: true`). | write, idempotent / destructive |
+
+Bot tokens, SMTP passwords and API keys are set up in the dashboard (`setup_url`), never through MCP.
+
+### Toolsets off by default
+
+Enable them with `settings.mcp.toolsets` / `POLPO_MCP_TOOLSETS` (e.g. `default,brain,vault`) or `all`; see [Toolsets](#toolsets).
+
+| Toolset | Tools | Annotations |
+|---|---|---|
+| `brain` | `polpo_brain_search` (by words, or the most connected entities and counts), `polpo_brain_get` (an entity with its relations and claims), `polpo_brain_save` (an entity, a relation or a claim), `polpo_brain_delete` (`confirm: true`) | read-only / write / destructive |
+| `learning` (needs `polpo:admin`) | `polpo_learning_get` (an agent's learning settings and changes), `polpo_learning_review` (learn from its conversations now), `polpo_learning_revert` (`confirm: true`) | read-only / write / destructive |
+| `watchers` | `polpo_watchers_list`, `polpo_watcher_create` (when a task reaches a status: create a task, run a mission or notify; never a shell command), `polpo_watcher_delete` (`confirm: true`) | read-only / write / destructive |
+| `vault` (needs `polpo:admin`, also to read) | `polpo_vault_list` (each agent's entries: service, type, label and the names of the fields, never values; `setup_url` to add or change one), `polpo_vault_delete` (`confirm: true`; not entries shared from another agent) | read-only / destructive |
+| `apps` | `polpo_apps_list` (services, whether they run, URLs, deployments, domains), `polpo_app_control` (start; stop and restart need `confirm: true`), `polpo_browser_profiles_list`, `polpo_browser_profile_clear` (`confirm: true`) | read-only / destructive |
+
+Not exposed yet: storage buckets, app registration and deployments, signing a browser profile in to a site, OAuth apps' client secrets, WhatsApp login (they need the dashboard or a person at the screen).
 
 ### admin (off by default)
 
@@ -103,6 +201,8 @@ Actions that cannot be undone need an explicit `confirm: true` (deleting files, 
 - **Delegate in words:** `polpo_ask { message: "send the weekly report to the team" }` → `status: "needs_input"`, `pending.kind: "questions"` → ask the person → `polpo_answer { session_id, answers: [{ question_id: "where", selected: ["Slack"] }] }`.
 - **Follow a task:** `polpo_task_create { … }` → `polpo_task_wait { id, timeout_seconds: 50 }` → if it failed, `polpo_task_get { id }` (assessment and activity), `polpo_task_update` and `polpo_task_retry`.
 - **Rebrand the dashboard:** `polpo_branding_update { product_name: "Shoplix", logo: { url: "https://cdn.example.com/logo.png" } }`.
+- **Talk to the team in a room:** `polpo_room_post { id, text: "@writer draft the launch post" }` → `polpo_room_wait { id, after_id: message.id }` → the agents' replies.
+- **Connect an app:** `polpo_connector_catalog { text: "linear" }` → `polpo_connector_add { catalog_id: "linear", agents: ["pm"] }` → give the person `authorization_url` → `polpo_connectors_list { id: "linear" }`.
 
 ## Toolsets
 
@@ -111,7 +211,9 @@ An instance chooses the toolsets it offers:
 - **`settings.mcp.toolsets`** in `.polpo/polpo.json`, e.g. `{ "settings": { "mcp": { "toolsets": ["default", "admin"] } } }`;
 - **`POLPO_MCP_TOOLSETS`** in the environment (comma-separated; it wins over the settings).
 
-Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `admin`), `default` (every toolset except `admin`) or `all`. Without either, the default toolsets are offered.
+Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 90 tools) or `all`. Without either, the default toolsets are offered.
+
+For example, the defaults plus the company brain and the vault: `POLPO_MCP_TOOLSETS=default,brain,vault`.
 
 For example, an instance that only lets clients follow work: `POLPO_MCP_TOOLSETS=core,tasks,missions`.
 
@@ -129,7 +231,7 @@ What a client does through MCP is recorded as the authenticated principal, in ev
 | A dashboard session | the person's email |
 | A server without auth (localhost) | `mcp` |
 
-Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team and the configuration, and the admin toolset, `polpo:admin`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
+Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team, the configuration, skills, connectors, channels and rules, learning, and the `vault` and `admin` toolsets (reads too), `polpo:admin`. Sending a message (`polpo_message_send`) needs `polpo:work`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
 
 ## The agent card (MCP App)
 
