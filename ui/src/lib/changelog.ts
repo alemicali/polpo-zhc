@@ -27,6 +27,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-run-context",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Dove e con cosa ha lavorato ogni task",
+    summary: "Nel dettaglio del task vedi motore (Claude Code, Codex o Polpo), modello, computer, uscita di rete, sessione e costo di ogni esecuzione, con i loghi veri.",
+    body: [
+      "- **Scheda Esecuzione nel task**: motore e modello (es. Haiku 4.5 via Bedrock), il computer su cui ha girato (Daytona v2, E2B o host) con il suo stato, l'uscita di rete, se la sessione è nuova o ripresa e il costo rispetto al budget.",
+      "- **Storico delle esecuzioni**: le ultime esecuzioni di ogni task restano consultabili.",
+      "- **Loghi ovunque**: lista task, board, missioni, agenti, organigramma, computer e impostazioni mostrano il motore di ogni agente a colpo d'occhio.",
+      "- **Log completi** anche per i task eseguiti con Claude Code, con token e costo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
+    id: "2026-11-22-polpo-does-it-all",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Polpo sa fare tutto quello che fa l'MCP",
+    summary: "In chat Polpo ora configura agenti con Claude Code e computer, connettori, canali, aspetto e impostazioni, senza mai chiederti chiavi in chat.",
+    body: [
+      "- **Agenti completi dalla chat**: motore (Claude Code o Codex), computer, tool dei connettori e uscita di rete.",
+      "- **Connettori, canali, aspetto, impostazioni, membri e accessi MCP** gestibili chiedendolo a Polpo.",
+      "- **Chiavi al sicuro**: per ogni segreto Polpo ti dà il link al campo giusto, aspetta che lo compili e prosegue da solo.",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
     id: "2026-11-22-theme-everywhere",
     date: "2026-11-22",
     kind: "improved",
