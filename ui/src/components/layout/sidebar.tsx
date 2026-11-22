@@ -103,27 +103,27 @@ const openWhatsNewFromNav = (e: React.MouseEvent) => {
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
-    color: "bg-teal-400",
+    color: "bg-success",
     pulse: true,
     label: "Connected",
   },
   connecting: {
-    color: "bg-amber-400",
+    color: "bg-warning",
     pulse: true,
     label: "Connecting...",
   },
   reconnecting: {
-    color: "bg-amber-400",
+    color: "bg-warning",
     pulse: true,
     label: "Reconnecting...",
   },
   disconnected: {
-    color: "bg-rose-500",
+    color: "bg-destructive",
     pulse: false,
     label: "Disconnected",
   },
   error: {
-    color: "bg-rose-500",
+    color: "bg-destructive",
     pulse: false,
     label: "Error",
   },
@@ -169,11 +169,11 @@ const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: bool
   if (count === 0) return null;
 
   return collapsed ? (
-    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1">
+    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning text-micro font-bold text-warning-foreground px-1">
       {count}
     </span>
   ) : (
-    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white px-1.5">
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning text-micro font-bold text-warning-foreground px-1.5">
       {count}
     </span>
   );
@@ -191,7 +191,7 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
               href={to}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-accent/40 hover:text-foreground"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               <Icon className="h-[18px] w-[18px]" />
             </a>
@@ -209,8 +209,8 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
       "flex items-center rounded-lg transition-colors duration-200 group/link relative",
       "justify-center h-10 w-10 mx-auto",
       isActive
-        ? "bg-primary/8 text-primary"
-        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+        ? "bg-sidebar-primary/10 text-sidebar-primary"
+        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     );
 
   return (
@@ -238,11 +238,11 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
         href={to}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center rounded-lg transition-all duration-200 relative gap-3 px-3 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+        className="flex items-center rounded-lg transition-all duration-200 relative gap-3 px-3 py-2.5 text-[13px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
         <Icon className="h-[18px] w-[18px] shrink-0" />
         <span className="truncate">{label}</span>
-        <ExternalLink className="h-3 w-3 ml-auto shrink-0 text-muted-foreground/40" />
+        <ExternalLink className="h-3 w-3 ml-auto shrink-0 text-sidebar-foreground/40" />
       </a>
     );
   }
@@ -252,8 +252,8 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
       "flex items-center rounded-lg transition-colors duration-200 group/link relative",
       "gap-3 px-3 py-2.5 text-[13px] font-medium",
       isActive
-        ? "bg-primary/8 text-primary"
-        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+        ? "bg-sidebar-primary/10 text-sidebar-primary"
+        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
     );
 
   return (
@@ -291,21 +291,21 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex h-full flex-col border-r border-border/40 bg-muted/50 transition-all duration-300 ease-out",
+        "relative flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-out",
         collapsed ? "w-[56px]" : "w-64"
       )}
     >
       {/* Logo area */}
-      <div className="relative flex h-14 shrink-0 items-center border-b border-border/40 group">
+      <div className="relative flex h-14 shrink-0 items-center border-b border-sidebar-border group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
             <BrandMark className="rounded-xl" bareMaxWidthClassName="max-w-10" />
             <button
               onClick={() => setCollapsed(false)}
-              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-muted/90 backdrop-blur-sm cursor-pointer"
+              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 backdrop-blur-sm cursor-pointer"
               aria-label="Expand sidebar"
             >
-              <Columns2 className="h-4 w-4 text-foreground" />
+              <Columns2 className="h-4 w-4 text-sidebar-foreground" />
             </button>
           </div>
         ) : (
@@ -313,13 +313,13 @@ export function Sidebar() {
             <div className="flex items-center gap-3">
               <BrandMark className="rounded-xl" />
               <div>
-                <h1 className="max-w-36 truncate text-sm font-bold tracking-tight text-foreground">{productName(branding)}</h1>
-                <p className="max-w-36 truncate text-[10px] uppercase text-muted-foreground/70">{productTagline(branding)}</p>
+                <h1 className="max-w-36 truncate text-sm font-bold tracking-tight text-sidebar-foreground">{productName(branding)}</h1>
+                <p className="max-w-36 truncate text-label text-sidebar-foreground/60">{productTagline(branding)}</p>
               </div>
             </div>
             <button
               onClick={() => setCollapsed(true)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all cursor-pointer"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-sidebar-foreground/70 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-all cursor-pointer"
               aria-label="Collapse sidebar"
             >
               <Columns2 className="h-4 w-4" />
@@ -338,9 +338,9 @@ export function Sidebar() {
         {nav.map(({ section, items }, sectionIdx) => (
           <div key={section} className={cn(sectionIdx > 0 && (collapsed ? "mt-2" : "mt-3"))}>
             {collapsed ? (
-              <div className="mx-auto mb-1 h-px w-5 bg-border/60" />
+              <div className="mx-auto mb-1 h-px w-5 bg-sidebar-border" />
             ) : (
-              <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              <div className="px-3 mb-1 text-label text-sidebar-foreground/50">
                 {section}
               </div>
             )}
@@ -358,14 +358,14 @@ export function Sidebar() {
       </nav>
 
       {/* What's new — pinned near the bottom */}
-      <div className={cn("shrink-0 border-t border-border/40", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>
+      <div className={cn("shrink-0 border-t border-sidebar-border", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>
         {collapsed ? <NavItemCollapsed {...WHATS_NEW_ITEM} /> : <NavItemExpanded {...WHATS_NEW_ITEM} />}
       </div>
 
       {/* Footer — project + connection */}
       <div
         className={cn(
-          "shrink-0 border-t border-border/40",
+          "shrink-0 border-t border-sidebar-border",
           collapsed ? "p-0 py-3 flex flex-col items-center" : "px-4 py-3"
         )}
       >
@@ -403,15 +403,15 @@ export function Sidebar() {
                 status.pulse && "bio-pulse"
               )}
             />
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            <span className="shrink-0 text-xs font-medium text-sidebar-foreground/70">
               {status.label}
             </span>
-            <div className="h-4 w-px shrink-0 bg-border/60" />
-            <span className="min-w-0 truncate text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
+            <div className="h-4 w-px shrink-0 bg-sidebar-border" />
+            <span className="min-w-0 truncate text-micro font-mono uppercase tracking-widest text-sidebar-foreground/60">
               {info?.project ?? "Polpo"}
             </span>
             {info?.version && (
-              <span className="ml-auto shrink-0 text-[10px] font-mono text-muted-foreground/50">
+              <span className="ml-auto shrink-0 text-micro font-mono text-sidebar-foreground/50">
                 v{info.version}
               </span>
             )}

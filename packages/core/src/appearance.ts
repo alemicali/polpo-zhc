@@ -16,8 +16,12 @@ export type AppearanceTheme = (typeof APPEARANCE_THEMES)[number];
 export const APPEARANCE_PALETTES = ["tide", "lovable", "chatgpt", "claude", "brutal", "editorial", "redline", "cyber", "mono"] as const;
 export type AppearancePalette = (typeof APPEARANCE_PALETTES)[number];
 
-/** How a token's value is checked. */
-export type AppearanceTokenKind = "color" | "font" | "radius" | "shadow";
+/**
+ * How a token's value is checked: colour, font stack, radius (px 0–24), box-shadow, font size
+ * (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em -0.1–0.3 / px -3–6, 0,
+ * normal), text case (uppercase, none, capitalize, lowercase).
+ */
+export type AppearanceTokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case";
 
 /** Editor groups, in the order the dashboard shows them. */
 export const APPEARANCE_TOKEN_GROUPS = ["brand", "surfaces", "text", "borders", "sidebar", "charts", "status", "typography", "shape"] as const;
@@ -59,9 +63,31 @@ export const APPEARANCE_TOKENS = {
   chart4: { css: "--chart-4", group: "charts", kind: "color" },
   chart5: { css: "--chart-5", group: "charts", kind: "color" },
   destructive: { css: "--destructive", group: "status", kind: "color" },
+  destructiveForeground: { css: "--destructive-foreground", group: "status", kind: "color" },
+  success: { css: "--success", group: "status", kind: "color" },
+  successForeground: { css: "--success-foreground", group: "status", kind: "color" },
+  warning: { css: "--warning", group: "status", kind: "color" },
+  warningForeground: { css: "--warning-foreground", group: "status", kind: "color" },
+  info: { css: "--info", group: "status", kind: "color" },
+  infoForeground: { css: "--info-foreground", group: "status", kind: "color" },
+  statusRunning: { css: "--status-running", group: "status", kind: "color" },
+  statusQueued: { css: "--status-queued", group: "status", kind: "color" },
+  statusAssigned: { css: "--status-assigned", group: "status", kind: "color" },
   fontFamily: { css: "--app-font-family", group: "typography", kind: "font" },
   headingFont: { css: "--app-heading-font", group: "typography", kind: "font" },
   monoFont: { css: "--app-mono-font", group: "typography", kind: "font" },
+  textDisplay: { css: "--text-display", group: "typography", kind: "size" },
+  textH1: { css: "--text-h1", group: "typography", kind: "size" },
+  textH2: { css: "--text-h2", group: "typography", kind: "size" },
+  textH3: { css: "--text-h3", group: "typography", kind: "size" },
+  textBody: { css: "--text-body", group: "typography", kind: "size" },
+  textSmall: { css: "--text-small", group: "typography", kind: "size" },
+  textCaption: { css: "--text-caption", group: "typography", kind: "size" },
+  textMicro: { css: "--text-micro", group: "typography", kind: "size" },
+  headingWeight: { css: "--font-weight-heading", group: "typography", kind: "weight" },
+  headingTracking: { css: "--tracking-heading", group: "typography", kind: "tracking" },
+  labelTracking: { css: "--tracking-label", group: "typography", kind: "tracking" },
+  labelCase: { css: "--label-transform", group: "typography", kind: "case" },
   radius: { css: "--radius", group: "shape", kind: "radius" },
   shadowCard: { css: "--shadow-card", group: "shape", kind: "shadow" },
   shadowRaised: { css: "--shadow-raised", group: "shape", kind: "shadow" },
@@ -83,20 +109,32 @@ export const APPEARANCE_FONT = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
 export const APPEARANCE_SHADOW = /^(none|[0-9a-zA-Z.%\s,/#()+-]{1,240})$/;
 export const APPEARANCE_RADIUS_MIN = 0;
 export const APPEARANCE_RADIUS_MAX = 24;
+/** A font size (the type scale): rem 0.5–6 or px 8–96. */
+export const APPEARANCE_SIZE = /^(\d{1,2}(?:\.\d{1,4})?|\.\d{1,4})(rem|px)$/;
+export const APPEARANCE_SIZE_RANGE = { rem: [0.5, 6], px: [8, 96] } as const;
+/** A letter-spacing: em -0.1–0.3 or px -3–6, or 0 / normal. */
+export const APPEARANCE_TRACKING = /^(-?(?:\d(?:\.\d{1,4})?|\.\d{1,4}))(em|px)$/;
+export const APPEARANCE_TRACKING_RANGE = { em: [-0.1, 0.3], px: [-3, 6] } as const;
+/** A font weight: 100–900. */
+export const APPEARANCE_WEIGHT_MIN = 100;
+export const APPEARANCE_WEIGHT_MAX = 900;
+/** The label case (text-transform). */
+export const APPEARANCE_CASES = ["uppercase", "none", "capitalize", "lowercase"] as const;
 
 /** The fonts the dashboard loads (any safe stack is accepted; others need the font installed on the viewer's device). */
 export const APPEARANCE_FONT_PRESETS: Record<string, string> = {
   Satoshi: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif",
   System: "ui-sans-serif, system-ui, sans-serif",
   Inter: "\"Inter\", ui-sans-serif, system-ui, sans-serif",
+  "Inter Tight": "\"Inter Tight\", ui-sans-serif, system-ui, sans-serif",
   "IBM Plex Sans": "\"IBM Plex Sans\", ui-sans-serif, system-ui, sans-serif",
   Newsreader: "\"Newsreader\", Georgia, serif",
   Serif: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
   Mono: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace",
 };
 
-/** Token values for one mode: any subset of APPEARANCE_TOKENS (radius in px, the rest strings). */
-export type AppearanceTokens = Partial<Record<Exclude<AppearanceTokenName, "radius">, string>> & { radius?: number };
+/** Token values for one mode: any subset of APPEARANCE_TOKENS (radius in px and headingWeight numbers, the rest strings). */
+export type AppearanceTokens = Partial<Record<Exclude<AppearanceTokenName, "radius" | "headingWeight">, string>> & { radius?: number; headingWeight?: number };
 /** @deprecated the old five-field shape; still accepted (text = foreground). */
 export type AppearanceColors = AppearanceTokens & { text?: string };
 
@@ -123,7 +161,32 @@ export function parseAppearanceToken(name: AppearanceTokenName, value: unknown, 
     }
     return Math.round(value * 2) / 2;
   }
+  if (kind === "weight") {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < APPEARANCE_WEIGHT_MIN || value > APPEARANCE_WEIGHT_MAX) {
+      throw new Error(`${path} must be a font weight from ${APPEARANCE_WEIGHT_MIN} to ${APPEARANCE_WEIGHT_MAX} (e.g. 600)`);
+    }
+    return Math.round(value);
+  }
   const s = typeof value === "string" ? value.trim() : "";
+  if (kind === "size") {
+    const m = APPEARANCE_SIZE.exec(s);
+    const range = m ? APPEARANCE_SIZE_RANGE[m[2] as "rem" | "px"] : null;
+    const n = m ? parseFloat(m[1]) : NaN;
+    if (!m || !range || n < range[0] || n > range[1]) throw new Error(`${path} must be a font size: rem 0.5–6 or px 8–96 (e.g. 1.5rem, 13px)`);
+    return s;
+  }
+  if (kind === "tracking") {
+    if (s === "0" || s === "normal") return s;
+    const m = APPEARANCE_TRACKING.exec(s);
+    const range = m ? APPEARANCE_TRACKING_RANGE[m[2] as "em" | "px"] : null;
+    const n = m ? parseFloat(m[1]) : NaN;
+    if (!m || !range || n < range[0] || n > range[1]) throw new Error(`${path} must be a letter-spacing: em -0.1–0.3 or px -3–6, 0 or normal (e.g. 0.06em)`);
+    return s;
+  }
+  if (kind === "case") {
+    if (!(APPEARANCE_CASES as readonly string[]).includes(s)) throw new Error(`${path} must be one of ${APPEARANCE_CASES.join(", ")}`);
+    return s;
+  }
   if (kind === "color") {
     if (!APPEARANCE_COLOR.test(s)) throw new Error(`${path} must be a colour: #rrggbb, #rgb, oklch(…), hsl(…) or rgb(…)`);
     return s.startsWith("#") ? s.toLowerCase() : s;

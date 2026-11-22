@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appearanceKit, bootScriptSource, type InstanceAppearance } from "@/lib/appearance-kit";
 import { parseImportedAppearance } from "@/lib/appearance-import";
 import { brandLogoCandidates } from "@/lib/brand-logo";
-import { APPEARANCE_TOKENS, APPEARANCE_PALETTES } from "../../packages/core/src/appearance";
+import { APPEARANCE_TOKENS, APPEARANCE_PALETTES, parseAppearanceSettings } from "../../packages/core/src/appearance";
 
 const kit = appearanceKit();
 const none = { theme: null, palette: null, custom: null };
@@ -76,13 +76,50 @@ describe("design tokens", () => {
     expect(kit.tokenValue("nope", "#fff")).toBeUndefined();
   });
 
-  it("outrank the palettes and style fonts and cards when set", () => {
-    const css = kit.overridesCss(kit.normalizeCustom({ enabled: true, light: { headingFont: "\"Newsreader\", serif", monoFont: "monospace", shadowCard: "none" }, dark: {} }))!;
+  it("outrank the palettes with the token variables (index.css reads them by name)", () => {
+    const css = kit.overridesCss(kit.normalizeCustom({ enabled: true, light: { headingFont: "\"Newsreader\", serif", monoFont: "monospace", shadowCard: "none", textH1: "2rem", headingWeight: 600, labelCase: "none" }, dark: {} }))!;
     expect(css).toContain("html:root, html:root[data-palette] {");
     expect(css).toContain("html:root.dark, html:root.dark[data-palette] {");
-    expect(css).toMatch(/h1.*font-family: var\(--app-heading-font\)/);
-    expect(css).toMatch(/code.*font-family: var\(--app-mono-font\)/);
-    expect(css).toContain("box-shadow: var(--shadow-card)");
+    expect(css).toContain("--app-heading-font: \"Newsreader\", serif;");
+    expect(css).toContain("--app-mono-font: monospace;");
+    // composed with Tailwind's rings: "none" would void the whole box-shadow list
+    expect(css).toContain("--shadow-card: 0 0 #0000;");
+    expect(css).toContain("--text-h1: 2rem;");
+    expect(css).toContain("--font-weight-heading: 600;");
+    expect(css).toContain("--label-transform: none;");
+  });
+
+  it("check the type scale, status colours and their foregrounds", () => {
+    expect(kit.tokenValue("textH1", "1.75rem")).toBe("1.75rem");
+    expect(kit.tokenValue("textMicro", "10px")).toBe("10px");
+    expect(kit.tokenValue("textH1", "7rem")).toBeUndefined();
+    expect(kit.tokenValue("textH1", "4px")).toBeUndefined();
+    expect(kit.tokenValue("textH1", "2em")).toBeUndefined();
+    expect(kit.tokenValue("headingWeight", 650)).toBe(650);
+    expect(kit.tokenValue("headingWeight", 1200)).toBe(900);
+    expect(kit.tokenValue("headingWeight", "bold")).toBeUndefined();
+    expect(kit.tokenValue("labelTracking", "0.08em")).toBe("0.08em");
+    expect(kit.tokenValue("labelTracking", "-0.02em")).toBe("-0.02em");
+    expect(kit.tokenValue("labelTracking", "1em")).toBeUndefined();
+    expect(kit.tokenValue("labelTracking", "0")).toBe("0");
+    expect(kit.tokenValue("labelCase", "uppercase")).toBe("uppercase");
+    expect(kit.tokenValue("labelCase", "small-caps")).toBeUndefined();
+    expect(kit.tokenValue("success", "#15803d")).toBe("#15803d");
+    const { tokens } = kit.deriveTokens({ success: "#15803d", warning: "#fde047", info: "#1d4ed8", destructive: "#b91c1c" }, true);
+    expect(tokens.successForeground).toBe("#ffffff");
+    expect(tokens.warningForeground).toBe("#0f172a");
+    expect(tokens.infoForeground).toBe("#ffffff");
+    expect(tokens.destructiveForeground).toBe("#ffffff");
+    expect(tokens.statusRunning).toBe("#1d4ed8");
+  });
+
+  it("the server takes and bounds the same type scale and status tokens", () => {
+    const light = { success: "#15803d", textH1: "1.75rem", textMicro: "10px", headingWeight: 600, labelTracking: "0.08em", labelCase: "none" };
+    expect(parseAppearanceSettings({ custom: { enabled: true, light } }).custom?.light).toEqual(light);
+    expect(() => parseAppearanceSettings({ custom: { light: { textH1: "7rem" } } })).toThrow(/textH1 must be a font size/);
+    expect(() => parseAppearanceSettings({ custom: { light: { headingWeight: 950 } } })).toThrow(/headingWeight must be a font weight/);
+    expect(() => parseAppearanceSettings({ custom: { light: { labelTracking: "1em" } } })).toThrow(/labelTracking must be a letter-spacing/);
+    expect(() => parseAppearanceSettings({ custom: { light: { labelCase: "small-caps" } } })).toThrow(/labelCase must be one of/);
   });
 });
 

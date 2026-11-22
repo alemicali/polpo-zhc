@@ -573,7 +573,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
 
   return (
-    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border/50 bg-muted/10 px-1.5 py-3 lg:w-44 lg:px-2.5">
+    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-sidebar-border bg-sidebar text-sidebar-foreground px-1.5 py-3 lg:w-44 lg:px-2.5">
       <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
         <MoreHorizontal className="h-4 w-4 text-primary" />
         <span className="text-xs font-semibold">More</span>
@@ -581,7 +581,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
       <nav className="space-y-3 pb-3" aria-label="More pages">
         {secondaryGroups.map(group => (
           <div key={group.label}>
-            <p className="mb-1 hidden px-2 text-[9px] font-semibold uppercase text-muted-foreground/55 lg:block">
+            <p className="text-label mb-1 hidden px-2 text-sidebar-foreground/55 lg:block">
               {group.label}
             </p>
             <div className="space-y-0.5">
@@ -597,8 +597,8 @@ function MoreNavigation({ pathname }: { pathname: string }) {
                     className={cn(
                       "flex h-9 w-full items-center justify-center gap-2 rounded-md transition-colors lg:justify-start lg:px-2",
                       active
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                        ? "bg-sidebar-primary/10 text-sidebar-primary"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />

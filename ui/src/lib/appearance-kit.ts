@@ -18,7 +18,12 @@
 export type BootTheme = "light" | "dark" | "system";
 
 export type TokenGroup = "brand" | "surfaces" | "text" | "borders" | "sidebar" | "charts" | "status" | "typography" | "shape";
-export type TokenKind = "color" | "font" | "radius" | "shadow";
+/**
+ * How a token is checked: a colour, a font stack, a radius (px, 0–24), a box-shadow, a font size
+ * (rem 0.5–6 or px 8–96), a font weight (100–900), a letter-spacing (em -0.1–0.3, px -3–6, 0 or
+ * normal) or a text case (uppercase, none, capitalize, lowercase).
+ */
+export type TokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case";
 
 /** A mode's design tokens: any subset (radius in px, the rest CSS values). */
 export type TokenMap = Record<string, string | number>;
@@ -152,9 +157,31 @@ export function appearanceKit() {
     chart4: ["--chart-4", "charts", "color"],
     chart5: ["--chart-5", "charts", "color"],
     destructive: ["--destructive", "status", "color"],
+    destructiveForeground: ["--destructive-foreground", "status", "color"],
+    success: ["--success", "status", "color"],
+    successForeground: ["--success-foreground", "status", "color"],
+    warning: ["--warning", "status", "color"],
+    warningForeground: ["--warning-foreground", "status", "color"],
+    info: ["--info", "status", "color"],
+    infoForeground: ["--info-foreground", "status", "color"],
+    statusRunning: ["--status-running", "status", "color"],
+    statusQueued: ["--status-queued", "status", "color"],
+    statusAssigned: ["--status-assigned", "status", "color"],
     fontFamily: ["--app-font-family", "typography", "font"],
     headingFont: ["--app-heading-font", "typography", "font"],
     monoFont: ["--app-mono-font", "typography", "font"],
+    textDisplay: ["--text-display", "typography", "size"],
+    textH1: ["--text-h1", "typography", "size"],
+    textH2: ["--text-h2", "typography", "size"],
+    textH3: ["--text-h3", "typography", "size"],
+    textBody: ["--text-body", "typography", "size"],
+    textSmall: ["--text-small", "typography", "size"],
+    textCaption: ["--text-caption", "typography", "size"],
+    textMicro: ["--text-micro", "typography", "size"],
+    headingWeight: ["--font-weight-heading", "typography", "weight"],
+    headingTracking: ["--tracking-heading", "typography", "tracking"],
+    labelTracking: ["--tracking-label", "typography", "tracking"],
+    labelCase: ["--label-transform", "typography", "case"],
     radius: ["--radius", "shape", "radius"],
     shadowCard: ["--shadow-card", "shape", "shadow"],
     shadowRaised: ["--shadow-raised", "shape", "shadow"],
@@ -183,6 +210,13 @@ export function appearanceKit() {
     ["sidebarAccentForeground", "contrast:sidebarAccent"],
     ["sidebarRing", "sidebarPrimary"],
     ["chart1", "primary"],
+    ["destructiveForeground", "contrast:destructive"],
+    ["successForeground", "contrast:success"],
+    ["warningForeground", "contrast:warning"],
+    ["infoForeground", "contrast:info"],
+    ["statusRunning", "info"],
+    ["statusAssigned", "primary"],
+    ["statusQueued", "mutedForeground"],
   ];
   const STYLE_ID = "polpo-appearance-overrides";
   const KEYS = { theme: "polpo-theme", palette: "polpo-palette", custom: "polpo-appearance" };
@@ -206,6 +240,11 @@ export function appearanceKit() {
   const FONT_PRELOAD_PREFIX = "polpo-font-preload-";
   const FONT_RE = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
   const SHADOW_RE = /^(none|[0-9a-zA-Z.%\s,/#()+-]{1,240})$/;
+  /** A font size: a number of rem or px (ranges checked in tokenValue). */
+  const SIZE_RE = /^(\d{1,2}(?:\.\d{1,4})?|\.\d{1,4})(rem|px)$/;
+  /** A letter-spacing: a number of em or px (ranges checked in tokenValue). */
+  const TRACKING_RE = /^(-?(?:\d(?:\.\d{1,4})?|\.\d{1,4}))(em|px)$/;
+  const CASES = ["uppercase", "none", "capitalize", "lowercase"];
 
   function slug(value: string): string {
     return value.trim().toLowerCase().replace(/[^a-z0-9._:-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "default";
@@ -234,14 +273,33 @@ export function appearanceKit() {
     return typeof v === "string" && PALETTES.indexOf(v) >= 0;
   }
 
-  /** A token's value when valid (a font stack, a colour, a shadow, a radius 0–24), else undefined. */
+  /**
+   * A token's value when valid (see TokenKind), else undefined. Numbers out of range are clamped
+   * (radius 0–24, weight 100–900); sizes and trackings out of range are refused.
+   */
   function tokenValue(name: string, value: unknown): string | number | undefined {
     const def = TOKENS[name];
     if (!def) return undefined;
-    if (def[2] === "radius") return typeof value === "number" && isFinite(value) ? Math.min(24, Math.max(0, value)) : undefined;
+    const kind = def[2];
+    if (kind === "radius") return typeof value === "number" && isFinite(value) ? Math.min(24, Math.max(0, value)) : undefined;
+    if (kind === "weight") return typeof value === "number" && isFinite(value) ? Math.round(Math.min(900, Math.max(100, value))) : undefined;
     const s = typeof value === "string" ? value.trim() : "";
-    if (def[2] === "color") return COLOR_RE.test(s) ? s : undefined;
-    if (def[2] === "font") return FONT_RE.test(s) ? s : undefined;
+    if (kind === "color") return COLOR_RE.test(s) ? s : undefined;
+    if (kind === "font") return FONT_RE.test(s) ? s : undefined;
+    if (kind === "size") {
+      const m = SIZE_RE.exec(s);
+      if (!m) return undefined;
+      const n = parseFloat(m[1]);
+      return (m[2] === "rem" ? n >= 0.5 && n <= 6 : n >= 8 && n <= 96) ? s : undefined;
+    }
+    if (kind === "tracking") {
+      if (s === "0" || s === "normal") return s;
+      const m = TRACKING_RE.exec(s);
+      if (!m) return undefined;
+      const n = parseFloat(m[1]);
+      return (m[2] === "em" ? n >= -0.1 && n <= 0.3 : n >= -3 && n <= 6) ? s : undefined;
+    }
+    if (kind === "case") return CASES.indexOf(s) >= 0 ? s : undefined;
     return SHADOW_RE.test(s) && !/url\s*\(/i.test(s) ? s : undefined;
   }
 
@@ -345,7 +403,10 @@ export function appearanceKit() {
       const value = tokens[name];
       if (value === undefined) continue;
       const css = TOKENS[name][0];
-      lines.push(`  ${css}: ${name === "radius" ? `${value}px` : value};`);
+      const kind = TOKENS[name][2];
+      // a shadow is composed with Tailwind's rings (shadow-card / shadow-raised): "none" would void the list
+      const out = kind === "radius" ? `${value}px` : kind === "shadow" && value === "none" ? "0 0 #0000" : value;
+      lines.push(`  ${css}: ${out};`);
       // the sans font is also Tailwind's --font-sans
       if (name === "fontFamily") lines.push(`  --font-sans: ${value};`);
     }
@@ -360,17 +421,12 @@ export function appearanceKit() {
     if (!custom.enabled) return null;
     const light = deriveTokens(custom.light, custom.derive).tokens;
     const dark = deriveTokens(custom.dark, custom.derive).tokens;
-    const has = (name: string) => light[name] !== undefined || dark[name] !== undefined;
+    // Only the variables: index.css reads every token by name (body and headings, code, the
+    // shadow-card / shadow-raised utilities, the type scale), palettes included.
     const blocks = [
       "html:root, html:root[data-palette] {", declarations(light), "}",
       "html:root.dark, html:root.dark[data-palette] {", declarations(dark), "}",
     ];
-    if (has("fontFamily")) blocks.push("html:root body, html:root[data-palette] body { font-family: var(--app-font-family); }");
-    if (has("headingFont")) {
-      blocks.push("html:root h1, html:root h2, html:root h3, html:root[data-palette] h1, html:root[data-palette] h2, html:root[data-palette] h3 { font-family: var(--app-heading-font); }");
-    }
-    if (has("monoFont")) blocks.push("html:root code, html:root pre, html:root .font-mono, html:root kbd { font-family: var(--app-mono-font); }");
-    if (has("shadowCard")) blocks.push("html:root [data-slot=\"card\"] { box-shadow: var(--shadow-card); }");
     return blocks.join("\n");
   }
 

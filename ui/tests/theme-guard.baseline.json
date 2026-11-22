@@ -1,0 +1,629 @@
+{
+  "totals": {
+    "palette": 1573,
+    "literal": 59,
+    "textSize": 1406
+  },
+  "files": {
+    "components/agents/activity-heatmap.tsx": {
+      "palette": 12,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/agents/agent-computer-tab.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/agents/agent-config-tab.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/agents/agent-credentials-tab.tsx": {
+      "palette": 22,
+      "literal": 0,
+      "textSize": 20
+    },
+    "components/agents/agent-drive-tab.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 9
+    },
+    "components/agents/agent-hero-card.tsx": {
+      "palette": 4,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/agents/agent-hierarchy-card.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/agents/agent-instructions-tab.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 3
+    },
+    "components/agents/agent-learning-tab.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 7
+    },
+    "components/agents/agent-memory-tab.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 3
+    },
+    "components/agents/agent-overview-tab.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/agents/agent-performance-card.tsx": {
+      "palette": 4,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/agents/agent-sandbox-tab.tsx": {
+      "palette": 5,
+      "literal": 0,
+      "textSize": 9
+    },
+    "components/agents/agent-socials-card.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/agents/agent-tasks-tab.tsx": {
+      "palette": 6,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/agents/agent-tools-tab.tsx": {
+      "palette": 5,
+      "literal": 0,
+      "textSize": 8
+    },
+    "components/agents/agents-dialogs.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/agents/agents-list-view.tsx": {
+      "palette": 2,
+      "literal": 1,
+      "textSize": 14
+    },
+    "components/agents/agents-org-chart.tsx": {
+      "palette": 3,
+      "literal": 5,
+      "textSize": 8
+    },
+    "components/agents/agents-summary.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/agents/agents-team-colors.ts": {
+      "palette": 35,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/agents/live-activity.tsx": {
+      "palette": 3,
+      "literal": 0,
+      "textSize": 9
+    },
+    "components/ai-elements/background-waits.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/ai-elements/env-from-vault-chips.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/ai-elements/mention-popover.tsx": {
+      "palette": 10,
+      "literal": 0,
+      "textSize": 17
+    },
+    "components/ai-elements/queue.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/ai-elements/tool.tsx": {
+      "palette": 12,
+      "literal": 0,
+      "textSize": 12
+    },
+    "components/artifacts/artifact-chat-card.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/chat-attachments.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/computers/computer-card.tsx": {
+      "palette": 4,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/computers/status-badge.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/config/agent-session-overrides.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 7
+    },
+    "components/config/custom-providers.tsx": {
+      "palette": 13,
+      "literal": 0,
+      "textSize": 34
+    },
+    "components/config/gate-form-dialog.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 10
+    },
+    "components/config/mcp-access-section.tsx": {
+      "palette": 4,
+      "literal": 0,
+      "textSize": 8
+    },
+    "components/config/rule-form-dialog.tsx": {
+      "palette": 11,
+      "literal": 0,
+      "textSize": 31
+    },
+    "components/config/telegram-connect.tsx": {
+      "palette": 12,
+      "literal": 0,
+      "textSize": 34
+    },
+    "components/connectors/agent-connectors-section.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/connectors/connect-dialog.tsx": {
+      "palette": 6,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/connectors/connector-bits.tsx": {
+      "palette": 18,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/connectors/connector-detail-sheet.tsx": {
+      "palette": 3,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/connectors/custom-connector-dialog.tsx": {
+      "palette": 3,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/connectors/oauth-apps-dialog.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/data/data-view-renderer.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 21
+    },
+    "components/error-boundary.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/files/volume-dialog.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 15
+    },
+    "components/groups/group-composer.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 8
+    },
+    "components/groups/group-conversation.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 14
+    },
+    "components/groups/group-dialogs.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/groups/group-form.tsx": {
+      "palette": 4,
+      "literal": 0,
+      "textSize": 10
+    },
+    "components/groups/group-list.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 12
+    },
+    "components/groups/group-members.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/json-block.tsx": {
+      "palette": 0,
+      "literal": 5,
+      "textSize": 1
+    },
+    "components/layout/chat-first-layout.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 7
+    },
+    "components/layout/chat-tabs.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/layout/header.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/layout/mobile-nav-sheet.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/layout/sidebar.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/sandbox/network-denied-card.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 6
+    },
+    "components/sandbox/network-notice.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/sandbox/remote-providers-card.tsx": {
+      "palette": 32,
+      "literal": 0,
+      "textSize": 17
+    },
+    "components/sandbox/sandbox-editor.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 13
+    },
+    "components/sandbox/sandbox-settings.tsx": {
+      "palette": 6,
+      "literal": 0,
+      "textSize": 11
+    },
+    "components/send-preview-card.tsx": {
+      "palette": 25,
+      "literal": 0,
+      "textSize": 17
+    },
+    "components/setup/local-model-step.tsx": {
+      "palette": 14,
+      "literal": 0,
+      "textSize": 5
+    },
+    "components/shared/agent-avatar.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 3
+    },
+    "components/shared/applied-rules-panel.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 9
+    },
+    "components/shared/file-preview.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/shared/model-picker.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/shared/multi-select-filter.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/shared/provider-auth.tsx": {
+      "palette": 27,
+      "literal": 0,
+      "textSize": 4
+    },
+    "components/shared/time-range-filter.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/shared/tool-result-artifacts.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 2
+    },
+    "components/ui/badge.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/ui/button.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/ui/dialog.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/ui/sheet.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 0
+    },
+    "components/vault/vault-ref-picker.tsx": {
+      "palette": 6,
+      "literal": 0,
+      "textSize": 8
+    },
+    "components/whats-new/changelog-kind.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 1
+    },
+    "components/whats-new/whats-new-bar.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 3
+    },
+    "components/widget-card.tsx": {
+      "palette": 0,
+      "literal": 5,
+      "textSize": 5
+    },
+    "lib/agent-meta.ts": {
+      "palette": 93,
+      "literal": 0,
+      "textSize": 0
+    },
+    "lib/mission-status.ts": {
+      "palette": 24,
+      "literal": 0,
+      "textSize": 0
+    },
+    "pages/activity.tsx": {
+      "palette": 57,
+      "literal": 0,
+      "textSize": 8
+    },
+    "pages/agent-browser-live.tsx": {
+      "palette": 6,
+      "literal": 5,
+      "textSize": 8
+    },
+    "pages/agent-detail.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 1
+    },
+    "pages/agent-talk.tsx": {
+      "palette": 10,
+      "literal": 0,
+      "textSize": 8
+    },
+    "pages/approvals.tsx": {
+      "palette": 51,
+      "literal": 0,
+      "textSize": 13
+    },
+    "pages/apps.tsx": {
+      "palette": 5,
+      "literal": 0,
+      "textSize": 34
+    },
+    "pages/artifacts.tsx": {
+      "palette": 7,
+      "literal": 0,
+      "textSize": 5
+    },
+    "pages/browser.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 14
+    },
+    "pages/chat.tsx": {
+      "palette": 50,
+      "literal": 0,
+      "textSize": 76
+    },
+    "pages/coding.tsx": {
+      "palette": 16,
+      "literal": 0,
+      "textSize": 4
+    },
+    "pages/coding/browser-tab.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 3
+    },
+    "pages/coding/changes-panel.tsx": {
+      "palette": 17,
+      "literal": 0,
+      "textSize": 7
+    },
+    "pages/coding/empty-quickstart.tsx": {
+      "palette": 10,
+      "literal": 0,
+      "textSize": 7
+    },
+    "pages/coding/new-terminal-dialog.tsx": {
+      "palette": 3,
+      "literal": 0,
+      "textSize": 12
+    },
+    "pages/coding/processes-dialog.tsx": {
+      "palette": 6,
+      "literal": 0,
+      "textSize": 13
+    },
+    "pages/coding/right-panel.tsx": {
+      "palette": 1,
+      "literal": 1,
+      "textSize": 7
+    },
+    "pages/coding/session-tabs.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 6
+    },
+    "pages/coding/settings-dialog.tsx": {
+      "palette": 7,
+      "literal": 0,
+      "textSize": 21
+    },
+    "pages/coding/sidebar.tsx": {
+      "palette": 15,
+      "literal": 0,
+      "textSize": 9
+    },
+    "pages/coding/terminal-session.tsx": {
+      "palette": 0,
+      "literal": 4,
+      "textSize": 0
+    },
+    "pages/coding/workspace-controls.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 20
+    },
+    "pages/company-brain.tsx": {
+      "palette": 37,
+      "literal": 0,
+      "textSize": 24
+    },
+    "pages/config.tsx": {
+      "palette": 185,
+      "literal": 0,
+      "textSize": 183
+    },
+    "pages/connectors.tsx": {
+      "palette": 0,
+      "literal": 0,
+      "textSize": 3
+    },
+    "pages/dashboard.tsx": {
+      "palette": 42,
+      "literal": 10,
+      "textSize": 22
+    },
+    "pages/data.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 19
+    },
+    "pages/files.tsx": {
+      "palette": 49,
+      "literal": 4,
+      "textSize": 11
+    },
+    "pages/login.tsx": {
+      "palette": 1,
+      "literal": 0,
+      "textSize": 0
+    },
+    "pages/memory.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 3
+    },
+    "pages/mission-detail.tsx": {
+      "palette": 120,
+      "literal": 13,
+      "textSize": 85
+    },
+    "pages/missions.tsx": {
+      "palette": 11,
+      "literal": 0,
+      "textSize": 19
+    },
+    "pages/notifications.tsx": {
+      "palette": 34,
+      "literal": 0,
+      "textSize": 15
+    },
+    "pages/playbook-detail.tsx": {
+      "palette": 2,
+      "literal": 0,
+      "textSize": 14
+    },
+    "pages/playbooks.tsx": {
+      "palette": 15,
+      "literal": 0,
+      "textSize": 13
+    },
+    "pages/schedules.tsx": {
+      "palette": 17,
+      "literal": 0,
+      "textSize": 6
+    },
+    "pages/setup.tsx": {
+      "palette": 14,
+      "literal": 0,
+      "textSize": 2
+    },
+    "pages/skill-detail.tsx": {
+      "palette": 8,
+      "literal": 0,
+      "textSize": 16
+    },
+    "pages/skills.tsx": {
+      "palette": 13,
+      "literal": 0,
+      "textSize": 19
+    },
+    "pages/task-detail.tsx": {
+      "palette": 180,
+      "literal": 4,
+      "textSize": 109
+    },
+    "pages/tasks.tsx": {
+      "palette": 56,
+      "literal": 1,
+      "textSize": 41
+    },
+    "pages/terminal.tsx": {
+      "palette": 21,
+      "literal": 1,
+      "textSize": 0
+    }
+  }
+}

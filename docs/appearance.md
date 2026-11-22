@@ -39,7 +39,13 @@ Values are checked by the REST route and MCP, which refuse invalid input (400), 
 - **colours**: `#rgb`, `#rrggbb`, `#rrggbbaa`, `oklch(…)`, `oklab(…)`, `lab(…)`, `lch(…)`, `hsl(…)`, `rgb(…)` (the syntaxes the dashboard's CSS uses);
 - **fonts**: a CSS font stack of names, commas and quotes, at most 200 characters (no `;`, braces, `url(`…). The dashboard loads Satoshi, IBM Plex Sans, JetBrains Mono and Newsreader, and ships **Inter Tight** (self-hosted variable woff2, weights 100–900, latin + latin-ext, `font-display: swap`: fetched only when a look uses it, and preloaded by the inline script then; e.g. `"\"Inter Tight\", sans-serif"`); other families need to be installed on the viewer's device (no web-font loading);
 - **radius**: 0–24 px;
-- **shadows**: a `box-shadow` or `none`, no `url(`.
+- **shadows**: a `box-shadow` or `none`, no `url(`;
+- **font sizes** (the type scale): `rem` 0.5–6 or `px` 8–96 (e.g. `"1.75rem"`, `"13px"`);
+- **font weight** (`headingWeight`): a number 100–900;
+- **letter-spacing** (`headingTracking`, `labelTracking`): `em` -0.1–0.3 or `px` -3–6, `0` or `normal`;
+- **label case** (`labelCase`): `uppercase`, `none`, `capitalize` or `lowercase`.
+
+The dashboard loads Satoshi (variable, 300–900), IBM Plex Sans (400–700), Inter (400–700), JetBrains Mono (400–700) and Newsreader (400–700) from their font services (declared only: a family is downloaded when the page uses it) and bundles Inter Tight — every preset in the editor.
 
 The old shape (`primary`, `secondary`, `text`, `fontFamily`, `radius` per mode) is still read: `text` is `foreground`.
 
@@ -69,18 +75,47 @@ Every CSS custom property the dashboard's theme uses (`ui/src/index.css`), and w
 | Sidebar | `sidebar`, `sidebarForeground`, `sidebarPrimary`, `sidebarPrimaryForeground`, `sidebarAccent`, `sidebarAccentForeground`, `sidebarBorder`, `sidebarRing` | `--sidebar*` | primary and foreground copies only | yes (derived from background, foreground, primary, accent, border) |
 | Charts | `chart1` … `chart5` | `--chart-1` … `--chart-5` | palette only | yes (chart1 derived from primary) |
 | Status | `destructive` | `--destructive` | palette only | yes |
-| Typography | `fontFamily` | `--app-font-family`, `--font-sans` | yes | yes (also on palettes that set their own body font) |
-| Typography | `headingFont` | `--app-heading-font` (h1–h3) | palette only (Claude, Redline) | yes |
-| Typography | `monoFont` | `--app-mono-font` (code, pre) | no (fixed JetBrains Mono) | yes |
+| Status | `destructiveForeground` | `--destructive-foreground` | no | yes (derived by contrast) |
+| Status | `success`, `warning`, `info` | `--success`, `--warning`, `--info` | no (fixed Tailwind emerald / amber / sky) | yes (every palette defines them) |
+| Status | `successForeground`, `warningForeground`, `infoForeground` | `--*-foreground` | no | yes (derived by contrast) |
+| Status | `statusRunning`, `statusQueued`, `statusAssigned` | `--status-running`, `--status-queued`, `--status-assigned` | no | yes (default: info, muted text, primary) |
+| Typography | `fontFamily` | `--app-font-family` (Tailwind `font-sans`) | yes | yes (also on palettes that set their own body font) |
+| Typography | `headingFont` | `--app-heading-font` (h1–h3, `font-heading`, card / dialog / sheet titles) | palette only (Claude, Redline) | yes |
+| Typography | `monoFont` | `--app-mono-font` (code, pre, kbd, Tailwind `font-mono`) | no (fixed JetBrains Mono) | yes |
+| Typography | `textDisplay`, `textH1`, `textH2`, `textH3`, `textBody`, `textSmall`, `textCaption`, `textMicro` | `--text-display` … `--text-micro` | no | yes |
+| Typography | `headingWeight` | `--font-weight-heading` | no (fixed 700; Claude 600) | yes |
+| Typography | `headingTracking` | `--tracking-heading` | no | yes |
+| Typography | `labelTracking`, `labelCase` | `--tracking-label`, `--label-transform` (`text-label`) | no | yes |
 | Shape | `radius` | `--radius` (and `--radius-sm` … `--radius-4xl`) | yes | yes (Redline forces square corners) |
-| Shape | `shadowCard` | `--shadow-card` | palette only | yes (applied to every card) |
-| Shape | `shadowRaised` | `--shadow-raised` | palette only | yes |
+| Shape | `shadowCard` | `--shadow-card` (`shadow-card`: every card) | palette only | yes |
+| Shape | `shadowRaised` | `--shadow-raised` (`shadow-raised`: popovers, menus, selects, dialogs, sheets, tooltips, the mobile nav) | palette only | yes |
 
-Not configurable: success / warning / info colours (the components use Tailwind's emerald, amber and sky directly, not tokens), palette-only textures (Editorial's paper grain, Cyber's glow), spacing and density (no density tokens exist), and the favicon.
+Not configurable: palette-only textures (Editorial's paper grain, Cyber's scanlines), spacing and density (no density tokens exist), the line heights of the type scale (`--leading-*`, per palette in CSS only), and the favicon. Palettes with zero letter-spacing (Lovable, ChatGPT, Claude, Redline) set `headingTracking` and `labelTracking` to 0; a custom value still applies.
+
+## Using the tokens in the dashboard's code
+
+`ui/src/index.css` maps every token to Tailwind (`@theme`), so screens never need a fixed colour or size:
+
+| Need | Use |
+|---|---|
+| Success / warning / info / error text | `text-success`, `text-warning`, `text-info`, `text-destructive` |
+| Tinted badge or banner | `bg-success/10 text-success border-success/30` (same for warning, info, destructive) |
+| Filled badge or button | `bg-success text-success-foreground` (… `bg-destructive text-destructive-foreground`) |
+| Task states | `text-status-running` / `bg-status-running`, `…-status-queued`, `…-status-assigned`; done → success, failed → destructive, review / awaiting → warning |
+| Page title | `<PageHeader title description actions />` (`components/shared/page-header.tsx`: `font-heading text-h1`) |
+| Section title | `<SectionHeader title icon count actions />` (a `text-label`) |
+| Small uppercase label | `<Eyebrow>` or the `text-label` class (caption size, 600, label case and tracking) |
+| A metric | `<StatValue label value hint tone />` |
+| Font sizes | `text-display` (2.25rem), `text-h1` (1.5rem), `text-h2` (1.125rem), `text-h3` (0.9375rem), `text-body` (0.875rem), `text-small` (0.8125rem), `text-caption` (0.6875rem), `text-micro` (0.625rem) |
+| Heading font, weight, tracking | `font-heading` |
+| Shadows | `shadow-card`, `shadow-raised` |
+| Sidebar-like chrome | `bg-sidebar text-sidebar-foreground border-sidebar-border`, hover `bg-sidebar-accent`, active `text-sidebar-primary` |
+
+`ui/tests/theme-guard.test.ts` counts, per file, Tailwind palette colours (`bg-emerald-500`, `text-zinc-400`, `bg-white`…), colour literals (`#…`, `rgb(…)`, `oklch(…)`…) and arbitrary sizes (`text-[10px]`) and fails when a file has more than `ui/tests/theme-guard.baseline.json` allows (files not listed: zero). After removing some, lower the baseline: `UPDATE_THEME_BASELINE=1 npx vitest run --config ui/vitest.config.ts ui/tests/theme-guard.test.ts`, and commit it. Real exceptions (vendor brand colours, the QR code, the appearance preview) are in the test's `ALLOWLIST`.
 
 ## Derivation
 
-With `derive` on, a token not given is filled from one that is, in this order: `accent` ← `secondary`; `card` ← `background`; `popover` ← `card`; `sidebar` ← `background`; `cardForeground`, `popoverForeground`, `sidebarForeground` ← `foreground`; `primaryForeground`, `secondaryForeground`, `accentForeground`, `sidebarPrimaryForeground`, `sidebarAccentForeground` ← a readable black or white on their surface; `ring`, `sidebarPrimary`, `chart1` ← `primary`; `input`, `sidebarBorder` ← `border`; `sidebarAccent` ← `accent`; `sidebarRing` ← `sidebarPrimary`. A token given always wins.
+With `derive` on, a token not given is filled from one that is, in this order: `accent` ← `secondary`; `card` ← `background`; `popover` ← `card`; `sidebar` ← `background`; `cardForeground`, `popoverForeground`, `sidebarForeground` ← `foreground`; `primaryForeground`, `secondaryForeground`, `accentForeground`, `sidebarPrimaryForeground`, `sidebarAccentForeground` ← a readable black or white on their surface; `ring`, `sidebarPrimary`, `chart1` ← `primary`; `input`, `sidebarBorder` ← `border`; `sidebarAccent` ← `accent`; `sidebarRing` ← `sidebarPrimary`; `destructiveForeground`, `successForeground`, `warningForeground`, `infoForeground` ← a readable black or white on their colour; `statusRunning` ← `info`; `statusAssigned` ← `primary`; `statusQueued` ← `mutedForeground`. A token given always wins.
 
 ## No flash on reload
 

@@ -28,13 +28,13 @@ const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "borders", label: "Borders & focus", hint: "Lines, inputs, focus ring" },
   { id: "sidebar", label: "Sidebar", hint: "The navigation column" },
   { id: "charts", label: "Charts", hint: "Series colours" },
-  { id: "status", label: "Status", hint: "Errors and destructive actions" },
-  { id: "typography", label: "Typography", hint: "Body, headings, code" },
+  { id: "status", label: "Status", hint: "Success, warning, info, errors (and text on them); task states" },
+  { id: "typography", label: "Typography", hint: "Fonts; the type scale (rem or px); heading weight; label tracking and case" },
   { id: "shape", label: "Shape", hint: "Corners and shadows" },
 ];
 
 function label(name: string): string {
-  return name.replace(/([A-Z])/g, " $1").replace(/(\d)/, " $1").replace(/^./, (c) => c.toUpperCase());
+  return name.replace(/([A-Z])/g, " $1").replace(/([a-z])(\d)/, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
 /** #rrggbb for the colour picker (any CSS colour, through a 1px canvas), or null. */
@@ -92,12 +92,13 @@ function TokenRow({ name, value, derived, computed, onChange }: {
   }
   const shown = value ?? derived;
   const placeholder = derived !== undefined ? `${derived} (derived)` : computed ? `${computed} (palette)` : "palette";
-  const invalid = draft.trim() !== "" && kind !== "radius" && kit.tokenValue(name, draft) === undefined;
+  const numeric = kind === "radius" || kind === "weight";
+  const invalid = draft.trim() !== "" && !numeric && kit.tokenValue(name, draft) === undefined;
 
   const commit = (text: string) => {
     setDraft(text);
     if (text.trim() === "") return onChange(undefined);
-    const ok = kit.tokenValue(name, kind === "radius" ? Number(text) : text);
+    const ok = kit.tokenValue(name, numeric ? Number(text) : text);
     if (ok !== undefined) onChange(ok);
   };
 
@@ -128,6 +129,27 @@ function TokenRow({ name, value, derived, computed, onChange }: {
             />
             <code className="w-12 shrink-0 text-right text-[11px] text-muted-foreground">{value === undefined ? "palette" : `${value}px`}</code>
           </>
+        ) : kind === "weight" ? (
+          <>
+            <input
+              type="range" min={100} max={900} step={100}
+              aria-label={label(name)}
+              value={typeof shown === "number" ? shown : Number(computed) || 700}
+              onChange={(e) => commit(e.target.value)}
+              className="w-full accent-primary"
+            />
+            <code className="w-12 shrink-0 text-right text-[11px] text-muted-foreground">{value === undefined ? computed || "palette" : value}</code>
+          </>
+        ) : kind === "case" ? (
+          <select
+            aria-label={label(name)}
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => commit(e.target.value)}
+            className="h-8 w-40 rounded-md border border-border bg-background px-2 text-xs"
+          >
+            <option value="">{computed ? `${computed} (palette)` : "Palette"}</option>
+            {["uppercase", "none", "capitalize", "lowercase"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         ) : kind === "font" ? (
           <div className="flex min-w-0 flex-1 gap-2">
             <select
@@ -235,7 +257,18 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
     "--pv-destructive": String(withDerived.destructive ?? "var(--destructive)"),
     "--pv-radius": typeof withDerived.radius === "number" ? `${withDerived.radius}px` : "var(--radius)",
     "--pv-font": String(withDerived.fontFamily ?? "var(--app-font-family)"),
-    "--pv-heading": String(withDerived.headingFont ?? withDerived.fontFamily ?? "inherit"),
+    "--pv-heading": String(withDerived.headingFont ?? withDerived.fontFamily ?? "var(--app-heading-font)"),
+    "--pv-heading-weight": String(withDerived.headingWeight ?? "var(--font-weight-heading)"),
+    "--pv-heading-size": String(withDerived.textH2 ?? "var(--text-h2)"),
+    "--pv-label-tracking": String(withDerived.labelTracking ?? "var(--tracking-label)"),
+    "--pv-label-case": String(withDerived.labelCase ?? "var(--label-transform)"),
+    "--pv-success": String(withDerived.success ?? "var(--success)"),
+    "--pv-success-fg": String(withDerived.successForeground ?? "var(--success-foreground)"),
+    "--pv-warning": String(withDerived.warning ?? "var(--warning)"),
+    "--pv-warning-fg": String(withDerived.warningForeground ?? "var(--warning-foreground)"),
+    "--pv-info": String(withDerived.info ?? "var(--info)"),
+    "--pv-info-fg": String(withDerived.infoForeground ?? "var(--info-foreground)"),
+    "--pv-destructive-fg": String(withDerived.destructiveForeground ?? "var(--destructive-foreground)"),
   } as CSSProperties;
 
   return (
@@ -272,7 +305,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
 
       {/* Theme */}
       <section>
-        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="text-label mb-2 flex items-center gap-1.5 text-muted-foreground">
           <Sun className="h-3.5 w-3.5" /> Theme
           {resolved.sources.theme !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.theme}</Badge>}
         </h3>
@@ -285,7 +318,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
 
       {/* Palette */}
       <section>
-        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="text-label mb-2 flex items-center gap-1.5 text-muted-foreground">
           <PaletteIcon className="h-3.5 w-3.5" /> Palette
           {resolved.sources.palette !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.palette}</Badge>}
         </h3>
@@ -316,7 +349,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
       {/* Design tokens */}
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h3 className="text-label flex items-center gap-1.5 text-muted-foreground">
             Design tokens
             {resolved.sources.custom !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.custom}</Badge>}
           </h3>
@@ -384,16 +417,20 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
             </div>
             <div className="space-y-3 rounded-[var(--pv-radius)] border p-3"
               style={{ background: "var(--pv-bg)", borderColor: "var(--pv-border)", color: "var(--pv-text)", fontFamily: "var(--pv-font)" }}>
-              <div className="text-base font-semibold" style={{ fontFamily: "var(--pv-heading)" }}>Heading</div>
+              <div className="text-[10px] font-semibold" style={{ letterSpacing: "var(--pv-label-tracking)", textTransform: "var(--pv-label-case)" as CSSProperties["textTransform"] }}>Label</div>
+              <div style={{ fontFamily: "var(--pv-heading)", fontWeight: "var(--pv-heading-weight)" as CSSProperties["fontWeight"], fontSize: "var(--pv-heading-size)" }}>Heading</div>
               <button type="button" className="h-9 w-full rounded-[var(--pv-radius)] px-3 text-sm font-medium"
                 style={{ background: "var(--pv-primary)", color: "var(--pv-primary-fg)" }}>Primary action</button>
               <div className="rounded-[var(--pv-radius)] border p-3 text-xs" style={{ background: "var(--pv-card)", borderColor: "var(--pv-border)" }}>
                 Card surface
                 <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Muted text</div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
-                <span className="rounded-full px-2 py-0.5 text-xs text-white" style={{ background: "var(--pv-destructive)" }}>Error</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
               </div>
               <div className="flex h-4 overflow-hidden rounded">
                 {["chart1", "chart2", "chart3", "chart4", "chart5"].map((c, i) => (

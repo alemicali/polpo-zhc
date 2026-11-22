@@ -7,7 +7,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
 import {
-  APPEARANCE_PALETTES, APPEARANCE_THEMES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseAppearanceSettings,
+  APPEARANCE_CASES, APPEARANCE_PALETTES, APPEARANCE_THEMES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseAppearanceSettings,
   type AppearanceSettings,
 } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
@@ -198,8 +198,15 @@ const logoInput = z.union([
 /** Every design token, each optional; null removes it (back to the palette's value). */
 const tokensInput = z.object(Object.fromEntries(APPEARANCE_TOKEN_NAMES.map((name) => {
   const kind = APPEARANCE_TOKENS[name].kind;
-  const value = kind === "radius" ? z.number().min(0).max(24) : z.string().min(1).max(240);
-  const hint = kind === "color" ? "colour" : kind === "font" ? "CSS font stack" : kind === "radius" ? "px, 0–24" : "box-shadow";
+  const value = kind === "radius" ? z.number().min(0).max(24)
+    : kind === "weight" ? z.number().min(100).max(900)
+    : kind === "case" ? z.enum(APPEARANCE_CASES)
+    : z.string().min(1).max(240);
+  const hint = ({
+    color: "colour", font: "CSS font stack", radius: "px, 0–24", shadow: "box-shadow",
+    size: "font size: rem 0.5–6 or px 8–96, e.g. 1.5rem", weight: "font weight 100–900, e.g. 600",
+    tracking: "letter-spacing: em -0.1–0.3 or px -3–6, 0 or normal, e.g. 0.06em", case: "label case",
+  } as const)[kind];
   return [name, value.nullable().optional().describe(`${APPEARANCE_TOKENS[name].css} (${hint})`)];
 }))).strict();
 
@@ -456,7 +463,10 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
       + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
-      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack; Inter Tight is bundled with the dashboard, loaded only when used: \"Inter Tight\", sans-serif), radius (0–24 px), shadows; "
+      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack; Inter Tight is bundled with the dashboard, loaded only when used: \"Inter Tight\", sans-serif), radius (0–24 px), shadows (shadowCard on cards, shadowRaised on popovers, menus, dialogs); "
+      + "status colours (success, warning, info, destructive and their *Foreground; statusRunning, statusQueued, statusAssigned for task states); "
+      + "the type scale (textDisplay, textH1, textH2, textH3, textBody, textSmall, textCaption, textMicro: rem 0.5–6 or px 8–96), headingWeight (100–900), "
+      + "headingTracking and labelTracking (em -0.1–0.3), labelCase (uppercase, none, capitalize, lowercase); "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
