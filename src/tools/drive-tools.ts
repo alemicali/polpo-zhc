@@ -3,7 +3,7 @@
  * its open threads), which it carries from one conversation to the next, and its own plan (the steps
  * toward its goals).
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { DriveManager } from "../core/drive.js";
 

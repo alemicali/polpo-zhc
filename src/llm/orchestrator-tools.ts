@@ -8,7 +8,7 @@
  * /v1/chat/completions endpoint.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";

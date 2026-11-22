@@ -4,7 +4,7 @@
  * read-write volumes; the write-back is guarded by the volume's revision (a concurrent writer
  * produces a conflict copy under .conflicts/, not a loss).
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 const SandboxVolumeCheckpointSchema = Type.Object({

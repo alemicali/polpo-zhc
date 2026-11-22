@@ -11,7 +11,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed, isPathAllowed } from "./path-sandbox.js";
 import { offloadToolOutput, offloadHint, resolveToolOutputDir, saveToolOutput } from "./tool-output.js";

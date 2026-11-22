@@ -7,7 +7,7 @@
  * plus admin tools (list entries with mount status, mount, unmount).
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { existsSync } from "node:fs";

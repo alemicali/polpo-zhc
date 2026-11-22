@@ -2,7 +2,7 @@
  * Learning tools for an agent chat: set_learning (always), and, while learning with skills is on or
  * with a drive, list_my_skills / create_my_skill / update_my_skill (only skills the agent created itself).
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AgentConfig, AgentLearningSettings } from "@polpo-ai/core";
 import { DEFAULT_LEARNING_EVERY, DEFAULT_LEARNING_IDLE_MINUTES, type LearningManager, type LearningSkillPort } from "../core/learning.js";

@@ -26,7 +26,7 @@ import type { Shell } from "@polpo-ai/core/shell";
 import { withHostTempDir, writeBytes } from "./tool-fs.js";
 import { assertWebUrl } from "./browser-url-guard.js";
 import { assertPathAllowed, resolveAllowedPaths } from "./path-sandbox.js";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
 import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./browser-network-guard.js";
