@@ -21,17 +21,32 @@ export const HARNESS_BRIDGE_PORT = 4000;
 
 const ZERO: HarnessUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
 
-/** AI SDK usage → ours. */
+/**
+ * AI SDK usage → ours. The stream's finish part carries the AI SDK usage (inputTokens,
+ * outputTokens, totalTokens, inputTokenDetails.{cacheReadTokens, cacheWriteTokens}); the
+ * provider-level shape ({ inputTokens: { total, cacheRead, cacheWrite }, outputTokens: { total } })
+ * and the older cachedInputTokens are read too.
+ */
 export function mapUsage(u: any): HarnessUsage {
   if (!u || typeof u !== "object") return { ...ZERO };
-  const input = Number(u.inputTokens ?? 0) || 0;
-  const output = Number(u.outputTokens ?? 0) || 0;
+  const n = (...xs: unknown[]): number => {
+    for (const x of xs) {
+      if (x === undefined || x === null) continue;
+      const v = Number(x);
+      if (Number.isFinite(v)) return v;
+    }
+    return 0;
+  };
+  const inObj = u.inputTokens && typeof u.inputTokens === "object" ? u.inputTokens : undefined;
+  const outObj = u.outputTokens && typeof u.outputTokens === "object" ? u.outputTokens : undefined;
+  const input = inObj ? n(inObj.total) : n(u.inputTokens);
+  const output = outObj ? n(outObj.total) : n(u.outputTokens);
   return {
     inputTokens: input,
     outputTokens: output,
-    cacheReadTokens: Number(u.inputTokenDetails?.cacheReadTokens ?? u.cachedInputTokens ?? 0) || 0,
-    cacheWriteTokens: Number(u.inputTokenDetails?.cacheWriteTokens ?? 0) || 0,
-    totalTokens: Number(u.totalTokens ?? input + output) || input + output,
+    cacheReadTokens: n(u.inputTokenDetails?.cacheReadTokens, inObj?.cacheRead, u.cachedInputTokens),
+    cacheWriteTokens: n(u.inputTokenDetails?.cacheWriteTokens, inObj?.cacheWrite),
+    totalTokens: n(u.totalTokens) || input + output,
   };
 }
 

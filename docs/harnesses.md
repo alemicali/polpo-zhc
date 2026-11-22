@@ -114,7 +114,8 @@ REST: `GET /api/v1/harnesses`, `GET /api/v1/harnesses/sessions?agent=&computer=`
 5. Usage and cost: each turn's tokens (input, cached, output) go to the task's activity, and a
    token-usage record (`source: "agent_harness"`) carries the runtime's cost estimate (Claude Code
    reports it cumulatively per session; Polpo records the difference). `GET /api/v1/token-usage`
-   adds it to the cost (`harnessCost`); `?taskId=<id>` narrows it to one task (its runs' tokens and
+   adds it to the cost (`harnessCost`) and its input, output and cache tokens to `inputTokens`,
+   `outputTokens`, `cacheReadTokens` and `cacheWriteTokens`; `?taskId=<id>` narrows it to one task (its runs' tokens and
    harness cost), `?range=` is `1h`, `today`, `24h`, `7d` (default), `30d` or `all` (anything else: 400).
 6. Deliverables: what the runtime registers with `register_outcome`, and the output directory
    copied back like any remote run. A continuation of the task adds its outcomes to the previous
@@ -138,6 +139,13 @@ and asks the runtime to check its work and continue.
 
 Session status (no secrets) is in `.polpo/harness-sessions.json`: state, live, when the runtime was
 bootstrapped and how long it took, last detach and resume, turns, cost.
+
+Sessions follow what they belong to. Deleting a task resets its session: the runtime stops, the
+status record goes and its resume state is removed from the vault. Removing an agent resets all of
+its sessions, and deleting a computer resets the sessions bound to it. This is best effort: it never
+blocks the delete, and failures are logged. The server also sweeps for orphans at startup and every
+15 minutes. An orphan is a session whose task, agent or computer no longer exists. The sweep skips
+sessions that are live and sessions updated in the last 10 minutes.
 
 ## Costs and limits
 

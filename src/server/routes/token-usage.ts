@@ -15,6 +15,8 @@ const VALID_RANGES = new Set<string>(TOKEN_USAGE_RANGES);
  * - range: 1h, today, 24h, 7d (default), 30d or all; anything else is a 400 (never a silent 7d).
  * - taskId: only that task: its runs' tokens (activity logs, else the run records) and its harness
  *   cost (agent_harness records carry the task id as their session). Chat usage belongs to no task.
+ * - inputTokens / outputTokens / cacheReadTokens / cacheWriteTokens: chats plus agent harness runs
+ *   (the split each harness turn reports); a task on Polpo's engine records only its total.
  */
 export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => RunStore): OpenAPIHono {
   const app = new OpenAPIHono();
@@ -32,8 +34,16 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
     const taskEvents = (await readTaskTokenEvents(getPolpoDir()))
       .filter((event) => Date.parse(event.timestamp) >= cutoff && (!taskId || event.taskId === taskId));
 
-    // agent harness runs (Claude Code, Codex) record their cost; their tokens are counted with the tasks
-    const harnessCost = records.filter((r) => r.source === "agent_harness").reduce((total, r) => total + r.cost, 0);
+    // agent harness runs (Claude Code, Codex) record their cost and their token split (input,
+    // output, cache read/write); their total is counted with the tasks (taskTokens)
+    const harness = records.filter((r) => r.source === "agent_harness").reduce((total, r) => ({
+      inputTokens: total.inputTokens + (r.inputTokens || 0),
+      outputTokens: total.outputTokens + (r.outputTokens || 0),
+      cacheReadTokens: total.cacheReadTokens + (r.cacheReadTokens || 0),
+      cacheWriteTokens: total.cacheWriteTokens + (r.cacheWriteTokens || 0),
+      cost: total.cost + (r.cost || 0),
+    }), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 });
+    const harnessCost = harness.cost;
     const chat = records.filter((r) => r.source !== "agent_harness").reduce((total, record) => ({
       inputTokens: total.inputTokens + record.inputTokens,
       outputTokens: total.outputTokens + record.outputTokens,
@@ -58,6 +68,10 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
         range,
         ...(taskId ? { taskId } : {}),
         ...chat,
+        inputTokens: chat.inputTokens + harness.inputTokens,
+        outputTokens: chat.outputTokens + harness.outputTokens,
+        cacheReadTokens: chat.cacheReadTokens + harness.cacheReadTokens,
+        cacheWriteTokens: chat.cacheWriteTokens + harness.cacheWriteTokens,
         cost: chat.cost + harnessCost,
         totalTokens: chat.totalTokens + taskTokens,
         taskTokens,
