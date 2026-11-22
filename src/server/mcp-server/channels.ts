@@ -4,8 +4,8 @@
  * vault: which credentials each agent has (names and metadata, never values).
  *
  * Secrets never pass through here: bot tokens, SMTP passwords and API keys are entered in the
- * dashboard (setup_url). Changing channels and rules, and the vault, need polpo:admin; sending a
- * message needs polpo:work and confirm: true.
+ * dashboard (setup_url). Changing the notification rules needs polpo:admin; sending a message (or a
+ * test) polpo:messages, and confirm: true; the vault, reads too, polpo:vault.
  */
 import { z } from "zod";
 import {
@@ -65,6 +65,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     inputSchema: { name: z.string().min(1).describe("The channel's name") },
     outputSchema: { name: z.string(), success: z.boolean(), error: z.string().optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "polpo:messages",
   }, async ({ name }) => {
     const r = await apiSend(deps, "POST", `/config/channels/${enc(name)}/test`);
     if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; a new one is added in the dashboard (${setupUrl}).`) : apiError(r, `Testing channel ${name}`);
@@ -92,7 +93,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { sent: z.boolean(), channel: z.string(), message_id: z.string().optional(), to: z.unknown().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-    scope: "polpo:work",
+    scope: "polpo:messages",
   }, async ({ channel, to, text, subject, html, cc, files, agent, topic, confirm }) => {
     const missing = await unknownAgents(deps, [agent]);
     if (missing) return fail(missing);

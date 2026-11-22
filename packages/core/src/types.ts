@@ -979,6 +979,12 @@ export interface PolpoSettings {
   mcp?: {
     /** Toolsets offered to MCP clients ("all", "default" or names such as core, tasks, admin). Default: every toolset except admin. POLPO_MCP_TOOLSETS wins. */
     toolsets?: string[];
+    /**
+     * Named keys that open /mcp, each with its scopes: the value is in a vault entry (keyRef; a field
+     * named key, apiKey or token). Scopes: polpo:read, polpo:work, polpo:files, polpo:messages,
+     * polpo:connectors, polpo:computers, polpo:vault, polpo:admin; default read and work.
+     */
+    keys?: Array<{ name: string; keyRef: import("./vault-ref.js").VaultRef; scopes?: string[] }>;
   };
 }
 

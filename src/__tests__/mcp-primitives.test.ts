@@ -308,11 +308,16 @@ describe("toolsets and scopes", () => {
     for (const n of ["polpo_room_post", "polpo_message_send", "polpo_connector_add", "polpo_schedule_run"]) expect(a[n], n).toMatchObject({ openWorldHint: true });
   });
 
-  it("a work-scoped client can post and send, but not change skills, connectors, channels or the team, nor see the vault", async () => {
+  it("a work-scoped client can post, but not send messages, change skills, connectors, channels or the team, nor see the vault", async () => {
     const f = fakeInstance();
     const list = (await names(deps(f, { principal: { kind: "oauth", actor: "ada@example.com via Claude", scopes: ["polpo:read", "polpo:work"] } }))).map((t) => t.name);
-    for (const n of ["polpo_room_post", "polpo_message_send", "polpo_memory_update", "polpo_check_create", "polpo_schedule_run", "polpo_skills_list", "polpo_connectors_list"]) expect(list).toContain(n);
-    for (const n of ["polpo_skill_create", "polpo_connector_add", "polpo_notification_rule_save", "polpo_team_save", "polpo_agent_delete", "polpo_vault_list", "polpo_vault_delete", "polpo_learning_revert"]) expect(list).not.toContain(n);
+    for (const n of ["polpo_room_post", "polpo_memory_update", "polpo_check_create", "polpo_schedule_run", "polpo_skills_list", "polpo_connectors_list"]) expect(list).toContain(n);
+    for (const n of ["polpo_message_send", "polpo_channel_test", "polpo_skill_create", "polpo_connector_add", "polpo_notification_rule_save", "polpo_team_save", "polpo_agent_delete", "polpo_vault_list", "polpo_vault_delete", "polpo_learning_revert"]) expect(list).not.toContain(n);
+    // sending is its own scope, on top of work or alone
+    const messages = (await names(deps(f, { principal: { kind: "oauth", actor: "x", scopes: ["polpo:read", "polpo:messages"] } }))).map((t) => t.name);
+    expect(messages).toEqual(expect.arrayContaining(["polpo_message_send", "polpo_channel_test", "polpo_channels_list"]));
+    expect(messages).not.toContain("polpo_room_post");
+    expect(messages).not.toContain("polpo_notification_rule_save");
     const readOnly = (await names(deps(f, { principal: { kind: "oauth", actor: "x", scopes: ["polpo:read"] } }))).map((t) => t.name);
     expect(readOnly).toContain("polpo_room_messages");
     expect(readOnly).not.toContain("polpo_room_post");

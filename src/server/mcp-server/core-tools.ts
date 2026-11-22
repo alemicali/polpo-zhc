@@ -9,7 +9,7 @@ import { AGENT_CARD_HTML } from "../mcp-widgets.generated.js";
 import {
   BAD_CURSOR, DESTRUCTIVE, READ, WRITE, allowed, apiError, apiGet, apiSend, clip, cursorParam, enc, fail, formatBytes, limitParam,
   looseObject, ok, page, pageOutput, qs, short, unwrap,
-  type McpDeps, type McpPrincipal, type Register, type ToolsetName,
+  type McpDeps, type McpPrincipal, type Register, type ToolScope, type ToolsetName,
 } from "./kit.js";
 
 /** Largest image or PDF returned inline by polpo_file_read. */
@@ -81,7 +81,7 @@ function decodeText(bytes: Uint8Array): string | null {
 
 const agentItem = z.object({ name: z.string(), role: z.string().optional(), model: z.string().optional(), title: z.string().optional() }).passthrough();
 
-export function registerAgentTools(tool: Register, deps: McpDeps, server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal): void {
+export function registerAgentTools(tool: Register, deps: McpDeps, server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
   tool("core", "polpo_agents_list", {
     title: "List agents",
     description: "The agents of this instance: name, role, model. Use it to find the name to pass to polpo_agent_chat, polpo_agent_show or a task's assignTo.",
@@ -97,7 +97,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
   });
 
   // ── The agent card: an MCP App (interactive UI in Claude, ChatGPT…; text elsewhere) ──
-  if (!allowed(enabled, principal, "core", READ)) return;
+  if (!allowed(enabled, principal, "core", READ, catalog, ["polpo_agent_show", "agent_card_refresh"])) return;
 
   registerAppResource(server, "Agent card", AGENT_CARD_URI, {
     description: "An agent's card: status, the task at hand, today, what is next, its main goal; full screen, its tasks, goals and routine.",
@@ -137,7 +137,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
     return r.ok ? cardResult(r.card) : fail(r.error);
   });
 
-  if (!allowed(enabled, principal, "core", DESTRUCTIVE)) return;
+  if (!allowed(enabled, principal, "core", DESTRUCTIVE, catalog, ["agent_intention_decide"])) return;
   registerAppTool(server, "agent_intention_decide", {
     title: "Confirm or cancel an agent's plan",
     description: "From the agent card: confirm an intention the agent proposed, or cancel one (called by its UI after the person clicked).",

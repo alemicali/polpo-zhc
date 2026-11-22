@@ -1,7 +1,7 @@
 /**
  * Computers: persistent machines agents work on (a Daytona or E2B machine that keeps its files,
  * installed tools and browser profile between chats and tasks). List with live status, create or
- * change, start/stop/restart/reset, delete. Changes need polpo:admin (they cost money and change
+ * change, start/stop/restart/reset, delete. Changes need polpo:computers (or polpo:admin) (they cost money and change
  * where agents run); reset and delete need confirm: true.
  */
 import { z } from "zod";

@@ -29,7 +29,9 @@ export function withEventOrigin<T>(origin: EventOrigin, fn: () => T): T {
   // A nested origin keeps the outer person when it names none (a person → Polpo's tools).
   const outer = originStore.getStore();
   const by = origin.by ?? outer?.by;
-  return originStore.run({ source: origin.source ?? outer?.source, ...(by ? { by } : {}) }, fn);
+  // the scopes go with the person: kept when the inner origin names nobody, dropped when it names another
+  const scopes = origin.by ? origin.scopes : origin.scopes ?? outer?.scopes;
+  return originStore.run({ source: origin.source ?? outer?.source, ...(by ? { by } : {}), ...(scopes ? { scopes } : {}) }, fn);
 }
 
 /** The origin of the code running now, if any. */
@@ -45,7 +47,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function withOrigin(event: string, payload: unknown): unknown {
   const origin = originStore.getStore();
   if (!origin || NO_ORIGIN.has(event) || !isPlainObject(payload) || "source" in payload) return payload;
-  return { ...payload, source: origin.source, ...(origin.by ? { by: origin.by } : {}) };
+  return { ...payload, source: origin.source, ...(origin.by ? { by: origin.by } : {}), ...(origin.scopes ? { scopes: origin.scopes } : {}) };
 }
 
 /**
