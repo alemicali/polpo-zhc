@@ -36,9 +36,9 @@ export function BottomNav() {
   return (
     <nav
       className={cn(
-        "fixed inset-x-3 z-50 mx-auto max-w-md rounded-3xl border border-sidebar-border bg-sidebar/88 text-sidebar-foreground",
+        "fixed inset-x-3 z-50 mx-auto max-w-md rounded-3xl border border-sidebar-border sidebar-surface-floating text-sidebar-foreground",
         "shadow-raised",
-        "backdrop-blur-2xl supports-[backdrop-filter]:bg-sidebar/72",
+        "backdrop-blur-2xl",
         "lg:hidden bottom-[var(--mobile-nav-offset)] p-1",
       )}
     >

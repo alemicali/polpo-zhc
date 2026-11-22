@@ -49,6 +49,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-button-primary-foreground: var(--button-primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -117,6 +118,51 @@
   --leading-micro: 1.3;
   --tracking-heading: -0.025em;
   --tracking-label: 0.06em;
+  /* Card and control corners (`rounded-card`: cards and tiles; `rounded-control`: buttons, inputs,
+     selects): from --radius by default, as rounded-xl / rounded-md were; a look may set them apart. */
+  --radius-card: calc(var(--radius) + 4px);
+  --radius-control: calc(var(--radius) - 2px);
+}
+
+/*
+ * The primary button and the sidebar, per look (lib/appearance-kit.ts overrides them by name). The
+ * defaults are today's: the primary colour (hover 90%, as bg-primary/90), an opaque sidebar, no blur.
+ */
+:root {
+  --button-primary-bg: var(--primary);
+  --button-primary-hover-bg: color-mix(in oklab, var(--primary) 90%, transparent);
+  --button-primary-foreground: var(--primary-foreground);
+  --sidebar-opacity: 1;
+  --sidebar-blur: 0px;
+  --sidebar-backdrop: none;
+}
+
+/* The primary button's fill: a colour or a gradient (background, not background-color). */
+@utility bg-button-primary {
+  background: var(--button-primary-bg);
+}
+@utility bg-button-primary-hover {
+  background: var(--button-primary-hover-bg);
+}
+
+/*
+ * The sidebar's background: var(--sidebar) at --sidebar-opacity, with --sidebar-backdrop (a blur,
+ * none by default). Opaque where the browser has no backdrop-filter or color-mix.
+ */
+@utility sidebar-surface {
+  background-color: var(--sidebar);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and (color: color-mix(in oklab, red 50%, transparent)) {
+    background-color: color-mix(in oklab, var(--sidebar) calc(var(--sidebar-opacity) * 100%), transparent);
+    -webkit-backdrop-filter: var(--sidebar-backdrop);
+    backdrop-filter: var(--sidebar-backdrop);
+  }
+}
+/* The floating bottom nav: already translucent (72%, blurred); --sidebar-opacity scales it. */
+@utility sidebar-surface-floating {
+  background-color: color-mix(in oklab, var(--sidebar) 88%, transparent);
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and (color: color-mix(in oklab, red 50%, transparent)) {
+    background-color: color-mix(in oklab, var(--sidebar) calc(var(--sidebar-opacity) * 72%), transparent);
+  }
 }
 
 /* Headings: the heading font, weight and tracking (h1–h3 get them in the base layer). */

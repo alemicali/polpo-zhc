@@ -283,8 +283,10 @@ export {
   APPEARANCE_FONT, APPEARANCE_SHADOW, APPEARANCE_FONT_PRESETS, APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX,
   APPEARANCE_SIZE, APPEARANCE_SIZE_RANGE, APPEARANCE_TRACKING, APPEARANCE_TRACKING_RANGE, APPEARANCE_WEIGHT_MIN, APPEARANCE_WEIGHT_MAX, APPEARANCE_CASES,
   parseAppearanceSettings, parseAppearanceTokens, sanitizeAppearanceSettings, parseAppearanceToken, isEmptyAppearance,
+  APPEARANCE_NUMBER_RANGES, APPEARANCE_GRADIENT_ANGLE, APPEARANCE_FONT_HOSTS, APPEARANCE_MAX_WEB_FONTS, APPEARANCE_FONT_FAMILY, APPEARANCE_BUNDLED_FONTS,
+  APPEARANCE_PRELOADED_FONTS, normalizeFontWeights, normalizeFontUrl, webFontHref, parseWebFont, parseWebFonts, unloadedFontFamilies, parseAppearanceGradient,
 } from "./appearance.js";
 export type {
   AppearanceTheme, AppearancePalette, AppearanceColors, AppearanceCustom, AppearanceSettings, AppearanceTokens, AppearanceTokenName,
-  AppearanceTokenGroup, AppearanceTokenKind,
+  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient,
 } from "./appearance.js";

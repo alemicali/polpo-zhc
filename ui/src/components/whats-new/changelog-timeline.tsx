@@ -52,7 +52,7 @@ export function ChangelogTimeline({
                 key={entry.id}
                 id={entry.id}
                 className={cn(
-                  compact ? "rounded-xl border bg-card/80 p-3.5 shadow-card" : "rounded-xl border bg-card/80 p-4 shadow-card backdrop-blur-sm sm:p-5",
+                  compact ? "rounded-card border bg-card/80 p-3.5 shadow-card" : "rounded-card border bg-card/80 p-4 shadow-card backdrop-blur-sm sm:p-5",
                   entry.highlight ? "border-primary/25" : "border-border/60",
                 )}
               >
