@@ -115,6 +115,7 @@ import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
 import { HarnessesSection } from "@/components/config/harnesses-section";
+import { ComputerWebhooksSection } from "@/components/config/computer-webhooks-section";
 import { SectionHeader } from "@/components/shared/section-header";
 
 // ── API helper (same pattern as setup.tsx) ──
@@ -221,6 +222,7 @@ const baseSections = [
   { id: "policies", label: "Policies", icon: Shield },
   { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
   { id: "harnesses", label: "Harnesses", icon: Bot },
+  { id: "computers", label: "Computers", icon: Monitor },
   { id: "mcp", label: "MCP access", icon: Plug },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
@@ -3302,6 +3304,7 @@ export function ConfigPage() {
 
         {/* ═══ HARNESSES ═══ */}
         {activeSection === "harnesses" && <HarnessesSection />}
+        {activeSection === "computers" && <ComputerWebhooksSection />}
 
         {/* ═══ MCP ACCESS ═══ */}
         {activeSection === "mcp" && <McpAccessSection />}

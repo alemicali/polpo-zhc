@@ -166,6 +166,33 @@ machine, and its v2 snapshots, and create a new one: everything on its disk is l
 confirmation), **Delete** (machine, snapshots and computer; needs confirmation; refused while it is
 an agent's default).
 
+### Deleted at the provider
+
+A machine can be deleted outside Polpo: in the provider's dashboard or API, by its own clean-up, or
+(Daytona v2) its snapshots deleted while it hibernates. Polpo notices and shows it:
+
+- Status **`deleted`** ("Deleted at provider") when the provider has neither the machine nor, on
+  Daytona v2, a ready snapshot to wake from, while Polpo knew one (`missing` stays "never created",
+  or wiped by a reset whose new machine comes on the next use). A hibernated v2 computer is checked
+  by its newest snapshot (read by id); one that is gone is forgotten and an older one from the
+  provider's listing is used if there is one, otherwise the computer is `deleted`. The state then
+  drops its machine id and snapshots, records `deletedAtProvider`, emits `computer:changed`
+  (`status: "deleted"`), logs a notice and stops live agent harness sessions on it (their next turn
+  starts a new bridge).
+- When: on every live status read (`GET /computers`, the Computers page, `polpo_computers_list`),
+  whose provider answers are reused for **15 s** (`?fresh=1`, and the page's refresh button, ask
+  again), at once when the provider pushes an event (webhooks, below), and in the background every
+  **5 minutes** (every **20** when every provider in use pushes its events: a safety net): one
+  listing of this instance's computer machines per provider (label `polpo-scope=computer`) and, for
+  hibernated v2 computers, one snapshot listing; only the computers that disagree with it get the
+  full check. A provider that cannot be asked changes nothing.
+- **Recreate** (the page's action for a `deleted` computer) is a confirmed **Reset**: a new machine
+  from the image, without the old files. **Remove from Polpo** is **Delete**.
+- Using it anyway (a chat, a task, a harness turn, Start) makes a new machine from the image instead
+  of failing; the computer's notice and the run's warning say that its files are lost. A command (or
+  a harness process or port) that fails because its machine vanished mid-run is retried once on the
+  new machine; an error of a machine that still runs stands.
+
 ### Inactive Daytona snapshots (v0)
 
 Daytona deactivates snapshots nobody used for a while; creating from one then fails with
@@ -174,25 +201,84 @@ the server log) and tries once more; if activation fails the error says what to 
 Sandbox and the computer's card show when the snapshot is not active. Daytona v2 has no such
 snapshots: a missing image fails the create with the command that builds it.
 
+### Provider webhooks
+
+Providers that have lifecycle webhooks push their machines' changes, so a machine deleted, stopped
+or paused outside Polpo shows at once. An event is a hint: it triggers the computer's full check at
+its provider (idempotent), and events about machines that are not this instance's computers are
+ignored. Set up in **Settings → Computers** (status per provider: receiving, configured with no event
+yet, or not configured; the last event; the URL to give the provider).
+
+- Endpoint: `POST <POLPO_PUBLIC_URL>/api/v1/computers/webhooks/<provider>` — public, authenticated
+  by the provider's signature, 256 KB at most, rate limited (300 a minute per provider). **Behind
+  Tailscale Funnel the path `/<instance>/api/v1/computers/webhooks/` must be exposed** (by default
+  only `/mcp` is); Polpo does not change the Funnel.
+- **Daytona**: in Daytona's dashboard, Webhooks → Add Endpoint with that URL and the events
+  `sandbox.created`, `sandbox.state.updated` (`oldState` → `newState`; `destroyed` = gone) and
+  `snapshot.removed`; then paste the endpoint's signing secret (`whsec_…`) in Settings → Computers:
+  it goes to the vault (owner `$computers`, entry `webhook-daytona`), never through chat or MCP (the
+  MCP tool gives a setup link). Deliveries are verified Svix-style: headers `svix-id`,
+  `svix-timestamp`, `svix-signature` (or `webhook-*`), HMAC-SHA256 of `<id>.<timestamp>.<body>` with
+  the key after `whsec_`, timestamp within 5 minutes. (Daytona's docs do not describe the signature:
+  this is how its Svix-based webhooks sign; a delivery that does not verify is counted as refused in
+  Settings → Computers.)
+- **E2B**: Polpo registers the endpoint itself (`POST https://api.e2b.app/events/webhooks` with the
+  project's API key) for `sandbox.lifecycle.created|killed|updated|paused|resumed|checkpointed`, with
+  a secret it makes and keeps in the vault (`$computers` / `webhook-e2b`, with the webhook's id): by
+  itself when the instance has E2B computers, an API key and `POLPO_PUBLIC_URL` (a failure waits an
+  hour), or with **Register**; **Unregister** deletes it. Deliveries carry `e2b-signature` =
+  base64(sha256(secret + body)) without padding; events older than 24 h are refused. The computer is
+  found by its label in the sandbox's metadata.
+- **Vercel Sandbox** (not a provider yet) has no lifecycle webhooks: reconcile only.
+- Replays: a delivery id (Svix) or event id is accepted once (remembered 24 h); counts and the last
+  event are kept in `.polpo/computer-webhooks.json`.
+- REST (authenticated): `GET /api/v1/computer-webhooks`, `PUT|DELETE /api/v1/computer-webhooks/daytona/secret`
+  (`{ secret }`), `POST|DELETE /api/v1/computer-webhooks/e2b/register`. MCP: `polpo_computer_webhooks`
+  (`action: status | register | unregister`); Polpo: `computer_webhooks`.
+- A pushed change emits `computer:changed` like any other (the pages update live) and adds a line to
+  the computer's activity ("The provider reported sandbox.state.updated (started → destroyed)").
+
 ## API, tools, events
 
-- REST: `GET/POST /api/v1/computers`, `GET/PATCH/DELETE /api/v1/computers/:id` (delete with
-  `{ "confirm": true }`), `POST /api/v1/computers/:id/{start,stop,restart,reset}` (reset with
+- REST: `GET/POST /api/v1/computers` (`?live=0`: the last known status; `?fresh=1`: skip the 15 s
+  cache of provider answers), `GET/PATCH/DELETE /api/v1/computers/:id` (delete with
+  `{ "confirm": true }`; `GET ?detail=1` adds `snapshots`, `activity` (status changes and notices,
+  newest first, the last 40 kept), `sessions` (agent harness sessions on it), `runs` (the 50 newest
+  task runs that used it, from `Task.runs`: task, agent, engine, model, status, duration, cost,
+  tokens), `cost { runsUsd, chatSessionsUsd, totalUsd }` (task runs plus chat harness sessions; a
+  task's harness session is counted in its runs), `idleStopAt`, `timeoutAt`, `runningSince`,
+  `hibernate` (Daytona v2 settings), `machine { image?, snapshot?, template?, region?, resources? }`
+  (what a new machine is made from)), `POST /api/v1/computers/:id/{start,stop,restart,reset}` (reset with
   `{ "confirm": true }`). Agents: `defaultComputer` and `computers` on `POST /agents` and
   `PATCH /agents/:name` (`""` clears the default). `GET /api/v1/computers/:id/egress`: a remote
   computer's egress through Tailscale (tailnet up/down, node, direct or DERP path, proxy reachable,
   where its browser goes out now; it looks inside a running machine only).
-- Polpo: `computers_list`, `computer_save` (create or change: lifecycle, network, egress…), `computer_control`
+- Polpo: `computers_list`, `computer_get`, `computer_save` (create or change: lifecycle, network, egress…), `computer_control`
   (start, stop, restart, reset), `computer_delete` (the MCP server's tools, run in process), `computer_create`,
   `computer_assign`, `computer_start`, `computer_stop`; `add_agent` / `update_agent` take `computers` and
   `defaultComputer`; `egress_status` (proxies, and remote computers' tailnet egress).
-- MCP (`computers` toolset): `polpo_computers_list`, `polpo_computer_save`, `polpo_computer_control`,
-  `polpo_computer_delete`; `polpo_agent_update` takes `defaultComputer`.
+- MCP (`computers` toolset): `polpo_computers_list`, `polpo_computer_get` (one computer in full: the
+  detail above, read-only), `polpo_computer_save`, `polpo_computer_control`, `polpo_computer_delete`;
+  `polpo_agent_update` takes `defaultComputer`. Polpo has the same as `computer_get`.
 - Event `computer:changed` `{ id, action: created | updated | deleted | status, status?, remoteId?, error?, notice? }`
   (`status` includes `hibernated`; `notice`: e.g. a v2 VM that vanished and was restored).
-- The API's computer view adds `lastSnapshot { at, diskBytes?, memoryBytes? }` and `notice` (Daytona v2).
+- The API's computer view adds `lastSnapshot { at, diskBytes?, memoryBytes? }`, `snapshotCount` and `notice` (Daytona v2),
+  `deletedAtProvider` (status `deleted`) and `providerApi` (`v0` / `v2`, Daytona).
 - Each task run records the computer it used (`Task.runs[].computer`: id, kind, Daytona v0/v2, the VM id) and its egress (direct, or the proxy and whether through Tailscale): see [harnesses.md](harnesses.md#where-and-with-what-a-run-executed). The task page links to the computer; the Computers page shows the agents' engines and the harness sessions on each computer.
-- Dashboard: **Computers** page; an agent's computers (status, Start/Stop/Restart/Reset, default, add or create one for it) are in its **Computer** tab.
+- Dashboard: the **Computers** page is a table like the other lists (search, status and provider
+  filters, sort by status, name, last use or uptime): provider mark and kind (Daytona v2, Daytona,
+  E2B, This server), live status, agents with their engine, harness sessions, egress, last use,
+  snapshots, the main action inline (Start, Stop / Hibernate / Pause, Recreate) and the others in a
+  menu; on a phone a row keeps the name, the status and the menu. A banner lists computers deleted at
+  the provider. A row opens the computer's page (**`/computers/:id`**): header with the lifecycle
+  actions, tiles (last use, uptime, when it stops or hibernates by itself, what was spent on it),
+  harness sessions (engine, agent, task link, state, started, duration, turns, tokens, cost), recent
+  task runs (task link, agent and engine, model, status, duration, cost), activity, agents (default
+  or may use), lifecycle, snapshots (count, size, keepSnapshots), machine (image, region, size,
+  machine id, dates), network and egress (with the live Tailscale status of a remote computer's
+  egress). Edit opens the computer's form, which now also sets the network rule and the size.
+  An agent's computers (status, Start/Stop/Restart/Reset, default, add or create one for it) are in
+  its **Computer** tab.
 
 ## Migration: computer `nina` for `sitoinchat` (lumea)
 

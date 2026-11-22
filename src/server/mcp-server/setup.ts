@@ -16,7 +16,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
-export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data"] as const;
+export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data", "computer-webhook"] as const;
 export type SetupKind = (typeof SETUP_KINDS)[number];
 
 /** What is awaited: a channel's field, a provider's key, a vault entry… */
@@ -57,6 +57,7 @@ export function setupPath(t: SetupTarget): string {
     case "vault": return `/agents/${enc(t.item ?? "")}?${q({ tab: "credentials", service: t.field })}`;
     case "connector": return `/connectors?${q({ connector: t.item, focus: t.field })}`;
     case "data": return `/data?${q({ tab: "sources", source: t.item, focus: t.field ?? "password" })}`;
+    case "computer-webhook": return `/config?${q({ section: "computers", provider: t.item, focus: t.field ?? "secret" })}`;
   }
 }
 
@@ -139,6 +140,12 @@ export async function setupDone(deps: McpDeps, t: SetupTarget): Promise<boolean 
       const keys = (r.data as { credentialKeys?: string[] }).credentialKeys;
       if (!keys) return null;
       return t.field ? keys.includes(t.field) : keys.length > 0;
+    }
+    case "computer-webhook": {
+      // a computer provider's webhook signing secret (vault $computers): whether it is set
+      const r = await apiGet(deps, "/computer-webhooks");
+      if (!r.ok) return null;
+      return ((r.data as { providers?: Array<{ provider: string; secretSet: boolean }> }).providers ?? []).some((p) => p.provider === t.item && p.secretSet);
     }
   }
 }

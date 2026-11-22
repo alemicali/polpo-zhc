@@ -7,7 +7,7 @@ import {
   COMPUTER_LABEL, agentEgressName, computerContext, normalizeSandboxSettings, parseComputer, parseComputers, resolveSandbox,
   type ComputerConfig, type EffectiveSandbox,
 } from "@polpo-ai/core/sandbox";
-import { ComputerManager, computerStatusOf, uptimeMinutes } from "../sandbox/computers.js";
+import { ComputerManager, ComputerUpkeep, RECREATED_NOTICE, computerStatusOf, uptimeMinutes } from "../sandbox/computers.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import type { CreateSpec, RemoteAdapter, RemoteDriver, RemoteVmSummary } from "../sandbox/remote-adapters.js";
 import { SandboxReaper } from "../sandbox/reaper.js";
@@ -356,6 +356,88 @@ describe("computer lifecycle", () => {
   test("uptime", () => {
     expect(uptimeMinutes({ uptimeMs: 90 * 60_000, status: "stopped" })).toBe(90);
     expect(uptimeMinutes({ uptimeMs: 0, status: "running", runningSince: new Date(1000).toISOString() }, 1000 + 30 * 60_000)).toBe(30);
+  });
+});
+
+describe("a machine deleted at the provider", () => {
+  const start = Date.parse("2026-11-22T10:00:00Z");
+
+  test("missing = never made; deleted = the provider has it no more (after the refresh cache, or forced)", async () => {
+    const provider = new FakeDaytona();
+    const clock = { now: start };
+    const m = manager(provider, clock);
+    expect((await m.refresh(nina)).status).toBe("missing");
+    const d = await m.ensure(nina, computerSandbox());
+    await m.stop(nina);
+    provider.vms.get(d.remoteId)!.destroyed = true; // deleted in the provider's dashboard
+    clock.now += 16_000;
+    const live = await m.refresh(nina);
+    expect(live).toMatchObject({ status: "deleted", deletedAtProvider: new Date(clock.now).toISOString(), notice: expect.stringMatching(/^Its machine was deleted at the provider/) });
+    expect(live.remoteId).toBeUndefined();
+    // the uptime it ran is kept
+    expect(m.read().nina.uptimeMs).toBeGreaterThanOrEqual(0);
+  });
+
+  test("its next use makes a new machine and says so; Start on it is the same", async () => {
+    const provider = new FakeDaytona();
+    const clock = { now: start };
+    const m = manager(provider, clock);
+    const d = await m.ensure(nina, computerSandbox());
+    provider.vms.get(d.remoteId)!.destroyed = true;
+    await m.refresh(nina, undefined, { force: true });
+    const warnings: string[] = [];
+    const again = await m.ensure(nina, computerSandbox(), (w) => warnings.push(w));
+    expect(again.remoteId).not.toBe(d.remoteId);
+    expect(provider.created).toHaveLength(2);
+    expect(m.live("nina")).toMatchObject({ status: "running", notice: RECREATED_NOTICE });
+    expect(warnings).toEqual([`Computer "nina": ${RECREATED_NOTICE}`]);
+    // a machine made for a computer that never had one is no news
+    const fresh = manager(new FakeDaytona());
+    await fresh.ensure(nina, computerSandbox());
+    expect(fresh.live("nina").notice).toBeUndefined();
+  });
+
+  test("a run whose machine is deleted under it: the command goes to a new machine (once); other errors stand", async () => {
+    const provider = new FakeDaytona();
+    const m = manager(provider);
+    const warnings: string[] = [];
+    const driver = await m.attach(nina, computerSandbox(), (w) => warnings.push(w));
+    await driver.exec("true", {});
+    provider.vms.get(driver.remoteId)!.destroyed = true;
+    const r = await driver.exec("echo again", {});
+    expect(r.stdout.trim()).toBe("again");
+    expect(provider.created).toHaveLength(2);
+    expect(warnings.some((w) => w.includes("deleted at the provider"))).toBe(true);
+    // the machine still runs: its error is the command's
+    const vm = provider.vms.get(driver.remoteId)!;
+    vm.exec = async () => { throw new Error("flaky network"); };
+    await expect(driver.exec("true", {})).rejects.toThrow(/flaky network/);
+    expect(provider.created).toHaveLength(2);
+  });
+
+  test("reconcile: one listing for every computer; the server's upkeep runs it every few minutes", async () => {
+    const provider = new FakeDaytona();
+    const lists: Array<Record<string, string>> = [];
+    const list = provider.list.bind(provider);
+    provider.list = async (labels) => { lists.push(labels); return list(labels); };
+    const clock = { now: start };
+    const m = manager(provider, clock);
+    const d = await m.ensure(nina, computerSandbox());
+    lists.length = 0;
+    const upkeep = new ComputerUpkeep(m, () => [nina], undefined, undefined, { reconcileEveryMs: 5 * 60_000, now: () => clock.now });
+    await upkeep.tick();
+    expect(lists).toEqual([{ "polpo-scope": "computer" }]); // all its computers in one listing; nina agrees: not checked further
+    clock.now += 60_000;
+    await upkeep.tick();
+    expect(lists).toHaveLength(1);
+    provider.vms.get(d.remoteId)!.destroyed = true;
+    clock.now += 4 * 60_000;
+    await upkeep.tick();
+    expect(m.live("nina").status).toBe("deleted");
+    // a provider that cannot be asked: nothing changes
+    provider.list = async () => { throw new Error("401 Unauthorized"); };
+    expect(await m.reconcile([nina])).toEqual([]);
+    expect(m.live("nina").status).toBe("deleted");
   });
 });
 

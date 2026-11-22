@@ -59,7 +59,7 @@ test("an agent harness run: Claude Code mark, model via Bedrock, the Daytona v2 
   expect(card.textContent).toContain("us-east-1");
   const computer = q('[data-testid="run-computer"]')!;
   expect(computer.textContent).toBe("Coder box");
-  expect(computer.getAttribute("href")).toBe("/computers#computer-coder-box");
+  expect(computer.getAttribute("href")).toBe("/computers/coder-box");
   expect(q('[data-testid="run-computer-kind"]')!.textContent).toBe("Daytona v2");
   expect(q('[data-testid="computer-status"]', card)!.textContent).toBe("Running");
   expect(q('[data-brand="daytona"]', card)).not.toBeNull();

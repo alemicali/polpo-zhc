@@ -5,7 +5,8 @@
  */
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Monitor, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { Monitor } from "lucide-react";
+import { ACTION_META, actionLabel } from "@/components/computers/computer-actions";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
@@ -13,15 +14,8 @@ import { EngineBadge } from "@/components/shared/run-context";
 import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
 import { computerBrand, formatUsd } from "@/lib/run-context";
 import {
-  KIND_LABELS, availableActions, formatLastUsed, formatSnapshot, formatUptime, type Computer, type ComputerAction,
+  availableActions, formatLastUsed, formatSnapshot, formatUptime, kindLabel, type Computer, type ComputerAction,
 } from "@/lib/computers-api";
-
-const ACTION_META: Record<ComputerAction, { label: string; icon: typeof Play }> = {
-  start: { label: "Start", icon: Play },
-  stop: { label: "Stop", icon: Square },
-  restart: { label: "Restart", icon: RefreshCw },
-  reset: { label: "Reset", icon: RotateCcw },
-};
 
 export function ComputerCard({
   computer, busy, onAction, badge, showAgents = true, agentEngines, harnessSessions, children,
@@ -52,12 +46,12 @@ export function ComputerCard({
             <span className="truncate">{computer.name}</span>
             {badge}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{KIND_LABELS[computer.kind]}{computer.builtin ? "" : ` · ${computer.id}`}{image ? ` · ${image}` : ""}</p>
+          <p className="truncate text-xs text-muted-foreground">{kindLabel(computer)}{computer.builtin ? "" : ` · ${computer.id}`}{image ? ` · ${image}` : ""}</p>
         </div>
         <StatusBadge computer={computer} />
       </div>
       {computer.lastError && computer.status === "error" && <p className="text-xs text-destructive" role="alert">{computer.lastError}</p>}
-      {computer.notice && <p className="text-xs text-warning" data-testid="computer-notice">{computer.notice}</p>}
+      {computer.notice && <p className={computer.status === "deleted" ? "text-xs text-destructive" : "text-xs text-warning"} data-testid="computer-notice">{computer.notice}</p>}
       {computer.snapshotState && computer.snapshotState !== "active" && (
         <p className="text-xs text-warning" data-testid="computer-snapshot">
           Snapshot {computer.snapshotState}{computer.snapshotState === "inactive" ? ": it is activated on the next start (a few minutes longer)" : ""}
@@ -118,9 +112,10 @@ export function ComputerCard({
       ) : (
         <div className="mt-auto flex flex-wrap items-center gap-1.5">
           {availableActions(computer).map((action) => {
-            const { label, icon: Icon } = ACTION_META[action];
+            const { icon: Icon } = ACTION_META[action];
+            const label = actionLabel(computer, action);
             return (
-              <Button key={action} size="sm" variant={action === "start" ? "default" : "outline"} className="h-7 px-2.5 text-xs" disabled={busy}
+              <Button key={action} size="sm" variant={action === "start" || action === "recreate" ? "default" : "outline"} className="h-7 px-2.5 text-xs" disabled={busy}
                 onClick={() => onAction(action)} aria-label={`${label} ${computer.name}`}>
                 <Icon className="h-3.5 w-3.5" /> {label}
               </Button>

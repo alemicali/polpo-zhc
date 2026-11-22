@@ -19,7 +19,8 @@ import { configureRemoteProviders } from "../sandbox/remote-providers.js";
 import { configureTailnetEgress } from "../sandbox/tailnet-egress.js";
 import { tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { SandboxReaper } from "../sandbox/reaper.js";
-import { ComputerUpkeep, computerManagerWithEvents } from "../sandbox/computers.js";
+import { ComputerUpkeep, RECONCILE_EVERY_MS, RECONCILE_WITH_WEBHOOKS_MS, computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { bridgeCommandRunner, HarnessSessionJanitor } from "../harness/janitor.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { closeAllConnectorManagers } from "../mcp/manager.js";
@@ -116,6 +117,8 @@ export class PolpoServer {
     // delete them; Daytona v2: hibernate, safety snapshots, rotation before the wall clock),
     // announce status changes made by task runners
     this.computerUpkeep?.stop();
+    const webhooks = () => computerWebhooksFor(o, () => computerManagerWithEvents(polpoDir, (payload) => o.emit("computer:changed", payload)),
+      (level, message) => o.emit("log", { level, message: `[computers] ${message}` }));
     this.computerUpkeep = new ComputerUpkeep(
       computerManagerWithEvents(
         polpoDir, (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` }),
@@ -124,6 +127,11 @@ export class PolpoServer {
       () => o.getConfig()?.settings?.computers ?? [],
       (message) => o.emit("log", { level: "warn", message: `[computers] ${message}` }),
       (c) => computerSandbox(c, o.getConfig()?.settings),
+      {
+        // providers that push their machines' events (webhooks): the reconcile is only a safety net
+        reconcileEveryMs: async () => (await webhooks().pushing().catch(() => false) ? RECONCILE_WITH_WEBHOOKS_MS : RECONCILE_EVERY_MS),
+        beforeReconcile: () => webhooks().autoRegister(),
+      },
     );
     this.computerUpkeep.start();
 

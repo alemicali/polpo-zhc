@@ -13,8 +13,8 @@ export interface UseComputersReturn {
   computers: Computer[];
   loading: boolean;
   error: string | null;
-  /** live: ask the providers (slower); otherwise the last known status. */
-  refresh: (live?: boolean) => Promise<void>;
+  /** live: ask the providers (slower); otherwise the last known status. fresh: skip the server's short cache. */
+  refresh: (live?: boolean, fresh?: boolean) => Promise<void>;
   /** Put a computer returned by a mutation in the list right away. */
   upsert: (computer: Computer) => void;
   drop: (id: string) => void;
@@ -31,9 +31,9 @@ export function useComputers({ live = true }: { live?: boolean } = {}): UseCompu
     return () => { mounted.current = false; };
   }, []);
 
-  const refresh = useCallback(async (live = true) => {
+  const refresh = useCallback(async (live = true, fresh = false) => {
     try {
-      const list = await computersApi.list(live);
+      const list = await computersApi.list(live, fresh);
       if (!mounted.current) return;
       setComputers(list);
       setError(null);
