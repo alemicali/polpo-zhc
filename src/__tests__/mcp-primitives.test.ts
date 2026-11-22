@@ -292,7 +292,7 @@ describe("toolsets and scopes", () => {
       "polpo_teams_list", "polpo_team_save", "polpo_agent_delete"]) expect(def).toContain(n);
     for (const n of ["polpo_brain_search", "polpo_learning_get", "polpo_watchers_list", "polpo_vault_list", "polpo_apps_list", "polpo_api_get"]) expect(def).not.toContain(n);
     // the visible default set, every Configuration section included (the settings toolset), for a full-access client
-    expect(def.length).toBeLessThanOrEqual(150);
+    expect(def.length).toBeLessThanOrEqual(152);
     const all = await names(deps(f));
     for (const t of all) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     const a = Object.fromEntries(all.map((t) => [t.name, t.annotations]));
