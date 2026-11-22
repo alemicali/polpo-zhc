@@ -90,7 +90,7 @@ export function HarnessesSection() {
         <label className="flex items-center gap-2 text-sm font-medium">
           <input type="checkbox" checked={form.enabled.includes("claude-code")} onChange={(e) => toggle("claude-code", e.target.checked)} aria-label="Enable Claude Code" />
           <Bot className="h-4 w-4" /> Claude Code
-          {item("claude-code")?.agents.length ? <Badge variant="secondary" className="text-[10px]">{item("claude-code")!.agents.join(", ")}</Badge> : null}
+          {item("claude-code")?.agents.length ? <Badge variant="secondary" className="text-micro">{item("claude-code")!.agents.join(", ")}</Badge> : null}
         </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="space-y-1">
@@ -134,9 +134,9 @@ export function HarnessesSection() {
           </label>
         </div>
         {item("claude-code")?.credentialRef && item("claude-code")?.credentialFound === false && (
-          <p className="flex items-center gap-1.5 text-amber-600"><AlertTriangle className="h-3.5 w-3.5" /> The vault entry does not exist yet: add it in that agent's Credentials tab.</p>
+          <p className="flex items-center gap-1.5 text-warning"><AlertTriangle className="h-3.5 w-3.5" /> The vault entry does not exist yet: add it in that agent's Credentials tab.</p>
         )}
-        <p className="text-[10px] text-muted-foreground">A Claude subscription (Pro/Max sign-in) cannot be used: Anthropic's terms do not allow it for agents that serve other people.</p>
+        <p className="text-micro text-muted-foreground">A Claude subscription (Pro/Max sign-in) cannot be used: Anthropic's terms do not allow it for agents that serve other people.</p>
       </CardContent></Card>
 
       {/* Codex */}
@@ -144,7 +144,7 @@ export function HarnessesSection() {
         <label className="flex items-center gap-2 text-sm font-medium">
           <input type="checkbox" checked={form.enabled.includes("codex")} onChange={(e) => toggle("codex", e.target.checked)} aria-label="Enable Codex" />
           <Bot className="h-4 w-4" /> Codex
-          {item("codex")?.agents.length ? <Badge variant="secondary" className="text-[10px]">{item("codex")!.agents.join(", ")}</Badge> : null}
+          {item("codex")?.agents.length ? <Badge variant="secondary" className="text-micro">{item("codex")!.agents.join(", ")}</Badge> : null}
         </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="space-y-1">
@@ -157,7 +157,7 @@ export function HarnessesSection() {
             <Input className="h-8 text-xs" value={cx?.model ?? ""} onChange={(e) => setForm({ ...form, codex: { ...(cx ?? { credentialRef: undefined as never }), auth: "api-key", model: e.target.value.trim() || undefined } })} aria-label="Codex model" />
           </label>
         </div>
-        <p className="text-[10px] text-muted-foreground">Signing in with ChatGPT is not supported yet.</p>
+        <p className="text-micro text-muted-foreground">Signing in with ChatGPT is not supported yet.</p>
       </CardContent></Card>
 
       <label className="flex items-center gap-2 text-sm">
@@ -171,7 +171,7 @@ export function HarnessesSection() {
 
       {/* Sessions */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-2 text-label text-muted-foreground">
           Harness sessions
           <Button size="icon" variant="ghost" className="ml-auto h-6 w-6" onClick={() => void load()} aria-label="Refresh sessions"><RefreshCw className="h-3 w-3" /></Button>
         </div>
@@ -179,7 +179,7 @@ export function HarnessesSection() {
           <div key={s.key} className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs" data-testid={`harness-session-${s.key}`}>
             <code>{s.key}</code>
             <span>{s.agent} · {HARNESS_NAMES[s.harness]} on {s.computerId}</span>
-            <Badge variant={s.state === "error" ? "destructive" : "secondary"} className="text-[10px]">{s.state}{s.live ? " · live" : ""}</Badge>
+            <Badge variant={s.state === "error" ? "destructive" : "secondary"} className="text-micro">{s.state}{s.live ? " · live" : ""}</Badge>
             <span className="text-muted-foreground">{s.turns} turn(s) · ${s.costUsd.toFixed(4)}{s.lastResumeAt ? ` · resumed ${new Date(s.lastResumeAt).toLocaleString()}` : ""}</span>
             <div className="ml-auto flex gap-1">
               <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={async () => {
