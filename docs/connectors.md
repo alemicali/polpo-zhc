@@ -126,6 +126,41 @@ Google publishes official remote MCP servers (Workspace servers are a Developer 
 
 Polpo asks Google for offline access (`access_type=offline`, `prompt=consent`) so a refresh token is issued, with each service's scopes (e.g. Gmail: `gmail.readonly gmail.compose gmail.modify`; Calendar: `calendar.calendarlist.readonly calendar.events.freebusy calendar.events.readonly calendar.events`). The authorization server is `https://accounts.google.com` (Google's MCP servers publish no resource metadata). Google Maps uses an API key instead (`X-Goog-Api-Key`).
 
+## Slack
+
+Slack's MCP server (`https://mcp.slack.com/mcp`) has no dynamic registration: it needs a Slack app of your own, internal to your workspace or published in the Slack Marketplace, set up once:
+
+1. At [api.slack.com/apps](https://api.slack.com/apps) choose **Create New App → From a manifest**, pick the workspace and paste the manifest the dashboard's setup dialog shows (Copy button), with this instance's redirect URL filled in. It has the user token scopes the MCP server's tools use:
+
+   ```json
+   {
+     "display_information": { "name": "Polpo" },
+     "oauth_config": {
+       "redirect_urls": ["<public URL>/api/v1/connectors/oauth/callback"],
+       "scopes": {
+         "user": [
+           "search:read.public", "search:read.private", "search:read.mpim", "search:read.im", "search:read.files", "search:read.users",
+           "emoji:read", "chat:write",
+           "channels:history", "groups:history", "mpim:history", "im:history",
+           "channels:write", "groups:write", "im:write", "mpim:write",
+           "channels:read", "groups:read", "mpim:read",
+           "files:read", "files:write", "users:read", "users:read.email",
+           "reactions:write", "reactions:read", "canvases:read", "canvases:write", "lists:read", "lists:write"
+         ]
+       }
+     }
+   }
+   ```
+
+   Without a manifest: **OAuth & Permissions** → add the redirect URL and these user token scopes.
+2. In the app's settings open **Features → Agents** and turn on **"Slack Model Context Protocol (MCP) Server"**. Without it the OAuth sign-in succeeds but the first connection fails with `App is not enabled for Slack MCP server access. Please enable it here: https://api.slack.com/apps/<APP_ID>/app-assistant` (the dashboard shows that link as **Fix it**).
+3. Install the app to the workspace (a workspace admin may have to approve it).
+4. From **Basic Information → App Credentials** save the Client ID and Client Secret as the **`slack`** OAuth app (Connectors → OAuth apps, or `PUT /api/v1/connectors/oauth-apps/slack`), then connect.
+
+The catalog entry carries these steps (`setup`) and the manifest (`setupManifest`, the redirect URL as `<public URL>/api/v1/connectors/oauth/callback`); Polpo's `connector_add` / `connector_connect` return them while the `slack` OAuth app is missing.
+
+Any connector whose first connection fails with an error that tells the person to enable or approve something at a link gets that link as **Fix it** next to the error, in the connect dialog and in the connector's sheet.
+
 ## Custom connectors
 
 Any remote MCP server: `url` (https), `transport` `http` (default; falls back to SSE) or `sse`, and `auth` `none` / `bearer` / `headers` / `oauth` (dynamic registration, CIMD, or `auth.oauth.clientId` + `secrets.clientSecret`, with optional `scopes`, `extraAuthParams` and `authorizationServer`). Non-secret headers go in `transport.headers`.

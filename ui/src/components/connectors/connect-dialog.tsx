@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  connectorsApi, fillTemplate, setupSteps, suggestedAccountName, templateFields,
+  connectorsApi, fillTemplate, setupManifest, setupSteps, suggestedAccountName, templateFields,
   type CatalogEntry, type Connector,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
 import { ConnectorIcon } from "./connector-icon";
+import { FixItLink } from "./connector-bits";
 import type { ConnectDetails, ConnectState } from "./use-connect-flow";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
@@ -40,6 +41,31 @@ export function CopyField({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** A multi-line value to copy (an app manifest). */
+function CopyBlock({ value, label, hint }: { value: string; label: string; hint?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        <Button
+          type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" aria-label={`Copy ${label}`}
+          onClick={() => {
+            void navigator.clipboard?.writeText(value).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }, () => toast.error("Could not copy"));
+          }}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <pre className="max-h-48 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs leading-relaxed">{value}</pre>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 export function Field({ label, hint, error, children }: { label: string; hint?: React.ReactNode; error?: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
@@ -60,6 +86,7 @@ function SetupStep({ appId, name, entry, redirectUri, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const steps = entry ? setupSteps(entry, redirectUri) : [];
+  const manifest = entry ? setupManifest(entry, redirectUri) : undefined;
   const intro = steps[0] && !/^\d+\./.test(steps[0]) ? steps[0] : undefined;
   const list = intro ? steps.slice(1) : steps;
   const save = async () => {
@@ -93,6 +120,7 @@ function SetupStep({ appId, name, entry, redirectUri, onSaved }: {
         </ol>
       )}
       <CopyField label="Redirect URI to register" value={redirectUri} />
+      {manifest && <CopyBlock label="App manifest" value={manifest} hint="Paste it when creating the app from a manifest: scopes and redirect URL included." />}
       {entry?.docs && (
         <a href={entry.docs} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
           {entry.name} documentation <ExternalLink className="h-3 w-3" />
@@ -318,7 +346,10 @@ export function ConnectDialog({
           <div className="space-y-4 py-2">
             <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-              <span className="break-words">{state.error ?? "Something went wrong"}</span>
+              <span className="min-w-0 space-y-1">
+                <span className="block break-words">{state.error ?? "Something went wrong"}</span>
+                <FixItLink message={state.error} />
+              </span>
             </div>
             <DialogFooter sticky>
               {removeButton}
