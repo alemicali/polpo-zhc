@@ -232,7 +232,14 @@ export const UpdateSettingsSchema = z.object({
     productName: z.string().trim().max(80).optional(),
     tagline: z.string().trim().max(120).optional(),
     logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
+    /** The logo for dark mode (the light one when absent). */
+    logoDarkUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo-dark"), z.literal("")]).optional(),
   }).optional(),
+  /**
+   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark } }
+   * (validated by parseAppearanceSettings); replaces it, null removes it.
+   */
+  appearance: z.record(z.string(), z.unknown()).nullable().optional(),
   /** Named egress proxies for agents' browsers ({ home: "socks5://…" }); replaces them all, null removes them. */
   egressProxies: z.record(z.string(), z.string()).nullable().optional(),
   /**
@@ -244,7 +251,76 @@ export const UpdateSettingsSchema = z.object({
     tags: z.array(z.string()).optional(),
     hostnamePrefix: z.string().optional(),
   }).nullable().optional(),
+
+  // General settings (Configuration → General). null goes back to the default where there is one.
+  maxRetries: z.number().int().min(0).max(20).optional(),
+  logLevel: z.enum(["quiet", "normal", "verbose"]).optional(),
+  maxConcurrency: z.number().int().min(1).max(1000).nullable().optional(),
+  /** Default timeout per task (ms); null: the default (30 min). */
+  taskTimeout: z.number().int().min(1000).nullable().optional(),
+  /** Idle time (ms) before an agent is considered stale; null: the default (5 min). */
+  staleThreshold: z.number().int().min(1000).nullable().optional(),
+  maxFixAttempts: z.number().int().min(0).max(20).nullable().optional(),
+  maxQuestionRounds: z.number().int().min(0).max(20).nullable().optional(),
+  maxResolutionAttempts: z.number().int().min(0).max(20).nullable().optional(),
+  maxAssessmentRetries: z.number().int().min(0).max(20).nullable().optional(),
+  defaultQualityThreshold: z.number().min(1).max(5).nullable().optional(),
+  autoCorrectExpectations: z.boolean().nullable().optional(),
+  enableScheduler: z.boolean().nullable().optional(),
+  enableVolatileTeams: z.boolean().nullable().optional(),
+  volatileCleanup: z.enum(["on_complete", "manual"]).nullable().optional(),
+  /** Days of event logs kept (0: forever). */
+  logRetentionDays: z.number().int().min(0).max(3650).nullable().optional(),
+  emailAllowedDomains: z.array(z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9.*-]+$/, "a domain like example.com")).nullable().optional(),
+  /** Polpo's own voice replies in chats. */
+  voiceReplies: z.enum(["off", "voice", "always"]).nullable().optional(),
+  defaultRetryPolicy: z.object({
+    escalateAfter: z.number().int().min(0).max(20).optional(),
+    fallbackAgent: z.string().min(1).optional(),
+    escalateModel: z.string().min(3).optional(),
+  }).strict().nullable().optional(),
+  /** Remote connectors on private addresses, and their default tool timeout. */
+  connectors: z.object({
+    allowPrivateNetwork: z.boolean().optional(),
+    toolTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
+  }).strict().nullable().optional(),
+  /** Polpo's own MCP server: toolsets offered and named keys (vault references); the keys given change, null removes it. */
+  mcp: z.object({
+    toolsets: z.array(z.string().trim().min(1)).optional(),
+    keys: z.array(z.object({
+      name: z.string().trim().min(1).max(80),
+      keyRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }),
+      scopes: z.array(z.string().min(1)).optional(),
+    }).strict()).optional(),
+  }).strict().nullable().optional(),
+
+  // Policies (Configuration → Policies)
+  escalationPolicy: z.object({
+    name: z.string().trim().min(1).max(120),
+    levels: z.array(z.object({
+      level: z.number().int().min(0),
+      handler: z.enum(["agent", "orchestrator", "human"]),
+      target: z.string().min(1).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+      notifyChannels: z.array(z.string().min(1)).optional(),
+    }).strict()).min(1),
+  }).strict().nullable().optional(),
+  sla: z.object({
+    warningThreshold: z.number().min(0).max(1).optional(),
+    checkIntervalMs: z.number().int().min(1000).optional(),
+    warningChannels: z.array(z.string().min(1)).optional(),
+    violationChannels: z.array(z.string().min(1)).optional(),
+    violationAction: z.enum(["notify", "fail"]).optional(),
+  }).strict().nullable().optional(),
 });
+
+/** Settings PATCH keys that are set as given, or removed with null (validated by UpdateSettingsSchema). */
+export const PLAIN_SETTINGS_KEYS = [
+  "maxRetries", "logLevel", "maxConcurrency", "taskTimeout", "staleThreshold", "maxFixAttempts", "maxQuestionRounds",
+  "maxResolutionAttempts", "maxAssessmentRetries", "defaultQualityThreshold", "autoCorrectExpectations", "enableScheduler",
+  "enableVolatileTeams", "volatileCleanup", "logRetentionDays", "emailAllowedDomains", "voiceReplies", "defaultRetryPolicy",
+  "connectors", "escalationPolicy", "sla",
+] as const;
 
 // ── Notification rule (full top-level, with action passthrough) ───────
 

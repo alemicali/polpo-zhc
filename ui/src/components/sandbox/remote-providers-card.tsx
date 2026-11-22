@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, Cloud, KeyRound, Loader2, Save, Trash2 } from "lucide-react";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
+import { notifySetupSaved } from "@/lib/setup-link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -85,6 +86,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
       await sandboxApi.saveProvider(status.id, Object.keys(next).length ? next : null);
       setDraft({});
       toast.success(`${meta.name} saved`);
+      notifySetupSaved();
       onChanged();
     } catch (e) {
       toast.error((e as Error).message);
@@ -162,11 +164,12 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
         </div>
 
         <div className="space-y-2.5 px-4 pt-4">
-          <div className="block">
+          <div className="block" data-setup-item={status.id}>
             <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
               <KeyRound className="h-3 w-3" /> API key (vault entry)
             </span>
             <VaultRefPicker
+              data-setup-field="credential"
               value={credential}
               onChange={(ref) => setDraft((d) => ({ ...d, credential: ref }))}
               requiredKeys={["apiKey"]}

@@ -2,7 +2,13 @@
  * Static config from env vars.
  */
 declare global {
-  var __POLPO_RUNTIME_CONFIG__: { baseUrl?: string; apiKey?: string; inkHubUrl?: string } | undefined;
+  var __POLPO_RUNTIME_CONFIG__: {
+    baseUrl?: string;
+    apiKey?: string;
+    inkHubUrl?: string;
+    /** The instance's default look (settings.appearance), inlined by the UI server; null when it could not be read. */
+    appearance?: import("./appearance-kit").InstanceAppearance | null;
+  } | undefined;
 }
 
 const runtimeConfig = globalThis.__POLPO_RUNTIME_CONFIG__;
@@ -17,6 +23,16 @@ export const config = {
 export function apiUrl(path: string): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   return `${config.baseUrl}${normalized}`;
+}
+
+/**
+ * fetch() for the instance's API: sends the session cookie and, when the dashboard has one, the API
+ * key (Authorization: Bearer), like every other call — so it works in API-key-only setups too.
+ */
+export function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (config.apiKey && !headers.has("authorization")) headers.set("authorization", `Bearer ${config.apiKey}`);
+  return fetch(url, { ...init, headers, credentials: init.credentials ?? "include" });
 }
 
 /** Hostname the UI is talking to — used by the "local vs remote" badge. */

@@ -2,9 +2,10 @@ import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
-import { computerEgressProblem, parseComputers, parseEgressProxies, parseTailscaleSettings, type TailscaleSettings } from "@polpo-ai/core";
+import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
 import {
   UpdateSettingsSchema,
+  PLAIN_SETTINGS_KEYS,
   NotificationChannelConfigSchema,
   StoredNotificationChannelConfigSchema,
   UpsertNotificationRuleSchema,
@@ -177,6 +178,10 @@ const upsertRuleRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Rule saved",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "The id in the body does not match the URL",
+    },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
       description: "No configuration loaded",
@@ -227,6 +232,10 @@ const upsertGateRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Gate saved",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "The id in the body does not match the URL",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -335,6 +344,15 @@ export function configRoutes(getDeps: () => {
         return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
       }
     }
+    // the dashboard's default look: colours, font stack and radius checked
+    let appearance: AppearanceSettings | null | undefined;
+    if (body.appearance !== undefined) {
+      try {
+        appearance = body.appearance === null ? null : parseAppearanceSettings(body.appearance);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    }
     // Tailscale in remote computers: the auth key only as a vault reference
     let tailscale: TailscaleSettings | null | undefined;
     if (body.tailscale !== undefined) {
@@ -367,10 +385,23 @@ export function configRoutes(getDeps: () => {
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
       if (body.tools !== undefined) settings.tools = body.tools === null || Object.keys(body.tools).length === 0 ? undefined : body.tools;
+      // Polpo's MCP server settings merge: the keys given change (toolsets, keys)
+      if (body.mcp === null) delete settings.mcp;
+      else if (body.mcp !== undefined) {
+        const mcp: Record<string, unknown> = { ...(settings.mcp ?? {}), ...body.mcp };
+        settings.mcp = Object.keys(mcp).length ? mcp : undefined;
+      }
+      for (const key of PLAIN_SETTINGS_KEYS) {
+        const value = (body as Record<string, unknown>)[key];
+        if (value === undefined) continue;
+        if (value === null) delete settings[key];
+        else settings[key] = value;
+      }
+      if (appearance !== undefined) settings.appearance = appearance === null || isEmptyAppearance(appearance) ? undefined : appearance;
       if (body.branding !== undefined) {
         // only the fields given change; an empty string restores the default
         const branding: Record<string, string | undefined> = { ...(settings.branding ?? {}) };
-        for (const key of ["productName", "tagline", "logoUrl"] as const) {
+        for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl"] as const) {
           const value = body.branding[key];
           if (value === undefined) continue;
           if (value === "") delete branding[key];
@@ -489,7 +520,7 @@ export function configRoutes(getDeps: () => {
     const { id } = c.req.valid("param");
     const ruleBody = c.req.valid("json");
     if (ruleBody.id !== id) {
-      return c.json({ ok: false, error: "Rule id in body must match URL param" }, 500);
+      return c.json({ ok: false, error: "Rule id in body must match URL param" }, 400);
     }
 
     const result = await mutateConfig(deps, (config) => {
@@ -538,7 +569,7 @@ export function configRoutes(getDeps: () => {
     const { id } = c.req.valid("param");
     const gateBody = c.req.valid("json");
     if (gateBody.id !== id) {
-      return c.json({ ok: false, error: "Gate id in body must match URL param" }, 500);
+      return c.json({ ok: false, error: "Gate id in body must match URL param" }, 400);
     }
 
     const result = await mutateConfig(deps, (config) => {

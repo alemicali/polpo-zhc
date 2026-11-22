@@ -896,6 +896,8 @@ export interface BrandingConfig {
   tagline?: string;
   /** HTTPS image URL or the managed `/api/v1/config/branding/logo` asset. */
   logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl): HTTPS image URL or the managed `/api/v1/config/branding/logo-dark` asset. */
+  logoDarkUrl?: string;
 }
 
 export interface PolpoSettings {
@@ -904,6 +906,8 @@ export interface PolpoSettings {
   logLevel: "quiet" | "normal" | "verbose";
   /** Instance-wide UI branding. Unlike themes, this is shared by every user. */
   branding?: BrandingConfig;
+  /** The dashboard's default look for everyone (theme, palette, custom colours); a person may still customize their browser. */
+  appearance?: import("./appearance.js").AppearanceSettings;
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;
