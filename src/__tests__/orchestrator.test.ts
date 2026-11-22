@@ -304,6 +304,24 @@ describe("Orchestrator", () => {
       expect(await orchestrator.removeAgent("nope")).toBe(false);
     });
 
+    it("get_task and list_tasks say why a task failed (labelled, not retried), what it depends on and where each run executed", async () => {
+      const dep = await orchestrator.addTask({ title: "Collect", description: "x", assignTo: "agent-1" });
+      const task = await orchestrator.addTask({ title: "Report", description: "x", assignTo: "agent-1", dependsOn: [dep.id] });
+      const stderr = "Bedrock: model \"x\" not enabled for this account — pick another model";
+      await store.updateTask(task.id, {
+        status: "failed",
+        result: { exitCode: 1, stdout: "", stderr, duration: 1, retryable: false },
+        runs: [{ runId: "r1", startedAt: "2026-11-22T10:00:00.000Z", status: "failed", engine: "claude-code", model: "claude-sonnet-4-5", auth: { kind: "bedrock" },
+          computer: { id: "gpu", kind: "daytona", provider: "daytona", daytonaApi: "v2" }, egress: { mode: "direct" }, cost: { harnessUsd: 0.5 } }],
+      });
+      const got = await executeOrchestratorTool("get_task", { id: task.id }, orchestrator);
+      expect(got).toContain(`Failed: ${stderr} (not retried: a re-run would fail the same way)`);
+      expect(got).toContain(`Depends on: Collect [pending] (${dep.id})`);
+      expect(got).toContain("Claude Code claude-sonnet-4-5 via Bedrock · on computer gpu (daytona v2)");
+      const list = await executeOrchestratorTool("list_tasks", { status: "failed" }, orchestrator);
+      expect(list).toContain(`— ${stderr} (not retried)`);
+    });
+
     it("creates a team and moves an agent through hot orchestrator tools", async () => {
       const events: any[] = [];
       orchestrator.on("agent:updated", event => events.push(event));

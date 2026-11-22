@@ -6,6 +6,7 @@ import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
 import { fileURLToPath } from "url";
 import { bootScriptSource } from "./src/lib/appearance-kit";
+import { CHANGELOG } from "./src/lib/changelog";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -112,10 +113,30 @@ function appearanceBootPlugin(): Plugin {
   };
 }
 
+/**
+ * dist/whats-new-ids.json: the ids of the What's new entries in this build. The UI server
+ * (server.mjs) records the time it first serves a build containing each id and inlines those
+ * times into runtime-config.js, so the changelog shows when each entry went online.
+ */
+function whatsNewIdsPlugin(): Plugin {
+  return {
+    name: "polpo-whats-new-ids",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "whats-new-ids.json",
+        source: `${JSON.stringify({ ids: CHANGELOG.map((entry) => entry.id) })}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: isElectron ? "./" : "/",
   plugins: [
     appearanceBootPlugin(),
+    whatsNewIdsPlugin(),
     react(),
     tailwindcss(),
     // Disable PWA in Electron builds — service workers break file:// protocol

@@ -1,0 +1,17 @@
+/* The task and mission cards: on top of the cards' common look (agent-card/style.css). */
+.failure { border-radius: var(--r-sm); padding: 10px 12px; background: var(--color-background-danger, light-dark(#f7ecec, #602a28)); display: flex; flex-direction: column; gap: 6px; }
+.failure-head { display: flex; gap: 6px; flex-wrap: wrap; }
+.failure-head .chip-sm { margin-inline-start: 0; }
+.failure-text { margin: 0; color: var(--color-text-danger, light-dark(#7f2c28, #ee8884)); overflow-wrap: anywhere; }
+.danger-text { color: var(--color-text-danger, light-dark(#7f2c28, #ee8884)); }
+.run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.run-engine { font-weight: var(--font-weight-medium, 500); }
+.run-cost { font-variant-numeric: tabular-nums; }
+.deps { display: flex; flex-direction: column; gap: 4px; }
+.dep { display: inline-flex; align-items: center; flex-wrap: wrap; }
+.cost { display: flex; flex-direction: column; gap: 8px; }
+.cost-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.cost-n { font-size: var(--font-heading-lg-size, 20px); font-weight: var(--font-weight-semibold, 600); font-variant-numeric: tabular-nums; }
+.bar-over .bar-fill { background: var(--color-text-danger, light-dark(#7f2c28, #ee8884)); }
+.chips .chip { gap: 6px; }
+.row .chip-sm { margin-inline-start: 0; }

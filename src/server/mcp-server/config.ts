@@ -101,7 +101,7 @@ type Settings = Record<string, unknown> & {
 
 /** The settings people choose, without secrets or internals. */
 function publicSettings(s: Settings): Record<string, unknown> {
-  const keys = ["orchestratorName", "orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "mcp", "connectors", "egressProxies", "tailscale",
+  const keys = ["orchestratorName", "orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "dependencyResults", "mcp", "connectors", "egressProxies", "tailscale",
     "escalationPolicy", "sla", "appearance"];
   return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, k === "egressProxies" ? maskProxies(s[k]) : s[k]]));
 }
@@ -376,7 +376,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     title: "Update settings",
     description: "Change the instance's settings: the orchestrator's display name (orchestrator_name), Polpo's own model (and fallbacks), the image model, the reasoning level, the egress proxies agents' "
       + "browsers can use (agent.browserEgress picks one), the general settings (retries, concurrency, timeouts, log level, scheduler, quality, "
-      + "voice replies…), compaction, Tailscale in remote computers, Polpo's MCP server (toolsets, named keys) and connectors' network policy. "
+      + "voice replies…), compaction, how much of their dependencies' results tasks receive in their prompt (dependency_results), Tailscale in remote computers, Polpo's MCP server (toolsets, named keys) and connectors' network policy. "
       + "Secrets are only vault references ({ owner, service }). Only the fields given change; models are checked against the catalog "
       + "(polpo_models_list). The result lists what changed. Needs the admin scope.",
     inputSchema: {
@@ -394,6 +394,11 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
         reserveTokens: z.number().int().min(0).optional(), keepRecentTokens: z.number().int().min(0).optional(),
         model: z.string().min(3).optional(), summaryTimeoutMs: z.number().int().min(1000).optional(), memoryFlush: z.boolean().optional(),
       }).strict().nullable().optional().describe("How conversations are compacted when they fill the window: replaces it; null: the defaults"),
+      dependency_results: z.object({
+        perTaskChars: z.number().int().min(240).max(200_000).optional().describe("Characters at most per dependency (result, outcomes, error); default 2000"),
+        totalChars: z.number().int().min(480).max(1_000_000).optional().describe("Characters at most for the whole section; default 20000"),
+      }).strict().nullable().optional()
+        .describe("How much of the results of the tasks it depends on a task receives in its prompt (the rest is one task_result call away): replaces it; null: the defaults"),
       tailscale: z.object({
         auth_key: vaultRefInput.describe("The vault entry holding the Tailscale auth key"),
         tags: z.array(z.string().min(1)).optional(), hostname_prefix: z.string().min(1).optional(),
@@ -411,7 +416,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, tailscale, mcp, connectors }) => {
+  }, async ({ orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors }) => {
     const body: Record<string, unknown> = {};
     if (orchestrator_name !== undefined) body.orchestratorName = orchestrator_name || null;
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
@@ -420,6 +425,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     if (egress_proxies !== undefined) body.egressProxies = egress_proxies;
     for (const [k, v] of Object.entries(general ?? {})) if (v !== undefined) body[k] = v;
     if (compaction !== undefined) body.compaction = compaction;
+    if (dependency_results !== undefined) body.dependencyResults = dependency_results;
     if (connectors !== undefined) body.connectors = connectors;
     const refs: Array<{ owner: string; service: string }> = [];
     if (tailscale !== undefined) {
@@ -443,7 +449,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       };
     }
     if (Object.keys(body).length === 0) {
-      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, tailscale, mcp or connectors.");
+      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp or connectors.");
     }
     const missing = await missingVaultRefs(deps, refs);
     if (missing.length) {
