@@ -2,9 +2,10 @@ import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
-import { computerEgressProblem, parseComputers, parseEgressProxies, parseTailscaleSettings, type TailscaleSettings } from "@polpo-ai/core";
+import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
 import {
   UpdateSettingsSchema,
+  PLAIN_SETTINGS_KEYS,
   NotificationChannelConfigSchema,
   StoredNotificationChannelConfigSchema,
   UpsertNotificationRuleSchema,
@@ -335,6 +336,15 @@ export function configRoutes(getDeps: () => {
         return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
       }
     }
+    // the dashboard's default look: colours, font stack and radius checked
+    let appearance: AppearanceSettings | null | undefined;
+    if (body.appearance !== undefined) {
+      try {
+        appearance = body.appearance === null ? null : parseAppearanceSettings(body.appearance);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    }
     // Tailscale in remote computers: the auth key only as a vault reference
     let tailscale: TailscaleSettings | null | undefined;
     if (body.tailscale !== undefined) {
@@ -366,10 +376,17 @@ export function configRoutes(getDeps: () => {
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
+      for (const key of PLAIN_SETTINGS_KEYS) {
+        const value = (body as Record<string, unknown>)[key];
+        if (value === undefined) continue;
+        if (value === null) delete settings[key];
+        else settings[key] = value;
+      }
+      if (appearance !== undefined) settings.appearance = appearance === null || isEmptyAppearance(appearance) ? undefined : appearance;
       if (body.branding !== undefined) {
         // only the fields given change; an empty string restores the default
         const branding: Record<string, string | undefined> = { ...(settings.branding ?? {}) };
-        for (const key of ["productName", "tagline", "logoUrl"] as const) {
+        for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl"] as const) {
           const value = body.branding[key];
           if (value === undefined) continue;
           if (value === "") delete branding[key];

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { parseAppearanceSettings } from "@polpo-ai/core";
 import { redactPolpoConfig } from "../security.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
@@ -11,6 +12,10 @@ import type { Orchestrator } from "../../core/orchestrator.js";
 import { createInitialInstanceAuth, isInstanceAuthEnabled, loadInstanceAuth, normalizeEmail } from "../auth/instance-auth.js";
 
 const MANAGED_LOGO_URL = "/api/v1/config/branding/logo";
+const MANAGED_LOGO_DARK_URL = "/api/v1/config/branding/logo-dark";
+/** The logo shown in light mode (logo.*) or in dark mode (logo-dark.*; the light one when absent). */
+type LogoVariant = "light" | "dark";
+const logoBase = (variant: LogoVariant) => (variant === "dark" ? "logo-dark" : "logo");
 const BRANDING_LOGO_TYPES: Record<string, { extension: string; contentType: string }> = {
   "image/png": { extension: "png", contentType: "image/png" },
   "image/jpeg": { extension: "jpg", contentType: "image/jpeg" },
@@ -18,17 +23,17 @@ const BRANDING_LOGO_TYPES: Record<string, { extension: string; contentType: stri
   "image/gif": { extension: "gif", contentType: "image/gif" },
 };
 
-function findManagedLogo(polpoDir: string): { path: string; contentType: string } | null {
+function findManagedLogo(polpoDir: string, variant: LogoVariant = "light"): { path: string; contentType: string } | null {
   for (const logo of Object.values(BRANDING_LOGO_TYPES)) {
-    const path = join(polpoDir, "branding", `logo.${logo.extension}`);
+    const path = join(polpoDir, "branding", `${logoBase(variant)}.${logo.extension}`);
     if (existsSync(path)) return { path, contentType: logo.contentType };
   }
   return null;
 }
 
-function clearManagedLogos(polpoDir: string): void {
+function clearManagedLogos(polpoDir: string, variant: LogoVariant = "light"): void {
   for (const logo of Object.values(BRANDING_LOGO_TYPES)) {
-    const path = join(polpoDir, "branding", `logo.${logo.extension}`);
+    const path = join(polpoDir, "branding", `${logoBase(variant)}.${logo.extension}`);
     if (existsSync(path)) unlinkSync(path);
   }
 }
@@ -147,9 +152,10 @@ const uploadBrandingLogoRoute = createRoute({
   method: "post",
   path: "/instance-logo",
   tags: ["Config"],
-  summary: "Upload the managed instance logo",
+  summary: "Upload the managed instance logo (?variant=dark: the logo for dark mode)",
   request: {
     headers: z.object({ "content-type": z.string() }),
+    query: z.object({ variant: z.enum(["light", "dark"]).optional() }),
   },
   responses: {
     200: {
@@ -183,9 +189,10 @@ const deleteBrandingLogoRoute = createRoute({
   method: "delete",
   path: "/instance-logo",
   tags: ["Config"],
-  summary: "Remove the managed instance logo",
+  summary: "Remove the managed instance logo (?variant=dark: the logo for dark mode)",
   request: {
     headers: z.object({ "x-polpo-operation": z.string().optional() }),
+    query: z.object({ variant: z.enum(["light", "dark"]).optional() }),
   },
   responses: {
     200: {
@@ -248,15 +255,16 @@ function registerBrandingConfigRoutes(
     if (bytes.length === 0) return c.json({ ok: false, error: "Logo file is empty" }, 400);
     if (bytes.length > 4 * 1024 * 1024) return c.json({ ok: false, error: "Logo must be smaller than 4 MB" }, 413);
 
+    const variant: LogoVariant = c.req.valid("query").variant === "dark" ? "dark" : "light";
     const polpoDir = deps.getPolpoDir();
     const brandingDir = join(polpoDir, "branding");
     mkdirSync(brandingDir, { recursive: true });
-    clearManagedLogos(polpoDir);
-    writeFileSync(join(brandingDir, `logo.${logoType.extension}`), bytes);
+    clearManagedLogos(polpoDir, variant);
+    writeFileSync(join(brandingDir, `${logoBase(variant)}.${logoType.extension}`), bytes);
 
     const result = await mutateConfig(deps, (fileConfig) => {
       const settings = fileConfig.settings ?? {} as any;
-      settings.branding = { ...(settings.branding ?? {}), logoUrl: MANAGED_LOGO_URL };
+      settings.branding = { ...(settings.branding ?? {}), ...(variant === "dark" ? { logoDarkUrl: MANAGED_LOGO_DARK_URL } : { logoUrl: MANAGED_LOGO_URL }) };
       fileConfig.settings = settings;
     });
     if (!result.ok) {
@@ -268,11 +276,12 @@ function registerBrandingConfigRoutes(
 
   app.openapi(deleteBrandingLogoRoute, async (c) => {
     const deps = getDeps();
-    clearManagedLogos(deps.getPolpoDir());
+    const variant: LogoVariant = c.req.valid("query").variant === "dark" ? "dark" : "light";
+    clearManagedLogos(deps.getPolpoDir(), variant);
     const result = await mutateConfig(deps, (fileConfig) => {
       const settings = fileConfig.settings ?? {} as any;
       settings.branding = { ...(settings.branding ?? {}) };
-      delete settings.branding.logoUrl;
+      delete settings.branding[variant === "dark" ? "logoDarkUrl" : "logoUrl"];
       fileConfig.settings = settings;
     });
     if (!result.ok) {
@@ -309,17 +318,34 @@ export function publicConfigRoutes(
     return c.json({ ok: true, data: branding });
   });
 
-  app.get("/branding/logo", (c) => {
+  // The dashboard's default look (theme, palette, custom colours): public like the branding, so the
+  // UI server can inline it into runtime-config.js and the first paint (even the sign-in page) is right.
+  app.get("/appearance", (c) => {
     const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
-    const logo = findManagedLogo(getPolpoDir(activeWorkDir));
-    if (!logo) return c.json({ ok: false, error: "No managed logo configured" }, 404);
+    let appearance: unknown = {};
+    try {
+      const raw = loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings?.appearance;
+      appearance = raw ? parseAppearanceSettings(raw) : {};
+    } catch {
+      appearance = {};
+    }
+    return c.json({ ok: true, data: appearance }, 200, { "cache-control": "no-cache" });
+  });
+
+  const serveLogo = (variant: LogoVariant) => () => {
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const logo = findManagedLogo(getPolpoDir(activeWorkDir), variant);
+    if (!logo) return Response.json({ ok: false, error: "No managed logo configured" }, { status: 404 });
     return new Response(readFileSync(logo.path), {
       headers: {
         "content-type": logo.contentType,
         "cache-control": "no-cache",
+        "x-content-type-options": "nosniff",
       },
     });
-  });
+  };
+  app.get("/branding/logo", serveLogo("light"));
+  app.get("/branding/logo-dark", serveLogo("dark"));
 
   // GET /config/status
   app.openapi(configStatusRoute, (c) => {

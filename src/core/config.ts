@@ -5,7 +5,7 @@ import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, P
 import { getPolpoDir } from "./constants.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
+import { parseAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -400,7 +400,12 @@ function parseSettings(raw: any): PolpoSettings {
       productName: typeof branding.productName === "string" ? branding.productName.trim().slice(0, 80) : undefined,
       tagline: typeof branding.tagline === "string" ? branding.tagline.trim().slice(0, 120) : undefined,
       logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl.trim() : undefined,
+      logoDarkUrl: typeof branding.logoDarkUrl === "string" ? branding.logoDarkUrl.trim() : undefined,
     };
+  }
+  if (raw?.appearance !== undefined && raw?.appearance !== null) {
+    const appearance = parseAppearanceSettings(raw.appearance);
+    if (!isEmptyAppearance(appearance)) settings.appearance = appearance;
   }
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;
   if (raw?.orchestratorModel) settings.orchestratorModel = parseOrchestratorModel(raw.orchestratorModel);
@@ -432,6 +437,7 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
   if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
   if (raw?.reasoning) settings.reasoning = raw.reasoning;
+  if (raw?.voiceReplies === "off" || raw?.voiceReplies === "voice" || raw?.voiceReplies === "always") settings.voiceReplies = raw.voiceReplies;
   if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
   if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
   if (raw?.egressProxies && typeof raw.egressProxies === "object") {

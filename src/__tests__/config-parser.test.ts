@@ -222,6 +222,34 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       expect(config.teams).toEqual([]); // ignored
     });
 
+    it("reads the instance appearance, the dark-mode logo and Polpo's voice replies", async () => {
+      const cfg = {
+        ...minimalConfig(),
+        settings: {
+          ...minimalConfig().settings,
+          voiceReplies: "voice",
+          branding: { logoDarkUrl: "/api/v1/config/branding/logo-dark" },
+          appearance: { theme: "system", palette: "mono", custom: { enabled: true, light: { text: "#111111", radius: 6 }, dark: { primary: "oklch(0.7 0.15 200)" } } },
+        },
+      };
+      const config = await parseConfig(writeConfig(cfg));
+      expect(config.settings.voiceReplies).toBe("voice");
+      expect(config.settings.branding?.logoDarkUrl).toBe("/api/v1/config/branding/logo-dark");
+      // the old `text` is foreground
+      expect(config.settings.appearance).toEqual({
+        theme: "system", palette: "mono", custom: { enabled: true, light: { foreground: "#111111", radius: 6 }, dark: { primary: "oklch(0.7 0.15 200)" } },
+      });
+    });
+
+    it("refuses an appearance that could break out of the stylesheet", async () => {
+      const bad = (appearance: object) => writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance } });
+      await expect(parseConfig(bad({ palette: "nope" }))).rejects.toThrow(/settings\.appearance\.palette/);
+      await expect(parseConfig(bad({ custom: { enabled: true, light: { primary: "red;}" } } }))).rejects.toThrow(/custom\.light\.primary must be a colour/);
+      await expect(parseConfig(bad({ custom: { enabled: true, dark: { fontFamily: "x; } body {" } } }))).rejects.toThrow(/fontFamily/);
+      await expect(parseConfig(bad({ custom: { enabled: true, dark: { radius: 40 } } }))).rejects.toThrow(/radius/);
+      await expect(parseConfig(bad({ custom: { enabled: true, dark: { nope: "#fff" } } }))).rejects.toThrow(/unknown token nope/);
+    });
+
     it("throws on invalid logLevel", async () => {
       const cfg = {
         ...minimalConfig(),
