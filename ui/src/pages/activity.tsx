@@ -301,6 +301,9 @@ function buildNarrative(
     const facts = data?.savedFacts ? `, ${data.savedFacts} facts saved to memory` : "";
     return `${who} compacted${why}: ${k(data?.beforeTokens)} → ${k(data?.afterTokens)} tokens, ${how}${facts}`;
   }
+  if (eventName === "context:checkpoint-carried") {
+    return `Branch${data?.agentName ? ` with ${data.agentName}` : ""} started from its parent's context checkpoint (${data?.coveredMessages ?? 0} messages already summarized)`;
+  }
 
   if (category === "sandbox") {
     const where = data?.scope === "task" || (data?.scope === undefined && data?.taskId)

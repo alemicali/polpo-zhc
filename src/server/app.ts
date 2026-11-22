@@ -1387,6 +1387,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (event: string, data: unknown) => o.emit(event as any, data),
     chatQueueStore: o.getChatQueueStore(),
     turnScheduler,
+    contextCheckpoints: o.getContextCheckpointStore(),
     removeAttachmentFile: async (path: string) => {
       // Only chat attachments, never anything else under the project.
       if (!CHAT_ATTACHMENT_PATH.test(path)) return;
