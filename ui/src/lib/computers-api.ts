@@ -6,12 +6,13 @@
  * Same envelope ({ ok, data } / { ok, error }) and auth as the other page clients.
  */
 import { apiUrl, config } from "@/lib/config";
+import type { HarnessSession } from "@/lib/harnesses-api";
 
 // ── Types (mirror @polpo-ai/core computers.ts and src/server/routes/computers.ts) ──
 
 export type ComputerKind = "host" | "daytona" | "e2b";
 export type ComputerStatus =
-  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
+  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "deleted" | "unknown";
 
 export interface ComputerNetwork {
   mode: "deny" | "allowlist" | "open" | "unrestricted";
@@ -42,6 +43,12 @@ export interface Computer {
   snapshotState?: string;
   /** Daytona v2: the newest memory and disk snapshot of its VM (what a hibernated computer wakes from). */
   lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number };
+  /** Daytona v2: how many snapshots of it are kept (snapshot storage is billed). */
+  snapshotCount?: number;
+  /** Status "deleted": when Polpo found its machine deleted at the provider. */
+  deletedAtProvider?: string;
+  /** Daytona: the service its machines run on ("v2": Linux VMs that hibernate). */
+  providerApi?: "v0" | "v2";
   /** Something worth knowing that is not an error (e.g. its VM vanished and was restored from the snapshot). */
   notice?: string;
   /** "host": this server, always there. */
@@ -51,9 +58,75 @@ export interface Computer {
   note?: string;
 }
 
+/** A task run on a computer (its page's run list). */
+export interface ComputerRun {
+  taskId: string;
+  taskTitle: string;
+  taskStatus: string;
+  mission?: string;
+  runId: string;
+  agent?: string;
+  engine: string;
+  model?: string;
+  status: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  costUsd?: number;
+  tokens?: number;
+  remoteId?: string;
+}
+
+export interface ComputerActivity {
+  at: string;
+  kind: "status" | "notice";
+  status?: ComputerStatus;
+  from?: ComputerStatus;
+  level?: "info" | "warn";
+  message?: string;
+  remoteId?: string;
+}
+
+export interface ComputerSnapshotInfo { id: string; name: string; at: string; status: string; diskBytes?: number; memoryBytes?: number }
+
+/** GET /computers/:id?detail=1: the computer and what its page shows. */
+export interface ComputerDetail extends Computer {
+  snapshots: ComputerSnapshotInfo[];
+  activity: ComputerActivity[];
+  updatedAt?: string;
+  runningSince?: string;
+  /** Daytona v2: when the VM's wall clock deletes it (it is rotated before). */
+  timeoutAt?: string;
+  /** When it stops or hibernates by itself if nobody uses it (running). */
+  idleStopAt?: string;
+  hibernate?: { keepSnapshots: number; safetySnapshotHours: number; rotateBeforeMinutes: number };
+  machine?: { image?: string; snapshot?: string; template?: string; region?: string; resources?: { cpus?: number; memoryMb?: number; diskMb?: number } };
+  sessions: HarnessSession[];
+  runs: ComputerRun[];
+  cost: { runsUsd: number; chatSessionsUsd: number; totalUsd: number };
+}
+
+/** GET /computers/:id/egress (a remote computer with an egress proxy). */
+export interface ComputerEgress {
+  computerId: string;
+  proxy?: string;
+  egress?: null;
+  tailnet?: string | null;
+  node?: string;
+  path?: string;
+  relay?: string;
+  proxyReachable?: boolean;
+  effective?: string;
+  machine?: string;
+  checkedAt?: string;
+  error?: string;
+  note?: string;
+}
+
 export type ComputerInput = Partial<Pick<Computer, "id" | "name" | "kind" | "description" | "image" | "snapshot" | "template" | "resources" | "lifecycle" | "network" | "egress">> & { start?: boolean };
 
-export type ComputerAction = "start" | "stop" | "restart" | "reset";
+/** "recreate": a reset of a computer whose machine was deleted at the provider (a new one from the image). */
+export type ComputerAction = "start" | "stop" | "restart" | "reset" | "recreate";
 
 export class ComputerRequestError extends Error {
   readonly code?: string;
@@ -82,12 +155,20 @@ const at = (id: string) => `/computers/${encodeURIComponent(id)}`;
 const json = (method: string, body?: unknown): RequestInit => ({ method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 
 export const computersApi = {
-  list: (live = true) => request<{ computers: Computer[] }>(`/computers${live ? "" : "?live=0"}`).then((d) => d.computers),
+  /** live: ask the providers (their answers are reused for a few seconds; fresh: ask again now). */
+  list: (live = true, fresh = false) => request<{ computers: Computer[] }>(`/computers${!live ? "?live=0" : fresh ? "?fresh=1" : ""}`).then((d) => d.computers),
   get: (id: string) => request<Computer>(at(id)),
+  /** The computer with its snapshots, activity, harness sessions, task runs and cost (its page). */
+  detail: (id: string, fresh = false) => request<ComputerDetail>(`${at(id)}?detail=1${fresh ? "&fresh=1" : ""}`),
+  egress: (id: string) => request<ComputerEgress>(`${at(id)}/egress`),
   create: (input: ComputerInput) => request<Computer>("/computers", json("POST", input)),
   update: (id: string, patch: Record<string, unknown>) => request<Computer>(at(id), json("PATCH", patch)),
   remove: (id: string) => request<{ deleted: string }>(at(id), json("DELETE", { confirm: true })),
-  control: (id: string, action: ComputerAction) => request<Computer>(`${at(id)}/${action}`, json("POST", action === "reset" ? { confirm: true } : undefined)),
+  control: (id: string, action: ComputerAction) => {
+    // Recreate is a reset: its machine (and snapshots) are gone already, a new one comes from the image
+    const op = action === "recreate" ? "reset" : action;
+    return request<Computer>(`${at(id)}/${op}`, json("POST", op === "reset" ? { confirm: true } : undefined));
+  },
   /** An agent's default computer ("host" or "" for this server) and the computers it may use. */
   assign: (agent: string, defaultComputer: string, computers?: string[]) =>
     request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { defaultComputer: defaultComputer === "host" ? "" : defaultComputer, ...(computers ? { computers } : {}) })),
@@ -97,10 +178,18 @@ export const computersApi = {
 
 export const KIND_LABELS: Record<ComputerKind, string> = { host: "This server", daytona: "Daytona", e2b: "E2B" };
 
+/** "Daytona v2", "Daytona", "E2B", "This server". */
+export function kindLabel(c: Pick<Computer, "kind" | "providerApi">): string {
+  return c.kind === "daytona" && c.providerApi === "v2" ? "Daytona v2" : KIND_LABELS[c.kind];
+}
+
 export const STATUS_LABELS: Record<ComputerStatus, string> = {
   running: "Running", stopped: "Stopped", paused: "Paused", hibernated: "Hibernated (resumes in a few seconds)", archived: "Archived", creating: "Creating", starting: "Starting",
-  stopping: "Stopping", error: "Error", missing: "Not created yet", unknown: "Unknown",
+  stopping: "Stopping", error: "Error", missing: "Not created yet", deleted: "Deleted at provider", unknown: "Unknown",
 };
+
+/** Short labels for the list's status column and filter. */
+export const STATUS_SHORT_LABELS: Record<ComputerStatus, string> = { ...STATUS_LABELS, hibernated: "Hibernated" };
 
 export type StatusTone = "ok" | "idle" | "busy" | "bad";
 
@@ -108,7 +197,7 @@ export function statusTone(status: ComputerStatus): StatusTone {
   switch (status) {
     case "running": return "ok";
     case "creating": case "starting": case "stopping": return "busy";
-    case "error": case "unknown": return "bad";
+    case "error": case "unknown": case "deleted": return "bad";
     default: return "idle";
   }
 }
@@ -120,8 +209,49 @@ export function availableActions(c: Pick<Computer, "status" | "builtin" | "kind"
     case "running": return ["stop", "restart", "reset"];
     case "creating": case "starting": case "stopping": return [];
     case "missing": return ["start"];
+    // its machine is gone: a new one from the image (Remove from Polpo is the other way out)
+    case "deleted": return ["recreate"];
     default: return ["start", "reset"];
   }
+}
+
+/** What Stop does on this computer: Daytona v2 hibernates (a snapshot, the VM deleted), E2B pauses. */
+export function stopLabel(c: Pick<Computer, "kind" | "providerApi">): string {
+  return c.kind === "daytona" && c.providerApi === "v2" ? "Hibernate" : c.kind === "e2b" ? "Pause" : "Stop";
+}
+
+/** Status order for sorting: what needs attention first, then running, then the resting ones. */
+export const STATUS_ORDER: ComputerStatus[] = [
+  "deleted", "error", "unknown", "creating", "starting", "stopping", "running", "paused", "hibernated", "stopped", "archived", "missing",
+];
+
+export type ComputerSortKey = "name" | "status" | "lastUsed" | "uptime";
+
+/** The list's order (host always first). */
+export function sortComputers(list: Computer[], key: ComputerSortKey): Computer[] {
+  const by: Record<ComputerSortKey, (a: Computer, b: Computer) => number> = {
+    name: (a, b) => a.name.localeCompare(b.name),
+    status: (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) || a.name.localeCompare(b.name),
+    lastUsed: (a, b) => (Date.parse(b.lastUsedAt ?? "") || 0) - (Date.parse(a.lastUsedAt ?? "") || 0) || a.name.localeCompare(b.name),
+    uptime: (a, b) => b.uptimeMinutes - a.uptimeMinutes || a.name.localeCompare(b.name),
+  };
+  return [...list].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin) || by[key](a, b));
+}
+
+/** Whether a computer matches the search (name, id, kind, image, agents, egress). */
+export function matchesComputer(c: Computer, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [c.name, c.id, kindLabel(c), c.image, c.snapshot, c.template, c.egress, c.description, ...c.agents.map((a) => a.name)]
+    .some((v) => v?.toLowerCase().includes(q));
+}
+
+/** "2 snapshots · 1.7 GB" (memory + disk of the newest), "—". */
+export function formatSnapshotSummary(c: Pick<Computer, "lastSnapshot" | "snapshotCount">): string {
+  if (!c.lastSnapshot) return "—";
+  const bytes = (c.lastSnapshot.memoryBytes ?? 0) + (c.lastSnapshot.diskBytes ?? 0);
+  const count = c.snapshotCount ?? 1;
+  return `${count} snapshot${count === 1 ? "" : "s"}${bytes ? ` · ${formatBytes(bytes)}` : ""}`;
 }
 
 /** "3 h 20 min", "45 min", "—". */
@@ -167,12 +297,23 @@ export interface ComputerForm {
   idleStopMinutes: string;
   autoArchiveDays: string;
   egress: string;
+  /** "" = the agent's or the instance's rule. */
+  networkMode: "" | ComputerNetwork["mode"];
+  /** Allowlist: host names, one per line or comma separated. */
+  networkAllow: string;
+  /** Daytona with an image ("" = the provider's default). */
+  cpus: string;
+  memoryGb: string;
+  diskGb: string;
   start: boolean;
 }
 
 export const EMPTY_COMPUTER_FORM: ComputerForm = {
-  id: "", name: "", kind: "daytona", image: "", imageKind: "snapshot", idleStopMinutes: "15", autoArchiveDays: "", egress: "", start: false,
+  id: "", name: "", kind: "daytona", image: "", imageKind: "snapshot", idleStopMinutes: "15", autoArchiveDays: "", egress: "",
+  networkMode: "", networkAllow: "", cpus: "", memoryGb: "", diskGb: "", start: false,
 };
+
+const gbOf = (mb: number | undefined) => (mb ? String(Math.round((mb / 1024) * 100) / 100) : "");
 
 export function formFromComputer(c: Computer): ComputerForm {
   return {
@@ -181,8 +322,16 @@ export function formFromComputer(c: Computer): ComputerForm {
     imageKind: c.image ? "image" : "snapshot",
     idleStopMinutes: c.lifecycle?.idleStopMinutes ? String(c.lifecycle.idleStopMinutes) : "15",
     autoArchiveDays: c.lifecycle?.autoArchiveDays ? String(c.lifecycle.autoArchiveDays) : "",
-    egress: c.egress ?? "", start: false,
+    egress: c.egress ?? "",
+    networkMode: c.network?.mode ?? "", networkAllow: (c.network?.allow ?? []).join("\n"),
+    cpus: c.resources?.cpus ? String(c.resources.cpus) : "", memoryGb: gbOf(c.resources?.memoryMb), diskGb: gbOf(c.resources?.diskMb),
+    start: false,
   };
+}
+
+/** Allowlist entries from the form's text (lines or commas). */
+export function allowEntries(text: string): string[] {
+  return [...new Set(text.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean))];
 }
 
 const RESERVED_COMPUTER_IDS = ["host", "ephemeral"];
@@ -209,6 +358,10 @@ export function validateComputerForm(form: ComputerForm, existingIds: string[] =
       const days = Number(form.autoArchiveDays);
       if (!Number.isInteger(days) || days < 1 || days > 30) errors.autoArchiveDays = "Whole days, 1 to 30";
     }
+    if (form.networkMode === "allowlist" && allowEntries(form.networkAllow).length === 0) errors.networkAllow = "Add at least one host (e.g. github.com)";
+    for (const key of ["cpus", "memoryGb", "diskGb"] as const) {
+      if (form[key] !== "" && !(Number(form[key]) > 0)) errors[key] = "A positive number";
+    }
   }
   return errors;
 }
@@ -229,6 +382,16 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
     const lifecycle: Record<string, number> = { idleStopMinutes: Number(form.idleStopMinutes) };
     if (form.kind === "daytona" && form.autoArchiveDays !== "") lifecycle.autoArchiveDays = Number(form.autoArchiveDays);
     out.lifecycle = lifecycle;
+    const network = form.networkMode
+      ? { mode: form.networkMode, ...(form.networkMode === "allowlist" ? { allow: allowEntries(form.networkAllow) } : {}) }
+      : undefined;
+    out.network = network ?? (editing ? null : undefined);
+    const resources = Object.fromEntries(Object.entries({
+      cpus: form.cpus !== "" ? Number(form.cpus) : undefined,
+      memoryMb: form.memoryGb !== "" ? Math.round(Number(form.memoryGb) * 1024) : undefined,
+      diskMb: form.diskGb !== "" ? Math.round(Number(form.diskGb) * 1024) : undefined,
+    }).filter(([, v]) => v !== undefined));
+    out.resources = Object.keys(resources).length ? resources : editing ? null : undefined;
   }
   if (!editing && form.start && form.kind !== "host") out.start = true;
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));

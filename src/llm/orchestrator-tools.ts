@@ -1299,7 +1299,7 @@ const browserProfileLoginTool: Tool = {
 const computersListTool: Tool = {
   name: "computers_list",
   description: "The computers (persistent machines agents work on: settings.computers) with their live status (running, stopped, paused, "
-    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet), provider, last use, uptime, "
+    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet, deleted = its machine was deleted at the provider: its next use or a reset makes a new one), provider, last use, uptime, "
     + "last snapshot and the agents using each. \"host\" is this server.",
   parameters: Type.Object({}),
 };

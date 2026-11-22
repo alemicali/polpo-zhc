@@ -30,10 +30,13 @@ export const COMPUTER_KINDS: readonly ComputerKind[] = ["host", "daytona", "e2b"
  * (memory kept). Daytona v2 computers hibernate: their VM is saved as a memory and disk snapshot
  * and deleted ("hibernated"); the next use makes a VM from the snapshot (a few seconds).
  * "missing": not created yet (it is created on first use or on start).
+ * "deleted": it had a machine, but the provider has neither it nor (Daytona v2) a snapshot to wake
+ *   from: it was deleted outside Polpo (the provider's dashboard, API, or its own clean-up). Its
+ *   next use or start makes a new machine from the image (its files are lost); or remove it.
  * "unknown": the provider cannot be asked (no API key).
  */
 export type ComputerStatus =
-  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
+  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "deleted" | "unknown";
 
 export interface ComputerLifecycle {
   /** Stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2: snapshot, VM deleted) after this many minutes without use. Default 15. */

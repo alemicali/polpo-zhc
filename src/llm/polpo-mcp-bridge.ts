@@ -57,6 +57,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_harness_sessions_list", name: "harness_sessions_list", group: "harnesses" },
   { mcp: "polpo_harness_session_control", name: "harness_session_control", group: "harnesses" },
   // Computers
+  { mcp: "polpo_computer_get", name: "computer_get", group: "computers" },
   { mcp: "polpo_computer_save", name: "computer_save", group: "computers" },
   { mcp: "polpo_computer_control", name: "computer_control", group: "computers" },
   { mcp: "polpo_computer_delete", name: "computer_delete", group: "computers" },

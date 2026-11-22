@@ -61,7 +61,10 @@ export interface HarnessSession {
   resumable: boolean;
   turns: number;
   costUsd: number;
+  tokens?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  chatSessionId?: string;
   lastError?: string;
+  createdAt?: string;
   updatedAt: string;
 }
 

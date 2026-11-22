@@ -2,9 +2,12 @@
  * Computers: persistent machines agents work on (settings.computers), for the dashboard, Polpo
  * and API clients. Mounted under the authenticated API (/api/v1/computers).
  *
- *   GET    /computers                 list, with live status (?live=0: the last known status) and the agents using each
+ *   GET    /computers                 list, with live status (?live=0: the last known status; the providers' answers are
+ *                                     reused for 15 s, ?fresh=1 asks again) and the agents using each. Status "deleted":
+ *                                     its machine (and snapshots) were deleted at the provider, outside Polpo
  *   POST   /computers                 create { id, name, kind, image?, snapshot?, template?, resources?, lifecycle?, network?, egress?, volumes?, start? }
- *   GET    /computers/:id
+ *   GET    /computers/:id             one computer (?detail=1: also its snapshots, activity, harness sessions, recent
+ *                                     task runs on it and their cost, the image and region a new machine gets)
  *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes (id and kind stay)
  *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk (Daytona v2: and its snapshots), and the computer
  *   POST   /computers/:id/start       start, resume, or wake it from its snapshot (Daytona v2); created if it has no machine yet
@@ -21,8 +24,10 @@
 import { Hono, type Context } from "hono";
 import {
   ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, agentEgressName, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
-  type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
+  type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings, type Task,
 } from "@polpo-ai/core";
+import { daytonaV2HibernateSettings, type DaytonaV2HibernateSettings } from "@polpo-ai/core/sandbox";
+import type { HarnessSessionView } from "../../harness/control.js";
 import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
 import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manager.js";
 import { SandboxNetworkConfigError } from "../../sandbox/remote-adapters.js";
@@ -39,11 +44,62 @@ export interface ComputerRouteDeps {
   emit: (payload: PolpoEventMap["computer:changed"]) => void;
   /** The instance's name (the project): part of the computers' node names in the tailnet. */
   instance?: () => string | undefined;
+  /** Tasks (the detail's recent runs on a computer). */
+  tasks?: () => Promise<Task[]>;
+  /** The agent harness sessions (Claude Code, Codex) bound to a computer. */
+  harnessSessions?: (computerId: string) => HarnessSessionView[];
+}
+
+/** Runs listed in a computer's detail (newest first). */
+const DETAIL_RUNS = 50;
+
+/** A task run on a computer, as its page lists it. */
+export interface ComputerRunView {
+  taskId: string;
+  taskTitle: string;
+  taskStatus: string;
+  mission?: string;
+  runId: string;
+  agent?: string;
+  engine: string;
+  model?: string;
+  status: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  costUsd?: number;
+  tokens?: number;
+  remoteId?: string;
+}
+
+/** What GET /computers/:id?detail=1 adds to the computer. */
+export interface ComputerDetailView {
+  snapshots: Array<{ id: string; name: string; at: string; status: string; diskBytes?: number; memoryBytes?: number }>;
+  activity: Array<{ at: string; kind: "status" | "notice"; status?: string; from?: string; level?: string; message?: string; remoteId?: string }>;
+  updatedAt?: string;
+  runningSince?: string;
+  /** Daytona v2: when the current VM's wall clock deletes it (it is rotated before). */
+  timeoutAt?: string;
+  /** When it hibernates or stops by itself if nobody uses it (running only). */
+  idleStopAt?: string;
+  /** Daytona v2 hibernation settings (keepSnapshots…). */
+  hibernate?: DaytonaV2HibernateSettings;
+  /** What a new machine is made from, and where (the instance's defaults when the computer names none). */
+  machine?: { image?: string; snapshot?: string; template?: string; region?: string; resources?: { cpus?: number; memoryMb?: number; diskMb?: number } };
+  sessions: HarnessSessionView[];
+  runs: ComputerRunView[];
+  /** Spend on it: task runs (harness or model cost) plus chat harness sessions (task sessions are in their runs). */
+  cost: { runsUsd: number; chatSessionsUsd: number; totalUsd: number };
 }
 
 const LIVE_TIMEOUT_MS = 8_000;
 
-type View = ComputerConfig & ComputerLive & { builtin?: boolean; agents: { name: string; isDefault: boolean }[] };
+type View = ComputerConfig & ComputerLive & {
+  builtin?: boolean;
+  agents: { name: string; isDefault: boolean }[];
+  /** Daytona: the service its machines run on ("v2": Linux VMs that hibernate). */
+  providerApi?: "v0" | "v2";
+};
 
 function fail(c: Context, status: 400 | 404 | 409 | 500 | 502, error: string, code?: string) {
   return c.json({ ok: false, error, ...(code ? { code } : {}) }, status);
@@ -62,25 +118,29 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   };
 
   /** Live status from the provider, or the last known one when it does not answer in time. */
-  const liveOf = async (computer: ComputerConfig, live: boolean): Promise<ComputerLive> => {
+  const liveOf = async (computer: ComputerConfig, live: boolean, fresh = false): Promise<ComputerLive> => {
     if (!isRemoteComputer(computer)) return { id: computer.id, status: "running", uptimeMinutes: 0 };
     const manager = deps.manager();
     if (!live) return manager.live(computer.id);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<ComputerLive>((resolve) => { timer = setTimeout(() => resolve(manager.live(computer.id)), LIVE_TIMEOUT_MS); });
     try {
-      return await Promise.race([manager.refresh(computer, snapshotOf(computer)).catch((err) => ({ ...manager.live(computer.id), status: "unknown" as const, lastError: (err as Error).message })), late]);
+      return await Promise.race([manager.refresh(computer, snapshotOf(computer), { force: fresh }).catch((err) => ({ ...manager.live(computer.id), status: "unknown" as const, lastError: (err as Error).message })), late]);
     } finally {
       clearTimeout(timer);
     }
   };
 
-  const view = async (computer: ComputerConfig, live = true, agents?: AgentConfig[]): Promise<View> => {
+  const view = async (computer: ComputerConfig, live = true, agents?: AgentConfig[], fresh = false): Promise<View> => {
     const all = agents ?? await deps.agents();
     const users = computer.id === HOST_COMPUTER_ID
       ? all.filter((a) => !a.defaultComputer || a.defaultComputer === HOST_COMPUTER_ID).map((a) => ({ name: a.name, isDefault: true }))
       : computerUsers(computer.id, all);
-    return { ...computer, ...(await liveOf(computer, live)), ...(computer.id === HOST_COMPUTER_ID ? { builtin: true } : {}), agents: users };
+    const api = computer.kind === "daytona" ? (deps.settings()?.sandbox?.providers?.daytona?.api === "v2" ? "v2" : "v0") : undefined;
+    return {
+      ...computer, ...(await liveOf(computer, live, fresh)), ...(computer.id === HOST_COMPUTER_ID ? { builtin: true } : {}),
+      ...(api ? { providerApi: api } : {}), agents: users,
+    } as View;
   };
 
   /** The sandbox to create/start a machine with, or an error response. */
@@ -100,15 +160,63 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
 
   app.get("/", async (c) => {
     const live = c.req.query("live") !== "0";
+    const fresh = c.req.query("fresh") === "1";
     const agents = await deps.agents();
-    const computers = await Promise.all([HOST_COMPUTER, ...deps.computers()].map((computer) => view(computer, live, agents)));
+    const computers = await Promise.all([HOST_COMPUTER, ...deps.computers()].map((computer) => view(computer, live, agents, fresh)));
     return c.json({ ok: true, data: { computers } });
   });
+
+  /** Snapshots, activity, sessions, runs and cost of one computer (its page). */
+  const detail = async (computer: ComputerConfig, base: View): Promise<ComputerDetailView> => {
+    const remote = isRemoteComputer(computer);
+    const d = remote ? deps.manager().detail(computer.id) : { snapshots: [], activity: [] };
+    const sessions = [...(deps.harnessSessions?.(computer.id) ?? [])].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    const tasks = await deps.tasks?.().catch(() => [] as Task[]) ?? [];
+    const runs: ComputerRunView[] = [];
+    for (const t of tasks) {
+      for (const r of t.runs ?? []) {
+        if (r.computer?.id !== computer.id) continue;
+        const cost = r.cost?.harnessUsd ?? r.cost?.modelUsd;
+        runs.push({
+          taskId: t.id, taskTitle: t.title, taskStatus: t.status, ...(t.group ? { mission: t.group } : {}),
+          runId: r.runId, ...(r.agent ? { agent: r.agent } : {}), engine: r.engine, ...(r.model ? { model: r.model } : {}),
+          status: r.status, startedAt: r.startedAt, ...(r.endedAt ? { endedAt: r.endedAt } : {}),
+          ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}), ...(cost !== undefined ? { costUsd: cost } : {}),
+          ...(r.cost?.tokens !== undefined ? { tokens: r.cost.tokens } : {}), ...(r.computer.remoteId ? { remoteId: r.computer.remoteId } : {}),
+        });
+      }
+    }
+    runs.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    const runsUsd = runs.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+    const chatSessionsUsd = sessions.filter((s) => s.scope === "chat").reduce((s, x) => s + (x.costUsd ?? 0), 0);
+    const round = (v: number) => Math.round(v * 10_000) / 10_000;
+    const settings = deps.settings();
+    const sb = remote ? deps.sandboxFor(computer) : undefined;
+    const opts = sb && !("error" in sb) ? sb.providerOptions : undefined;
+    const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    const machine = remote ? Object.fromEntries(Object.entries({
+      image: computer.image ?? str(opts?.image), snapshot: computer.snapshot ?? str(opts?.snapshot), template: computer.template ?? str(opts?.template),
+      region: str(opts?.region) ?? str((settings?.sandbox?.providers?.[computer.kind as "daytona"] as Record<string, unknown> | undefined)?.region),
+      resources: computer.resources ?? (sb && !("error" in sb) && Object.keys(sb.resources ?? {}).length ? sb.resources : undefined),
+    }).filter(([, v]) => v !== undefined)) : undefined;
+    const idleStopAt = base.status === "running" && base.lastUsedAt
+      ? new Date(Date.parse(base.lastUsedAt) + (computer.lifecycle?.idleStopMinutes ?? 15) * 60_000).toISOString() : undefined;
+    return {
+      ...d,
+      ...(idleStopAt ? { idleStopAt } : {}),
+      ...(base.providerApi === "v2" ? { hibernate: daytonaV2HibernateSettings(settings?.sandbox?.providers?.daytona as Record<string, unknown> | undefined) } : {}),
+      ...(machine && Object.keys(machine).length ? { machine } : {}),
+      sessions, runs: runs.slice(0, DETAIL_RUNS),
+      cost: { runsUsd: round(runsUsd), chatSessionsUsd: round(chatSessionsUsd), totalUsd: round(runsUsd + chatSessionsUsd) },
+    };
+  };
 
   app.get("/:id", async (c) => {
     const computer = find(c.req.param("id"));
     if (!computer) return fail(c, 404, `There is no computer "${c.req.param("id")}"`, "NOT_FOUND");
-    return c.json({ ok: true, data: await view(computer, c.req.query("live") !== "0") });
+    const base = await view(computer, c.req.query("live") !== "0", undefined, c.req.query("fresh") === "1");
+    if (c.req.query("detail") !== "1") return c.json({ ok: true, data: base });
+    return c.json({ ok: true, data: { ...base, ...(await detail(computer, base)) } });
   });
 
   app.post("/", async (c) => {

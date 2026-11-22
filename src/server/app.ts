@@ -72,6 +72,7 @@ import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { harnessRoutes } from "./routes/harnesses.js";
+import { harnessSessionViews } from "../harness/control.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -1525,6 +1526,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       await o.reloadConfig();
     },
     sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
+    tasks: () => o.getStore().getAllTasks(),
+    harnessSessions: (computerId) => harnessSessionViews(o.getPolpoDir(), { computer: computerId }),
     instance: () => o.getConfig()?.project,
     emit: (payload) => o.emit("computer:changed", payload),
   };

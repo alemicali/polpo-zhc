@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-computers-list",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Computer in lista, e quelli eliminati dal provider si vedono",
+    summary: "La pagina Computer è una tabella come le altre, ogni computer ha la sua pagina con sessioni, task e costi, e uno la cui macchina è stata eliminata da Daytona o E2B ora risulta «Deleted at provider».",
+    body: [
+      "- **Lista invece delle card**: una riga per computer con provider (Daytona v2, Daytona, E2B), stato in tempo reale, agenti che lo usano, sessioni harness, egress, ultimo uso e snapshot. Ricerca, filtri per stato e provider, ordinamento; su telefono le righe sono compatte.",
+      "- **Una pagina per ogni computer**: la riga apre la sua pagina con stato e azioni (avvia, ferma o iberna, riavvia, reset, elimina), quando si iberna da solo, quanto è costato, le sessioni harness e i task che ci sono girati (con link), l'attività recente, gli agenti, gli snapshot, la macchina e la rete con l'egress. Modifica imposta anche rete e risorse.",
+      "- **Eliminato dal provider**: se la macchina (e, su Daytona v2, i suoi snapshot) viene eliminata dalla dashboard del provider, Polpo se ne accorge da solo entro pochi minuti, o subito con Aggiorna, e lo mostra invece di continuare a dirlo acceso o ibernato. Puoi **Ricrearlo** (una macchina nuova dall'immagine, senza i file di prima) o **Rimuoverlo da Polpo**.",
+      "- **Niente errori misteriosi**: se un agente usa un computer la cui macchina è sparita, Polpo ne crea una nuova e lo avvisa, invece di fallire.",
+    ].join("\n"),
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-22-compaction-fix",
     date: "2026-11-22",
     kind: "fixed",

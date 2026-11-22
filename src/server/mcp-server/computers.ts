@@ -7,7 +7,9 @@
 import { z } from "zod";
 import type { ComputerConfig } from "@polpo-ai/core";
 import { describeComputerEgress, type ComputerEgressStatus } from "../../sandbox/computers.js";
-import type { EgressOverview } from "../routes/computers.js";
+import type { ComputerDetailView, EgressOverview } from "../routes/computers.js";
+
+type ComputerDetail = ComputerDetailView & { status: string };
 import { DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, type McpDeps, type Register } from "./kit.js";
 
 type Computer = {
@@ -30,7 +32,7 @@ const computerItem = z.object({ id: z.string(), name: z.string(), kind: z.string
 const line = (c: Computer) => {
   const image = c.snapshot ? `snapshot ${c.snapshot}` : c.image ? `image ${c.image}` : c.template ? `template ${c.template}` : "";
   const users = (c.agents ?? []).map((a) => `${a.name}${a.isDefault ? " (default)" : ""}`).join(", ");
-  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}${c.status === "hibernated" ? " (resumes in a few seconds on its next use)" : ""}`
+  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}${c.status === "hibernated" ? " (resumes in a few seconds on its next use)" : c.status === "deleted" ? " (deleted at the provider: its next use makes a new machine from the image)" : ""}`
     + `${c.lastUsedAt ? `, last used ${c.lastUsedAt}` : ""}${c.uptimeMinutes ? `, ${c.uptimeMinutes} min running so far` : ""}`
     + `${c.lastSnapshot ? `, ${snapshotLine(c.lastSnapshot)}` : ""}${c.notice ? `, note: ${c.notice}` : ""}`
     + `${c.lastError ? `, error: ${c.lastError}` : ""}${users ? ` · agents: ${users}` : ""}`;
@@ -42,7 +44,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
   tool("computers", "polpo_computers_list", {
     title: "List computers",
     description: "The computers agents work on: \"host\" (this server) and persistent machines (Daytona, E2B) with their live status "
-      + "(running, stopped, paused, hibernated, archived, creating, error; missing = not created yet), last use, uptime (a rough cost signal), "
+      + "(running, stopped, paused, hibernated, archived, creating, error; missing = not created yet; deleted = its machine was deleted at the provider, outside Polpo: its next use or a reset makes a new one, without its files), last use, uptime (a rough cost signal), "
       + "the last snapshot (Daytona v2: time, memory and disk size) and the agents using each. With id, one computer.",
     inputSchema: { id: z.string().optional().describe("One computer") },
     outputSchema: { items: z.array(computerItem) },
@@ -52,6 +54,43 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return id && r.status === 404 ? notFound(id) : apiError(r, "Listing computers");
     const items = id ? [r.data as Computer] : ((r.data as { computers?: Computer[] })?.computers ?? []);
     return ok(items.map(line).join("\n"), { items });
+  });
+
+  tool("computers", "polpo_computer_get", {
+    title: "Get a computer",
+    description: "One computer in full, as its page shows it: live status, the agents using it, its snapshots (Daytona v2), what a new machine "
+      + "is made from (image or snapshot, region, size), when it hibernates or stops by itself, its recent activity (status changes, wakes, "
+      + "rotations, errors, a machine deleted at the provider), the agent harness sessions on it (Claude Code, Codex: state, turns, tokens, cost), "
+      + "the recent task runs on it (agent, engine, model, status, duration, cost) and what was spent on it. Read-only: never starts it.",
+    inputSchema: { id: z.string().min(1).describe("The computer's id (polpo_computers_list)") },
+    outputSchema: { computer: computerItem },
+    annotations: READ,
+  }, async ({ id }) => {
+    const r = await apiGet(deps, `/computers/${enc(id)}?detail=1`);
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Reading computer ${id}`);
+    const c = r.data as Computer & ComputerDetail;
+    const lines = [line(c).slice(2)];
+    if (c.machine) {
+      const m = c.machine;
+      const size = m.resources ? [m.resources.cpus ? `${m.resources.cpus} CPU` : "", m.resources.memoryMb ? `${m.resources.memoryMb} MB memory` : "", m.resources.diskMb ? `${m.resources.diskMb} MB disk` : ""].filter(Boolean).join(", ") : "";
+      lines.push(`New machine from: ${m.snapshot ? `snapshot ${m.snapshot}` : m.image ? `image ${m.image}` : m.template ? `template ${m.template}` : "the provider's default"}${m.region ? `, region ${m.region}` : ""}${size ? `, ${size}` : ""}`);
+    }
+    if (c.idleStopAt) lines.push(`${c.status === "running" && c.hibernate ? "Hibernates" : "Stops"} by itself at ${c.idleStopAt} unless used`);
+    if (c.snapshots?.length) lines.push(`Snapshots (${c.snapshots.length}${c.hibernate ? `, keeps ${c.hibernate.keepSnapshots}` : ""}): ${c.snapshots.map((s) => `${s.at} ${s.status}`).join("; ")}`);
+    lines.push(`Spent: $${c.cost.totalUsd.toFixed(2)} (task runs $${c.cost.runsUsd.toFixed(2)}, chat harness sessions $${c.cost.chatSessionsUsd.toFixed(2)})`);
+    if (c.sessions.length) {
+      lines.push(`Harness sessions (${c.sessions.length}):`);
+      for (const s of c.sessions.slice(0, 10)) lines.push(`- ${s.harness} · ${s.agent}${s.taskId ? ` · task ${s.taskId}` : " · chat"}: ${s.live ? "running" : s.state}, ${s.turns} turns, $${(s.costUsd ?? 0).toFixed(2)}, updated ${s.updatedAt}`);
+    }
+    if (c.runs.length) {
+      lines.push(`Recent task runs (${c.runs.length}):`);
+      for (const x of c.runs.slice(0, 10)) lines.push(`- ${x.taskTitle} (${x.taskId}) · ${x.agent ?? "?"} · ${x.engine}${x.model ? ` ${x.model}` : ""}: ${x.status}, started ${x.startedAt}${x.durationMs !== undefined ? `, ${Math.round(x.durationMs / 1000)} s` : ""}${x.costUsd !== undefined ? `, $${x.costUsd.toFixed(2)}` : ""}`);
+    }
+    if (c.activity.length) {
+      lines.push("Recent activity:");
+      for (const a of c.activity.slice(0, 10)) lines.push(`- ${a.at} ${a.kind === "status" ? `${a.from ? `${a.from} → ` : ""}${a.status}${a.message ? ` (${a.message})` : ""}` : `${a.level ?? "info"}: ${a.message}`}`);
+    }
+    return ok(lines.join("\n"), { computer: c });
   });
 
   tool("computers", "polpo_computer_save", {

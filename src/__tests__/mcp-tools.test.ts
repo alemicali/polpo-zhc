@@ -192,7 +192,7 @@ describe("the tools offered", () => {
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
     // every Configuration section is on by default (the settings toolset): 124 tools for a full-access client
-    expect(tools.length).toBeLessThanOrEqual(150);
+    expect(tools.length).toBeLessThanOrEqual(152);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
