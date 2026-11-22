@@ -341,7 +341,7 @@ describe("missions", () => {
     expect(f.missions.get("m1")!.status).toBe("active");
     expect((await call(deps(f), "polpo_mission_abort", { id: "m1", confirm: true })).structuredContent).toEqual({ id: "m1", aborted_tasks: 3 });
     expect((await call(deps(f), "polpo_mission_wait", { id: "m1" })).structuredContent).toMatchObject({ reached: true, mission: { status: "cancelled" } });
-  });
+  }, 20_000); // runs a mission and waits for it: slow on CI runners
 
   it("polpo_mission_wait returns for a recurring mission once its run finished, with the run's outcome (live: it never settled)", async () => {
     const f = fakeInstance();

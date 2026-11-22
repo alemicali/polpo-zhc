@@ -137,6 +137,8 @@ export const PROVIDER_ENV_MAP: Record<string, string> = {
   "qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
   "qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
   "qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
+  // pi-ai 1.6 also reads the per-plan QWEN_TOKEN_PLAN_{TEAM,INDIVIDUAL}[_CN]_API_KEY first
+  "qwen-token-plan-individual-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
   "kimi-coding": "KIMI_API_KEY",
   "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
   "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
@@ -260,8 +262,14 @@ export function enforceModelAllowlist(spec: string): void {
  */
 export function resolveApiKey(provider: string): string | undefined {
   if (isCustomProvider(provider)) return undefined; // vault/keyless — see hasProviderCredentials
-  return getEnvApiKey(provider as KnownProvider);
+  const key = getEnvApiKey(provider as KnownProvider);
+  // pi-ai answers "<authenticated>" for ambient credentials (Bedrock bearer token / AWS chain,
+  // Vertex ADC): not a key. Passing it on would send it as the credential.
+  return key === AMBIENT_AUTH_MARKER ? undefined : key;
 }
+
+/** What pi-ai's getEnvApiKey returns when the provider authenticates from its environment. */
+const AMBIENT_AUTH_MARKER = "<authenticated>";
 
 /**
  * Synchronous "can this provider be called" check: env / ambient credentials for built-ins,
@@ -269,7 +277,7 @@ export function resolveApiKey(provider: string): string | undefined {
  */
 export function hasProviderCredentials(provider: string): boolean {
   if (isCustomProvider(provider)) return customProviderHasCredentials(provider);
-  return !!resolveApiKey(provider) || hasAmbientCredentials(provider);
+  return !!resolveApiKey(provider) || hasAmbientCredentials(provider) || getEnvApiKey(provider as KnownProvider) === AMBIENT_AUTH_MARKER;
 }
 
 /**
@@ -340,12 +348,22 @@ function optionsWithAuth(
   return next;
 }
 
+/**
+ * Requests carry no provider attribution headers (OpenRouter `HTTP-Referer`/title, NVIDIA invoke
+ * origin, OpenCode client). pi-agent-core >= 1.6 attributes agent-loop requests to pi by default;
+ * Polpo keeps sending none, as before the upgrade.
+ */
+function withoutAttribution<T extends { identity?: SimpleStreamOptions["identity"] }>(options: T | undefined): T {
+  return { ...(options as T), identity: { ...options?.identity, attribution: null } };
+}
+
 /** Auth-aware stream function suitable for pi-agent-core's required streamFn. */
 export async function streamSimpleWithAuth(
   model: Model<Api>,
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<AssistantMessageEventStream> {
+  options = withoutAttribution(options);
   if (isCustomProvider(model.provider)) return streamCustomProvider(model, context, options);
   const auth = await resolveModelAuthAsync(model.provider);
   return streamSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth, model.provider));
@@ -357,6 +375,7 @@ export async function completeSimpleWithAuth(
   context: Context,
   options?: SimpleStreamOptions,
 ): Promise<AssistantMessage> {
+  options = withoutAttribution(options);
   if (isCustomProvider(model.provider)) return streamCustomProvider(model, context, options).result();
   const auth = await resolveModelAuthAsync(model.provider);
   return completeSimple(modelWithAuth(model, auth), context, optionsWithAuth(options, auth, model.provider));
@@ -371,6 +390,7 @@ export async function completeWithAuth(
   context: Context,
   options?: Record<string, unknown>,
 ): Promise<AssistantMessage> {
+  options = withoutAttribution(options as { identity?: SimpleStreamOptions["identity"] });
   if (isCustomProvider(model.provider)) return completeCustomProviderRaw(model, context, options);
   const auth = await resolveModelAuthAsync(model.provider);
   const merged = optionsWithAuth(options as SimpleStreamOptions | undefined, auth, model.provider) as Record<string, unknown> | undefined;

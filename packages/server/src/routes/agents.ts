@@ -210,6 +210,7 @@ export function agentRoutes(getDeps: () => {
       ...(body.computers !== undefined && { computers: body.computers }),
       ...(body.defaultComputer ? { defaultComputer: body.defaultComputer } : {}),
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
+      ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools }),
       ...(body.learning !== undefined && { learning: body.learning }),
       ...(body.drive !== undefined && { drive: body.drive }),
     }, teamName);
@@ -511,6 +512,7 @@ export function agentRoutes(getDeps: () => {
       ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
       ...(body.sandbox !== undefined && { sandbox: normalizeSandboxSettings(body.sandbox) }),
       ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
+      ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools ?? undefined }),
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
       ...(body.learning !== undefined && { learning: body.learning }),
       ...(body.drive !== undefined && { drive: body.drive }),

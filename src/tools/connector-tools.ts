@@ -4,7 +4,7 @@
  * use it, connect it again, remove it (only after the person confirms). Local (stdio) connectors
  * are not available here: they run a command on the server, so only an admin adds them via the API.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { ConnectorConfig } from "@polpo-ai/core";
 import { CONNECTOR_CATALOG, catalogEntry } from "../mcp/catalog.js";

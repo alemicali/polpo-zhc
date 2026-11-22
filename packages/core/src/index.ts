@@ -120,6 +120,35 @@ export type {
   ContextCompactorOptions,
 } from "./context-compactor.js";
 
+// ── Progressive tool discovery ──────────────────────────────────────────
+export {
+  ProgressiveToolSet,
+  AGENT_TOOL_GROUPS,
+  POLPO_TOOL_GROUPS,
+  DEFAULT_PROGRESSIVE_THRESHOLD,
+  TOOLS_SEARCH,
+  TOOLS_LOAD,
+  META_TOOL_NAMES,
+  connectorIdOf,
+  declaredTools,
+  loadedToolsFromHistory,
+  progressiveEnabled,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+} from "./progressive-tools.js";
+export type {
+  ProgressiveToolsMode,
+  ToolsSettings,
+  ToolLike,
+  ToolDeclaration,
+  ToolAnnouncement,
+  ToolGroupRule,
+  ToolGroup,
+  SearchHit,
+  ProgressiveMetaTool,
+  ProgressiveToolSetOptions,
+} from "./progressive-tools.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 

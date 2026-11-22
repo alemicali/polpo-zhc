@@ -246,6 +246,10 @@
       "types": "./dist/context-checkpoint.d.ts",
       "import": "./dist/context-checkpoint.js"
     },
+    "./progressive-tools": {
+      "types": "./dist/progressive-tools.d.ts",
+      "import": "./dist/progressive-tools.js"
+    },
     "./whatsapp-store": {
       "types": "./dist/whatsapp-store.d.ts",
       "import": "./dist/whatsapp-store.js"

@@ -6,7 +6,7 @@
  * time so the agent cannot access other agents' or shared memory.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { MemoryStore } from "@polpo-ai/core";
 import { agentMemoryScope } from "@polpo-ai/core";
