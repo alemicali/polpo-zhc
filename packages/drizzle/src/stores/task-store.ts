@@ -171,6 +171,8 @@ export class DrizzleTaskStore implements TaskStore {
       deadline: row.deadline ?? undefined,
       notifications: deserializeJson(row.notifications, undefined, d),
       executionCount: row.executionCount ?? 0,
+      ...(row.budgetUsd ? { budgetUsd: Number(row.budgetUsd) } : {}),
+      ...(row.pauseReason ? { pauseReason: row.pauseReason } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -582,6 +584,8 @@ export class DrizzleTaskStore implements TaskStore {
       deadline: mission.deadline ?? null,
       notifications: serializeJson(mission.notifications, d),
       executionCount: mission.executionCount ?? 0,
+      budgetUsd: mission.budgetUsd != null ? String(mission.budgetUsd) : null,
+      pauseReason: mission.pauseReason ?? null,
       createdAt: mission.createdAt,
       updatedAt: mission.updatedAt,
     });
@@ -624,6 +628,9 @@ export class DrizzleTaskStore implements TaskStore {
     if (updates.deadline !== undefined) values.deadline = updates.deadline;
     if (updates.notifications !== undefined) values.notifications = serializeJson(updates.notifications, d);
     if (updates.executionCount !== undefined) values.executionCount = updates.executionCount;
+    // present with undefined (or null) clears them
+    if ("budgetUsd" in updates) values.budgetUsd = updates.budgetUsd != null ? String(updates.budgetUsd) : null;
+    if ("pauseReason" in updates) values.pauseReason = updates.pauseReason ?? null;
 
     await this.db.update(this.schema.missions).set(values)
       .where(eq(this.schema.missions.id, missionId));

@@ -101,6 +101,8 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "mission:completed": { label: "Mission completed", description: "All tasks in a mission reached a terminal state.", category: "mission", placeholders: ["missionId", "group", "allPassed", "report"] },
   "mission:resumed": { label: "Mission resumed", description: "A paused or failed mission was resumed.", category: "mission", placeholders: ["missionId", "name", "retried", "pending"] },
   "mission:deleted": { label: "Mission deleted", description: "A mission and its tasks were removed.", category: "mission", placeholders: ["missionId", "deletedTasks"] },
+  "mission:budget-exceeded": { label: "Mission over budget", description: "A mission spent its budget: no new task starts and it is paused until the budget is raised or cleared.", category: "mission", placeholders: ["missionId", "name", "spentUsd", "budgetUsd", "reason"] },
+  "mission:budget-resumed": { label: "Mission budget raised", description: "The budget of a mission paused by it was raised or cleared: the mission goes on.", category: "mission", placeholders: ["missionId", "name", "spentUsd", "budgetUsd"] },
 
   // ── Chat sessions ─────────────────────────────────────────────
   "session:created": { label: "Chat session created", description: "A new chat session was opened.", category: "session", placeholders: ["sessionId", "title"] },
@@ -254,7 +256,7 @@ const HOOK_EVENT_INDEX: Record<string, HookEventDef> = Object.fromEntries(
 /** Glob shortcuts the UI surfaces as first-class suggestions. */
 export const HOOK_EVENT_GLOBS: { pattern: string; label: string; description: string }[] = [
   { pattern: "task:*", label: "All task events", description: "Matches every task lifecycle event (created, transition, retry, timeout, ...)." },
-  { pattern: "mission:*", label: "All mission events", description: "Matches every mission event (saved, executed, completed, resumed, deleted)." },
+  { pattern: "mission:*", label: "All mission events", description: "Matches every mission event (saved, executed, completed, resumed, deleted, over budget)." },
   { pattern: "assessment:*", label: "All assessment events", description: "Matches every assessment event (started, progress, complete, corrected)." },
   { pattern: "schedule:*", label: "All schedule events", description: "Matches every schedule event (triggered, created, completed, expired)." },
   { pattern: "approval:*", label: "All approval events", description: "Matches every approval gate event (requested, resolved, timeout)." },

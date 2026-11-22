@@ -84,6 +84,8 @@ export const CreateMissionSchema = z.object({
   /** End date for recurring schedules (ISO timestamp). */
   endDate: z.string().datetime().optional(),
   notifications: ScopedNotificationRulesSchema.optional(),
+  /** Spending limit in USD for the whole mission: at it, no new task starts and the mission pauses. */
+  budgetUsd: z.number().positive().finite().optional().openapi({ description: "Spending limit in USD for the whole mission (all its tasks' runs). When reached, no new task starts (running ones finish) and the mission pauses until the budget is raised or cleared." }),
 });
 
 export const UpdateMissionSchema = z.object({
@@ -94,6 +96,8 @@ export const UpdateMissionSchema = z.object({
   name: z.string().optional(),
   /** End date for recurring schedules (ISO timestamp). */
   endDate: z.string().datetime().nullable().optional(),
+  /** Spending limit in USD for the whole mission; null clears it. */
+  budgetUsd: z.number().positive().finite().nullable().optional().openapi({ description: "Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on." }),
 });
 
 // ── Atomic mission data schemas ──────────────────────────────────

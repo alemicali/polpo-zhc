@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-mission-cost",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Quanto costa una missione, e un budget per tenerla a bada",
+    summary: "Ogni missione mostra il costo complessivo di tutti i suoi task (tentativi e continuazioni compresi), per agente e per motore; con un budget si ferma da sola quando lo raggiunge.",
+    body: [
+      "- **Costo complessivo**: nell'intestazione della missione la somma di tutte le esecuzioni dei suoi task, in dollari e token, con il dettaglio per motore (Claude Code, Codex, Polpo) e per agente, e quanto è stima del harness e quanto costo del modello.",
+      "- **Budget opzionale**: impostalo dalla missione (o da Polpo e dall'MCP); la barra diventa gialla vicino al limite e rossa oltre.",
+      "- **Si ferma da sola**: raggiunto il budget non parte nessun nuovo task (quelli in corso finiscono), la missione va in pausa e ricevi la notifica tramite le tue regole. Alza o togli il budget e riparte da sola.",
+      "- **Lista missioni**: il costo di ogni missione accanto allo stato.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le missioni", to: "/missions" },
+  },
+  {
     id: "2026-11-22-run-context",
     date: "2026-11-22",
     kind: "new",

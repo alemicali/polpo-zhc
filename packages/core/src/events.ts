@@ -119,6 +119,10 @@ export interface PolpoEventMap {
   "mission:completed": { missionId: string; group: string; allPassed: boolean; report: MissionReport };
   "mission:resumed": { missionId: string; name: string; retried: number; pending: number };
   "mission:deleted": { missionId: string; deletedTasks?: number };
+  /** What the mission spent reached its budget: no new task starts and it pauses (running ones finish). */
+  "mission:budget-exceeded": { missionId: string; name: string; spentUsd: number; budgetUsd: number; reason: string };
+  /** The budget was raised or cleared: the mission paused by it goes on. */
+  "mission:budget-resumed": { missionId: string; name: string; spentUsd: number; budgetUsd?: number };
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };

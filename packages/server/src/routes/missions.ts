@@ -23,14 +23,14 @@ const listMissionsRoute = createRoute({
         description: "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients.",
       }),
       slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
-        description: "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview).",
+        description: "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview).",
       }),
     }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
-      description: "List of missions",
+      description: "List of missions, each with a compact `cost` (usd, tokens, runs, partial, budgetUsd, overBudget)",
     },
     304: {
       description: "Not modified — client has the current list per ETag",
@@ -62,7 +62,7 @@ const getMissionRoute = createRoute({
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Mission details",
+      description: "Mission details, with `cost`: what its tasks' recorded runs cost (usd, tokens, runs, harnessUsd vs modelUsd, byAgent, byEngine, partial when older runs were dropped) against `budgetUsd` (remainingUsd, budgetUsed, overBudget), or agentBudgetCapUsd when it has no budget",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -396,13 +396,20 @@ export function missionRoutes(getDeps: () => {
   updateMissionTeamMember: (missionId: string, name: string, body: any) => Promise<any>;
   removeMissionTeamMember: (missionId: string, name: string) => Promise<any>;
   updateMissionNotifications: (missionId: string, notifications: any) => Promise<any>;
+  /** What a mission cost so far (by agent and engine, against its budget). */
+  getMissionCost?: (missionId: string) => Promise<any>;
+  /** The compact cost of every mission, by id (lists). */
+  getMissionCostSummaries?: (missions: any[]) => Promise<Record<string, any>>;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // GET /missions — list all missions
   app.openapi(listMissionsRoute, async (c) => {
     const deps = getDeps();
-    const all = await deps.getAllMissions();
+    const listed = await deps.getAllMissions();
+    // every mission with its compact cost (cost.usd, tokens, runs, budget)
+    const costs = deps.getMissionCostSummaries ? await deps.getMissionCostSummaries(listed).catch(() => undefined) : undefined;
+    const all = costs ? listed.map((m: any) => (costs[m.id] ? { ...m, cost: costs[m.id] } : m)) : listed;
     const { summary, slim } = c.req.valid("query");
     const wantSlim = summary === "true" || slim === "true";
 
@@ -428,6 +435,9 @@ export function missionRoutes(getDeps: () => {
           deadline: m.deadline,
           endDate: m.endDate,
           qualityThreshold: m.qualityThreshold,
+          ...(m.budgetUsd !== undefined ? { budgetUsd: m.budgetUsd } : {}),
+          ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
+          ...(m.cost ? { cost: m.cost } : {}),
           createdAt: m.createdAt,
           updatedAt: m.updatedAt,
           ...(taskCount != null ? { taskCount } : {}),
@@ -473,7 +483,8 @@ export function missionRoutes(getDeps: () => {
     if (!mission) {
       return c.json({ ok: false, error: "Mission not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: mission }, 200);
+    const cost = deps.getMissionCost ? await deps.getMissionCost(missionId).catch(() => undefined) : undefined;
+    return c.json({ ok: true, data: cost ? { ...mission, cost } : mission }, 200);
   });
 
   // POST /missions — save mission
@@ -487,6 +498,7 @@ export function missionRoutes(getDeps: () => {
       name: body.name,
       status: body.status,
       notifications: body.notifications,
+      ...(body.budgetUsd !== undefined ? { budgetUsd: body.budgetUsd } : {}),
     });
 
     return c.json({ ok: true, data: mission }, 201);
@@ -496,11 +508,13 @@ export function missionRoutes(getDeps: () => {
   app.openapi(updateMissionRoute, async (c) => {
     const deps = getDeps();
     const { missionId } = c.req.valid("param");
-    const { endDate, ...rest } = c.req.valid("json");
-    // Convert null endDate (clear) to undefined for the Mission interface
+    const { endDate, budgetUsd, ...rest } = c.req.valid("json");
+    // Convert null endDate / budgetUsd (clear) to undefined for the Mission interface: the key
+    // present with undefined clears the field
     const updates: Partial<Omit<import("@polpo-ai/core/types").Mission, "id">> = {
       ...rest,
       ...(endDate !== undefined ? { endDate: endDate ?? undefined } : {}),
+      ...(budgetUsd !== undefined ? { budgetUsd: budgetUsd ?? undefined } : {}),
     };
     const mission = await deps.updateMission(missionId, updates);
     return c.json({ ok: true, data: mission });

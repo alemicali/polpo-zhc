@@ -142,6 +142,8 @@ export interface TaskRunContext {
   status: "running" | "completed" | "failed" | "killed";
   /** The run continued the previous one (a "continue" direction). */
   continuation?: boolean;
+  /** The agent that ran it. */
+  agent?: string;
   engine: TaskRunEngine;
   model?: string;
   /** The harness authentication kind (never the credential). */
@@ -497,8 +499,56 @@ export interface Mission {
   notifications?: ScopedNotificationRules;
   /** How many times this mission has been executed. */
   executionCount?: number;
+  /** Spending limit in USD for the whole mission: at it, no new task starts and it pauses. */
+  budgetUsd?: number;
+  /** Why the orchestrator paused it on its own: "budget". */
+  pauseReason?: "budget";
+  /** What it cost so far: full on GET /missions/:id, compact (MissionCostSummary) in lists. */
+  cost?: MissionCost | MissionCostSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+/** USD, tokens and runs of a slice of a mission's cost. */
+export interface MissionCostBucket {
+  usd: number;
+  /** The harness runtimes' own estimate (Claude Code, Codex). */
+  harnessUsd: number;
+  /** The model cost the provider reported (Polpo's engine). */
+  modelUsd: number;
+  tokens: number;
+  runs: number;
+}
+
+/** What a mission cost: every recorded run of its tasks (retries and continuations included). */
+export interface MissionCost extends MissionCostBucket {
+  currency: "USD";
+  tasks: number;
+  unpricedRuns: number;
+  runsActive: number;
+  byAgent: Array<MissionCostBucket & { agent: string }>;
+  byEngine: Array<MissionCostBucket & { engine: TaskRunEngine }>;
+  /** Older runs of some task were dropped (20 kept per task): the total may be higher. */
+  partial: boolean;
+  partialTaskIds?: string[];
+  recoveredUsd?: number;
+  budgetUsd?: number;
+  remainingUsd?: number;
+  /** usd / budgetUsd. */
+  budgetUsed?: number;
+  overBudget?: boolean;
+  /** No budget: the per-run harness budgets of the tasks' agents, summed (informational). */
+  agentBudgetCapUsd?: number;
+}
+
+/** The compact cost in mission lists. */
+export interface MissionCostSummary {
+  usd: number;
+  tokens: number;
+  runs: number;
+  partial?: boolean;
+  budgetUsd?: number;
+  overBudget?: boolean;
 }
 
 /**
@@ -515,6 +565,9 @@ export interface MissionSlim {
   deadline?: string;
   endDate?: string;
   qualityThreshold?: number;
+  budgetUsd?: number;
+  pauseReason?: "budget";
+  cost?: MissionCostSummary;
   createdAt: string;
   updatedAt: string;
   taskCount?: number;
@@ -1090,12 +1143,17 @@ export interface CreateMissionRequest {
   name?: string;
   status?: MissionStatus;
   notifications?: ScopedNotificationRules;
+  /** Spending limit in USD for the whole mission. */
+  budgetUsd?: number;
 }
 
 export interface UpdateMissionRequest {
   data?: string;
   status?: MissionStatus;
   name?: string;
+  endDate?: string | null;
+  /** Spending limit in USD; null clears it. */
+  budgetUsd?: number | null;
 }
 
 // === Atomic Mission Data Request DTOs ===

@@ -42,9 +42,9 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_missions_list`, `polpo_mission_get` | Missions; one with its plan, its tasks and their status counts. | read-only |
-| `polpo_mission_create` | A mission from a structured plan (tasks with `assignTo` and `dependsOn` by title; checkpoints, delays, quality gates), validated as the executor will; a draft, or started with `run: true`. | write |
-| `polpo_mission_update` | Rename, or replace its tasks, checkpoints, delays or quality gates (not while it runs). | write, idempotent |
+| `polpo_missions_list`, `polpo_mission_get` | Missions, with what each cost so far and its budget (`cost_usd`, `budget_usd`, `over_budget`); one with its plan, its tasks and their status counts, and its full `cost` (USD, tokens, runs, harness estimate vs model cost, by agent and by engine, `partial` when older runs were dropped) — see [missions.md](missions.md). | read-only |
+| `polpo_mission_create` | A mission from a structured plan (tasks with `assignTo` and `dependsOn` by title; checkpoints, delays, quality gates), validated as the executor will; a draft, or started with `run: true`. `budget_usd` sets its spending limit. | write |
+| `polpo_mission_update` | Rename, set or clear its budget (`budget_usd`, `null` clears; allowed while it runs, and raising or clearing it lets a mission its budget paused go on), or replace its tasks, checkpoints, delays or quality gates (not while it runs). | write, idempotent |
 | `polpo_mission_run` | Start a draft, scheduled or finished mission, or resume a paused one. | write, open world |
 | `polpo_mission_abort` | Stop a running mission and its unfinished tasks (`confirm: true`; without it, it says what would stop). | destructive |
 | `polpo_mission_delete` | Delete a mission, its schedule and its tasks for good (`confirm: true`); a running mission is aborted first. | destructive |

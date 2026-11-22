@@ -71,6 +71,8 @@ export interface TaskRunContext {
   status: RunContextStatus;
   /** The run continues the previous one (a "continue" direction). */
   continuation?: boolean;
+  /** The agent that ran it (the task's assignee at the time; reassignments change it). */
+  agent?: string;
   engine: RunEngine;
   /** Model id (the agent's for Polpo's engine; the harness model for a harness). */
   model?: string;
@@ -166,6 +168,7 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     startedAt: i.startedAt ?? new Date().toISOString(),
     status: "running",
     ...(i.continuation ? { continuation: true } : {}),
+    agent: i.agent.name,
     engine: harness ? harness.harness : "polpo",
     computer,
     sandbox: { provider, ephemeral: !c && remote, ...(i.sandbox?.fallback ? { fallbackFrom: i.sandbox.fallback.from } : {}) },

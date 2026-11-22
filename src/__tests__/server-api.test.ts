@@ -559,6 +559,51 @@ describe("Missions API", () => {
     ],
   });
 
+  test("a mission's budget (set, raised, cleared) and its cost: every run of its tasks, full on GET /missions/:id, compact in the lists", async () => {
+    // its own client address: the file's other requests share one rate-limit window (200/min)
+    const req = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "x-forwarded-for": "10.0.0.235" } });
+    const created = await (await req(api("/missions"), jsonReq("POST", { data: MISSION_DATA, name: "costed-mission", budgetUsd: 3 }))).json();
+    const id = created.data.id as string;
+    expect(created.data.budgetUsd).toBe(3);
+    expect((await req(api("/missions"), jsonReq("POST", { data: MISSION_DATA, name: "bad-budget", budgetUsd: -1 }))).status).toBe(400);
+
+    // two tasks of the mission, with runs as the orchestrator records them (a retry, two engines)
+    const store = orchestrator.getStore();
+    const t1 = await store.addTask({ title: "Build feature", description: "x", assignTo: "agent-1", dependsOn: [], expectations: [], metrics: [], maxRetries: 2, group: "costed-mission", missionId: id });
+    const t2 = await store.addTask({ title: "Write tests", description: "x", assignTo: "agent-1", dependsOn: [], expectations: [], metrics: [], maxRetries: 2, group: "costed-mission", missionId: id });
+    const base = { startedAt: "2026-11-22T10:00:00.000Z", computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    await store.updateTask(t1.id, { runs: [
+      { ...base, runId: "a", status: "failed", engine: "claude-code", agent: "agent-1", cost: { harnessUsd: 1, tokens: 100 } },
+      { ...base, runId: "b", status: "completed", engine: "claude-code", agent: "agent-1", cost: { harnessUsd: 0.5, tokens: 50 } },
+    ] as any });
+    await store.updateTask(t2.id, { runs: [{ ...base, runId: "c", status: "completed", engine: "polpo", cost: { modelUsd: 0.25, tokens: 1000 } }] as any });
+
+    const got = await (await req(api(`/missions/${id}`))).json();
+    expect(got.data.budgetUsd).toBe(3);
+    expect(got.data.cost).toMatchObject({
+      currency: "USD", usd: 1.75, harnessUsd: 1.5, modelUsd: 0.25, tokens: 1150, runs: 3, tasks: 2, partial: false,
+      budgetUsd: 3, remainingUsd: 1.25, overBudget: false,
+    });
+    expect(got.data.cost.byEngine.map((e: any) => [e.engine, e.usd, e.runs])).toEqual([["claude-code", 1.5, 2], ["polpo", 0.25, 1]]);
+    expect(got.data.cost.byAgent).toEqual([expect.objectContaining({ agent: "agent-1", usd: 1.75, runs: 3 })]);
+
+    const listed = (await (await req(api("/missions"))).json()).data.find((m: any) => m.id === id);
+    expect(listed.cost).toEqual({ usd: 1.75, tokens: 1150, runs: 3, budgetUsd: 3, overBudget: false });
+    const slim = (await (await req(api("/missions?slim=true"))).json()).data.find((m: any) => m.id === id);
+    expect(slim).toMatchObject({ budgetUsd: 3, cost: { usd: 1.75, overBudget: false } });
+
+    // lowered under what it spent, then cleared
+    const lowered = await (await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: 1 }))).json();
+    expect(lowered.data.budgetUsd).toBe(1);
+    expect((await (await req(api(`/missions/${id}`))).json()).data.cost).toMatchObject({ overBudget: true, remainingUsd: -0.75 });
+    expect((await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: 0 }))).status).toBe(400);
+    await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: null }));
+    const cleared = (await (await req(api(`/missions/${id}`))).json()).data;
+    expect(cleared.budgetUsd).toBeUndefined();
+    expect(cleared.cost.budgetUsd).toBeUndefined();
+    expect(cleared.cost.usd).toBe(1.75);
+  });
+
   test("GET /missions returns 200 with mission array", async () => {
     const res = await app.request(api("/missions"));
     expect(res.status).toBe(200);

@@ -1291,6 +1291,23 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateMissionTeamMember: (mid: string, name: string, u: any) => o.updateMissionTeamMember(mid, name, u),
     removeMissionTeamMember: (mid: string, name: string) => o.removeMissionTeamMember(mid, name),
     updateMissionNotifications: (mid: string, n: any) => o.updateMissionNotifications(mid, n),
+    getMissionCost: async (mid: string) => {
+      const cost = await o.getMissionCost(mid);
+      if (!cost?.partialTaskIds?.length) return cost;
+      // a task kept only its latest runs: its harness cost comes back from the usage records
+      // (agent_harness, the task id as session), which are not capped
+      const ids = new Set(cost.partialTaskIds);
+      const store = databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir());
+      const harnessUsage: Record<string, { usd: number; tokens: number }> = {};
+      for (const r of await store.list("all").catch(() => [])) {
+        if (r.source !== "agent_harness" || !r.sessionId || !ids.has(r.sessionId)) continue;
+        const u = (harnessUsage[r.sessionId] ??= { usd: 0, tokens: 0 });
+        u.usd += Number.isFinite(r.cost) ? r.cost : 0;
+        u.tokens += Number.isFinite(r.totalTokens) ? r.totalTokens : 0;
+      }
+      return Object.keys(harnessUsage).length ? o.getMissionCost(mid, { harnessUsage }) : cost;
+    },
+    getMissionCostSummaries: (missions: any[]) => o.getMissionCostSummaries(missions),
   })));
 
   authed.route("/agents", agentRoutes(() => ({

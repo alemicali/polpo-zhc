@@ -2168,17 +2168,17 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview)."
+              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview).",
+            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview).",
             "name": "slim",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "List of missions",
+            "description": "List of missions, each with a compact `cost` (usd, tokens, runs, partial, budgetUsd, overBudget)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2331,6 +2331,11 @@
                     "required": [
                       "rules"
                     ]
+                  },
+                  "budgetUsd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "description": "Spending limit in USD for the whole mission (all its tasks' runs). When reached, no new task starts (running ones finish) and the mission pauses until the budget is raised or cleared."
                   }
                 },
                 "required": [
@@ -2488,7 +2493,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Mission details",
+            "description": "Mission details, with `cost`: what its tasks' recorded runs cost (usd, tokens, runs, harnessUsd vs modelUsd, byAgent, byEngine, partial when older runs were dropped) against `budgetUsd` (remainingUsd, budgetUsed, overBudget), or agentBudgetCapUsd when it has no budget",
             "content": {
               "application/json": {
                 "schema": {
@@ -2581,6 +2586,12 @@
                     "type": "string",
                     "nullable": true,
                     "format": "date-time"
+                  },
+                  "budgetUsd": {
+                    "type": "number",
+                    "nullable": true,
+                    "exclusiveMinimum": 0,
+                    "description": "Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on."
                   }
                 }
               }

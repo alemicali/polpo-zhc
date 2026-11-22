@@ -273,6 +273,8 @@ function missionToRow(m: any): Record<string, unknown> {
     deadline: m.deadline ?? null,
     notifications: m.notifications ? JSON.stringify(m.notifications) : null,
     executionCount: m.executionCount ?? 0,
+    budgetUsd: m.budgetUsd != null ? String(m.budgetUsd) : null,
+    pauseReason: m.pauseReason ?? null,
     createdAt: m.createdAt ?? new Date().toISOString(),
     updatedAt: m.updatedAt ?? new Date().toISOString(),
   };

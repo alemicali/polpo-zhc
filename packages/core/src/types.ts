@@ -693,6 +693,7 @@ export interface AskUserRequest {
 
 // === Mission ===
 
+export type MissionPauseReason = "budget";
 export type MissionStatus = "draft" | "scheduled" | "recurring" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Mission {
@@ -713,6 +714,15 @@ export interface Mission {
   notifications?: ScopedNotificationRules;
   /** How many times this mission has been executed. Incremented on each run (useful for recurring missions). */
   executionCount?: number;
+  /**
+   * Spending limit in USD for the whole mission (all its tasks' runs: retries, continuations and
+   * recurring runs included). When what it spent reaches it, no new task starts (running ones
+   * finish) and the mission pauses (pauseReason "budget"); raising or clearing it lets it go on.
+   * See mission-cost.ts.
+   */
+  budgetUsd?: number;
+  /** Why the mission is paused, when the orchestrator paused it on its own: "budget". */
+  pauseReason?: MissionPauseReason;
   createdAt: string;
   updatedAt: string;
 }

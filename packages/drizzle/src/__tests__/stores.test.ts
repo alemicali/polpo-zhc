@@ -224,6 +224,20 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(updated.name).toBe("m-1");
     });
 
+    it("keeps a mission's budget and why it paused; a key given as undefined clears them", async () => {
+      const m = await stores.taskStore.saveMission!({ name: "m-budget", data: "{}", status: "active", budgetUsd: 12.5 });
+      expect((await stores.taskStore.getMission!(m.id))!.budgetUsd).toBe(12.5);
+      await stores.taskStore.updateMission!(m.id, { status: "paused", pauseReason: "budget", budgetUsd: 20 });
+      expect(await stores.taskStore.getMission!(m.id)).toMatchObject({ status: "paused", pauseReason: "budget", budgetUsd: 20 });
+      await stores.taskStore.updateMission!(m.id, { status: "active" });
+      expect((await stores.taskStore.getMission!(m.id))!.pauseReason).toBe("budget");
+      await stores.taskStore.updateMission!(m.id, { pauseReason: undefined, budgetUsd: undefined });
+      const cleared = await stores.taskStore.getMission!(m.id);
+      expect(cleared!.pauseReason).toBeUndefined();
+      expect(cleared!.budgetUsd).toBeUndefined();
+      expect((await stores.taskStore.getAllMissions!()).find((x) => x.id === m.id)!.budgetUsd).toBeUndefined();
+    });
+
     it("deleteMission removes", async () => {
       const m = await stores.taskStore.saveMission!({ name: "m-del", data: "{}", status: "draft" });
       const ok = await stores.taskStore.deleteMission!(m.id);

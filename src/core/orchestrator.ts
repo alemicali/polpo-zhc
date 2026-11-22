@@ -30,6 +30,7 @@ import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
 import { MISSION_EDIT } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
+import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { TypedEmitter, withEventOrigin } from "./events.js";
 import type { PolpoEventMap } from "@polpo-ai/core";
@@ -1800,7 +1801,35 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.engine.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> { return this.engine.saveMission(opts); }
+
+  /**
+   * What a mission cost so far: every recorded run of its tasks (Task.runs), by agent and engine,
+   * against its budget (see @polpo-ai/core mission-cost). `harnessUsage` (token-usage records per
+   * task id) only fills in tasks whose older runs were dropped.
+   */
+  async getMissionCost(missionId: string, opts?: { harnessUsage?: Record<string, { usd: number; tokens: number }> }): Promise<MissionCost | undefined> {
+    const mission = await this.getMission(missionId);
+    if (!mission) return undefined;
+    return this.missionCostOf(mission, await this.registry.getAllTasks(), await this.getAgents(), opts);
+  }
+
+  /** The compact cost of every mission (lists), from one read of the tasks. */
+  async getMissionCostSummaries(missions?: Mission[]): Promise<Record<string, MissionCostSummary>> {
+    const all = missions ?? await this.getAllMissions();
+    const tasks = await this.registry.getAllTasks();
+    const out: Record<string, MissionCostSummary> = {};
+    for (const m of all) out[m.id] = summarizeMissionCost(this.missionCostOf(m, tasks, undefined));
+    return out;
+  }
+
+  private missionCostOf(mission: Mission, tasks: Task[], agents: AgentConfig[] | undefined, opts?: { harnessUsage?: Record<string, { usd: number; tokens: number }> }): MissionCost {
+    return computeMissionCost(tasksOfMission(mission, tasks), {
+      ...(mission.budgetUsd !== undefined ? { budgetUsd: mission.budgetUsd } : {}),
+      ...(opts?.harnessUsage ? { harnessUsage: opts.harnessUsage } : {}),
+      ...(agents ? { agentBudgets: Object.fromEntries(agents.map((a) => [a.name, agentHarnessBudgetUsd(a)])), plannedAgents: plannedAgentsOf(mission.data) } : {}),
+    });
+  }
   async getMission(missionId: string): Promise<Mission | undefined> { return this.engine.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.engine.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }

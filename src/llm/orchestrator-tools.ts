@@ -40,6 +40,7 @@ import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
+import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
 import { createCliStores } from "../cli/stores.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
@@ -265,7 +266,7 @@ const getTaskTool: Tool = {
 
 const listMissionsTool: Tool = {
   name: "list_missions",
-  description: "List all missions. Optionally filter by status.",
+  description: "List all missions, with what each cost so far and its budget. Optionally filter by status.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
   }),
@@ -273,7 +274,7 @@ const listMissionsTool: Tool = {
 
 const getMissionTool: Tool = {
   name: "get_mission",
-  description: "Get full details of a mission by ID or name (partial match).",
+  description: "Get full details of a mission by ID or name (partial match), with what it cost so far (every run of its tasks, retries included: USD, tokens, by agent and engine) against its budget.",
   parameters: Type.Object({
     id: Type.Optional(Type.String({ description: "Mission ID" })),
     name: Type.Optional(Type.String({ description: "Mission name (partial match)" })),
@@ -520,17 +521,19 @@ const createMissionTool: Tool = {
     name: Type.String({ description: "Mission name" }),
     data: MissionDataSchema,
     prompt: Type.Optional(Type.String({ description: "Original user request that generated this mission" })),
+    budgetUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Spending limit in USD for the whole mission (all its tasks' runs, retries included): when reached, no new task starts and the mission pauses until it is raised or cleared" })),
   }),
 };
 
 const updateMissionTool: Tool = {
   name: "update_mission",
-  description: "Update an existing mission's name, content, or status.",
+  description: "Update an existing mission's name, content, status or budget. Raising or clearing the budget lets a mission paused by it go on.",
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID to update" }),
     name: Type.Optional(Type.String({ description: "New mission name" })),
     data: Type.Optional(Type.String({ description: "New JSON mission content" })),
     status: Type.Optional(Type.String({ description: "New status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
+    budgetUsd: Type.Optional(Type.Union([Type.Number({ exclusiveMinimum: 0 }), Type.Null()], { description: "Spending limit in USD for the whole mission; null clears it" })),
   }),
 };
 
@@ -3199,6 +3202,7 @@ export async function formatToolDetails(
       break;
     case "create_mission":
       main.push(["Name", trunc(args.name)]);
+      if (args.budgetUsd !== undefined) main.push(["Budget", `$${args.budgetUsd}`]);
       if (args.data) extra.push(["Content", trunc(args.data, 300)]);
       break;
     case "add_agent":
@@ -3741,9 +3745,13 @@ async function execListMissions(polpo: Orchestrator, args: Record<string, unknow
   let missions = await polpo.getAllMissions();
   if (args.status) missions = missions.filter(p => p.status === args.status);
   if (missions.length === 0) return "No missions found.";
-  const lines = missions.map(p =>
-    `[${p.id}] ${p.status.toUpperCase().padEnd(10)} ${p.name}${p.prompt ? ` — "${p.prompt.slice(0, 60)}"` : ""}`
-  );
+  const costs = await polpo.getMissionCostSummaries(missions).catch(() => ({} as Record<string, MissionCostSummary>));
+  const money = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
+  const lines = missions.map(p => {
+    const c = costs[p.id];
+    const cost = c ? ` · ${money(c.usd)}${c.partial ? "+" : ""}${p.budgetUsd !== undefined ? ` of ${money(p.budgetUsd)}${c.usd >= p.budgetUsd ? " (over budget)" : ""}` : ""}` : "";
+    return `[${p.id}] ${p.status.toUpperCase().padEnd(10)} ${p.name}${p.pauseReason === "budget" ? " (paused: budget)" : ""}${cost}${p.prompt ? ` — "${p.prompt.slice(0, 60)}"` : ""}`;
+  });
   return `${missions.length} mission(s):\n${lines.join("\n")}`;
 }
 
@@ -3758,7 +3766,8 @@ async function execGetMission(polpo: Orchestrator, args: Record<string, unknown>
     }
   }
   if (!mission) return "Mission not found.";
-  return JSON.stringify(mission, null, 2);
+  const cost = await polpo.getMissionCost(mission.id).catch(() => undefined);
+  return `${JSON.stringify(cost ? { ...mission, cost } : mission, null, 2)}${cost ? `\n\n${describeMissionCost(cost)}` : ""}`;
 }
 
 async function execListAgents(polpo: Orchestrator): Promise<string> {
@@ -3987,13 +3996,16 @@ async function execCreateMission(polpo: Orchestrator, args: Record<string, unkno
     return `Error: ${e.message}`;
   }
 
+  const budget = args.budgetUsd;
+  if (budget !== undefined && !isValidBudgetUsd(budget)) return "Error: budgetUsd must be a positive number of USD.";
   const mission = await polpo.saveMission({
     data: dataStr,
     name: args.name as string,
     prompt: args.prompt as string | undefined,
     status: "draft",
+    ...(budget !== undefined ? { budgetUsd: budget } : {}),
   });
-  return `Mission created: [${mission.id}] "${mission.name}" (draft)`;
+  return `Mission created: [${mission.id}] "${mission.name}" (draft)${mission.budgetUsd !== undefined ? `, budget $${mission.budgetUsd}` : ""}`;
 }
 
 async function execUpdateMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4004,8 +4016,15 @@ async function execUpdateMission(polpo: Orchestrator, args: Record<string, unkno
   if (args.name) updates.name = args.name;
   if (args.data) updates.data = args.data;
   if (args.status) updates.status = args.status;
+  if (args.budgetUsd !== undefined) {
+    if (args.budgetUsd !== null && !isValidBudgetUsd(args.budgetUsd)) return "Error: budgetUsd must be a positive number of USD (null clears it).";
+    updates.budgetUsd = args.budgetUsd ?? undefined;
+  }
   const updated = await polpo.updateMission(missionId, updates as any);
-  return `Mission "${updated.name}" updated.`;
+  const budgetNote = "budgetUsd" in updates
+    ? ` Budget ${updated.budgetUsd !== undefined ? `$${updated.budgetUsd}` : "cleared"}${mission.pauseReason === "budget" ? ": if it is now under its budget, it goes on by itself within seconds" : ""}.`
+    : "";
+  return `Mission "${updated.name}" updated.${budgetNote}`;
 }
 
 async function execExecuteMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
