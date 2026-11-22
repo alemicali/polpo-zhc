@@ -380,6 +380,11 @@ export function configRoutes(getDeps: () => {
       if (egressProxies !== undefined) settings.egressProxies = egressProxies === null || Object.keys(egressProxies).length === 0 ? undefined : egressProxies;
       if (tailscale !== undefined) settings.tailscale = tailscale === null ? undefined : tailscale;
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
+      // the orchestrator's display name: null or "" goes back to the default ("Polpo")
+      if (body.orchestratorName !== undefined) {
+        if (body.orchestratorName) settings.orchestratorName = body.orchestratorName;
+        else delete settings.orchestratorName;
+      }
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);

@@ -7,6 +7,7 @@ import { App } from "./app";
 import { config } from "./lib/config";
 import { bootstrapAppearance } from "./lib/appearance";
 import { bootstrapBranding } from "./lib/branding";
+import { loadOrchestratorName } from "./lib/orchestrator-name";
 // Iconify glyphs are generated as small, local subsets and registered by the
 // components that use them. No icon depends on the public Iconify API.
 import "./index.css";
@@ -51,6 +52,8 @@ bootstrapAppearance();
 // The branding (name, tagline, logo, frame) the same way: the title and logo preload are already on
 // the page, the components read it synchronously on their first render; this fetches the latest.
 bootstrapBranding();
+// The orchestrator's display name (settings.orchestratorName): known from runtime-config.js or the cache; this fetches the latest.
+void loadOrchestratorName();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";

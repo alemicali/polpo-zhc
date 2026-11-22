@@ -10,6 +10,8 @@ declare global {
     appearance?: import("./appearance-kit").InstanceAppearance | null;
     /** The instance's branding (settings.branding display fields), inlined by the UI server; null when it could not be read. */
     branding?: import("./appearance-kit").InstanceBranding | null;
+    /** The orchestrator's display name (settings.orchestratorName, "Polpo" by default), inlined by the UI server. */
+    orchestratorName?: string;
   } | undefined;
 }
 

@@ -5,7 +5,7 @@
 import { z } from "zod";
 import {
   BAD_CURSOR, DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor, enc, encodeCursor, fail,
-  limitParam, ok, pageBackwards, pageOutput, short,
+  limitParam, ok, orchestratorLabel, pageBackwards, pageOutput, short,
   type McpDeps, type Register,
 } from "./kit.js";
 
@@ -22,7 +22,7 @@ const sessionView = (s: Session) => ({
   id: s.id, ...(s.title ? { title: s.title } : {}), ...(s.agent ? { agent: s.agent } : {}), ...(s.starred ? { starred: true } : {}),
   message_count: s.messageCount ?? 0, updated_at: s.updatedAt, created_at: s.createdAt, ...(s.scope ? { scope: s.scope } : {}),
 });
-const sessionLine = (s: ReturnType<typeof sessionView>) => `- ${s.id}${s.starred ? " ★" : ""} "${short(s.title ?? "(untitled)", 80)}" with ${s.agent ?? "Polpo"}, ${s.message_count} messages, ${s.updated_at.slice(0, 16).replace("T", " ")}`;
+const sessionLine = (polpo: string) => (s: ReturnType<typeof sessionView>) => `- ${s.id}${s.starred ? " ★" : ""} "${short(s.title ?? "(untitled)", 80)}" with ${s.agent ?? polpo}, ${s.message_count} messages, ${s.updated_at.slice(0, 16).replace("T", " ")}`;
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
@@ -74,7 +74,7 @@ export function registerChatTools(tool: Register, deps: McpDeps): void {
     const start = c.o ?? 0;
     const items = all.slice(start, start + n);
     const next = start + n < all.length ? encodeCursor({ o: start + n }) : null;
-    return ok(`${items.map(sessionLine).join("\n") || "No conversations match."}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
+    return ok(`${items.map(sessionLine(await orchestratorLabel(deps))).join("\n") || "No conversations match."}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
   });
 
   tool("chat", "polpo_chat_messages", {
@@ -97,7 +97,7 @@ export function registerChatTools(tool: Register, deps: McpDeps): void {
     if (!p) return fail(BAD_CURSOR);
     const session = sessionView(data.session);
     const lines = p.items.map((m) => `[${m.id}] ${m.ts.slice(0, 16).replace("T", " ")} ${m.role}${m.tools ? ` (tools: ${m.tools.join(", ")})` : ""}: ${m.text}`);
-    return ok(`${sessionLine(session).slice(2)}\n\n${lines.join("\n\n") || "No messages."}${p.next_cursor ? `\n(older: cursor ${p.next_cursor})` : ""}`, { ...p, session });
+    return ok(`${sessionLine(await orchestratorLabel(deps))(session).slice(2)}\n\n${lines.join("\n\n") || "No messages."}${p.next_cursor ? `\n(older: cursor ${p.next_cursor})` : ""}`, { ...p, session });
   });
 
   tool("chat", "polpo_chat_session_update", {
@@ -131,7 +131,7 @@ export function registerChatTools(tool: Register, deps: McpDeps): void {
     if (!all.ok) return apiError(all, "Listing chat sessions");
     const s = all.sessions.find((x) => x.id === id);
     if (!s) return notFound(id);
-    if (confirm !== true) return fail(`Deleting "${s.title ?? id}" (${s.messageCount} messages with ${s.agent ?? "Polpo"}) cannot be undone: ask the person, then call again with confirm: true.`);
+    if (confirm !== true) return fail(`Deleting "${s.title ?? id}" (${s.messageCount} messages with ${s.agent ?? await orchestratorLabel(deps)}) cannot be undone: ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "DELETE", `/chat/sessions/${enc(id)}`);
     if (!r.ok) return apiError(r, `Deleting chat session ${id}`);
     return ok(`Deleted chat session ${id}.`, { id, deleted: true });

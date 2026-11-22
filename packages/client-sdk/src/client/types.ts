@@ -860,6 +860,8 @@ export interface PolpoSettings {
   orchestratorSkills?: string[];
   /** Model for orchestrator LLM calls. Can be a string or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name (default "Polpo"). */
+  orchestratorName?: string;
   imageModel?: string;
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Global reasoning / deep thinking level. */
@@ -1201,6 +1203,8 @@ export interface UpdateSettingsRequest {
   /** Context compaction settings; null removes them. */
   compaction?: Record<string, unknown> | null;
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name (default "Polpo"); in an update, null or "" restores the default. */
+  orchestratorName?: string | null;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;

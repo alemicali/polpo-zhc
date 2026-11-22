@@ -5,6 +5,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { sanitizeAppearanceSettings } from "@polpo-ai/core";
 import { redactPolpoConfig } from "../security.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
+import { orchestratorName } from "../../core/orchestrator-name.js";
 import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
 import { buildLocalProvider, discoverLocalModels } from "../../setup/local-provider.js";
 import { createCliStores } from "../../cli/stores.js";
@@ -322,6 +323,14 @@ export function publicConfigRoutes(
       if (typeof value === "string" && value) branding[key] = value;
     }
     return c.json({ ok: true, data: branding }, 200, { "cache-control": "no-cache" });
+  });
+
+  // The orchestrator's display name (settings.orchestratorName, "Polpo" by default): public display
+  // data like the branding, so the UI server can inline it into runtime-config.js for the first paint.
+  app.get("/orchestrator", (c) => {
+    const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
+    const name = orchestratorName(loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings);
+    return c.json({ ok: true, data: { name } }, 200, { "cache-control": "no-cache" });
   });
 
   // The dashboard's default look (theme, palette, custom colours): public like the branding, so the

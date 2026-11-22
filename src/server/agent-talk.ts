@@ -36,6 +36,8 @@ export interface AgentTalkRequest {
   /** The messages of a session (user and assistant text). */
   history(sessionId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>>;
   agents(): Promise<Array<{ name: string; role?: string }>>;
+  /** The orchestrator's display name (settings.orchestratorName); "Polpo" without it. */
+  orchestratorName?(): string;
   /**
    * Bring a message into a web conversation now: into the answer it is writing, else as the next
    * turn (streamed). Without it the reply gets a non-streaming turn.
@@ -82,7 +84,7 @@ export interface AgentTalkOverview {
 }
 
 const RECENT_LIMIT = 200;
-const label = (agent: string | undefined) => agent ?? "Polpo";
+
 let exchangeCounter = 0;
 
 export class AgentTalk {
@@ -90,6 +92,11 @@ export class AgentTalk {
 
   constructor(polpoDir: string, private readonly io: AgentTalkRequest) {
     this.file = join(polpoDir, "agent-dms.json");
+  }
+
+  /** The writer as people see it: the agent, or the orchestrator's display name. */
+  private label(agent: string | undefined): string {
+    return agent ?? this.io.orchestratorName?.() ?? "Polpo";
   }
 
   private sessions(): Record<string, string> {
@@ -126,7 +133,7 @@ export class AgentTalk {
     const conversations = Object.entries(this.sessions())
       .map(([key, sessionId]) => {
         const [, from, to] = key.split(":");
-        return { from: from === POLPO ? "Polpo" : from!, to: to!, sessionId };
+        return { from: from === POLPO ? this.label(undefined) : from!, to: to!, sessionId };
       })
       .filter((c) => c.to);
     return { conversations, recent: [...this.recent].reverse() };
@@ -149,8 +156,8 @@ export class AgentTalk {
     const known = this.sessions()[key];
     const history = known ? await this.io.history(known).catch(() => []) : [];
     const intro = exchange.kind === "question"
-      ? `[${label(from.agent)} asks you, in the middle of their work: answer briefly and to the point]`
-      : `[${label(from.agent)} hands this to you: work on it, and your answer goes back to them]`;
+      ? `[${this.label(from.agent)} asks you, in the middle of their work: answer briefly and to the point]`
+      : `[${this.label(from.agent)} hands this to you: work on it, and your answer goes back to them]`;
     const chain = [...from.chain, from.agent ?? POLPO];
     const { text, sessionId } = await this.io.turn({
       agent: to, sessionId: known ?? "new", chain, signal,
@@ -172,7 +179,7 @@ export class AgentTalk {
     const known = this.sessions()[`agent-dm:${from.agent ?? POLPO}:${target}`];
     const exchange: AgentExchange = {
       id: `ax-${Date.now().toString(36)}-${(exchangeCounter++).toString(36)}`,
-      from: label(from.agent), to: target, kind, message, status: "working",
+      from: this.label(from.agent), to: target, kind, message, status: "working",
       ...(from.sessionId ? { fromSessionId: from.sessionId } : {}),
       ...(known ? { dmSessionId: known } : {}),
       startedAt: new Date().toISOString(),
@@ -188,13 +195,13 @@ export class AgentTalk {
         const error = err instanceof Error ? err.message : String(err);
         Object.assign(exchange, { status: "failed", error, answeredAt: new Date().toISOString() });
         this.update(exchange);
-        this.io.log?.(`${kind} ${label(from.agent)} → ${target} failed: ${error}`);
+        this.io.log?.(`${kind} ${this.label(from.agent)} → ${target} failed: ${error}`);
         reply = `(no answer: ${error})`;
       }
       try {
         await this.bringBack(from, target, kind, reply);
       } catch (err) {
-        this.io.log?.(`could not bring ${target}'s answer back to ${label(from.agent)}: ${err instanceof Error ? err.message : String(err)}`);
+        this.io.log?.(`could not bring ${target}'s answer back to ${this.label(from.agent)}: ${err instanceof Error ? err.message : String(err)}`);
       }
     })();
     return { to: target, id: exchange.id };

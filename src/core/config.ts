@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
+import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
@@ -412,6 +413,12 @@ function parseSettings(raw: any): PolpoSettings {
   }
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;
   if (raw?.orchestratorModel) settings.orchestratorModel = parseOrchestratorModel(raw.orchestratorModel);
+  if (raw?.orchestratorName !== undefined && raw?.orchestratorName !== null) {
+    // a display name: an invalid one is left out (the default "Polpo" applies), with a warning
+    const name = normalizeOrchestratorName(raw.orchestratorName);
+    if (name) settings.orchestratorName = name;
+    else console.warn(`[polpo] Ignoring invalid settings.orchestratorName in polpo.json (1–${ORCHESTRATOR_NAME_MAX_LENGTH} characters): the default "Polpo" applies`);
+  }
   if (raw?.imageModel && typeof raw.imageModel === "string") settings.imageModel = raw.imageModel;
   if (raw?.modelAllowlist && typeof raw.modelAllowlist === "object") settings.modelAllowlist = raw.modelAllowlist;
   if (raw?.enableVolatileTeams != null) settings.enableVolatileTeams = raw.enableVolatileTeams;

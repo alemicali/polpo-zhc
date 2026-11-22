@@ -28,6 +28,7 @@ import { useAgents } from "@polpo-ai/react";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { resolveTitle } from "@/lib/page-titles";
 import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { useOrchestratorName } from "@/lib/orchestrator-name";
 import { requestNewGroup, setActiveChatRoom, useActiveChatRoom, useActiveChatRoomTitle } from "@/hooks/use-chat-room";
 
 function ChatHeaderCenter() {
@@ -37,7 +38,8 @@ function ChatHeaderCenter() {
   const { agents } = useAgents();
   const sessionAgent = selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
   const agentConfig = sessionAgent && agents ? agents.find((a) => a.name === sessionAgent) : undefined;
-  const agentName = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
+  const orchestratorName = useOrchestratorName();
+  const agentName = agentConfig?.identity?.displayName ?? agentConfig?.name ?? orchestratorName;
   const sessionTitle = sessionId
     ? sessions.find((s: { id: string; title?: string }) => s.id === sessionId)?.title || "Session"
     : "New session";

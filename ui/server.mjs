@@ -56,6 +56,8 @@ const appearanceUrl = process.env.POLPO_APPEARANCE_URL
 const brandingUrl = process.env.POLPO_BRANDING_URL
   || (process.env.POLPO_APPEARANCE_URL ? process.env.POLPO_APPEARANCE_URL.replace(/\/appearance\/*$/, "/branding") : "")
   || (apiConfigBase ? `${apiConfigBase}/branding` : "");
+// The orchestrator's display name (settings.orchestratorName), read next to the branding.
+const orchestratorUrl = brandingUrl ? brandingUrl.replace(/\/branding\/*$/, "/orchestrator") : "";
 const APPEARANCE_TTL_MS = Number(process.env.POLPO_APPEARANCE_TTL_MS ?? 30_000);
 const APPEARANCE_TIMEOUT_MS = 1_500;
 
@@ -107,13 +109,18 @@ function cachedPublic(url, pick = (data) => data) {
 
 const instanceAppearance = cachedPublic(appearanceUrl);
 const instanceBranding = cachedPublic(brandingUrl, publicBranding);
+const instanceOrchestratorName = cachedPublic(orchestratorUrl, (data) => {
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  return name && name.length <= 40 ? name : null;
+});
 
 async function runtimeConfig() {
-  const [appearance, branding] = await Promise.all([instanceAppearance(), instanceBranding()]);
+  const [appearance, branding, orchestratorName] = await Promise.all([instanceAppearance(), instanceBranding(), instanceOrchestratorName()]);
   const payload = {
     baseUrl: apiUrl, apiKey, inkHubUrl,
     ...(appearance !== undefined ? { appearance } : {}),
     ...(branding !== undefined ? { branding } : {}),
+    ...(typeof orchestratorName === "string" ? { orchestratorName } : {}),
   };
   // JSON in a script: never let a value close it
   return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify(payload).replace(/</g, "\\u003c")};`;
