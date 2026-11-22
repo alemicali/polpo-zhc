@@ -6,7 +6,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 vi.hoisted(() => { (globalThis as { __POLPO_RUNTIME_CONFIG__?: unknown }).__POLPO_RUNTIME_CONFIG__ = { apiKey: "test-key" }; });
 
 import { TooltipProvider } from "../src/components/ui/tooltip";
-import { ConnectorIcon, clearConnectorIconCache } from "../src/components/connectors/connector-icon";
+import { ConnectorIcon } from "../src/components/connectors/connector-icon";
+import { clearConnectorIconCache } from "../src/lib/connector-icon-cache";
 import { ConnectorDetailSheet } from "../src/components/connectors/connector-detail-sheet";
 import { CustomConnectorDialog } from "../src/components/connectors/custom-connector-dialog";
 import { applyDiscovery, EMPTY_CUSTOM_FORM, iconSourceLabel, type Connector, type ConnectorDiscovery } from "../src/lib/connectors-api";

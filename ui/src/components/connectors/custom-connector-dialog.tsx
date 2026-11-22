@@ -49,9 +49,9 @@ type Detection =
 function useDetection(url: string | undefined, onResult: (result: ConnectorDiscovery) => void): Detection {
   const [detection, setDetection] = useState<Detection>({ state: "idle" });
   const callback = useRef(onResult);
-  callback.current = onResult;
+  useEffect(() => { callback.current = onResult; });
   useEffect(() => {
-    if (!url) { setDetection({ state: "idle" }); return; }
+    if (!url) return;
     const ac = new AbortController();
     const timer = setTimeout(() => {
       setDetection({ state: "loading", url });
@@ -64,7 +64,8 @@ function useDetection(url: string | undefined, onResult: (result: ConnectorDisco
     }, DETECT_DELAY_MS);
     return () => { clearTimeout(timer); ac.abort(); };
   }, [url]);
-  return detection;
+  // a detection of another (or no) URL is not shown
+  return url && detection.state !== "idle" && detection.url === url ? detection : { state: "idle" };
 }
 
 export function CustomConnectorDialog({

@@ -13,7 +13,7 @@
  */
 import { useEffect, useState } from "react";
 import { connectorIconSrc } from "@/lib/connectors-api";
-import { apiUrl, config } from "@/lib/config";
+import { loadApiImage } from "@/lib/connector-icon-cache";
 import { cn } from "@/lib/utils";
 
 const SIZES = { sm: "h-7 w-7 rounded-md text-xs", md: "h-9 w-9 rounded-lg text-sm", lg: "h-12 w-12 rounded-xl text-lg" } as const;
@@ -24,28 +24,6 @@ function readableOn(hex: string | undefined): string {
   const n = parseInt(m[1]!, 16);
   const luminance = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
   return luminance > 0.6 ? "#111" : "#fff";
-}
-
-/** Object URLs of the API's icons, by URL (the URL carries the content hash, so an entry never goes stale). */
-const cache = new Map<string, Promise<string | null>>();
-
-function loadApiImage(path: string): Promise<string | null> {
-  let pending = cache.get(path);
-  if (!pending) {
-    pending = fetch(apiUrl(path), {
-      headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
-      credentials: "include",
-    }).then(async (res) => (res.ok ? URL.createObjectURL(await res.blob()) : null)).catch(() => null);
-    cache.set(path, pending);
-    // a failure may be temporary (offline, signed out): try again next time
-    void pending.then((url) => { if (!url) cache.delete(path); });
-  }
-  return pending;
-}
-
-/** Test hook. */
-export function clearConnectorIconCache(): void {
-  cache.clear();
 }
 
 /** An image of the API (auth needed) as a displayable URL; undefined while loading, null when unavailable. */
