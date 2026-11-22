@@ -20,6 +20,13 @@ import {
   parseSummary,
   type CompactionInfo,
 } from "@polpo-ai/core";
+import {
+  AGENT_TOOL_GROUPS,
+  ProgressiveToolSet,
+  declaredTools,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+} from "@polpo-ai/core/progressive-tools";
 import { effectiveCompactionSettings, loadPolpoConfig } from "../core/config.js";
 import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
@@ -617,11 +624,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     transformContext: async (messages, signal) => {
       const force = forceNextCompaction;
       forceNextCompaction = undefined;
-      const { messages: projected, info } = await compactor.prepare(messages as any[], { force, signal });
+      const { messages: compacted, info } = await compactor.prepare(messages as any[], { force, signal });
       if (info) {
         recordCompaction(info, pendingFacts);
         pendingFacts = undefined;
       }
+      // tools loaded during the run are declared again when compaction dropped their announcement
+      const projected = restoreToolAnnouncements(messages as any[], compacted);
       lastProjectedCount = projected.length;
       return projected as unknown as AgentMessage[];
     },
@@ -857,7 +866,34 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
         } catch { /* no connectors */ }
       }
-      agent.state.tools = allTools;
+      // Progressive tool discovery: above the threshold the run starts with its essential tools plus
+      // tools_search/tools_load; connector tools and optional groups are added when loaded (before the
+      // next request, as a pi toolsAdded system message: inline where the provider supports it).
+      const progressive = new ProgressiveToolSet({
+        tools: allTools,
+        mode: progressiveModeFor(agentConfig, ctx?.polpoDir ? loadPolpoConfig(ctx.polpoDir)?.settings?.tools : undefined),
+        threshold: ctx?.polpoDir ? loadPolpoConfig(ctx.polpoDir)?.settings?.tools?.progressiveThreshold : undefined,
+        groups: AGENT_TOOL_GROUPS,
+        connectorNames: connectorManager
+          ? Object.fromEntries(connectorManager.store.list().map((connector) => [connector.id, connector.name]))
+          : undefined,
+        // a resumed run keeps what its transcript already declares
+        loaded: declaredTools(ctx?.resumeMessages ?? []).keys(),
+      });
+      let progressiveNote = "";
+      if (progressive.enabled) {
+        agent.state.tools = progressive.initialTools() as typeof allTools;
+        progressiveNote = progressive.promptSection();
+        agent.prepareNextTurnWithContext = (turn) => {
+          const added = progressive.takeNewlyLoaded();
+          if (added.length === 0) return undefined;
+          const tools = [...(turn.context.tools ?? []), ...added];
+          agent.state.tools = tools;
+          return { context: { ...turn.context, tools } };
+        };
+      } else {
+        agent.state.tools = allTools;
+      }
 
       // Refresh system prompt with mailboxes info now that vault is resolved.
       // The initial prompt set in `new Agent(...)` had no mailbox section
@@ -874,9 +910,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
             ? [{ ...head, content: prompt }, ...rest]
             : [{ role: "system", content: prompt, timestamp: Date.now() } as AgentMessage, ...agent.state.messages];
       }
-      if (connectorNote) {
+      for (const note of [connectorNote, progressiveNote]) {
+        if (!note) continue;
         const [head, ...rest] = agent.state.messages;
-        if (head && head.role === "system" && typeof head.content === "string") agent.state.messages = [{ ...head, content: `${head.content}\n\n${connectorNote}` }, ...rest];
+        if (head && head.role === "system" && typeof head.content === "string") agent.state.messages = [{ ...head, content: `${head.content}\n\n${note}` }, ...rest];
       }
 
       if (ctx?.continuation) {

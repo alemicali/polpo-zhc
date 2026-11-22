@@ -400,6 +400,12 @@ export interface AgentConfig {
   reasoning?: ReasoningLevel;
   /** Context compaction for this agent's runs and chats (overrides `settings.compaction`). */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /**
+   * Progressive tool discovery (overrides `settings.tools.progressive`): "auto" (default) defers
+   * connector tools and optional groups behind tools_search/tools_load when the run has more than
+   * `settings.tools.progressiveThreshold` tools; "always" always does; "never" gives every tool up front.
+   */
+  progressiveTools?: import("./progressive-tools.js").ProgressiveToolsMode;
   /** Voice replies in chats (Telegram); default "off". The agent can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
   /** Learning from its conversations (memory, own skills); off by default. The agent can change it (set_learning). */
@@ -946,6 +952,8 @@ export interface PolpoSettings {
   logRetentionDays?: number;
   /** How long conversations and task runs are compacted when they fill the model's window. */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Progressive tool discovery for agents and Polpo (tools_search / tools_load). */
+  tools?: import("./progressive-tools.js").ToolsSettings;
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */

@@ -425,6 +425,8 @@ function parseSettings(raw: any): PolpoSettings {
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
   const compaction = normalizeCompactionSettings(raw?.compaction);
   if (compaction) settings.compaction = compaction;
+  const tools = normalizeToolsSettings(raw?.tools);
+  if (tools) settings.tools = tools;
   // Daytona's API version and its options (v2 takes no API URL): refused with a clear message
   const daytonaErrors = daytonaProviderErrors(raw?.sandbox?.providers?.daytona);
   if (daytonaErrors.length) throw new Error(daytonaErrors.join("; "));
@@ -586,6 +588,18 @@ export function generatePolpoConfigDefault(
     config.providers = options.providers;
   }
   return config;
+}
+
+/** Keep only well-formed progressive tool settings (`settings.tools`). */
+export function normalizeToolsSettings(raw: unknown): import("@polpo-ai/core").ToolsSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: import("@polpo-ai/core").ToolsSettings = {};
+  if (typeof r.progressiveThreshold === "number" && Number.isFinite(r.progressiveThreshold) && r.progressiveThreshold >= 0) {
+    out.progressiveThreshold = Math.floor(r.progressiveThreshold);
+  }
+  if (r.progressive === "auto" || r.progressive === "always" || r.progressive === "never") out.progressive = r.progressive;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Keep only well-formed compaction settings (unknown keys and wrong types are dropped). */

@@ -384,6 +384,7 @@ export function configRoutes(getDeps: () => {
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
+      if (body.tools !== undefined) settings.tools = body.tools === null || Object.keys(body.tools).length === 0 ? undefined : body.tools;
       // Polpo's MCP server settings merge: the keys given change (toolsets, keys)
       if (body.mcp === null) delete settings.mcp;
       else if (body.mcp !== undefined) {

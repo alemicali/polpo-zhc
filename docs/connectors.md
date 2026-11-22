@@ -115,6 +115,22 @@ A stdio connector **runs a command on the Polpo server** with the server's user,
 - **Network**: remote connectors must use https; private, loopback, link-local and CGNAT (tailnet) addresses are refused unless `settings.connectors.allowPrivateNetwork` is `true` (or `POLPO_CONNECTORS_ALLOW_PRIVATE=1`), which also allows `http://localhost`. The URL is checked when saved and before every connection.
 - Tokens are never logged; tool results are capped; tool calls time out and honor cancellation.
 
+## Progressive tool discovery
+
+A few connectors easily add a hundred tools to every request. When a run (a task, a chat turn of an agent or of Polpo) has more tools than `settings.tools.progressiveThreshold` (default 30), it starts with its essential tools plus two meta tools, and the rest is loaded on demand:
+
+- **Deferred:** connector tools (`mcp__*`), and optional groups: for agents browser, email, images/video/audio, Excel/PDF/Word, WhatsApp, phone, Ink Hub, data, company brain, storage; for Polpo step-by-step mission editing, apps, data, company brain, storage, skills and playbooks, Ink Hub, phone, WhatsApp, browser and profiles, computers, agent learning. Everything else (files, shell, HTTP, vault, memory, tasks, missions, team, schedules, connectors management, chat tools…) is always on.
+- The prompt lists the deferred groups with their size (`Connector Linear (mcp__linear__*): 12 tools`). `tools_search { query, limit }` ranks the deferred tools by name, description and connector; `tools_load { names }` loads tools by name, or a whole group by its name (`mcp__linear`, `Linear`, `browser`).
+- A loaded tool is declared to the model before its next step as a pi-ai system message with `toolsAdded`. Where the provider supports changing tools mid-conversation it goes inline and the cached prompt prefix survives: Anthropic (inline `tool_addition` blocks on recent Claude models), OpenAI Responses (`additional_tools` / tool search on GPT-5.6+ and Codex), Kimi (K3). Every other model gets the current tool list at the top of the request.
+- Loaded tools stay for the rest of the conversation: in a chat, the next turns start with the tools loaded (or used) in earlier turns; in a task, for the run. After a compaction, loaded tools are declared again.
+- Search and load only see the tools the run was given: `allowedTools`, connector access and `toolPolicy` are applied first. In a chat, calling a deferred tool by name without loading it loads it (in a task the call fails as an unknown tool until it is loaded).
+
+| Setting | Default | |
+|---|---|---|
+| `settings.tools.progressiveThreshold` | `30` | Runs with more tools than this defer their optional tools (`"auto"` mode) |
+| `settings.tools.progressive` | `"auto"` | Default mode for Polpo and agents: `"auto"`, `"always"`, `"never"` |
+| `agent.progressiveTools` | — | Per-agent mode (wins over `settings.tools.progressive`) |
+
 ## Configuration
 
 `.polpo/polpo.json`:
