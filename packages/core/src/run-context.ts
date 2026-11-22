@@ -17,7 +17,7 @@ import type { SandboxProviderId } from "./sandbox.js";
 export type RunEngine = "polpo" | HarnessId;
 export type RunContextStatus = "running" | "completed" | "failed" | "killed";
 /** How the harness authenticates (the kind only). */
-export type RunAuthKind = "api-key" | "bedrock" | "vertex";
+export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
 
 export interface RunComputerContext {
   /** "host" (this server), a computer id, or "ephemeral" (a sandbox made for this run). */
@@ -54,6 +54,12 @@ export interface RunCostContext {
   /** The model cost reported by the provider (Polpo's engine), USD. */
   modelUsd?: number;
   tokens?: number;
+  /**
+   * Where harnessUsd comes from: "gateway" (the gateway reported it), "runtime" (Claude Code's own
+   * estimate, Anthropic prices), "runtime-estimate" (that estimate for a model behind a gateway:
+   * approximate), "tokens-only" (no reliable price: non-Claude models; only tokens are recorded).
+   */
+  costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
 }
 
 /** What the engine reports while the run goes (AgentActivity.runContext). */
@@ -132,13 +138,14 @@ function harnessSetting(settings: BuildRunContextInput["settings"], harness: Har
   if (!all || typeof all !== "object") return undefined;
   const h = (all as Record<string, unknown>)[harness];
   if (!h || typeof h !== "object") return undefined;
-  const r = h as { auth?: unknown; model?: unknown; bedrock?: { region?: unknown }; vertex?: { region?: unknown } };
-  const auth = r.auth === "api-key" || r.auth === "bedrock" || r.auth === "vertex" ? r.auth : undefined;
+  const r = h as { auth?: unknown; model?: unknown; bedrock?: { region?: unknown }; vertex?: { region?: unknown }; gateway?: { models?: { main?: unknown } } };
+  const auth = r.auth === "api-key" || r.auth === "bedrock" || r.auth === "vertex" || r.auth === "ai-gateway" || r.auth === "gateway" ? r.auth : undefined;
+  const model = typeof r.gateway?.models?.main === "string" && r.gateway.models.main ? r.gateway.models.main : r.model;
   const region = auth === "bedrock" ? r.bedrock?.region : auth === "vertex" ? r.vertex?.region : undefined;
   return {
     ...(auth ? { auth } : {}),
     ...(typeof region === "string" && region ? { region } : {}),
-    ...(typeof r.model === "string" && r.model ? { model: r.model } : {}),
+    ...(typeof model === "string" && model ? { model } : {}),
   };
 }
 

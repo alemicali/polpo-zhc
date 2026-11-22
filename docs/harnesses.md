@@ -30,6 +30,11 @@ versions are pinned exactly and only `src/harness/sdk.ts` imports them).
 | `bedrock` | `apiKey` (a Bedrock API key / bearer token), or `accessKeyId` + `secretAccessKey` (+ `sessionToken`) | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION` (`bedrock.region`), `AWS_BEARER_TOKEN_BEDROCK` or the AWS keys, `ANTHROPIC_MODEL` (the model) |
 | `api-key` | `apiKey` (an Anthropic API key, `sk-ant-api…`) | `ANTHROPIC_API_KEY` |
 | `vertex` | `serviceAccountJson` (a service account key) | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID`, the key as a file (`GOOGLE_APPLICATION_CREDENTIALS`) |
+| `ai-gateway` | `gateway.credentialRef` → `apiKey` (a Vercel AI Gateway key) | the gateway's base URL and a placeholder key (see [Model gateways](#model-gateways)) |
+| `gateway` | `gateway.credentialRef` → `apiKey` (the gateway's key; none with `authScheme: "none"`) | the gateway's base URL, a placeholder key, the gateway's model ids |
+
+With `api-key`, `ai-gateway` and `gateway` the key **does not enter the VM** when Polpo's model relay
+is reachable (see [Credential brokering](#credential-brokering)): the runtime gets a placeholder.
 
 **A Claude subscription (Pro/Max sign-in, `sk-ant-oat…` tokens) is refused** — in the settings and in
 the vault entry. Anthropic's consumer terms do not allow a subscription to power a product that runs
@@ -41,8 +46,10 @@ subscription store or `~/.codex/auth.json`.
 
 ### Codex: authentication
 
-`auth: "api-key"` with an OpenAI API key (`apiKey` or `OPENAI_API_KEY` in the entry). Signing in with
-ChatGPT is not supported yet.
+`auth: "api-key"` with an OpenAI API key (`apiKey` or `OPENAI_API_KEY` in the entry), `"ai-gateway"`
+(the Vercel AI Gateway: model ids `openai/…`) or `"gateway"` (a gateway that speaks the OpenAI
+Responses API, `format: "openai-responses"`, base URL ending in `/v1`). Signing in with ChatGPT is not
+supported yet.
 
 ## Configuration
 
@@ -68,7 +75,10 @@ ChatGPT is not supported yet.
 }
 ```
 
-- `engine`: `"polpo"` (default) or `{ harness, model?, permissionMode?, effort?, maxBudgetUsd? }`.
+- `engine`: `"polpo"` (default) or `{ harness, model?, permissionMode?, effort?, maxBudgetUsd?, credentialRef? }`.
+  `credentialRef` (a vault reference, never the key) is the agent's **own key** for cost separation:
+  it replaces the harness's API key or gateway key for this agent's runs (not with Bedrock / Vertex,
+  nor with a gateway that takes no key).
   `permissionMode` `allow-all` (default: the runtime works unattended in its VM), `allow-edits` or
   `allow-reads`; in a task nobody answers an approval, so an action the mode does not allow is
   denied and the runtime is told to do it another way. `maxBudgetUsd` stops a run when Claude Code's
@@ -79,17 +89,170 @@ ChatGPT is not supported yet.
   disabled.
 
 Dashboard: **Settings → Harnesses** (enable, authentication, credential via the vault picker, region,
-model, allow on this server; the harness sessions with Stop / Reset) and the agent's **Computer tab →
-Engine** (Polpo / Claude Code / Codex, model, permission mode, effort, budget; only enabled
-harnesses are offered).
+gateway with presets, model, allow on this server; **Test connection**, also run after every save;
+whether the key stays on the server; the harness sessions with Stop / Reset) and the agent's
+**Computer tab → Engine** (Polpo / Claude Code / Codex, model, permission mode, effort, budget, own
+key; only enabled harnesses are offered; the connection is tested after a save).
 
 MCP (see [mcp.md](mcp.md)): `polpo_harnesses_get`, `polpo_harnesses_update` (admin; a missing
-credential entry comes back as `setup_url` + `setup_id` for `polpo_setup_wait`),
-`polpo_harness_sessions_list`, `polpo_harness_session_control` (work), and `engine` on
-`polpo_agent_create` / `polpo_agent_update`.
+credential entry comes back as `setup_url` + `setup_id` for `polpo_setup_wait`; `gateway` for
+`ai-gateway` / `gateway`), `polpo_harnesses_test` (read), `polpo_harness_sessions_list`,
+`polpo_harness_session_control` (work), and `engine` on `polpo_agent_create` / `polpo_agent_update`.
 
-REST: `GET /api/v1/harnesses`, `GET /api/v1/harnesses/sessions?agent=&computer=`,
-`POST /api/v1/harnesses/sessions/:key/stop`, `POST /api/v1/harnesses/sessions/:key/reset { confirm: true }`.
+REST: `GET /api/v1/harnesses` (with `relay` and each harness's `brokering`),
+`GET /api/v1/harnesses/sessions?agent=&computer=`, `POST /api/v1/harnesses/sessions/:key/stop`,
+`POST /api/v1/harnesses/sessions/:key/reset { confirm: true }`,
+`POST /api/v1/harnesses/test { harness, settings?, agent? }` (see [Connection test](#connection-test)).
+
+## Model gateways
+
+A harness can reach its model through a gateway instead of the provider: for cost control, logging,
+routing, fallbacks or other models. Two auth types:
+
+- **`ai-gateway`** — the [Vercel AI Gateway](https://vercel.com/ai-gateway):
+  `gateway: { baseUrl?, credentialRef }` (`baseUrl` defaults to `https://ai-gateway.vercel.sh`). The
+  AI SDK uses its gateway mode: Claude Code calls `<base>/v1/messages` and maps `anthropic/…` model
+  ids; Codex calls `<base>/v1/responses` and prefixes `openai/`.
+- **`gateway`** — any gateway:
+
+```json
+"claude-code": {
+  "auth": "gateway",
+  "gateway": {
+    "preset": "cloudflare",
+    "format": "anthropic",
+    "baseUrl": "https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic",
+    "authScheme": "none",
+    "headers": [{ "name": "cf-aig-authorization", "credentialRef": { "owner": "ops", "service": "cloudflare" }, "field": "token", "prefix": "Bearer " }],
+    "models": { "main": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5" }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `format` | `anthropic` (Claude Code: Anthropic Messages) or `openai-responses` (Codex: OpenAI Responses) |
+| `baseUrl` | https only, no user info, no query or fragment (http only for `localhost`). Claude Code appends `/v1/messages` (do not include it); Codex appends `/responses`, so the base ends in `/v1` (Cloudflare's `…/openai` is accepted as is) |
+| `authScheme` | how the gateway key is sent: `x-api-key`, `bearer` (`Authorization: Bearer`, default) or `none` (no key; auth in a header) |
+| `credentialRef` | the gateway key's vault entry (required unless `authScheme: "none"`) |
+| `headers` | extra headers on every model request: `{ name, credentialRef, field?, prefix? }` for a secret (from the vault; `field` defaults to the entry's apiKey / key / token; `prefix` e.g. `"Bearer "`), `{ name, value }` for a literal that is not a secret (a value that looks like a key is refused). Names are HTTP tokens; `host`, `content-length`, `authorization`, `x-api-key`, `cookie`, `anthropic-*` and hop-by-hop headers are refused. Secret header entries must exist in the vault to save |
+| `models` | `{ main, haiku?, sonnet?, opus? }`: the gateway's model ids; Claude Code's aliases map to them (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `_SONNET_` / `_OPUS_`, `ANTHROPIC_SMALL_FAST_MODEL`). Required with `openai-responses` or `nonClaude` (or a harness `model`) |
+| `nonClaude` | Claude Code on non-Claude models (GLM, Kimi, Qwen, DeepSeek… behind the Anthropic format): sets `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1`, maps every alias to `models.main` unless set, and sends no adaptive thinking or effort |
+
+Presets in Settings → Harnesses (a label: the URL, scheme and headers are what count):
+
+| Preset | Base URL (Claude Code / Codex) | Key | Headers |
+|---|---|---|---|
+| Vercel AI Gateway | auth `ai-gateway` | AI Gateway key | — |
+| Cloudflare AI Gateway | `https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic` / `…/openai` (account and gateway ids in the form) | `none` with provider keys stored in Cloudflare (BYOK), or your provider key (`x-api-key` for Claude, `bearer` for Codex) | `cf-aig-authorization: Bearer <vault>` (authenticated gateway) |
+| OpenRouter | `https://openrouter.ai/api` / `https://openrouter.ai/api/v1` | `bearer` (OpenRouter key) | — |
+| LiteLLM | your proxy's URL / `<url>/v1` | `bearer` (virtual key) | — |
+| Portkey | `https://api.portkey.ai` / `https://api.portkey.ai/v1` | `none` | `x-portkey-api-key: <vault>`, `x-portkey-provider: anthropic` / `openai` or an `@integration` slug (literal) |
+| Kong AI Gateway | your route's URL | as your key-auth plugin expects (`bearer`, `x-api-key` or a header) | — |
+| Custom | any | any | any |
+
+Costs through a gateway: Claude Code's own estimate uses Anthropic's prices. Polpo records every
+turn's tokens and marks the cost's source on the run (`runContext.cost.costSource`): `gateway` when
+the gateway reports a cost in a response header (best effort: `x-litellm-response-cost` and similar),
+`runtime` (Anthropic directly), `runtime-estimate` (Claude models through a gateway: approximate),
+`tokens-only` (non-Claude models and Codex through a gateway: no reliable price, the cost is not
+recorded).
+
+## Credential brokering
+
+The runtime in the VM needs to call its model, but the VM should not hold the key: an agent (or
+anything it runs) could read it. The AI SDK harness supports **credential brokering**: when the
+sandbox session implements `addRequestTransformations` / `setRequestTransformations`, it puts a
+random placeholder (`aisdkhc_…`) in the VM instead of the key and registers request transformations
+("requests to host H whose `x-api-key` is the placeholder get `x-api-key: <key>`") that the sandbox
+applies **outside** the VM. Polpo's sandbox session implements them once, for **every computer
+provider** (`src/harness/sandbox-session.ts`):
+
+- **Native**: a provider that can rewrite its VMs' outbound requests itself (e.g. a sandbox network
+  policy that injects headers) implements the optional `RemoteDriver.requestTransformations(rules,
+  { replace })` capability; the rules go to the provider and the VM calls the upstream directly.
+- **Polpo's model relay** (any provider without it: Daytona v2, Daytona v0, E2B…): the VM's base URL
+  becomes `<POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>`, and the rules are applied by Polpo.
+
+Both get the same rules with the same semantics: the SDK's credential rules (presented as the
+gateway's `authScheme` wants: `x-api-key`, a Bearer token, or removed) and Polpo's own rules for the
+gateway headers (host = the upstream's). Credential headers the VM sends (`authorization`,
+`x-api-key`, `cookie`) are always dropped; only rule headers reach the upstream; in Polpo's rules a
+header value `""` removes the header.
+
+The relay (`src/harness/relay.ts`):
+
+```
+VM ──https──▶ <POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>/v1/messages   (Funnel / proxy)
+   ──▶ Polpo server: a pipe, never sees a key
+   ──unix socket──▶ the run's lease (in the process that runs the task and holds the key)
+   ──https──▶ <upstream>/v1/messages   (placeholder swapped, gateway headers added)
+```
+
+- **One lease per run**: a random 256-bit token (the VM's base URL), a unix socket named by the
+  token's hash in a 0700 directory (`/tmp/polpo-relay-<hash of the .polpo dir>/`, or
+  `POLPO_RELAY_SOCKET_DIR`), the run's rules and its upstream. Suspended (503) while the computer
+  hibernates, resumed when the session re-attaches, **revoked when the run ends** (or its session is
+  stopped or reset; the socket is removed). Tokens are never logged; transcripts scrub them.
+- **Rule matching follows the AI SDK type**: `host`, `path` (`exact` / `startsWith` / `regex`),
+  `method`, `queryString` and `headers` key/value matchers (header names case-insensitive). The SDK
+  registers its rules for the base URL it was given, i.e. the relay's public host and path
+  (`/<instance>/api/v1/harness-relay/<token>`); Polpo's gateway rules are for the upstream host. A
+  rule matches when it matches the request **as the VM sent it** (relay URL) or **as it goes
+  upstream** (upstream URL), host and path from the same view. A request that no credential rule of
+  the session matches (a stale placeholder) is refused (401).
+- **Not an open proxy**: the upstream is the configured base URL (`https://api.anthropic.com`,
+  `https://api.openai.com/v1`, the gateway's); a path that would leave it (`..`, encoded dots,
+  slashes or backslashes) is refused; redirects are not followed.
+- **Streaming**: bodies pass through untouched in both directions (SSE included) with backpressure
+  (a chunk is read from the upstream when the VM takes one); `anthropic-beta`, `anthropic-version`
+  and the other request headers pass through; `accept-encoding: identity` upstream. The VM's
+  disconnect aborts the upstream request. Timeouts: 10 min to the upstream's first byte, 5 min
+  between chunks.
+- Mounted before the API rate limit (an agent turn makes many calls) and outside the dashboard's
+  authentication: the token authenticates.
+
+**What the host needs.** Computers reach the relay at `POLPO_PUBLIC_URL`. On an instance published
+through Tailscale Funnel with a path per instance (`POLPO_PUBLIC_URL=https://<host>/<instance>`),
+expose one more path (Funnel strips the mount path):
+
+```bash
+tailscale funnel --bg --set-path /<instance>/api/v1/harness-relay http://127.0.0.1:<port>/api/v1/harness-relay
+```
+
+It is safe to expose: without a live run's token every request gets the same 401. Without
+`POLPO_PUBLIC_URL` Polpo **falls back** to forwarding the key into the VM (as before), with a warning
+in the server log, in the run's transcript and in Settings → Harnesses (`GET /api/v1/harnesses`
+returns `relay.available: false` and `brokering: "in-vm"`). Secret gateway headers then go with the
+requests from the VM too (`ANTHROPIC_CUSTOM_HEADERS` / Codex `http_headers`); a Codex gateway with
+`authScheme: "x-api-key"` needs the relay.
+
+**Bedrock and Vertex** sign every request (SigV4, Google OAuth) inside the runtime, so their
+credentials cannot be swapped on the way out: they still go into the VM. To keep them out, put a
+gateway in front (e.g. LiteLLM or Portkey with Bedrock/Vertex behind it, or Cloudflare AI Gateway)
+and use `auth: "gateway"`. Runs on this server (`allowHost`) are not brokered: the runtime already
+runs next to Polpo's files (isolated HOME).
+
+## Connection test
+
+`POST /api/v1/harnesses/test { harness, settings?, agent? }` (MCP `polpo_harnesses_test`, Polpo
+`harnesses_test`, the **Test connection** button; run after every save in the dashboard) sends one
+tiny request **from the Polpo server, never the VM**, with the configured authentication and model
+(the saved settings, the ones being edited in `settings`, or `agent`'s own key and model):
+
+- Anthropic format (API key, Vercel AI Gateway, gateways for Claude Code): `POST {base}/v1/messages`,
+  `stream: true`, `max_tokens: 16`, one trivial tool with `tool_choice: any`; passes on
+  `message_start` → a `tool_use` block → `message_stop` (Claude Code needs streaming and tools).
+- OpenAI Responses (Codex): `POST {base}/responses`, `stream: true`, `max_output_tokens: 16`, one
+  function tool; passes on `response.completed` (or `response.incomplete` at the token limit).
+- Bedrock: a minimal Converse call with the model (Bedrock API key, or SigV4 with access keys).
+- Vertex AI: a minimal `rawPredict` (the service account's OAuth token).
+
+The result: `{ ok, latencyMs, model, endpoint, status, errorKind?, error?, note? }`, `errorKind` one of
+`config` (settings or vault entry), `auth`, `model` (not available to the account / unknown id),
+`network`, `timeout`, `protocol` (no streaming or tools), `upstream`; the error says what to change,
+with secrets scrubbed. Defaults when no model is set: `claude-haiku-4-5`, `gpt-5-mini` (or their
+`anthropic/…`, `openai/…` ids on the AI Gateway), Haiku 4.5 on Bedrock / Vertex.
 
 ### From Polpo's chat
 
@@ -194,8 +357,9 @@ sessions that are live and sessions updated in the last 10 minutes.
   Haiku 4.5, $0.007 for the next). Budget runs with `maxBudgetUsd`.
 - The VM: about 640 MB of memory in use during a turn, the bridge about 92 MB between turns; 400 MB of
   disk for the bootstrap.
-- The credential is visible to processes inside the VM (the runtime needs it); use a dedicated,
-  scoped key per instance.
+- With an API key or a gateway, the key stays on the Polpo server when the model relay is reachable
+  (the VM has a placeholder). Bedrock / Vertex credentials, and every key when `POLPO_PUBLIC_URL` is
+  not set, are visible to processes inside the VM: use a dedicated, scoped key per instance.
 - Phase 1 runs **tasks**. Chats with an agent on a harness still run on Polpo's engine (with the
   agent's model). Codex has no budget limit and no Polpo-side cost (OpenAI does not report one in the
   stream). E2B and Daytona v0 computers are refused. Interactive approvals for `allow-edits` /

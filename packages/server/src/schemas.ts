@@ -267,8 +267,11 @@ export const UpdateSettingsSchema = z.object({
   }).nullable().optional(),
   /**
    * Official agent harnesses agents may run on (agent.engine): { enabled: ["claude-code" | "codex"],
-   * allowHost?, "claude-code"?: { auth: "api-key" | "bedrock" | "vertex", credentialRef: { owner, service },
-   * bedrock?: { region }, vertex?: { region, projectId }, model? }, codex?: { auth: "api-key", credentialRef, model? } }.
+   * allowHost?, "claude-code"?: { auth: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway", credentialRef: { owner, service },
+   * bedrock?: { region }, vertex?: { region, projectId }, gateway?: {...}, model? }, codex?: { auth: "api-key" | "ai-gateway" | "gateway",
+   * credentialRef | gateway, model? } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" |
+   * "openai-responses", baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
+   * field?, prefix?, value? }], models?: { main, haiku?, sonnet?, opus? }, nonClaude? }.
    * Credentials are vault references only (a Claude subscription is refused). Replaces it; null removes it.
    */
   harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -505,6 +508,8 @@ export const AgentEngineSchema = z.union([
     permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
     maxBudgetUsd: z.number().positive().max(10000).optional(),
+    /** This agent's own credential (cost separation): a vault reference that replaces the harness's API key or gateway key. */
+    credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional(),
   }),
 ]);
 

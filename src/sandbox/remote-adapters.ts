@@ -47,6 +47,14 @@ export interface RemoteDriver {
    * VM without Polpo commands): keeps a computer from hibernating as idle. Optional.
    */
   hold?(): () => void;
+  /**
+   * Native credential brokering (optional provider capability): the provider rewrites the VM's
+   * outbound HTTPS requests outside the VM (e.g. a sandbox network policy that injects headers),
+   * with the semantics of the AI SDK's request transformations (see
+   * HarnessMachine.nativeRequestTransformations). Providers without it are brokered by Polpo's
+   * model relay, so a provider only implements this when it can do it natively.
+   */
+  requestTransformations?(rules: ReadonlyArray<import("../harness/types.js").RequestTransformation>, opts: { replace: boolean }): Promise<void>;
 }
 
 /** A process started with RemoteDriver.spawn. */

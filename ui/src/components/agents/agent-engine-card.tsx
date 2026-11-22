@@ -1,8 +1,10 @@
 /**
  * The agent's engine: Polpo's own, or an official harness (Claude Code, Codex) running in its
  * computer. Only harnesses enabled in Settings → Harnesses are offered; the server refuses an
- * engine the agent's computer cannot run (shown as the error). Model, permission mode, effort and
- * a per-run budget are the harness options. `PATCH /agents/:name { engine }`.
+ * engine the agent's computer cannot run (shown as the error). Model, permission mode, effort, a
+ * per-run budget and the agent's own key (a vault reference that replaces the harness's API key or
+ * gateway key, for cost separation) are the harness options. `PATCH /agents/:name { engine }`;
+ * after a save the connection is tested with the agent's settings.
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -12,10 +14,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
+import { HarnessTestLine } from "@/components/config/harnesses-section";
 import { authBrand, AUTH_LABELS, engineBrand, engineLabel } from "@/lib/run-context";
 import {
   HARNESS_NAMES, harnessesApi,
-  type AgentHarnessEngine, type HarnessEffort, type HarnessesOverview, type HarnessId, type HarnessPermissionMode, type HarnessSession,
+  type AgentHarnessEngine, type HarnessEffort, type HarnessesOverview, type HarnessId, type HarnessPermissionMode, type HarnessSession, type HarnessTestResult,
 } from "@/lib/harnesses-api";
 import { useAgentDetail } from "./agent-detail-context";
 
@@ -28,6 +32,7 @@ export function AgentEngineCard() {
   const [sessions, setSessions] = useState<HarnessSession[]>([]);
   const [draft, setDraft] = useState<AgentHarnessEngine | "polpo">(current ?? "polpo");
   const [saving, setSaving] = useState(false);
+  const [test, setTest] = useState<HarnessTestResult | "running" | undefined>();
 
   useEffect(() => { setDraft(current ?? "polpo"); }, [current]);
   useEffect(() => {
@@ -49,6 +54,13 @@ export function AgentEngineCard() {
       await harnessesApi.setEngine(agentName, draft);
       await refetch();
       toast.success(draft === "polpo" ? "Runs on Polpo's engine" : `Runs on ${HARNESS_NAMES[draft.harness]}`);
+      // check it right away: one tiny model request from the Polpo server, with this agent's key and model
+      if (draft !== "polpo") {
+        setTest("running");
+        harnessesApi.test(draft.harness, { agent: agentName }).then(setTest, (e: Error) => setTest({ ok: false, harness: draft.harness, latencyMs: 0, errorKind: "config", error: e.message }));
+      } else {
+        setTest(undefined);
+      }
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -98,6 +110,17 @@ export function AgentEngineCard() {
               </select>
               <Input className="h-8 w-32 text-xs" type="number" min={0} step={0.5} placeholder="Budget $/run" value={harness.maxBudgetUsd ?? ""}
                 onChange={(e) => set({ maxBudgetUsd: e.target.value ? Number(e.target.value) : undefined })} aria-label="Budget per run (USD)" />
+              {(() => {
+                const s = overview.harnesses.find((h) => h.id === harness.harness);
+                // its own key replaces an API key or a gateway key (not Bedrock / Vertex, not a keyless gateway)
+                const can = s?.auth && s.auth !== "bedrock" && s.auth !== "vertex" && s.gateway?.authScheme !== "none";
+                return can || harness.credentialRef ? (
+                  <div className="w-64" title="This agent's own key (cost separation): replaces the harness's key for its runs">
+                    <VaultRefPicker value={harness.credentialRef} onChange={(ref) => set({ credentialRef: ref ?? undefined })} requiredKeys={["apiKey"]}
+                      placeholder="Own key (optional): the harness's" aria-label="Agent's own harness key" />
+                  </div>
+                ) : null;
+              })()}
             </>
           )}
           <Button size="sm" className="h-8 text-xs" disabled={!changed || saving} onClick={() => void save()}>
@@ -110,6 +133,7 @@ export function AgentEngineCard() {
             : "Polpo's own engine, with any model of the instance. Harnesses are set up in "}
           <Link to="/config?section=harnesses" className="underline">Settings → Harnesses</Link>.
         </p>
+        <HarnessTestLine result={test} />
         {sessions.length > 0 && (
           <p className="text-muted-foreground" data-testid="agent-harness-sessions">
             {sessions.length} harness session(s) · ${sessions.reduce((t, s) => t + s.costUsd, 0).toFixed(4)} so far

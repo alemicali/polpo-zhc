@@ -85,6 +85,8 @@ The provider redirects the person's browser to the callback, so it must be reach
 
 With a path prefix (`POLPO_PUBLIC_URL=https://host.ts.net/<name>`), that is `/<name>/api/v1/connectors/oauth/callback` and `/<name>/api/v1/connectors/oauth/client-metadata.json`. Both are safe to expose: the callback only accepts a valid single-use state, and the metadata document is public by design. Everything else under `/api/v1/connectors` stays behind the API key.
 
+Agents on Claude Code / Codex in remote computers also need `/<name>/api/v1/harness-relay` (Polpo's model relay, which keeps their model keys out of the VMs; authenticated by a per-run token): `tailscale funnel --bg --set-path /<name>/api/v1/harness-relay http://127.0.0.1:<port>/api/v1/harness-relay`. See [harnesses.md](harnesses.md#credential-brokering).
+
 ## Google (Gmail, Calendar, Drive, Docs, Sheets, Slides, Chat, People, Workspace search, Google Cloud)
 
 Google publishes official remote MCP servers (Workspace servers are a Developer Preview). They need a pre-registered client, set up once and shared by every Google connector:

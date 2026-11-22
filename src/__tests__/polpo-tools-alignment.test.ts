@@ -5,7 +5,7 @@
  * out of the chat (setup links), need confirm for destructive actions; the essential ones are up
  * front and the rest load on demand; the prompt says what Polpo can do.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,6 +136,39 @@ describe("the bridged tools on a real instance", () => {
     const wait = await run("setup_wait", { setup_id: "vault:agent-1:anthropic", timeout_seconds: 0 });
     expect(wait).toMatch(/Still waiting for vault:agent-1:anthropic/);
     expect(await run("harnesses_get")).toMatch(/MISSING in the vault/);
+  });
+
+  it("harnesses_update: a custom gateway (Cloudflare) with a secret header from the vault; secrets never as literals; harnesses_test runs", async () => {
+    await polpo.getVaultStore()!.set("agent-1", "cf", { type: "api_key", credentials: { token: "cf-token" } } as any);
+    await polpo.getVaultStore()!.set("agent-1", "openai", { type: "api_key", credentials: { apiKey: "sk-test" } } as any);
+    const cf = {
+      preset: "cloudflare", format: "anthropic", base_url: "https://gateway.ai.cloudflare.com/v1/acc/gw/anthropic", auth_scheme: "none",
+      headers: [{ name: "cf-aig-authorization", credential_ref: { owner: "agent-1", service: "cf" }, field: "token", prefix: "Bearer " }],
+    };
+    const r = await run("harnesses_update", { enabled: ["claude-code"], claude_code: { auth: "gateway", gateway: cf } });
+    expect(r).not.toMatch(/^Error/);
+    expect(r).toMatch(/auth gateway, gateway cloudflare https:\/\/gateway\.ai\.cloudflare\.com\/v1\/acc\/gw\/anthropic \[none\], headers cf-aig-authorization=agent-1\/cf/);
+    expect(r).toMatch(/key in the VM \(no POLPO_PUBLIC_URL\)/);
+    // a header refers to an entry that does not exist: refused (no setup link for headers)
+    const missing = await run("harnesses_update", { claude_code: { gateway: { headers: [{ name: "x-k", credential_ref: { owner: "agent-1", service: "gone" } }] } } });
+    expect(missing).toMatch(/^Error: .*ops|^Error: .*agent-1 \/ gone does not exist/);
+    // a literal that looks like a key is refused
+    expect(await run("harnesses_update", { claude_code: { gateway: { headers: [{ name: "x-k", value: "sk-live-0123456789abcdef0123" }] } } })).toMatch(/^Error: .*looks like a secret/);
+    // Codex on the Vercel AI Gateway
+    expect(await run("harnesses_update", { codex: { auth: "ai-gateway", gateway: { credential_ref: { owner: "agent-1", service: "openai" } }, model: "openai/gpt-5" } })).toMatch(/Codex \(codex\): disabled, auth ai-gateway, gateway \(Vercel AI Gateway\)/);
+    // the test tool reaches the route; the gateway is mocked (no live call): a labelled failure
+    const realFetch = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) =>
+      String(input).startsWith("https://ai-gateway.vercel.sh/") ? new Response('{"error":{"message":"Invalid API key"}}', { status: 401 }) : realFetch(input, init));
+    try {
+      const t = await run("harnesses_test", { harness: "codex" });
+      expect(t).toMatch(/^codex: FAILED \(auth\) after \d+ ms — Vercel AI Gateway: authentication failed/);
+      expect(spy.mock.calls.some(([u]) => String(u) === "https://ai-gateway.vercel.sh/v1/responses")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+    // back to an API key for the next tests
+    await run("harnesses_update", { claude_code: { auth: "api-key", credential_ref: { owner: "agent-1", service: "anthropic" }, gateway: null }, codex: null });
   });
 
   it("refuses a Claude subscription and bad input, as the MCP server does", async () => {
