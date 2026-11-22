@@ -34,7 +34,7 @@ export function ComputerCard({
 }) {
   const image = computer.snapshot ? `snapshot ${computer.snapshot}` : computer.image ? `image ${computer.image}` : computer.template ? `template ${computer.template}` : null;
   return (
-    <div data-testid={`computer-card-${computer.id}`} className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+    <div data-testid={`computer-card-${computer.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40"><Monitor className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1">

@@ -291,7 +291,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-out",
+        "relative flex h-full flex-col border-r border-sidebar-border sidebar-surface text-sidebar-foreground transition-all duration-300 ease-out",
         collapsed ? "w-[56px]" : "w-64"
       )}
     >
