@@ -67,7 +67,7 @@ import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
-import { computerRoutes } from "./routes/computers.js";
+import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -1291,6 +1291,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     rooms: o.getRoomStore(),
     engine: o.getRoomEngine(),
     agentNames: async () => (await o.getAgents()).map(a => a.name),
+    sessions: o.getSessionStore() ?? undefined,
     emit: (event, payload) => o.emit(event, payload),
     emitDeleted: (roomId) => o.emit("room:deleted", { roomId }),
   })));
@@ -1456,11 +1457,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     settings: () => o.getConfig()?.settings,
     redirectUri: (c) => `${publicOrigin(c)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
   }));
-  authed.route("/computers", computerRoutes({
+  const computerDeps: ComputerRouteDeps = {
     computers: () => o.getConfig()?.settings?.computers ?? [],
     settings: () => o.getConfig()?.settings,
     agents: () => o.getAgents(),
-    manager: () => computerManagerWithEvents(o.getPolpoDir(), (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` })),
+    manager: () => computerManagerWithEvents(
+      o.getPolpoDir(), (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` }),
+      () => o.getConfig()?.settings?.computers ?? [],
+    ),
     save: async (computers) => {
       const { savePolpoSettingsKey } = await import("../core/config.js");
       savePolpoSettingsKey(o.getPolpoDir(), "computers", computers.length ? computers : undefined);
@@ -1469,7 +1473,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
     instance: () => o.getConfig()?.project,
     emit: (payload) => o.emit("computer:changed", payload),
-  }));
+  };
+  authed.route("/computers", computerRoutes(computerDeps));
+  // every egress proxy and every remote computer's egress (read-only)
+  authed.route("/egress", egressRoutes(computerDeps));
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { Scheduler } from "../scheduling/scheduler.js";
-import { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "../scheduling/cron.js";
+import { parseCron, matchesCron, nextCronOccurrence, isCronExpression, scheduleExpressionProblem } from "../scheduling/cron.js";
 import { HookRegistry } from "../core/hooks.js";
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore } from "./fixtures.js";
@@ -142,6 +142,30 @@ describe("Cron Parser", () => {
 
     it("throws on invalid expression", () => {
       expect(() => parseCron("* * *")).toThrow("expected 5 fields");
+    });
+
+    it("is strict: out-of-range values, a step of 0 and backwards ranges are errors (live: '99 99 * * *' was accepted and never ran)", () => {
+      expect(() => parseCron("99 99 * * *")).toThrow(/minute "99": 99 is not between 0 and 59/);
+      expect(() => parseCron("0 24 * * *")).toThrow(/hour "24": 24 is not between 0 and 23/);
+      expect(() => parseCron("*/0 * * * *")).toThrow(/step must be at least 1/);
+      expect(() => parseCron("0 9 * * 5-1")).toThrow(/goes backwards/);
+      expect(() => parseCron("0 9 * * x")).toThrow(/not a number/);
+      expect(() => parseCron("0 9 32 * *")).toThrow(/day of month/);
+      // still fine
+      expect(parseCron("0 9 * * 1-5").dayOfWeek.values.size).toBe(5);
+      expect(parseCron("5/15 * * * *").minute.values).toEqual(new Set([5, 20, 35, 50]));
+    });
+  });
+
+  describe("scheduleExpressionProblem", () => {
+    const now = new Date("2026-11-21T12:00:00Z");
+    it("explains a bad cron, a cron that never fires, a non-date and a past one-shot; null when fine", () => {
+      expect(scheduleExpressionProblem("99 99 * * *", { now })).toMatch(/^Invalid cron expression "99 99 \* \* \*": minute "99": 99 is not between 0 and 59\. Use 5 fields/);
+      expect(scheduleExpressionProblem("0 0 31 2 *", { now })).toMatch(/never fires within a year/);
+      expect(scheduleExpressionProblem("next tuesday", { now })).toMatch(/neither a cron expression .* nor a date/);
+      expect(scheduleExpressionProblem("2026-01-01T09:00:00Z", { now })).toMatch(/in the past/);
+      expect(scheduleExpressionProblem("0 3 1 1 *", { now, recurring: true })).toBeNull();
+      expect(scheduleExpressionProblem("2027-01-01T09:00:00Z", { now })).toBeNull();
     });
   });
 
@@ -524,6 +548,34 @@ describe("Scheduler.runNow", () => {
       expect(ran.lastRunAt).toEqual(expect.any(String));
       expect(ran.nextRunAt).toBe(next);
       expect(events).toEqual(["triggered"]);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it("a paused schedule stays paused after a run now (live: the finished run re-registered it enabled)", async () => {
+    const store = new MissionAwareStore();
+    const ctx = createMockCtx(store);
+    const scheduler = new Scheduler(ctx, { checkIntervalMs: 0 });
+    scheduler.setExecutor(vi.fn());
+    try {
+      await scheduler.init();
+      const mission = await store.saveMission({ name: "digest", data: JSON.stringify({ tasks: [{ title: "A", description: "A" }] }), status: "recurring" });
+      Object.assign(mission, { schedule: "0 3 1 1 *" });
+      scheduler.registerMission(mission);
+      scheduler.setEnabled(mission.id, false);
+      const ran = scheduler.runNow(mission.id);
+      expect(ran.enabled).toBe(false);
+      // the run finishes: the mission is back to "recurring" and the scheduler registers it again
+      ctx.emitter.emit("mission:completed", { missionId: mission.id, group: "digest", allPassed: true, report: {} as any });
+      await vi.waitFor(() => expect(scheduler.getScheduleByMissionId(mission.id)!.lastRunAt).toBe(ran.lastRunAt));
+      expect(scheduler.getScheduleByMissionId(mission.id)!.enabled).toBe(false);
+      expect(scheduler.getActiveSchedules()).toEqual([]);
+      // a changed expression keeps the pause too
+      Object.assign(mission, { schedule: "0 4 1 1 *" });
+      expect(scheduler.rescheduleMission(mission)!.enabled).toBe(false);
+      // resuming is explicit
+      expect(scheduler.setEnabled(mission.id, true)!.enabled).toBe(true);
     } finally {
       scheduler.dispose();
     }

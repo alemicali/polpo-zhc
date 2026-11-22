@@ -5,6 +5,9 @@
  * where agents run); reset and delete need confirm: true.
  */
 import { z } from "zod";
+import type { ComputerConfig } from "@polpo-ai/core";
+import { describeComputerEgress, type ComputerEgressStatus } from "../../sandbox/computers.js";
+import type { EgressOverview } from "../routes/computers.js";
 import { DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, type McpDeps, type Register } from "./kit.js";
 
 type Computer = {
@@ -55,7 +58,8 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     title: "Create or change a computer",
     description: "Create a computer (a persistent machine for agents) or change one. Its machine is created on first use or with start: true, "
       + "stops (or pauses) after lifecycle.idleStopMinutes without use (default 15) and is never deleted automatically. Image, snapshot, "
-      + "template, size and network apply to a new machine (reset). Make it an agent's default with polpo_agent_update defaultComputer. "
+      + "template and size apply to a new machine (reset); so does the network, except on Daytona v2 where it applies at the next start or wake "
+      + "(and v2 allowlists take host names only: IP addresses are refused). Allowlist entries are checked when saved. Make it an agent's default with polpo_agent_update defaultComputer. "
       + "Ask the person first: a running machine costs money.",
     inputSchema: {
       id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "lowercase letters, digits and -").describe("Slug, e.g. nina"),
@@ -72,7 +76,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
         autoArchiveDays: z.number().int().min(1).max(30).optional().describe("Daytona: archive after this many days stopped"),
       }).nullable().optional().describe("When it stops and archives by itself (it is never deleted automatically)"),
       network: z.object({ mode: z.enum(["deny", "allowlist", "open", "unrestricted"]), allow: z.array(z.string()).optional() }).nullable().optional()
-        .describe("Network rule (fixed when the machine is created); default the instance's"),
+        .describe("Network rule; default the instance's. allow: host names (\"*.example.com\" covers subdomains); Daytona v2 takes host names only"),
       egress: z.string().nullable().optional().describe("Egress proxy name (settings.egressProxies) for its agents' browsers; a remote computer reaches it through Tailscale in its VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"),
       volumes: z.array(z.union([z.string(), looseObject])).nullable().optional().describe("Volumes attached to runs on it (names granted to the agent)"),
       start: z.boolean().optional().describe("Create: start the machine now"),
@@ -115,7 +119,42 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/computers/${enc(id)}/${action}`, action === "reset" ? { confirm: true } : undefined);
     if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `${action} of computer ${id}`);
     const c = r.data as Computer;
-    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}`, { computer: c });
+    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}${c.note ? `\nNote: ${c.note}.` : ""}`, { computer: c });
+  });
+
+  tool("computers", "polpo_egress_status", {
+    title: "Egress status",
+    description: "Where agents' browsers go out to the internet: each egress proxy (settings.egressProxies, e.g. a residential line) — "
+      + "whether this server reaches it and which agents (browser on this server) and host computers use it — and each remote computer "
+      + "with an egress, as seen from its VM through Tailscale (tailnet up/down, node, path, proxy reachable, where its browser goes out now). "
+      + "Read-only: a stopped or hibernated computer is not started (its egress is checked again when it wakes). With computer, one computer.",
+    inputSchema: { computer: z.string().min(1).optional().describe("One computer's id (polpo_computers_list)") },
+    outputSchema: {
+      proxies: z.array(z.object({ name: z.string(), reachable: z.boolean(), agents: z.array(z.string()), hostComputers: z.array(z.string()) }).passthrough()),
+      unknown: z.array(z.object({ agent: z.string(), proxy: z.string() }).passthrough()).describe("Agents naming a proxy that does not exist"),
+      computers: z.array(z.object({ computerId: z.string() }).passthrough()),
+    },
+    annotations: READ,
+  }, async ({ computer }) => {
+    if (computer) {
+      const r = await apiGet(deps, `/computers/${enc(computer)}/egress`);
+      if (!r.ok) return r.status === 404 ? notFound(computer) : apiError(r, `Egress of computer ${computer}`);
+      const s = r.data as ComputerEgressStatus & { egress?: null; note?: string };
+      if (s.egress === null) return ok(`Computer ${computer} has no egress: its browser goes out directly.`, { proxies: [], unknown: [], computers: [s] });
+      if (s.tailnet === null) return ok(`Computer ${computer} runs on this server and uses ${s.proxy} directly (no tailnet).`, { proxies: [], unknown: [], computers: [s] });
+      const kind = ((await apiGet(deps, `/computers/${enc(computer)}?live=0`)) as { data?: { kind?: string } }).data?.kind ?? "remote";
+      return ok(describeComputerEgress({ id: computer, kind: kind as ComputerConfig["kind"] }, s), { proxies: [], unknown: [], computers: [{ ...s, kind }] });
+    }
+    const r = await apiGet(deps, "/egress");
+    if (!r.ok) return apiError(r, "Egress status");
+    const o = r.data as EgressOverview;
+    const lines = [
+      ...(o.proxies.length ? o.proxies.map((p) => `- ${p.name}: ${p.reachable ? "reachable from this server" : "UNREACHABLE from this server (browsers go out directly; profiles signed in through it pause)"}`
+        + `; agents: ${p.agents.join(", ") || "none"}${p.hostComputers.length ? `; host computers: ${p.hostComputers.join(", ")}` : ""}`) : ["No egress proxies (settings.egressProxies): every browser goes out directly."]),
+      ...(o.unknown.length ? [`Agents naming a proxy that does not exist: ${o.unknown.map((u) => `${u.agent} (${u.proxy})`).join(", ")}`] : []),
+      ...(o.computers.length ? ["Remote computers (through Tailscale in their VM):", ...o.computers.map((s) => `- ${describeComputerEgress({ id: s!.computerId, kind: s!.kind as ComputerConfig["kind"] }, s!)}`)] : []),
+    ];
+    return ok(lines.join("\n"), o as unknown as Record<string, unknown>);
   });
 
   tool("computers", "polpo_computer_delete", {

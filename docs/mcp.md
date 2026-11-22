@@ -10,7 +10,7 @@ Every Polpo server is also an [MCP](https://modelcontextprotocol.io) server. Cla
 
 The connector exposes tools designed for what people do, rather than one tool per endpoint. They are named `polpo_<area>_<verb>` (the same vocabulary as the hosted Polpo Cloud connector) and grouped in **toolsets**.
 
-Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), described parameters, and, when it returns data, an `outputSchema` with `structuredContent` plus a short text for the model. Lists take `limit` and `cursor` and return `next_cursor`. Errors come back as `isError` results that say what to do next.
+Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), described parameters, and, when it returns data, an `outputSchema` with `structuredContent` plus a short text for the model. Output schemas are open (`additionalProperties` allowed): a field added later never makes an SDK client (Claude Code, Cursor) reject a result, and the tests validate every result against its schema with the SDK's own Ajv validator. Lists take `limit` and `cursor` and return `next_cursor`. Errors come back as `isError` results that say what to do next.
 
 ### core (on by default)
 
@@ -29,10 +29,11 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 |---|---|---|
 | `polpo_tasks_list` | Tasks by status, agent, mission, group or words; paged. | read-only |
 | `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies and its latest activity. | read-only |
-| `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). | write |
+| `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). `dependsOn` takes ids of existing tasks: an unknown id is refused (it would keep the task pending for ever). | write |
 | `polpo_task_update` | Change the description, agent, retries or side-effects flag, or start a draft; returns what changed. | write, idempotent |
 | `polpo_task_retry` | Run a failed task again. | write |
 | `polpo_task_kill` | Stop a running or waiting task (`confirm: true`). | destructive |
+| `polpo_task_delete` | Delete a task and its result for good (`confirm: true`); a running task is stopped first with `polpo_task_kill`. | destructive |
 | `polpo_task_direct` | Steer a running task, add a follow-up, or continue a finished one. | write |
 | `polpo_task_wait` | Wait until a task is done, failed, in review or waiting for approval (or given statuses), at most 55 s; returns its state, so call again to keep waiting. | read-only |
 | `polpo_task_logs` | The activity of the task's runs, newest first, paged backwards. | read-only |
@@ -46,7 +47,8 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_mission_update` | Rename, or replace its tasks, checkpoints, delays or quality gates (not while it runs). | write, idempotent |
 | `polpo_mission_run` | Start a draft, scheduled or finished mission, or resume a paused one. | write, open world |
 | `polpo_mission_abort` | Stop a running mission and its unfinished tasks (`confirm: true`; without it, it says what would stop). | destructive |
-| `polpo_mission_wait` | Wait until it is completed, failed, cancelled or paused, at most 55 s; returns the status and task counts. | read-only |
+| `polpo_mission_delete` | Delete a mission, its schedule and its tasks for good (`confirm: true`); a running mission is aborted first. | destructive |
+| `polpo_mission_wait` | Wait until it is completed, failed, cancelled or paused, at most 55 s; returns the status and task counts. A scheduled or recurring mission never completes: the wait is reached when its current (or latest) run has finished (every task of that run done or failed), with `run: { number, outcome: "completed" \| "failed", task_counts }`; one that never ran keeps waiting for its first run. | read-only |
 | `polpo_playbooks_list`, `polpo_playbook_run` | Reusable mission templates, run with their parameters. | read-only / write |
 
 `polpo_task_wait` and `polpo_mission_wait` send `notifications/progress` when the client passes a `progressToken`: that request is then answered as an event stream.
@@ -56,7 +58,7 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | Tool | What it does | Annotations |
 |---|---|---|
 | `polpo_agent_get` | An agent's configuration: role, model, instructions, tools, skills, identity. | read-only |
-| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity, manager or browser egress proxy (`browserEgress`, a name from the settings' egress proxies). | write |
+| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity, manager or browser egress proxy (`browserEgress`, a name from the settings' egress proxies). `computers: null` (or `[]`) clears its list of computers. | write |
 | `polpo_agent_delete` | Remove an agent (`confirm: true`). | destructive |
 | `polpo_agent_avatar_set` | An agent's picture, from a public https URL, a file of the instance or base64 (checked by its bytes); `remove: true` removes it. | write, idempotent |
 | `polpo_teams_list` | The teams and their agents. | read-only |
@@ -88,7 +90,7 @@ Group chats of people and agents (the dashboard's groups).
 |---|---|---|
 | `polpo_rooms_list` | Rooms, newest first; with `id`, one room in full (agents, goal, owner, reply settings, who is answering now). | read-only |
 | `polpo_room_create`, `polpo_room_update` | Open a room with agents, a goal and an owner; rename it, change its agents, goal, owner or reply settings. | write / write, idempotent |
-| `polpo_room_delete` | Delete a web room and its transcript (`confirm: true`); Telegram groups are not deleted here. | destructive |
+| `polpo_room_delete` | Delete a web room, its transcript and its agents' "(group)" sessions (`confirm: true`); Telegram groups are not deleted here. | destructive |
 | `polpo_room_messages` | The transcript, latest page first, older pages with `cursor`; `latest_id` is where to wait from. | read-only |
 | `polpo_room_post` | Write as the connected person (the principal's name): `@agent` mentions and `reply_to_id` call agents in, as on the web. Returns the message id. | write, open world |
 | `polpo_room_wait` | Wait (at most 55 s) for messages after `after_id`: by default until an agent answered and none is still typing. | read-only |
@@ -124,13 +126,14 @@ Group chats of people and agents (the dashboard's groups).
 | Tool | What it does | Annotations |
 |---|---|---|
 | `polpo_schedules_list` | Scheduled missions (cron or a time, paused or not, next and last run); with `mission_id`, its recent runs' tasks. | read-only |
-| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`). | write / write, idempotent |
-| `polpo_schedule_run` | Run a scheduled mission now (the next scheduled run stays). | write, open world |
+| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`). The expression is checked first: a cron with a value out of range (e.g. `99 99 * * *`) or a past time is refused with the reason. | write / write, idempotent |
+| `polpo_schedule_run` | Run a scheduled mission now (the next scheduled run stays; a paused schedule stays paused). | write, open world |
 | `polpo_schedule_delete` | Remove the schedule; the mission stays as a draft (`confirm: true`). | destructive |
 | `polpo_checks_list` | Recurring checks and reminders: what Polpo or an agent does on a schedule and reports in a chat; proposed ones wait for a yes. | read-only |
 | `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. | write |
 | `polpo_check_update` | Change the instructions, message, schedule or limits; `confirm: true` approves a proposed check. | write, idempotent |
-| `polpo_check_cancel` | Stop a check for good (`confirm: true`). | destructive |
+| `polpo_check_cancel` | Stop a check for good (`confirm: true`); it stays listed as cancelled. | destructive |
+| `polpo_check_delete` | Delete a check's record (cancelled, ended or still active: it stops first; `confirm: true`). Its reports stay in their chat. | destructive |
 
 ### connectors (on by default; changes need `polpo:admin`)
 
@@ -163,9 +166,10 @@ Computers are persistent machines agents work on (Daytona or E2B; see `docs/comp
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_computers_list` | "host" (this server) and each computer with its live status (running, stopped, paused, archived, creating, error; missing = not created yet), last use, uptime and the agents using it; with `id`, one computer. | read-only |
-| `polpo_computer_save` | Create a computer (`kind` needed) or change one (only the fields given; `null` clears). `start: true` creates the machine now; otherwise it is created on first use. | write, idempotent |
-| `polpo_computer_control` | `start`, `stop`, `restart`, or `reset` (delete the machine and create a new one: needs `confirm: true`). | destructive, open world |
+| `polpo_computers_list` | "host" (this server) and each computer with its live status (running, stopped, paused, hibernated, archived, creating, error; missing = not created yet), last use, uptime, last snapshot and the agents using it; with `id`, one computer. | read-only |
+| `polpo_computer_save` | Create a computer (`kind` needed) or change one (only the fields given; `null` clears). `start: true` creates the machine now; otherwise it is created on first use. A network allowlist is checked when saved with the provider's rules (an entry that is not a host name is refused; Daytona v2 takes host names only). A changed network applies at the next start or wake on Daytona v2, after a reset elsewhere (the note says which). | write, idempotent |
+| `polpo_computer_control` | `start`, `stop`, `restart`, or `reset` (delete the machine and create a new one: needs `confirm: true`). A reset whose wipe is done reports success (with a note when the new machine comes on its next use). | destructive, open world |
+| `polpo_egress_status` | Where browsers go out: each egress proxy (reachable from this server, the agents and host computers using it), agents naming a proxy that does not exist, and each remote computer's egress through Tailscale in its VM (tailnet, node, path, proxy reachable, where its browser goes out; a hibernated or stopped computer is not started: "checked again when it wakes"). With `computer`, one computer. | read-only |
 | `polpo_computer_delete` | Delete a computer and its machine (`confirm: true`); refused while it is an agent's default. | destructive |
 
 An agent's computer is set with `polpo_agent_update` (`defaultComputer`, `computers`).

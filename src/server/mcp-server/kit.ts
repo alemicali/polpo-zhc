@@ -280,6 +280,7 @@ export interface ToolSpec<I extends z.ZodRawShape> {
   title: string;
   description: string;
   inputSchema: I;
+  /** The structuredContent's main fields; it is published open (more fields may come: see outputObject). */
   outputSchema?: z.ZodRawShape;
   annotations: ToolAnnotations;
   /** The scope it needs, when not the toolset's rule (e.g. sending a message, in a toolset whose changes need admin, needs polpo:work). */
@@ -306,12 +307,21 @@ export function registrar(server: McpServer, enabled: ReadonlySet<ToolsetName>, 
       title: spec.title,
       description: spec.description,
       inputSchema: spec.inputSchema,
-      ...(spec.outputSchema ? { outputSchema: spec.outputSchema } : {}),
+      ...(spec.outputSchema ? { outputSchema: outputObject(spec.outputSchema) } : {}),
       annotations: { title: spec.title, ...spec.annotations },
       ...(spec._meta ? { _meta: spec._meta } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the SDK's generic callback type
     }, handler as any);
   };
+}
+
+/**
+ * A tool's output schema: the declared fields, open to others. A raw shape becomes a closed object
+ * (JSON Schema additionalProperties: false), and the official MCP client rejects a result with any
+ * field it does not list: one new field on the API would break the tool for every SDK client.
+ */
+export function outputObject(shape: z.ZodRawShape) {
+  return z.object(shape).passthrough();
 }
 
 /** Is this tool allowed for the principal and the toolsets (for app tools registered elsewhere)? */

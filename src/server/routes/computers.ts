@@ -20,10 +20,12 @@
  */
 import { Hono, type Context } from "hono";
 import {
-  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
+  ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, agentEgressName, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings,
 } from "@polpo-ai/core";
-import { computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
+import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
+import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manager.js";
+import { SandboxNetworkConfigError } from "../../sandbox/remote-adapters.js";
 
 export interface ComputerRouteDeps {
   computers: () => ComputerConfig[];
@@ -88,8 +90,13 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   };
 
 
-  const operationError = (c: Context, what: string, err: unknown) =>
-    fail(c, 502, `${what} failed: ${err instanceof Error ? err.message : String(err)}`, "PROVIDER_ERROR");
+  const operationError = (c: Context, what: string, err: unknown) => {
+    const message = `${what} failed: ${err instanceof Error ? err.message : String(err)}`;
+    // a rule the provider refuses is the computer's settings, not a server failure
+    if (err instanceof SandboxNetworkConfigError) return fail(c, 400, `${message}. Fix the computer's network rule`, "VALIDATION_ERROR");
+    if (err instanceof ComputerDeletedError) return fail(c, 409, message, "DELETED");
+    return fail(c, 502, message, "PROVIDER_ERROR");
+  };
 
   app.get("/", async (c) => {
     const live = c.req.query("live") !== "0";
@@ -114,8 +121,10 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     }
     const existing = deps.computers();
     if (existing.some((x) => x.id === computer.id)) return fail(c, 409, `A computer "${computer.id}" already exists`, "CONFLICT");
-    const egressError = checkEgress(computer, deps.settings());
+    const egressError = checkEgress(computer, deps.settings()) ?? computerNetworkProblem(computer, deps.settings());
     if (egressError) return fail(c, 400, egressError, "VALIDATION_ERROR");
+    // a computer created again with a deleted one's id gets machines again
+    if (isRemoteComputer(computer)) await deps.manager().revive(computer.id);
     await deps.save([...existing, computer]);
     deps.emit({ id: computer.id, action: "created", status: isRemoteComputer(computer) ? "missing" : "running" });
     if (body.start === true && isRemoteComputer(computer)) {
@@ -150,14 +159,14 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     } catch (err) {
       return fail(c, 400, (err as Error).message, "VALIDATION_ERROR");
     }
-    const egressError = checkEgress(next, deps.settings());
+    const egressError = checkEgress(next, deps.settings()) ?? computerNetworkProblem(next, deps.settings());
     if (egressError) return fail(c, 400, egressError, "VALIDATION_ERROR");
     await deps.save(existing.map((x) => (x.id === id ? next : x)));
     deps.emit({ id, action: "updated" });
-    // image, size and network are fixed when the machine is created
+    // image and size are fixed when the machine is created; the network too, except on Daytona
+    // v2, where the rule is applied again whenever its VM starts or wakes
     const fixed = ["image", "snapshot", "template", "resources", "network"].filter((k) => JSON.stringify((current as unknown as Record<string, unknown>)[k]) !== JSON.stringify((next as unknown as Record<string, unknown>)[k]));
-    const note = fixed.length && isRemoteComputer(next) && deps.manager().live(id).status !== "missing"
-      ? `${fixed.join(", ")} apply to a new machine: reset the computer to use them (its disk is lost)` : undefined;
+    const note = isRemoteComputer(next) && deps.manager().live(id).status !== "missing" ? computerChangeNote(next, fixed, deps.settings()) : undefined;
     return c.json({ ok: true, data: { ...(await view(next, false)), ...(note ? { note } : {}) } });
   });
 
@@ -207,6 +216,8 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
       }
       return c.json({ ok: true, data: await view(computer, false) });
     } catch (err) {
+      // the wipe is done: the reset did what was asked, its new machine comes on the next use
+      if (err instanceof ComputerResetIncompleteError) return c.json({ ok: true, data: { ...(await view(computer, false)), note: err.message } });
       return operationError(c, `${op[0]!.toUpperCase()}${op.slice(1)} of computer "${id}"`, err);
     }
   };
@@ -236,6 +247,60 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
  */
 function checkEgress(computer: ComputerConfig, settings: PolpoSettings | undefined): string | null {
   return computerEgressProblem(computer, settings);
+}
+
+/** One egress proxy as the overview shows it (never its URL: it may carry a password). */
+export interface EgressProxyView {
+  name: string;
+  /** A TCP connection to it opens from this server. */
+  reachable: boolean;
+  /** Agents whose browser runs on this server and goes out through it. */
+  agents: string[];
+  /** Computers on this server ("host" kind) with this egress. */
+  hostComputers: string[];
+}
+
+export interface EgressOverview {
+  proxies: EgressProxyView[];
+  /** Agents naming a proxy that does not exist (their browser goes out directly). */
+  unknown: Array<{ agent: string; proxy: string }>;
+  /** Remote computers with an egress: what each sees from its VM (never started for this). */
+  computers: Array<Awaited<ReturnType<typeof computerEgressStatus>> & { kind: string }>;
+}
+
+/**
+ * GET /egress: every egress proxy (reachable from this server, the agents and host computers
+ * using it) and every remote computer's egress through Tailscale. Read-only: looks inside only
+ * running machines.
+ */
+export function egressRoutes(deps: ComputerRouteDeps & { reachable?: (url: string) => Promise<boolean> }): Hono {
+  const app = new Hono();
+  app.get("/", async (c) => {
+    const settings = deps.settings();
+    const proxies = settings?.egressProxies ?? {};
+    const agents = await deps.agents();
+    const computers = deps.computers();
+    const reachable = deps.reachable ?? (async (url: string) => (await import("../../tools/browser-egress.js")).proxyReachable(url));
+    const remoteDefault = (a: AgentConfig) => computers.some((x) => x.id === a.defaultComputer && isRemoteComputer(x));
+    // agents whose browser runs on this server (a remote default computer's browser runs in its VM)
+    const hostAgents = agents.filter((a) => !remoteDefault(a)).map((a) => ({ name: a.name, proxy: agentEgressName(a, settings) }));
+    const view: EgressProxyView[] = await Promise.all(Object.entries(proxies).map(async ([name, url]) => ({
+      name,
+      reachable: await reachable(url).catch(() => false),
+      agents: hostAgents.filter((a) => a.proxy === name).map((a) => a.name),
+      hostComputers: computers.filter((x) => x.kind === "host" && x.egress === name).map((x) => x.id),
+    })));
+    const unknown = hostAgents.filter((a) => a.proxy && !proxies[a.proxy]).map((a) => ({ agent: a.name, proxy: a.proxy! }));
+    const remote = await Promise.all(computers.filter((x) => isRemoteComputer(x) && x.egress).map(async (x) => {
+      const status = await computerEgressStatus(deps.manager(), x, settings, deps.instance?.()).catch((err) => ({
+        computerId: x.id, proxy: x.egress!, tailnet: "unknown" as const, proxyReachable: false, effective: `direct (${x.egress} could not be checked)`, machine: "unknown" as const, error: (err as Error).message,
+      }));
+      return status ? { ...status, kind: x.kind } : undefined;
+    }));
+    const data: EgressOverview = { proxies: view, unknown, computers: remote.filter((x): x is NonNullable<typeof x> => !!x) };
+    return c.json({ ok: true, data });
+  });
+  return app;
 }
 
 export { ComputerConfigError };

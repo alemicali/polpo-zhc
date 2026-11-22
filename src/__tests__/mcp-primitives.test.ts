@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { handleMcpRequest, type ApiResponse, type McpDeps } from "../server/mcp.js";
+import { expectValidOutput } from "./helpers/mcp-output.js";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 const SECRET = "sk-live-super-secret-value-123";
@@ -180,6 +181,7 @@ function fakeInstance() {
     if ((m = p.match(/^\/checks\/([^/]+)$/))) {
       const c = checks.find((x) => x.id === m![1]);
       if (!c) return notFound("Check");
+      if (method === "DELETE" && q.get("purge") === "true") { checks.splice(checks.indexOf(c), 1); return okData({ ...c, deleted: true }); }
       if (method === "DELETE") { c.state = "cancelled"; return okData(c); }
       const b = body as Record<string, unknown>;
       if (b.confirm) c.state = "active";
@@ -272,7 +274,12 @@ async function rpc(deps: McpDeps, method: string, params: Record<string, unknown
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   }), deps);
 }
-const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => (await (await rpc(deps, "tools/call", { name, arguments: args })).json()).result;
+/** A tool call, its result checked as the official MCP client checks it (structuredContent against the outputSchema). */
+const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => {
+  const result = (await (await rpc(deps, "tools/call", { name, arguments: args })).json()).result;
+  await expectValidOutput(deps, async () => (await (await rpc(deps, "tools/list")).json()).result.tools, name, result);
+  return result;
+};
 const deps = (f: Fake, extra: Partial<McpDeps> = {}): McpDeps => ({ api: f.api, version: "x", pollIntervalMs: 5, publicUrl: "https://polpo.example.com", toolsets: ["all"], ...extra });
 const names = async (d: McpDeps) => ((await (await rpc(d, "tools/list")).json()).result.tools as Array<{ name: string; annotations: Record<string, unknown>; outputSchema?: unknown }>);
 
@@ -285,12 +292,12 @@ describe("toolsets and scopes", () => {
       "polpo_teams_list", "polpo_team_save", "polpo_agent_delete"]) expect(def).toContain(n);
     for (const n of ["polpo_brain_search", "polpo_learning_get", "polpo_watchers_list", "polpo_vault_list", "polpo_apps_list", "polpo_api_get"]) expect(def).not.toContain(n);
     // the visible default set stays near 90 (two agent-card tools are app-only)
-    expect(def.length).toBeLessThanOrEqual(97);
+    expect(def.length).toBeLessThanOrEqual(101);
     const all = await names(deps(f));
     for (const t of all) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     const a = Object.fromEntries(all.map((t) => [t.name, t.annotations]));
     for (const n of ["polpo_agent_delete", "polpo_team_delete", "polpo_room_delete", "polpo_chat_session_delete", "polpo_memory_update", "polpo_skill_delete",
-      "polpo_schedule_delete", "polpo_check_cancel", "polpo_connector_disconnect", "polpo_connector_remove", "polpo_message_send", "polpo_notification_rule_delete",
+      "polpo_schedule_delete", "polpo_check_cancel", "polpo_check_delete", "polpo_connector_disconnect", "polpo_connector_remove", "polpo_message_send", "polpo_notification_rule_delete",
       "polpo_vault_delete", "polpo_brain_delete", "polpo_learning_revert", "polpo_watcher_delete", "polpo_browser_profile_clear"]) {
       expect(a[n], n).toMatchObject({ destructiveHint: true, readOnlyHint: false });
     }
@@ -542,6 +549,12 @@ describe("automation", () => {
     expect(await call(d, "polpo_check_cancel", { id: "chk1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     expect((await call(d, "polpo_check_cancel", { id: "chk1", confirm: true })).structuredContent.check.state).toBe("cancelled");
     expect(await call(d, "polpo_check_cancel", { id: "nope", confirm: true })).toMatchObject({ isError: true });
+    // a cancelled check can now be deleted for good (live: it stayed listed for ever)
+    expect(await call(d, "polpo_check_delete", { id: "chk1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/\(cancelled\).*confirm: true/) }] });
+    expect((await call(d, "polpo_check_delete", { id: "chk1", confirm: true })).structuredContent).toEqual({ deleted: "chk1" });
+    expect(f.checks).toEqual([]);
+    expect(f.calls.at(-1)).toMatchObject({ method: "DELETE", path: "/api/v1/checks/chk1?purge=true" });
+    expect(await call(d, "polpo_check_delete", { id: "chk1", confirm: true })).toMatchObject({ isError: true });
   });
 
   it("watchers: creates (no shell actions), lists and deletes with confirm", async () => {

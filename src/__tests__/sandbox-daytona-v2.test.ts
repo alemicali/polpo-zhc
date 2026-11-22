@@ -43,6 +43,11 @@ const v2 = vi.hoisted(() => ({
   restoreError: undefined as any,
   sn: 0,
   clock: Date.parse("2026-11-21T10:00:00Z"),
+  // as seen live: the label search still lists a VM deleted seconds ago as started, and a read by
+  // id answers "destroyed" (not 404); a delete of a destroyed VM is refused
+  staleSearch: false,
+  destroyedVisible: false,
+  createFailures: 0,
 }));
 const v0 = vi.hoisted(() => ({ created: [] as any[] }));
 const providerOptions = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
@@ -123,6 +128,7 @@ vi.mock("@daytona/sdk-v2", () => ({
       return {
         create: async (image: string, opts: any) => {
           if (v2.createError) throw v2.createError;
+          if (v2.createFailures > 0) { v2.createFailures--; throw Object.assign(new Error("name is still taken by a sandbox being destroyed"), { statusCode: 409 }); }
           v2.creates.push({ image, opts });
           const id = `sbx_${++v2.n}`;
           const timeoutAt = opts.lifecyclePolicy?.timeoutSeconds ? new Date(v2.clock + opts.lifecyclePolicy.timeoutSeconds * 1000).toISOString() : undefined;
@@ -152,19 +158,22 @@ vi.mock("@daytona/sdk-v2", () => ({
         },
         get: async (id: string) => {
           const e = v2.sandboxes.get(id);
+          if (e && e.s.state === "destroyed" && v2.destroyedVisible) return e.sb;
           if (!e || e.s.state === "destroyed") throw Object.assign(new Error(`sandbox ${id} not found`), { statusCode: 404, code: "NOT_FOUND" });
           return e.sb;
         },
         search: async (opts: any) => {
           if (v2.searchError) throw v2.searchError;
           v2.calls.push(`search ${JSON.stringify(opts.labels)}`);
-          const items = [...v2.sandboxes.values()].filter((e) => opts.states.includes(e.s.state) && Object.entries(opts.labels ?? {}).every(([k, v]) => e.s.labels[k] === v)).map((e) => e.sb);
+          const lagging = (e: any) => (v2.staleSearch && e.s.state === "destroyed" ? Object.create(e.sb, { state: { value: "started" } }) : e.sb);
+          const items = [...v2.sandboxes.values()].filter((e) => (opts.states.includes(e.s.state) || (v2.staleSearch && e.s.state === "destroyed")) && Object.entries(opts.labels ?? {}).every(([k, v]) => e.s.labels[k] === v)).map(lagging);
           return { items, total: items.length, totalRelation: "eq", rawTotalRelation: "eq" };
         },
         iter: async function* () { for (const e of v2.sandboxes.values()) yield e.sb; },
         delete: async (id: string) => {
           const e = v2.sandboxes.get(id);
           if (!e) throw Object.assign(new Error("not found"), { statusCode: 404 });
+          if (e.s.state === "destroyed" && v2.destroyedVisible) throw Object.assign(new Error(`sandbox ${id} is destroyed`), { statusCode: 400, code: "BAD_REQUEST" });
           await e.sb.delete();
         },
       };
@@ -183,7 +192,8 @@ vi.mock("@daytona/sdk", () => ({
   },
 }));
 
-vi.mock("../sandbox/remote-providers.js", () => ({
+vi.mock("../sandbox/remote-providers.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sandbox/remote-providers.js")>()),
   remoteProviderCredentials: async (id: string) => {
     const o = providerOptions.value;
     return { apiKey: `key-${id}`, ...(o.api === "v2" ? { api: "v2" } : {}), ...(typeof o.image === "string" ? { image: o.image } : {}), ...(typeof o.region === "string" ? { region: o.region } : {}), ...(typeof o.maxTimeoutSeconds === "number" ? { maxTimeoutSeconds: o.maxTimeoutSeconds } : {}),
@@ -214,7 +224,7 @@ beforeEach(() => {
     ctor: [], creates: [], calls: [], execs: [], execResult: undefined, createError: undefined, searchError: undefined,
     createClass: "linux", createdState: "started", networkUpdates: [], networkResets: [], lifecycleUpdates: [], n: 0,
     snapReadyAfter: 2, snapFail: undefined, snapCreateError: undefined, restores: [], restoreError: undefined, sn: 0,
-    clock: Date.parse("2026-11-21T10:00:00Z"),
+    clock: Date.parse("2026-11-21T10:00:00Z"), staleSearch: false, destroyedVisible: false, createFailures: 0,
   });
   v2.sandboxes.clear();
   v2.snapshots.clear();
@@ -921,7 +931,7 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     await m.delete(nina);
     expect([...v2.snapshots.keys()].sort()).toEqual(["snap_other_computer", "snap_other_instance"]);
     expect(running()).toEqual([]);
-    expect(m.read().nina).toBeUndefined();
+    expect(m.read().nina).toMatchObject({ status: "missing", deletedAt: expect.any(String) });
   });
 
   test("the API shows a hibernated computer with its last snapshot; start wakes it", async () => {
@@ -938,5 +948,139 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     const started = await (await routes.request("/nina/start", { method: "POST" })).json();
     expect(started.data).toMatchObject({ status: "running", remoteId: "sbx_2" });
     expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
+  });
+
+  // ── live e2e findings (2026-11-21) ────────────────────────────────────
+
+  test("restart and reset while the search still lists the just-deleted VM as started: it is read by id and skipped (no 'sandbox … is destroyed')", async () => {
+    v2.staleSearch = true;
+    v2.destroyedVisible = true;
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    // restart = hibernate (snapshot, VM deleted) then wake: the stale hit sbx_1 must not be connected to
+    const restarted = await m.restart(nina, sb());
+    expect(restarted).toMatchObject({ status: "running", remoteId: "sbx_2" });
+    expect(v2.restores.map((r) => r.snapshot)).toEqual(["snap_1"]);
+    expect(v2.calls.some((c) => /^start sbx_1 /.test(c))).toBe(false);
+    // reset right after: sbx_2 is deleted and still listed; the new VM comes from the image
+    const reset = await m.reset(nina, sb());
+    expect(reset).toMatchObject({ status: "running", remoteId: "sbx_3" });
+    expect(v2.creates).toHaveLength(2);
+    // restart right after the reset (KjSL live): the same
+    expect(await m.restart(nina, sb())).toMatchObject({ status: "running", remoteId: "sbx_4" });
+    // a stale hit never counts as this computer's running VM
+    expect((await m.refresh(nina)).remoteId).toBe("sbx_4");
+  });
+
+  test("reset is atomic for the person: the wipe done, a failed create is tried again; when it still fails the reset reports success with a note, never 'try again later'", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    v2.createFailures = 1;
+    expect(await m.reset(nina, sb())).toMatchObject({ status: "running", remoteId: "sbx_2" });
+
+    const { computerRoutes } = await import("../server/routes/computers.js");
+    const routes = computerRoutes({
+      computers: () => [nina], settings: () => ({ sandbox: { providers: { daytona: { api: "v2" } } } }) as any, agents: async () => [],
+      manager: () => m, save: async () => {}, sandboxFor: () => sb(), emit: () => {},
+    });
+    v2.createFailures = 99;
+    const res = await routes.request("/nina/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toMatchObject({ status: "missing", note: expect.stringMatching(/was reset .* created on its next use or start/) });
+    expect(running()).toEqual([]);
+    // its next use makes it
+    v2.createFailures = 0;
+    expect((await m.start(nina, sb())).status).toBe("running");
+  });
+
+  test("delete is authoritative: a run, a queued wake or a config without it never brings the VM back (orphan seen live 2 s after a delete)", async () => {
+    const { m } = setup();
+    const configured = new Set(["nina"]);
+    m.isConfigured = (id) => configured.has(id);
+    const driver = await m.attach(nina, sb());
+    // a start queued right behind the delete (a tailnet logout, a config reload, a wake)
+    const deleting = m.delete(nina);
+    const racing = m.ensure(nina, sb());
+    await deleting;
+    await expect(racing).rejects.toThrow(/Computer "nina" was deleted/);
+    // the run that had it attached: its next command does not make a new VM
+    await expect(driver.exec("echo hi", {})).rejects.toThrow(/was deleted/);
+    await expect(m.start(nina, sb())).rejects.toThrow(/was deleted/);
+    // the config without it (after the route saved): still nothing
+    configured.delete("nina");
+    await expect(m.ensure(nina, sb())).rejects.toThrow(/was deleted/);
+    await m.idleTick([nina]);
+    expect(v2.creates).toHaveLength(1);
+    expect(v2.restores).toHaveLength(0);
+    expect(running()).toEqual([]);
+    // no state written back for it (lastUsedAt from a heartbeat)
+    m.touch(nina, undefined, true);
+    expect(m.read().nina).toMatchObject({ status: "missing", deletedAt: expect.any(String) });
+    expect(m.read().nina.lastUsedAt).toBeUndefined();
+
+    // another process (a task runner, no config hook) sees the tombstone
+    const other = new ComputerManager(m.polpoDir, { now: () => v2.clock, sleep: async () => {} });
+    await expect(other.ensure(nina, sb())).rejects.toThrow(/was deleted/);
+
+    // created again with the same id: machines again
+    configured.add("nina");
+    await m.revive("nina");
+    expect((await m.start(nina, sb())).status).toBe("running");
+    expect(v2.creates).toHaveLength(2);
+  });
+
+  test("the delete route marks the computer deleted before its VM goes, and POST creates it again", async () => {
+    const { m } = setup();
+    const state = { computers: [nina] as ComputerConfig[] };
+    m.isConfigured = (id) => state.computers.some((c) => c.id === id);
+    await m.ensure(nina, sb());
+    const { computerRoutes } = await import("../server/routes/computers.js");
+    const routes = computerRoutes({
+      computers: () => state.computers, settings: () => ({ sandbox: { providers: { daytona: { api: "v2" } } } }) as any, agents: async () => [],
+      manager: () => m, save: async (list) => { state.computers = list; }, sandboxFor: () => sb(), emit: () => {},
+    });
+    const del = await routes.request("/nina", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    expect(del.status).toBe(200);
+    await expect(m.ensure(nina, sb())).rejects.toThrow(/was deleted/);
+    expect(running()).toEqual([]);
+    const again = await routes.request("/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "nina", kind: "daytona", start: true }) });
+    expect(again.status).toBe(201);
+    expect(running()).toHaveLength(1);
+  });
+
+  test("network allowlist is checked when saved (REST): an invalid entry or an IP address on v2 is a 400 with the reason; a v2 network change needs no reset", async () => {
+    const { m } = setup();
+    const state = { computers: [{ ...nina, network: allow("example.com") }] as ComputerConfig[] };
+    const settings = { sandbox: { providers: { daytona: { api: "v2" } } } } as any;
+    const { computerRoutes } = await import("../server/routes/computers.js");
+    const routes = computerRoutes({
+      computers: () => state.computers, settings: () => settings, agents: async () => [],
+      manager: () => m, save: async (list) => { state.computers = list; }, sandboxFor: (c) => sb(c), emit: () => {},
+    });
+    const patch = (network: unknown) => routes.request("/nina", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ network }) });
+    const bad = await patch({ mode: "allowlist", allow: ["not a host!!", "300.1.1.1"] });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/not a host name: "not a host!!", "300\.1\.1\.1"/);
+    const ip = await patch({ mode: "allowlist", allow: ["*.wikipedia.org", "1.1.1.1/32"] });
+    expect(ip.status).toBe(400);
+    expect((await ip.json()).error).toMatch(/Daytona v2 applies domain rules only; use host names \(1\.1\.1\.1\/32/);
+    expect(state.computers[0]!.network).toEqual(allow("example.com"));
+    // a valid change on a computer that has a machine: applied at its next start or wake, no reset
+    await m.ensure(nina, sb());
+    const okRes = await patch({ mode: "allowlist", allow: ["*.wikipedia.org"] });
+    expect(okRes.status).toBe(200);
+    const note = (await okRes.json()).data.note as string;
+    expect(note).toMatch(/applies when it next starts or wakes/);
+    expect(note).not.toMatch(/reset the computer/);
+    // POST validates too
+    const post = await routes.request("/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "box2", kind: "daytona", network: { mode: "allowlist", allow: ["8.8.8.8"] } }) });
+    expect(post.status).toBe(400);
+    // a rule saved by hand that the provider refuses: a 400 on start, not a 502 "try again later"
+    state.computers = [{ ...nina, network: allow("bad host!") }];
+    await m.stop(nina);
+    const start = await routes.request("/nina/start", { method: "POST" });
+    expect(start.status).toBe(400);
+    expect((await start.json()).error).toMatch(/not a host name or IP address: "bad host!".*Fix the computer's network rule/);
   });
 });

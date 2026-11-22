@@ -3,6 +3,7 @@ import {
   describeMcpMessages, handleMcpRequest, hasScope, matchesOperationPath, resolveToolsets,
   type ApiResponse, type McpDeps, type McpPrincipal,
 } from "../server/mcp.js";
+import { expectValidOutput } from "./helpers/mcp-output.js";
 
 const OPENAPI = {
   paths: {
@@ -96,7 +97,12 @@ async function rpc(deps: McpDeps, method: string, params: Record<string, unknown
   return { status: res.status, body: await res.json() as { result?: any; error?: any } };
 }
 
-const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => (await rpc(deps, "tools/call", { name, arguments: args })).body.result;
+/** A tool call, its result checked as the official MCP client checks it (structuredContent against the outputSchema). */
+const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => {
+  const result = (await rpc(deps, "tools/call", { name, arguments: args })).body.result;
+  await expectValidOutput(deps, async () => (await rpc(deps, "tools/list")).body.result.tools, name, result);
+  return result;
+};
 const toolNames = async (deps: McpDeps) => ((await rpc(deps, "tools/list")).body.result.tools as Array<{ name: string }>).map((t) => t.name);
 
 describe("Polpo MCP server", () => {
@@ -112,8 +118,8 @@ describe("Polpo MCP server", () => {
       "polpo_ask", "polpo_agent_chat", "polpo_answer",
       "polpo_agents_list", "polpo_agent_show", "agent_card_refresh", "agent_intention_decide",
       "polpo_approvals_list", "polpo_approval_resolve",
-      "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
-      "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run",
+      "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_delete", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
+      "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run",
       "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create",
       "polpo_data_sources_list", "polpo_data_query",
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
@@ -124,10 +130,10 @@ describe("Polpo MCP server", () => {
       "polpo_memory_get", "polpo_memory_update",
       "polpo_skills_list", "polpo_skill_get", "polpo_skill_create", "polpo_skill_update", "polpo_skill_install", "polpo_skill_delete", "polpo_skill_assign",
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
-      "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel",
+      "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
       "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
-      "polpo_computers_list", "polpo_computer_save", "polpo_computer_control", "polpo_computer_delete",
+      "polpo_computers_list", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.polpo_file_write!.annotations).toMatchObject({ destructiveHint: true, title: "Write a file" });
@@ -297,7 +303,7 @@ describe("toolsets and scopes", () => {
 
   it("offers only the configured toolsets", async () => {
     const { api } = fakeApi();
-    expect(await toolNames({ api, version: "x", toolsets: ["missions"] })).toEqual(["polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run"]);
+    expect(await toolNames({ api, version: "x", toolsets: ["missions"] })).toEqual(["polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run"]);
     const withAdmin = await toolNames({ api, version: "x", toolsets: ["core", "admin"] });
     expect(withAdmin).toContain("polpo_api_get");
     expect(withAdmin).toContain("polpo_agent_show");
@@ -397,6 +403,28 @@ describe("the agent card (MCP App)", () => {
       key: { createdAt: expect.any(Number), seq: expect.any(Number) },
     });
     expect(await call({ api, version: "1" }, "polpo_agent_show", { agent: "nobody" })).toMatchObject({ isError: true });
+  });
+
+  it("the official MCP SDK client (Client.callTool, Ajv) accepts the card: no 'data must NOT have additional properties' (Claude Code, Cursor)", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const { createPolpoMcpServer } = await import("../server/mcp.js");
+    const { api } = fakeApi();
+    const server = createPolpoMcpServer({ api, version: "1" });
+    const client = new Client({ name: "e2e", version: "1" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+    try {
+      const tools = (await client.listTools()).tools;
+      // every output schema is open: a field the API adds later never breaks a client
+      for (const t of tools.filter((x) => x.outputSchema)) expect(t.outputSchema!.additionalProperties, t.name).not.toBe(false);
+      const shown = await client.callTool({ name: "polpo_agent_show", arguments: { agent: "coach" } });
+      expect(shown.structuredContent).toMatchObject({ agent: { name: "coach" }, goals: expect.any(Array), journal: expect.any(Array), today: expect.any(Object) });
+      expect((await client.callTool({ name: "agent_card_refresh", arguments: { agent: "coach" } })).isError).toBeFalsy();
+      expect((await client.callTool({ name: "agent_intention_decide", arguments: { agent: "coach", id: "chk_1", action: "confirm" } })).isError).toBeFalsy();
+    } finally {
+      await client.close();
+    }
   });
 
   it("the UI confirms an intention and gets the card back", async () => {

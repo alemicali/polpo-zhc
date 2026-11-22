@@ -225,6 +225,25 @@ describe("settings.tailscale and remote egress rules", () => {
     expect(status.data).toMatchObject({ computerId: "nina", proxy: "home", tailnet: "off", proxyReachable: false });
   });
 
+  test("a hibernated computer's egress reads well: checked again when it wakes, never 'proxy not reachable' (garbled live)", async () => {
+    const { computerEgressStatus, describeComputerEgress } = await import("../sandbox/computers.js");
+    const polpoDir = tmp("polpo-tailnet-hib-");
+    writeFileSync(join(polpoDir, "computers-state.json"), JSON.stringify({ version: 1, computers: { nina: { provider: "daytona", status: "hibernated", uptimeMs: 0, updatedAt: new Date().toISOString() } } }));
+    const m = new ComputerManager(polpoDir, { adapter: () => ({ list: async () => [] }) as any });
+    const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", egress: "home" };
+    const s = (await computerEgressStatus(m, nina, { egressProxies: proxies, tailscale }, "p"))!;
+    expect(s).toMatchObject({ tailnet: "off", machine: "hibernated", effective: "checked again when it wakes" });
+    const line = describeComputerEgress(nina, s);
+    expect(line).toBe("computer nina (daytona) → home: Hibernated: egress is checked again when it wakes");
+    expect(line).not.toMatch(/not reachable|goes out comes up/);
+    // stopped (not hibernated): the same idea
+    expect(describeComputerEgress(nina, { ...s, machine: "stopped", effective: "checked again when it next starts (it is stopped)" }))
+      .toBe("computer nina (daytona) → home: Stopped: egress is checked again when it next starts");
+    // running: tailnet, path, proxy and where the browser goes out
+    expect(describeComputerEgress(nina, { ...s, tailnet: "up", machine: "running", proxyReachable: true, effective: "via home", node: "n.ts.net", path: "direct" }))
+      .toBe("computer nina (daytona) → home: tailnet up as n.ts.net, path direct, proxy reachable; its browser goes out via home");
+  });
+
   test("the runner images install the same pinned Tailscale", async () => {
     // @ts-expect-error untyped .mjs
     const script = await import("../../scripts/build-sandbox-images.mjs");

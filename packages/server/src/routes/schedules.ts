@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { scheduleExpressionProblem } from "@polpo-ai/core";
 
 // ── Schemas ───────────────────────────────────────────────────────────
 
@@ -69,6 +70,10 @@ const updateScheduleRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Schedule updated",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Invalid expression",
+    },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
       description: "Schedule not found",
@@ -101,7 +106,7 @@ const runScheduleRoute = createRoute({
   path: "/{missionId}/run",
   tags: ["Schedules"],
   summary: "Run a scheduled mission now",
-  description: "Runs the mission out of turn; the next scheduled run stays as it is.",
+  description: "Runs the mission out of turn; the next scheduled run stays as it is, and a paused schedule stays paused.",
   request: {
     params: z.object({ missionId: z.string() }),
   },
@@ -166,6 +171,9 @@ export function scheduleRoutes(getDeps: () => {
     }
 
     const isRecurring = body.recurring ?? false;
+    // checked before the mission changes: a bad expression leaves it as it was
+    const problem = scheduleExpressionProblem(body.expression, { recurring: isRecurring });
+    if (problem) return c.json({ ok: false, error: problem, code: "INVALID_EXPRESSION" }, 400);
     const newStatus = isRecurring ? "recurring" : "scheduled";
     const missionUpdate: Record<string, unknown> = {
       schedule: body.expression,
@@ -199,6 +207,11 @@ export function scheduleRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
+
+    if (body.expression !== undefined) {
+      const problem = scheduleExpressionProblem(body.expression, { recurring: body.recurring ?? existing.recurring });
+      if (problem) return c.json({ ok: false, error: problem, code: "INVALID_EXPRESSION" }, 400);
+    }
 
     if (body.expression !== undefined) {
       const mission = await deps.getMission(missionId);

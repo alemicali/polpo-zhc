@@ -15,7 +15,10 @@ import {
   type ComputerContext,
   type ComputerConfig,
   normalizeSandboxSettings,
+  daytonaApiVersion,
 } from "@polpo-ai/core/sandbox";
+import { classifyAllowEntries, daytonaNetworkParams, e2bNetworkOpts, SandboxNetworkConfigError } from "./remote-adapters.js";
+import { daytonaV2NetworkPolicy } from "./daytona-v2.js";
 import type { NetworkDenial } from "./net-proxy.js";
 import { bashSafeEnv } from "../tools/safe-env.js";
 import { DockerWorkspace, dockerAvailable } from "./docker.js";
@@ -144,4 +147,61 @@ export function computerSandbox(computer: ComputerConfig, settings: { sandbox?: 
   if (s.computer?.id === computer.id && s.provider === computer.kind) return s;
   const name = PROVIDER_NAMES[computer.kind as SandboxProviderId] ?? computer.kind;
   return { error: `${name} has no API key on this server: choose one in Settings → Sandbox` };
+}
+
+/** Whether a computer runs on Daytona v2 with these settings (Linux VMs that hibernate). */
+export function isDaytonaV2Computer(computer: Pick<ComputerConfig, "kind">, settings: { sandbox?: unknown } | undefined): boolean {
+  if (computer.kind !== "daytona") return false;
+  const providers = (settings?.sandbox as { providers?: Record<string, Record<string, unknown> | undefined> } | undefined)?.providers;
+  return daytonaApiVersion(providers?.daytona) === "v2";
+}
+
+/** Why Daytona v2 cannot take an allowlist's IP addresses and ranges (seen live: its VMs reach none of them). */
+export const DAYTONA_V2_DOMAINS_ONLY = "Daytona v2 applies domain rules only; use host names";
+
+/**
+ * Why a computer's network rule cannot work on its provider (null: it can), checked with the same
+ * rules its machine is created with, so a bad entry is refused when it is saved and not when the
+ * computer next starts. Daytona v2 also refuses IP addresses and ranges: its VMs do not enforce them.
+ */
+export function computerNetworkProblem(computer: ComputerConfig, settings: { sandbox?: unknown } | undefined): string | null {
+  if (computer.kind !== "daytona" && computer.kind !== "e2b") return null;
+  const s = computerSandbox(computer, settings);
+  const network = "error" in s ? computer.network : s.network;
+  if (!network || network.mode !== "allowlist") return null;
+  try {
+    if (computer.kind === "e2b") {
+      e2bNetworkOpts(network);
+    } else if (isDaytonaV2Computer(computer, settings)) {
+      const entries = classifyAllowEntries(network.allow);
+      const invalid = entries.filter((e) => e.kind === "invalid");
+      if (invalid.length) return `Network allowlist of computer "${computer.id}": not a host name: ${invalid.map((e) => `"${e.raw}"`).join(", ")}`;
+      const addresses = entries.filter((e) => e.kind !== "domain");
+      if (addresses.length) {
+        return `Network allowlist of computer "${computer.id}": ${DAYTONA_V2_DOMAINS_ONLY} (${addresses.map((e) => e.raw).join(", ")} would not be reachable from its VM)`;
+      }
+      daytonaV2NetworkPolicy(network);
+    } else {
+      daytonaNetworkParams(network);
+    }
+  } catch (err) {
+    if (err instanceof SandboxNetworkConfigError) return `Computer "${computer.id}": ${err.message}`;
+    throw err;
+  }
+  return null;
+}
+
+/**
+ * When a change to a computer's image, size or network reaches its machine, said for its provider:
+ * Daytona v2 applies a new network rule when the VM next starts or wakes (stop and start it to
+ * apply it now); the rest (and everything elsewhere) needs a new machine (a reset loses the disk).
+ */
+export function computerChangeNote(computer: ComputerConfig, changed: string[], settings: { sandbox?: unknown } | undefined): string | undefined {
+  if (!changed.length) return undefined;
+  const atWake: string[] = isDaytonaV2Computer(computer, settings) ? changed.filter((k) => k === "network") : [];
+  const atReset = changed.filter((k) => !atWake.includes(k));
+  const parts: string[] = [];
+  if (atWake.length) parts.push("the network rule applies when it next starts or wakes (stop and start it to apply it now; no reset needed)");
+  if (atReset.length) parts.push(`${atReset.join(", ")} apply to a new machine: reset the computer to use them (its disk is lost)`);
+  return parts.join("; ");
 }

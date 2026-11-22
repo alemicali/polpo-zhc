@@ -100,6 +100,8 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
       ...agentFields,
+      computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional()
+        .describe("Computers it may use (ids from polpo_computers_list), replacing the list; null or [] clears it (\"host\", this server, is always allowed)"),
     },
     outputSchema: { agent: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,

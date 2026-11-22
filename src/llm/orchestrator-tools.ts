@@ -66,7 +66,7 @@ import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
 import { ASK_AGENT_DESCRIPTION, AskAgentSchema, execAskAgent, execMessageAgent, MESSAGE_AGENT_DESCRIPTION, MessageAgentSchema } from "../tools/agent-talk-tools.js";
 import { proxyReachable } from "../tools/browser-egress.js";
-import { CHECK_NOTHING_TO_REPORT } from "@polpo-ai/core";
+import { CHECK_NOTHING_TO_REPORT, scheduleExpressionProblem } from "@polpo-ai/core";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -3821,11 +3821,16 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
   const resolved = resolveAgentName(agents, args.assignTo as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  const dependsOn = args.dependsOn as string[] | undefined;
+  // a dependency that does not exist would keep the task pending for ever
+  const missing: string[] = [];
+  for (const id of new Set(dependsOn ?? [])) if (!(await polpo.getStore().getTask(id))) missing.push(id);
+  if (missing.length) return `Error: dependsOn: there is no task ${missing.map((id) => `"${id}"`).join(", ")} (give the ids of existing tasks: list_tasks).`;
   const task = await polpo.addTask({
     title: args.title as string,
     description: args.description as string,
     assignTo: agentName,
-    dependsOn: args.dependsOn as string[] | undefined,
+    dependsOn,
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
@@ -4381,6 +4386,8 @@ async function execCreateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!mission) return `Error: Mission "${missionId}" not found.`;
 
   const isRecurring = (args.recurring as boolean) ?? false;
+  const problem = scheduleExpressionProblem(String(args.expression ?? ""), { recurring: isRecurring });
+  if (problem) return `Error: ${problem}`;
   // Set schedule expression and transition status to scheduled/recurring
   const newStatus = isRecurring ? "recurring" : "scheduled";
   const missionUpdate: Record<string, unknown> = {
@@ -4431,6 +4438,10 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!existing) return `Error: No schedule found for mission "${missionId}".`;
 
   const changes: string[] = [];
+  if (args.expression !== undefined) {
+    const problem = scheduleExpressionProblem(String(args.expression), { recurring: (args.recurring as boolean | undefined) ?? existing.recurring });
+    if (problem) return `Error: ${problem}`;
+  }
   if (args.expression !== undefined) {
     // Re-register with new expression
     const mission = await polpo.getMission(missionId);
@@ -7170,7 +7181,7 @@ async function computerTools(polpo: Orchestrator) {
   return {
     core,
     computers: (): import("@polpo-ai/core/sandbox").ComputerConfig[] => settings()?.computers ?? [],
-    manager: () => computerManagerWithEvents(polpo.getPolpoDir(), (payload) => polpo.emit("computer:changed", payload)),
+    manager: () => computerManagerWithEvents(polpo.getPolpoDir(), (payload) => polpo.emit("computer:changed", payload), undefined, () => settings()?.computers ?? []),
     sandbox: (c: import("@polpo-ai/core/sandbox").ComputerConfig) => computerSandbox(c, settings()),
     save: async (list: import("@polpo-ai/core/sandbox").ComputerConfig[]) => {
       savePolpoSettingsKey(polpo.getPolpoDir(), "computers", list.length ? list : undefined);
@@ -7215,6 +7226,7 @@ async function execComputerCreate(polpo: Orchestrator, args: Record<string, unkn
   if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
   const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
   if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
+  if (t.core.isRemoteComputer(computer)) await t.manager().revive(computer.id);
   await t.save([...existing, computer]);
   polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
   if (args.start === true && t.core.isRemoteComputer(computer)) {
@@ -7276,14 +7288,12 @@ async function execEgressStatus(polpo: Orchestrator): Promise<string> {
   const remoteLines: string[] = [];
   if (remote.length) {
     const t = await computerTools(polpo);
-    const { computerEgressStatus } = await import("../sandbox/computers.js");
+    const { computerEgressStatus, describeComputerEgress } = await import("../sandbox/computers.js");
     for (const c of remote) {
       const s = await computerEgressStatus(t.manager(), c, settings, polpo.getConfig()?.project).catch((err) => ({ error: (err as Error).message } as const));
       if (!s) continue;
       if (!("proxy" in s)) { remoteLines.push(`- computer ${c.id} (${c.kind}) → ${c.egress}: could not be checked (${s.error})`); continue; }
-      const path = s.path ? `, path ${s.path === "derp" ? `DERP relay${s.relay ? ` ${s.relay}` : ""}` : s.path}` : "";
-      remoteLines.push(`- computer ${c.id} (${c.kind}) → ${s.proxy}: tailnet ${s.tailnet}${s.node ? ` as ${s.node}` : ""}${path}, `
-        + `proxy ${s.proxyReachable ? "reachable" : "not reachable"}; browser goes out ${s.effective}${s.error ? ` (${s.error})` : ""}`);
+      remoteLines.push(`- ${describeComputerEgress(c, s)}`);
     }
   }
   return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "")

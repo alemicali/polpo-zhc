@@ -5,12 +5,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { handleMcpRequest, type ApiResponse, type McpDeps } from "../server/mcp.js";
+import { expectValidOutput } from "./helpers/mcp-output.js";
 import { fetchPublicImage, sniffImage } from "../server/mcp-server/config.js";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 
 type Task = { id: string; title: string; status: string; assignTo: string; description: string; missionId?: string; group?: string; updatedAt: string; maxRetries?: number; sideEffects?: boolean };
-type Mission = { id: string; name: string; status: string; data: string; prompt?: string; updatedAt: string };
+type Mission = { id: string; name: string; status: string; data: string; prompt?: string; updatedAt: string; executionCount?: number; schedule?: string };
 
 function fakeInstance() {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
@@ -59,7 +60,9 @@ function fakeInstance() {
       return okData({ tasks: slice, hasMore: all.length > limit, nextCursor: all.length > limit ? slice.at(-1)!.updatedAt : null });
     }
     if (p === "/tasks" && method === "POST") {
-      const b = body as Task;
+      const b = body as Task & { dependsOn?: string[] };
+      const missingDeps = (b.dependsOn ?? []).filter((id) => !tasks.has(id));
+      if (missingDeps.length) return reply(400, { ok: false, error: `dependsOn: there is no task "${missingDeps[0]}"`, code: "UNKNOWN_DEPENDENCY" });
       if ([...tasks.values()].some((t) => t.title === b.title && t.status !== "done")) return reply(409, { ok: false, error: "A task with this title already exists", code: "CONFLICT" });
       const t = { ...b, id: `t${tasks.size + 1}`, status: "pending", updatedAt: now() };
       tasks.set(t.id, t);
@@ -71,6 +74,7 @@ function fakeInstance() {
       const action = m[2];
       if (!action && method === "GET") return okData({ ...t });
       if (!action && method === "PATCH") { Object.assign(t, body, { updatedAt: now() }); return okData(t); }
+      if (!action && method === "DELETE") { tasks.delete(t.id); return okData({ removed: true }); }
       if (action === "/retry") { t.status = "pending"; return okData({ retried: true }); }
       if (action === "/kill") { t.status = "failed"; return okData({ killed: true }); }
       if (action === "/directions") {
@@ -91,6 +95,7 @@ function fakeInstance() {
       const action = m[2];
       if (!action && method === "GET") return okData(mi);
       if (!action && method === "PATCH") { Object.assign(mi, body, { updatedAt: now() }); return okData(mi); }
+      if (!action && method === "DELETE") { missions.delete(mi.id); for (const t of [...tasks.values()]) if (t.missionId === mi.id) tasks.delete(t.id); return okData({ deleted: true }); }
       if (action === "/execute") {
         mi.status = "active";
         for (const [i, pt] of (JSON.parse(mi.data).tasks as Array<{ title: string; assignTo?: string }>).entries()) {
@@ -144,7 +149,12 @@ async function rpc(deps: McpDeps, method: string, params: Record<string, unknown
   }), deps);
   return res;
 }
-const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => (await (await rpc(deps, "tools/call", { name, arguments: args })).json()).result;
+/** A tool call, its result checked as the official MCP client checks it (structuredContent against the outputSchema). */
+const call = async (deps: McpDeps, name: string, args: Record<string, unknown> = {}) => {
+  const result = (await (await rpc(deps, "tools/call", { name, arguments: args })).json()).result;
+  await expectValidOutput(deps, async () => (await (await rpc(deps, "tools/list")).json()).result.tools, name, result);
+  return result;
+};
 const deps = (f: Fake, extra: Partial<McpDeps> = {}): McpDeps => ({ api: f.api, version: "x", pollIntervalMs: 5, publicUrl: "https://polpo.example.com", ...extra });
 
 describe("the tools offered", () => {
@@ -166,7 +176,8 @@ describe("the tools offered", () => {
     for (const n of ["polpo_task_update", "polpo_config_update", "polpo_branding_update", "polpo_agent_update"]) expect(a[n]).toMatchObject({ idempotentHint: true, destructiveHint: false });
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
-    expect(tools.length).toBeLessThanOrEqual(97);
+    for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
+    expect(tools.length).toBeLessThanOrEqual(101);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -324,6 +335,61 @@ describe("missions", () => {
     expect(f.missions.get("m1")!.status).toBe("active");
     expect((await call(deps(f), "polpo_mission_abort", { id: "m1", confirm: true })).structuredContent).toEqual({ id: "m1", aborted_tasks: 3 });
     expect((await call(deps(f), "polpo_mission_wait", { id: "m1" })).structuredContent).toMatchObject({ reached: true, mission: { status: "cancelled" } });
+  });
+
+  it("polpo_mission_wait returns for a recurring mission once its run finished, with the run's outcome (live: it never settled)", async () => {
+    const f = fakeInstance();
+    f.missions.set("mr", { id: "mr", name: "Digest", status: "recurring", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z", executionCount: 2, schedule: "0 3 1 1 *" });
+    // run #1 finished long ago; run #2 is under way
+    f.tasks.set("r1", { id: "r1", title: "Write", description: "", status: "done", assignTo: "coach", missionId: "mr", group: "Digest", updatedAt: "2026-11-21T09:00:00Z" } as Task);
+    f.tasks.set("r2", { id: "r2", title: "Write", description: "", status: "in_progress", assignTo: "coach", missionId: "mr", group: "Digest #2", updatedAt: "2026-11-21T10:00:00Z" } as Task);
+    const running = await call(deps(f), "polpo_mission_wait", { id: "mr", timeout_seconds: 1 });
+    expect(running.structuredContent).toMatchObject({ reached: false, timed_out: true });
+    expect(running.content[0].text).toMatch(/a run in progress/);
+    // the run ends (a failure counts: the run is over)
+    f.tasks.get("r2")!.status = "failed";
+    const done = await call(deps(f), "polpo_mission_wait", { id: "mr", timeout_seconds: 5 });
+    expect(done.structuredContent).toMatchObject({ reached: true, timed_out: false, mission: { status: "recurring" }, run: { number: 2, outcome: "failed", task_counts: { failed: 1 } } });
+    expect(done.content[0].text).toMatch(/run #2 failed .* runs again on its schedule \(0 3 1 1 \*\)/);
+    // never ran: it waits for its first run (and says how to start one)
+    f.missions.set("mn", { id: "mn", name: "Never", status: "recurring", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z", executionCount: 0 });
+    const never = await call(deps(f), "polpo_mission_wait", { id: "mn", timeout_seconds: 1 });
+    expect(never.structuredContent).toMatchObject({ reached: false });
+    expect(never.content[0].text).toMatch(/not run yet.*polpo_schedule_run/);
+  });
+
+  it("polpo_mission_delete and polpo_task_delete: confirm, not while running, then gone", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_mission_create", { name: "Old", ...plan, run: true });
+    expect(await call(deps(f), "polpo_mission_delete", { id: "m1", confirm: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/abort it first/) }] });
+    await call(deps(f), "polpo_mission_abort", { id: "m1", confirm: true });
+    expect(await call(deps(f), "polpo_mission_delete", { id: "m1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/"Old" \(cancelled, \d+ tasks\).*confirm: true/) }] });
+    expect(f.missions.has("m1")).toBe(true);
+    expect((await call(deps(f), "polpo_mission_delete", { id: "m1", confirm: true })).structuredContent).toEqual({ deleted: "m1" });
+    expect(f.missions.has("m1")).toBe(false);
+    expect(await call(deps(f), "polpo_mission_delete", { id: "m1", confirm: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/There is no mission m1/) }] });
+
+    expect(await call(deps(f), "polpo_task_delete", { id: "t2", confirm: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/in_progress: stop it first with polpo_task_kill/) }] });
+    expect(await call(deps(f), "polpo_task_delete", { id: "t1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
+    expect((await call(deps(f), "polpo_task_delete", { id: "t1", confirm: true })).structuredContent).toEqual({ deleted: "t1" });
+    expect(f.tasks.has("t1")).toBe(false);
+  });
+
+  it("polpo_task_create refuses a dependsOn that names no task, with the next step", async () => {
+    const f = fakeInstance();
+    const bad = await call(deps(f), "polpo_task_create", { title: "E2E bad dep", description: "x", assignTo: "coach", dependsOn: ["no-such-task-e2e"] });
+    expect(bad).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/there is no task "no-such-task-e2e".*polpo_tasks_list/) }] });
+    expect([...f.tasks.values()].some((t) => t.title === "E2E bad dep")).toBe(false);
+    expect((await call(deps(f), "polpo_task_create", { title: "After", description: "x", assignTo: "coach", dependsOn: ["t1"] })).isError).toBeFalsy();
+  });
+
+  it("polpo_agent_update clears an agent's computers with null or []", async () => {
+    const f = fakeInstance();
+    for (const computers of [null, []]) {
+      const r = await call(deps(f), "polpo_agent_update", { name: "coach", computers });
+      expect(r.isError).toBeFalsy();
+      expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ computers });
+    }
   });
 
   it("creates and starts at once with run: true; lists missions", async () => {

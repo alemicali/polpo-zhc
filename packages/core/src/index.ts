@@ -132,7 +132,7 @@ export type { NotificationRouterPort } from "./notification-router-port.js";
 export type { OrchestratorContext, AssessFn, CheckProgressEvent } from "./orchestrator-context.js";
 
 // ── Cron (pure) ─────────────────────────────────────────────────────────
-export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "./cron.js";
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression, scheduleExpressionProblem } from "./cron.js";
 
 // ── Core Managers ───────────────────────────────────────────────────────
 export { TaskManager } from "./task-manager.js";

@@ -133,10 +133,54 @@ describe("RoomEngine", () => {
     expect(await say("@growth budget?")).toEqual(["Ada: @growth budget?", "Giulia: @ops pay it"]);
   });
 
-  it("mentions-only room with one agent: whatever the person writes is for it", async () => {
-    const { say, classify } = setup({ agents: ["polpo"], settings: { replyMode: "mentions" } });
-    expect(await say("status?")).toEqual(["Ada: status?", "Polpo: polpo here"]);
+  it("mentions-only room with one agent: only a mention is answered (the setting is respected, as seen live)", async () => {
+    const { say, classify, runner } = setup({ agents: ["polpo"], settings: { replyMode: "mentions" } });
+    expect(await say("status?")).toEqual(["Ada: status?"]);
+    expect(runner).not.toHaveBeenCalled();
+    expect(await say("@polpo status?")).toEqual(["Ada: status?", "Ada: @polpo status?", "Polpo: polpo here"]);
     expect(classify).not.toHaveBeenCalled();
+    // an "intent" room with one agent still answers everything
+    rmSync(dir, { recursive: true, force: true });
+    dir = mkdtempSync(join(tmpdir(), "polpo-room-engine-"));
+    const intent = setup({ agents: ["growth"], settings: { replyMode: "intent" } });
+    expect(await intent.say("hello")).toEqual(["Ada: hello", "Giulia: growth here"]);
+  });
+
+  it("a mention is never lost to a quick follow-up, and the agent stays typing while its queued turns run (live: no PONG, room_wait settled early)", async () => {
+    const { rooms, engine, runner, events } = setup({ agents: ["growth"], settings: { replyMode: "mentions" } });
+    await rooms.ensureRoom({ id: "web:r1", kind: "web", title: "Team", agents: ["growth"], settings: { replyMode: "mentions" } });
+    // one turn per session (as the completion route's lease does): the second waits for the first
+    let busy: Promise<unknown> = Promise.resolve();
+    const gates: Array<() => void> = [];
+    runner.mockImplementation(async ({ messages }) => {
+      const prev = busy;
+      let done!: () => void;
+      busy = new Promise<void>((r) => { done = r; });
+      await prev;
+      await new Promise<void>((r) => gates.push(r));
+      done();
+      // the message it answers is the turn's last line
+      const target = String(messages.at(-1)!.content).split("\n").at(-1) ?? "";
+      return { text: target.includes("reply with PONG") ? "PONG" : "ok" };
+    });
+    const user = { id: "web:user", name: "Ada" };
+    await engine.post("web:r1", user, "@growth ping 1");
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    await engine.post("web:r1", user, "@growth reply with PONG");
+    // a follow-up without a mention right after: it must not swallow the mention's answer
+    await engine.post("web:r1", user, "thanks");
+    // the first turn ends: the second (the PONG) is queued, so growth is still typing
+    gates.shift()!();
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    expect(engine.typingIn("web:r1")).toEqual([{ agent: "growth", name: "Giulia" }]);
+    gates.shift()!();
+    await engine.settled();
+    expect(engine.typingIn("web:r1")).toEqual([]);
+    const transcript = (await rooms.getRecentMessages("web:r1", 50)).map((m) => `${m.authorName}: ${m.text}`);
+    expect(transcript).toContain("Giulia: PONG");
+    expect(runner).toHaveBeenCalledTimes(2); // "thanks" (no mention) is not answered
+    // typing went on once and off once
+    expect(events.filter((e) => e.type === "room:typing").map((e) => (e as { typing: boolean }).typing)).toEqual([true, false]);
   });
 
   it("the orchestrator runs as itself (no agent)", async () => {

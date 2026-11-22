@@ -6,7 +6,7 @@
  *   POST   /checks                           a new check { sessionId?, agent?, prompt?, message?, everyMinutes?, cron?, timezone?, at?, to?, maxRuns?, endsAt?, title? }
  *                                            (no sessionId: a new chat session is made for its reports)
  *   PATCH  /checks/:id                       change it { prompt?, message?, everyMinutes?, cron?, timezone?, maxRuns?, endsAt?, confirm? }
- *   DELETE /checks/:id                       cancel it (it stays listed as cancelled)
+ *   DELETE /checks/:id                       cancel it (it stays listed as cancelled); ?purge=true: delete it for good (its record goes)
  *
  *   GET    /telegram/chats                   the groups, topics and people the bots can write to, and the bots
  *   POST   /telegram/send                    { to, text?, files?, agent?, topic? }: send now
@@ -85,9 +85,8 @@ export function checkRoutes(getDeps: () => CheckRoutesDeps): OpenAPIHono {
     let sessionId = b.sessionId;
     if (sessionId) {
       if (deps.sessions && !(await deps.sessions.getSession(sessionId))) return fail(c, 404, `Chat session "${sessionId}" not found`);
-    } else {
-      if (!deps.sessions) return fail(c, 400, "Give the chat session the reports go to (sessionId)");
-      sessionId = await deps.sessions.create(b.title ?? `Check: ${(b.prompt ?? b.message ?? "").trim().slice(0, 60)}`, b.agent);
+    } else if (!deps.sessions) {
+      return fail(c, 400, "Give the chat session the reports go to (sessionId)");
     }
     let firstRunAt: string | undefined;
     if (b.at) {
@@ -104,6 +103,10 @@ export function checkRoutes(getDeps: () => CheckRoutesDeps): OpenAPIHono {
         return fail(c, 400, err instanceof Error ? err.message : String(err));
       }
     }
+    // its own chat for the reports is made only now that the input checked out, and deleted again
+    // when the check is refused (a bad cron, too many checks): a failed create leaves nothing behind
+    const ownSession = !sessionId;
+    if (!sessionId) sessionId = await deps.sessions!.create(b.title ?? `Check: ${(b.prompt ?? b.message ?? "").trim().slice(0, 60)}`, b.agent);
     try {
       const check = await m.create({
         sessionId, ...(b.agent ? { agent: b.agent } : {}), prompt: b.prompt ?? "", ...(b.message ? { message: b.message } : {}),
@@ -113,6 +116,7 @@ export function checkRoutes(getDeps: () => CheckRoutesDeps): OpenAPIHono {
       });
       return c.json({ ok: true, data: check }, 201);
     } catch (err) {
+      if (ownSession) await deps.sessions!.deleteSession(sessionId).catch(() => undefined);
       return fail(c, 400, err instanceof Error ? err.message : String(err));
     }
   });
@@ -137,6 +141,14 @@ export function checkRoutes(getDeps: () => CheckRoutesDeps): OpenAPIHono {
   app.delete("/:id", async (c) => {
     const m = manager(c);
     if (m instanceof Response) return m;
+    if (c.req.query("purge") === "true") {
+      try {
+        const check = await m.delete(c.req.param("id"));
+        return check ? c.json({ ok: true, data: { ...check, deleted: true } }) : fail(c, 404, "Check not found");
+      } catch (err) {
+        return fail(c, 409, err instanceof Error ? err.message : String(err));
+      }
+    }
     const check = await m.cancel(c.req.param("id"));
     return check ? c.json({ ok: true, data: check }) : fail(c, 404, "Check not found");
   });

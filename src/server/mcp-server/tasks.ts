@@ -171,6 +171,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     });
     if (!r.ok) {
       if (r.status === 409) return fail(`${r.error}: give it another title, or use the existing task (polpo_tasks_list with text).`);
+      if (r.code === "UNKNOWN_DEPENDENCY") return apiError(r, "Creating the task", "Find the ids with polpo_tasks_list; a task waits for every task in dependsOn.");
       if (/agent/i.test(r.error)) return apiError(r, "Creating the task", "Check the agent's name with polpo_agents_list.");
       return apiError(r, "Creating the task");
     }
@@ -252,6 +253,28 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/tasks/${enc(id)}/kill`);
     if (!r.ok) return apiError(r, `Stopping ${id}`);
     return ok(`Stopped task ${id} (was ${t.task.status}).`, { id, killed: true, previous_status: t.task.status });
+  });
+
+  tool("tasks", "polpo_task_delete", {
+    title: "Delete a task",
+    description: "Delete a task and its record (result, activity) for good. A running task must be stopped first (polpo_task_kill). "
+      + "It cannot be undone. Needs confirm: true after the person agreed.",
+    inputSchema: {
+      id: z.string().min(1).describe("The task's id"),
+      confirm: confirmParam("delete the task"),
+    },
+    outputSchema: { deleted: z.string() },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, confirm }) => {
+    const t = await loadTask(deps, id);
+    if (!t.ok) return t.status === 404 ? notFound(id) : apiError(t, `Reading task ${id}`);
+    if (["assigned", "in_progress", "review"].includes(t.task.status)) {
+      return fail(`Task ${id} is ${t.task.status}: stop it first with polpo_task_kill (confirm: true), then delete it.`);
+    }
+    if (confirm !== true) return fail(`Deleting "${t.task.title}" (${t.task.status}, ${t.task.assignTo}) removes it and its result for good: ask the person, then call again with confirm: true.`);
+    const r = await apiSend(deps, "DELETE", `/tasks/${enc(id)}`);
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Deleting ${id}`);
+    return ok(`Deleted task ${id} ("${t.task.title}").`, { deleted: id });
   });
 
   tool("tasks", "polpo_task_direct", {

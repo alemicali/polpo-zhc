@@ -4,7 +4,8 @@
  * A message comes into a room (from a person, or an agent's reply). Who answers it:
  *   1. the agents it mentions (@name);
  *   2. in "intent" rooms, the others the classifier (TypeSafe Jev) judges it is for, above the
- *      threshold; one person alone with one agent: that agent, no classification;
+ *      threshold; one person alone with one agent: that agent, no classification. A "mentions"
+ *      room answers mentions (and replies to an agent's message) only, even with one agent;
  *   3. a person's message nobody picked up: the agent most likely to be meant (a group chat on
  *      the web should not leave the person unanswered).
  * The chosen agents answer all at once (replyOrder "parallel", default) or one after the other,
@@ -13,7 +14,9 @@
  * Agents talking to each other (agentToAgent): an agent's reply is a message of the room like
  * any other, so it can set off other agents. Brakes: at most maxAgentHops rounds after a
  * person's message, a higher threshold between agents, an agent never answers itself, and a
- * new message from a person stops the chain that was running.
+ * new message from a person stops the chain that was running, except the answers of agents that
+ * person's earlier message mentioned: a mention is always answered (a quick follow-up never
+ * swallows it).
  */
 
 import { nanoid } from "nanoid";
@@ -102,7 +105,8 @@ export function mentionedAgents(text: string, profiles: AgentProfile[]): string[
 export class RoomEngine {
   /** Bumped by every person's message: chains of an older generation stop. */
   private generations = new Map<string, number>();
-  private typing = new Map<string, Map<string, string>>();
+  /** Per room, the agents answering now: their name and how many of their turns run (one agent may have several queued). */
+  private typing = new Map<string, Map<string, { name: string; turns: number }>>();
   /** Dispatches still running (a person's message and what it set off). */
   private running = new Set<Promise<void>>();
 
@@ -110,7 +114,7 @@ export class RoomEngine {
 
   /** The agents typing in a room right now. */
   typingIn(roomId: string): Array<{ agent: string; name: string }> {
-    return [...(this.typing.get(roomId) ?? new Map()).entries()].map(([agent, name]) => ({ agent, name }));
+    return [...(this.typing.get(roomId) ?? new Map<string, { name: string; turns: number }>()).entries()].map(([agent, t]) => ({ agent, name: t.name }));
   }
 
   /**
@@ -159,16 +163,23 @@ export class RoomEngine {
   async dispatch(room: Room, message: RoomMessage, hop: number, chain: Chain): Promise<void> {
     const settings = settingsOf(room);
     if (hop > 0 && (!settings.agentToAgent || hop > settings.maxAgentHops)) return;
-    if (this.stale(room, chain)) return;
+    // agents' rounds stop when a person wrote again; a person's own message still gets the agents it mentions
+    if (hop > 0 && this.stale(room, chain)) return;
 
     const profiles = (await this.profiles(room)).filter((p) => !(message.authorKind === "agent" && p.id === message.authorId));
     if (profiles.length === 0) return;
     const mentioned = [...new Set([...mentionedAgents(message.text, profiles),
       ...(message.authorKind === "person" ? (message.addressedTo ?? []).filter((id) => profiles.some((p) => p.id === id)) : [])])];
     const chosen = new Map<string, number>(mentioned.map((id) => [id, 1]));
+    // a person's mention is always answered, even after a newer message (never swallowed by a follow-up)
+    const owed = new Set(hop === 0 && message.authorKind === "person" ? mentioned : []);
+    if (hop === 0 && this.stale(room, chain)) {
+      for (const id of chosen.keys()) if (!owed.has(id)) chosen.delete(id);
+      if (chosen.size === 0) return;
+    }
 
     // between agents, by intent, only those who have not spoken in this chain yet
-    const others = profiles.filter((p) => !chosen.has(p.id) && (hop === 0 || !chain.spoke.has(p.id)));
+    const others = this.stale(room, chain) ? [] : profiles.filter((p) => !chosen.has(p.id) && (hop === 0 || !chain.spoke.has(p.id)));
     if (others.length > 0 && settings.replyMode === "intent" && (hop === 0 || mentioned.length === 0)) {
       const probabilities = await this.classify(room, message, others);
       const threshold = hop === 0 ? settings.intentThreshold : Math.min(0.95, settings.intentThreshold + AGENT_TO_AGENT_MARGIN);
@@ -180,16 +191,15 @@ export class RoomEngine {
         const best = others.map((p) => [p.id, probabilities[p.id] ?? 0] as const).sort((a, b) => b[1] - a[1])[0];
         if (best && (best[1] > 0 || others.length === 1)) chosen.set(best[0], best[1]);
       }
-    } else if (others.length > 0 && mentioned.length === 0 && hop === 0 && profiles.length === 1) {
-      // mentions-only room with one agent: whatever the person writes is for it
-      chosen.set(profiles[0]!.id, 1);
     }
+    // a "mentions" room answers mentions only, whatever the number of agents (one agent included:
+    // the setting is what the person chose; an "intent" room with one agent answers everything)
     if (chosen.size === 0) return;
 
     const order = [...chosen.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => profiles.find((p) => p.id === id)!);
     const room2 = await this.opts.rooms.getRoom(room.id) ?? room;
     const run = async (agent: AgentProfile) => {
-      if (this.stale(room, chain) || chain.turns >= MAX_TURNS_PER_MESSAGE) return;
+      if ((this.stale(room, chain) && !owed.has(agent.id)) || chain.turns >= MAX_TURNS_PER_MESSAGE) return;
       chain.turns += 1;
       const reply = await this.turn(room2, agent, message);
       if (reply) chain.spoke.add(agent.id);
@@ -224,10 +234,13 @@ export class RoomEngine {
       this.opts.log?.("warn", `[rooms] ${room.id}: agent chat is not available on this instance`);
       return undefined;
     }
-    const typing = this.typing.get(room.id) ?? new Map<string, string>();
+    const typing = this.typing.get(room.id) ?? new Map<string, { name: string; turns: number }>();
     this.typing.set(room.id, typing);
-    typing.set(agent.id, agent.name);
-    this.opts.emit({ type: "room:typing", roomId: room.id, agent: agent.id, name: agent.name, typing: true });
+    // counted: a second turn of the same agent (queued behind its first) keeps it typing until both are done
+    const t = typing.get(agent.id) ?? { name: agent.name, turns: 0 };
+    t.turns += 1;
+    typing.set(agent.id, t);
+    if (t.turns === 1) this.opts.emit({ type: "room:typing", roomId: room.id, agent: agent.id, name: agent.name, typing: true });
     try {
       const sessionId = await this.sessionOf(room, agent.id);
       const recent = await this.opts.rooms.getRecentMessages(room.id, ROOM_TURN_LINES + 20);
@@ -256,8 +269,11 @@ export class RoomEngine {
       this.opts.log?.("warn", `[rooms] ${room.id}: ${agent.name} could not answer: ${err instanceof Error ? err.message : String(err)}`);
       return undefined;
     } finally {
-      typing.delete(agent.id);
-      this.opts.emit({ type: "room:typing", roomId: room.id, agent: agent.id, name: agent.name, typing: false });
+      t.turns -= 1;
+      if (t.turns <= 0) {
+        typing.delete(agent.id);
+        this.opts.emit({ type: "room:typing", roomId: room.id, agent: agent.id, name: agent.name, typing: false });
+      }
     }
   }
 
