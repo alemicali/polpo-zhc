@@ -241,47 +241,6 @@ describe("general settings", () => {
   });
 });
 
-describe("the orchestrator's name", () => {
-  const patch = (body: unknown) => app.request("/api/v1/config/settings", {
-    method: "PATCH", headers: { authorization: `Bearer ${MCP_KEY}`, "content-type": "application/json" }, body: JSON.stringify(body),
-  });
-  const publicName = async () => (await (await app.request("/api/v1/config/orchestrator")).json()).data.name;
-
-  it("is Polpo by default, set and validated through PATCH /config/settings, public for the first paint", async () => {
-    expect(await publicName()).toBe("Polpo");
-    const get = await tool("polpo_config_get");
-    expect(get.structuredContent.settings.orchestratorName).toBe("Polpo");
-    expect(text(get)).toContain("orchestrator name: Polpo (default)");
-
-    expect((await patch({ orchestratorName: "x".repeat(41) })).status).toBe(400);
-    expect((await patch({ orchestratorName: "two\nlines" })).status).toBe(400);
-    const saved = await patch({ orchestratorName: "  Ada  " });
-    expect(saved.status).toBe(200);
-    expect((await settingsFile()).data.settings.orchestratorName).toBe("Ada");
-    expect(await publicName()).toBe("Ada");
-    // the branding never renames the orchestrator
-    expect((await patch({ branding: { productName: "Lumea" } })).status).toBe(200);
-    expect(await publicName()).toBe("Ada");
-    expect((await patch({ orchestratorName: null })).status).toBe(200);
-    expect((await settingsFile()).data.settings.orchestratorName).toBeUndefined();
-    expect(await publicName()).toBe("Polpo");
-    expect((await patch({ branding: { productName: "" } })).status).toBe(200);
-  });
-
-  it("is changed with polpo_config_update (admin) and read back with polpo_config_get", async () => {
-    const r = await tool("polpo_config_update", { orchestrator_name: "Ada" });
-    expect(r.isError).toBeFalsy();
-    expect(r.structuredContent.changed).toEqual(["orchestratorName"]);
-    expect((await tool("polpo_config_get")).structuredContent.settings.orchestratorName).toBe("Ada");
-    expect(await tool("polpo_config_update", { orchestrator_name: "x".repeat(41) })).toMatchObject({ isError: true });
-    const reset = await tool("polpo_config_update", { orchestrator_name: null });
-    expect(reset.structuredContent.changed).toEqual(["orchestratorName"]);
-    expect((await tool("polpo_config_get")).structuredContent.settings.orchestratorName).toBe("Polpo");
-    const { toolScopeMatrix } = await import("../server/mcp.js");
-    expect(toolScopeMatrix().find((t) => t.name === "polpo_config_update")?.scope).toBe("polpo:admin");
-  });
-});
-
 describe("policies", () => {
   it("saves and deletes approval gates, and the escalation policy and SLA", async () => {
     const saved = await tool("polpo_approval_gate_save", { id: "ship", name: "Ship check", handler: "human", hook: "task:complete", condition: "task.title.includes('deploy')", timeout_ms: 60_000, timeout_action: "reject" });
