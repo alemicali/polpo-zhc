@@ -1826,7 +1826,22 @@ export function MissionDetailView({
           {scheduleEntry && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-emerald-500" : "bg-zinc-500")} />
-              <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : "Paused"}</span>
+              <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : scheduleEntry.nextRunAt ? "Paused" : "Done"}</span>
+            </div>
+          )}
+          {scheduleEntry?.lastOutcome && (
+            <div className="flex items-center gap-1.5 text-xs" title={scheduleEntry.lastError}>
+              <span className="text-muted-foreground">Last outcome:</span>
+              <span className={cn("font-medium", scheduleEntry.lastOutcome === "failed" && "text-red-400",
+                (scheduleEntry.lastOutcome === "missed" || scheduleEntry.lastOutcome === "skipped") && "text-amber-400")}>
+                {scheduleEntry.lastOutcome}{scheduleEntry.lastError ? ` — ${scheduleEntry.lastError}` : ""}
+              </span>
+            </div>
+          )}
+          {(scheduleEntry?.missedRuns ?? 0) > 0 && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground">Missed:</span>
+              <span className="font-medium text-amber-400">{scheduleEntry!.missedRuns} while the server was down</span>
             </div>
           )}
           {mission.endDate && (() => {

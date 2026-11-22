@@ -3,11 +3,16 @@ import { scheduleExpressionProblem } from "@polpo-ai/core";
 
 // ── Schemas ───────────────────────────────────────────────────────────
 
+const CatchUpSchema = z.enum(["none", "once"]).describe(
+  "A run missed while the server was down: \"once\" (default) runs it at startup when it is at most one interval late (24 h for a one-shot), \"none\" skips to the next run",
+);
+
 const CreateScheduleSchema = z.object({
   missionId: z.string().min(1),
   expression: z.string().min(1),
   recurring: z.boolean().optional(),
   endDate: z.string().datetime().optional(),
+  catchUp: CatchUpSchema.optional(),
 });
 
 const UpdateScheduleSchema = z.object({
@@ -15,7 +20,18 @@ const UpdateScheduleSchema = z.object({
   recurring: z.boolean().optional(),
   enabled: z.boolean().optional(),
   endDate: z.string().datetime().nullable().optional(),
+  catchUp: CatchUpSchema.optional(),
 });
+
+/**
+ * A schedule as the API shows it: the entry, plus `paused` and `catchUp` spelled out. Pause,
+ * next/last run, last outcome and missed runs are persisted: a restart keeps them.
+ */
+function scheduleView(entry: any): any {
+  if (!entry) return entry;
+  // paused: stopped by someone with a run still ahead; a one-shot that ran (or expired) is done, not paused
+  return { ...entry, paused: !entry.enabled && !!entry.nextRunAt, catchUp: entry.catchUp ?? "once", missedRuns: entry.missedRuns ?? 0 };
+}
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -24,10 +40,32 @@ const listSchedulesRoute = createRoute({
   path: "/",
   tags: ["Schedules"],
   summary: "List schedules",
+  description: "Every mission schedule: paused or not, next and last run, how the last run went, runs missed while the server was down.",
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.array(z.any()) }) } },
       description: "List of schedule entries",
+    },
+  },
+});
+
+const getScheduleRoute = createRoute({
+  method: "get",
+  path: "/{missionId}",
+  tags: ["Schedules"],
+  summary: "Get a schedule",
+  description: "One mission's schedule: paused or not, next and last run, how the last run went, runs missed while the server was down.",
+  request: {
+    params: z.object({ missionId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "The schedule",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Schedule not found",
     },
   },
 });
@@ -143,7 +181,7 @@ export function scheduleRoutes(getDeps: () => {
       return c.json({ ok: false, error: `No schedule found for mission "${missionId}"`, code: "NOT_FOUND" }, 404);
     }
     try {
-      return c.json({ ok: true, data: scheduler.runNow(missionId) }, 200);
+      return c.json({ ok: true, data: scheduleView(scheduler.runNow(missionId)) }, 200);
     } catch (err) {
       return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), code: "CANNOT_RUN" }, 409);
     }
@@ -153,7 +191,15 @@ export function scheduleRoutes(getDeps: () => {
   app.openapi(listSchedulesRoute, (c) => {
     const deps = getDeps();
     const schedules = deps.getScheduler()?.getAllSchedules() ?? [];
-    return c.json({ ok: true, data: schedules });
+    return c.json({ ok: true, data: schedules.map(scheduleView) });
+  });
+
+  // GET /schedules/:missionId — one schedule
+  app.openapi(getScheduleRoute, (c) => {
+    const { missionId } = c.req.valid("param");
+    const entry = getDeps().getScheduler()?.getScheduleByMissionId(missionId);
+    if (!entry) return c.json({ ok: false, error: `No schedule found for mission "${missionId}"`, code: "NOT_FOUND" }, 404);
+    return c.json({ ok: true, data: scheduleView(entry) }, 200);
   });
 
   // POST /schedules — create a schedule for a mission
@@ -184,12 +230,12 @@ export function scheduleRoutes(getDeps: () => {
     }
     const updatedMission = await deps.updateMission(body.missionId, missionUpdate as any);
 
-    const entry = scheduler.registerMission(updatedMission);
+    const entry = scheduler.registerMission(updatedMission, "created", body.catchUp ? { catchUp: body.catchUp } : undefined);
     if (!entry) {
       return c.json({ ok: false, error: "Could not create schedule. Expression may be invalid or timestamp is in the past.", code: "INVALID_EXPRESSION" }, 400);
     }
 
-    return c.json({ ok: true, data: entry }, 201);
+    return c.json({ ok: true, data: scheduleView(entry) }, 201);
   });
 
   // PATCH /schedules/:missionId — update a schedule
@@ -242,13 +288,17 @@ export function scheduleRoutes(getDeps: () => {
       scheduler.setEnabled(missionId, body.enabled);
     }
 
+    if (body.catchUp !== undefined) {
+      scheduler.setCatchUp(missionId, body.catchUp);
+    }
+
     if (body.endDate !== undefined) {
       const endDate = body.endDate ?? undefined;
       await deps.updateMission(missionId, { endDate } as any);
     }
 
     const updated = scheduler.getScheduleByMissionId(missionId);
-    return c.json({ ok: true, data: updated }, 200);
+    return c.json({ ok: true, data: scheduleView(updated) }, 200);
   });
 
   // DELETE /schedules/:missionId — delete a schedule
