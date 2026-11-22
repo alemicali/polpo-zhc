@@ -20,7 +20,7 @@ type RoomMessage = { id: string; ts: string; authorKind: string; authorId: strin
 const settingsSchema = {
   goal: z.string().max(500).optional().describe("What the group is for: the outcome every agent works toward ('' to clear)"),
   owner: z.string().max(120).optional().describe("The agent that owns the next step: it answers what nobody else picks up ('' to clear)"),
-  reply_mode: z.enum(["mentions", "intent"]).optional().describe("mentions: agents answer @mentions, replies and commands only; intent: also what is clearly for them"),
+  reply_mode: z.enum(["mentions", "intent"]).optional().describe("mentions: agents answer @mentions and replies only (also with one agent); intent: also what is clearly for them"),
   reply_order: z.enum(["parallel", "sequential"]).optional().describe("Several agents answer at once (parallel) or one after the other"),
   agent_to_agent: z.boolean().optional().describe("Agents may answer each other's messages"),
   max_agent_hops: z.number().int().min(0).max(10).optional().describe("Agent turns one message can set off, at most (with agent_to_agent)"),
@@ -163,7 +163,7 @@ export function registerRoomTools(tool: Register, deps: McpDeps): void {
 
   tool("rooms", "polpo_room_delete", {
     title: "Delete a room",
-    description: "Delete a web room and its whole transcript. It cannot be undone. Needs confirm: true after the person agreed.",
+    description: "Delete a web room, its whole transcript and its agents' \"(group)\" chat sessions for it. It cannot be undone. Needs confirm: true after the person agreed.",
     inputSchema: { id: z.string().min(1).describe("The room's id"), confirm: confirmParam("delete the room and its messages") },
     outputSchema: { id: z.string(), deleted: z.boolean() },
     annotations: DESTRUCTIVE,

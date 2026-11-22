@@ -17,12 +17,17 @@ function api() {
   const engine = { post, typingIn: vi.fn(() => [{ agent: "growth", name: "Giulia" }]) } as unknown as RoomEngine;
   const emit = vi.fn();
   const emitDeleted = vi.fn();
-  const app = roomRoutes(() => ({ rooms, engine, agentNames: async () => ["growth", "ops"], emit, emitDeleted }));
+  const sessionList: Array<{ id: string; scope?: string; agent?: string }> = [];
+  const sessions = {
+    listSessions: vi.fn(async () => sessionList as any),
+    deleteSession: vi.fn(async (id: string) => { const i = sessionList.findIndex((s) => s.id === id); if (i < 0) return false; sessionList.splice(i, 1); return true; }),
+  };
+  const app = roomRoutes(() => ({ rooms, engine, agentNames: async () => ["growth", "ops"], sessions, emit, emitDeleted }));
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await app.request(path, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
     return { status: res.status, body: await res.json() as any };
   };
-  return { rooms, post, emit, emitDeleted, call };
+  return { rooms, post, emit, emitDeleted, call, sessionList };
 }
 
 describe("rooms API", () => {
@@ -56,9 +61,18 @@ describe("rooms API", () => {
     const id = encodeURIComponent(room.id);
     const patched = await call("PATCH", `/${id}`, { agents: ["growth", "ops"], settings: { agentToAgent: false } });
     expect(patched.body.data).toMatchObject({ agents: ["growth", "ops"], settings: { agentToAgent: false, replyMode: "intent" } });
-    expect((await call("DELETE", `/${id}`)).body.data).toEqual({ deleted: true });
+    expect((await call("DELETE", `/${id}`)).body.data).toMatchObject({ deleted: true });
     expect(emitDeleted).toHaveBeenCalledWith(room.id);
     expect((await call("GET", `/${id}`)).status).toBe(404);
+  });
+
+  it("deleting a room deletes its agents' \"(group)\" sessions too, and nothing else (live: they were left behind)", async () => {
+    const { call, sessionList } = api();
+    const room = (await call("POST", "/", { title: "Team", agents: ["growth", "ops"] })).body.data;
+    sessionList.push({ id: "g1", scope: room.id, agent: "growth" }, { id: "o1", scope: room.id, agent: "ops" }, { id: "dm", agent: "growth" }, { id: "x", scope: "web:other" });
+    const res = await call("DELETE", `/${encodeURIComponent(room.id)}`);
+    expect(res.body.data).toEqual({ deleted: true, sessionsDeleted: 2 });
+    expect(sessionList.map((s) => s.id)).toEqual(["dm", "x"]);
   });
 
   it("a Telegram room is read-only here", async () => {

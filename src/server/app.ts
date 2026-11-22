@@ -1291,6 +1291,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     rooms: o.getRoomStore(),
     engine: o.getRoomEngine(),
     agentNames: async () => (await o.getAgents()).map(a => a.name),
+    sessions: o.getSessionStore() ?? undefined,
     emit: (event, payload) => o.emit(event, payload),
     emitDeleted: (roomId) => o.emit("room:deleted", { roomId }),
   })));
