@@ -79,7 +79,7 @@ export const TOOLSETS = {
   data: { default: true, description: "Structured data sources and queries" },
   files: { default: true, description: "The instance's files: browse, search, read, write (writes need files scope)" },
   team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
-  config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
+  config: { default: true, description: "Settings (general ones too), branding and appearance, providers and models (changes need admin scope)" },
   rooms: { default: true, description: "Group chats of people and agents: rooms, their messages, posting and waiting for replies" },
   chat: { default: true, description: "Chat sessions with Polpo and agents: list, read, rename, star, delete" },
   memory: { default: true, description: "Shared and per-agent memory: read, write, clear" },
@@ -93,6 +93,7 @@ export const TOOLSETS = {
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
   vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs vault scope)" },
   apps: { default: false, description: "Registered apps (start, stop, restart) and browser profiles" },
+  settings: { default: false, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, notification channels' setup (secrets never; changes need admin scope)" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
 
@@ -163,7 +164,7 @@ export function normalizeScopes(input: string | readonly string[] | undefined | 
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "channels", "learning"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "settings", "team", "skills", "channels", "learning"]);
 /** Toolsets whose writes have a scope of their own (polpo:admin holds them too). */
 const AREA_WRITES: Partial<Record<ToolsetName, PolpoScope>> = {
   files: "polpo:files", connectors: "polpo:connectors", computers: "polpo:computers", vault: "polpo:vault",

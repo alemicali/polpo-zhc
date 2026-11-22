@@ -78,7 +78,9 @@ describe("the scope model", () => {
     const by = Object.fromEntries(m.map((t) => [t.name, t.scope]));
     for (const t of m) {
       if (t.destructive) expect(t.scope, t.name).not.toBe("polpo:read");
-      if (t.readOnly && t.toolset !== "vault" && t.toolset !== "admin") expect(t.scope, t.name).toBe("polpo:read");
+      // reads need read, except the vault's, the REST fallback, and the lists that name people and their access (admin)
+      const adminReads = ["polpo_members_list", "polpo_mcp_access_list"];
+      if (t.readOnly && t.toolset !== "vault" && t.toolset !== "admin") expect(t.scope, t.name).toBe(adminReads.includes(t.name) ? "polpo:admin" : "polpo:read");
     }
     expect(by).toMatchObject({
       polpo_file_read: "polpo:read", polpo_file_write: "polpo:files", polpo_file_manage: "polpo:files",

@@ -31,6 +31,7 @@ import { registerConnectorTools } from "./mcp-server/connectors.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
+import { registerSettingsTools } from "./mcp-server/settings.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -64,6 +65,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerConfigTools(tool, deps);
+  registerSettingsTools(tool, deps);
   registerRoomTools(tool, deps);
   registerChatTools(tool, deps);
   registerMemoryTools(tool, deps);
