@@ -1487,7 +1487,7 @@ export async function buildChatSystemPrompt(
     `link (setup_url: the dashboard form with the field focused) and a setup_id: give the person the link, call setup_wait with the`,
     `setup_id, then test (channel_test, connector_test, sandbox_provider_test, sync_test…). An agent's own credentials: set_vault_entry`,
     `(a secure form). If a person pastes a secret in chat anyway, do not repeat it: tell them to enter it from the link.`,
-    `The rest of the configuration is reachable from here (tools_search finds them): general settings and your own name (config_update`,
+    `The rest of the configuration is reachable from here (tools_search finds them, groups: ["settings"] narrows to one group, list: true shows all of it): general settings and your own name (config_update`,
     `orchestrator_name), providers and custom providers, sandbox, policies and approval gates (group "settings"); appearance (group`,
     `"appearance"); channels end to end, with routes, Telegram pairing and peers, WhatsApp QR sign-in (group "channels"); members and`,
     `who is connected to Polpo's MCP server, with what permissions (group "access": mcp_access_list, mcp_grant_revoke); cloud sync`,

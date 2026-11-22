@@ -13,6 +13,8 @@
  * channel gateway use this to decide what to send and to answer the meta tools.
  */
 
+import { idfTable, indexTool, prepareQuery, scoreTool, stripConnectorTag, synonymsOf, tokenize, type IndexedTool } from "./tool-search.js";
+
 /** Per-agent (and instance default) switch. */
 export type ProgressiveToolsMode = "auto" | "always" | "never";
 
@@ -34,6 +36,9 @@ export interface ToolLike {
   name: string;
   description?: string;
   parameters?: unknown;
+  /** Display title (pi-agent-core `label`; connector tools: "<connector>: <title>"). Searched. */
+  label?: string;
+  title?: string;
 }
 
 /** A tool declaration as pi-ai expects it in `toolsAdded` (no executor). */
@@ -159,6 +164,8 @@ export interface ToolGroup {
   label: string;
   kind: "connector" | "group";
   tools: string[];
+  /** A connector's app (catalog id, e.g. "gmail" for gmail-2), when known. */
+  app?: string;
 }
 
 /** Whether progressive discovery is on for a run of `toolCount` tools. */
@@ -183,6 +190,8 @@ export interface ProgressiveToolSetOptions<T extends ToolLike> {
   groups?: ToolGroupRule[];
   /** Display names of connectors by id (else the id). */
   connectorNames?: Record<string, string>;
+  /** Catalog app of connectors by id (`gmail-2` → `gmail`): a filter or load by app covers all its accounts. */
+  connectorApps?: Record<string, string>;
   /** Tools loaded earlier in the conversation: on from the start. */
   loaded?: Iterable<string>;
   /** Never deferred, whatever their group. */
@@ -191,34 +200,78 @@ export interface ProgressiveToolSetOptions<T extends ToolLike> {
 
 export interface SearchHit {
   name: string;
+  /** The group's label (a connector's name and account). */
   group: string;
+  /** "mcp__<connector>" for a connector, else the group id. */
+  groupId: string;
+  kind: "connector" | "group";
   description: string;
   loaded: boolean;
   score: number;
 }
 
-const STOP_WORDS = new Set([
-  "a", "an", "the", "to", "of", "for", "in", "on", "and", "or", "with", "by", "from", "at", "is", "it", "my", "me",
-  "tool", "tools", "use", "using", "how", "can", "i", "do", "some", "this", "that", "into", "about",
-]);
-
-function stem(token: string): string {
-  if (token.length > 4 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
-  if (token.length > 3 && token.endsWith("s") && !token.endsWith("ss")) return token.slice(0, -1);
-  return token;
+/** What `tools_search` takes. */
+export interface ToolSearchRequest {
+  query?: string;
+  /** Results per page: default 8 for a search (max 25), 50 for a list (max 100). */
+  limit?: number;
+  /** Skip this many results (paging). */
+  offset?: number;
+  /** Only these connectors: ids (`gmail-2`), names / accounts, or an app (`gmail`: all its accounts). */
+  connectors?: string[];
+  /** Only these groups (ids such as `browser`, `documents`). */
+  groups?: string[];
+  /** Every loadable tool in scope, not ranked (compact, paged). */
+  list?: boolean;
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0 && !STOP_WORDS.has(token))
-    .map(stem);
+/** One connector or group in a search result, with how many of its tools matched. */
+export interface ToolSearchGroupCount {
+  id: string;
+  /** The value for the `connectors` / `groups` filter (a connector's id without `mcp__`). */
+  filter: string;
+  label: string;
+  kind: "connector" | "group";
+  tools: number;
+  loaded: number;
+  matches: number;
+}
+
+/** The structured answer of `tools_search` (also the `details` of the meta tool, for UIs). */
+export interface ToolSearchResult {
+  /** "search": ranked; "list": every tool in scope; "summary": the connectors and groups only. */
+  mode: "search" | "list" | "summary";
+  query: string;
+  /** The page shown. */
+  hits: SearchHit[];
+  /** Matches (search) or tools in scope (list) across every page. */
+  total: number;
+  offset: number;
+  limit: number;
+  more: boolean;
+  nextOffset?: number;
+  /** Connectors and groups in scope (summary, list) or with matches (search). */
+  counts: ToolSearchGroupCount[];
+  /** Group ids the filters resolved to (empty: no filter). */
+  scope: string[];
+  /** How filters were resolved, unknown values with the valid ones. */
+  notes: string[];
+}
+
+/** What `tools_load` did. */
+export interface ToolLoadResult {
+  loaded: string[];
+  already: string[];
+  unknown: string[];
+  /** Whole connectors / groups loaded, by the value asked for. */
+  groups: Array<{ asked: string; id: string; label: string; tools: number }>;
+  /** Close names for unknown ones. */
+  suggestions: Record<string, string[]>;
+  notes: string[];
 }
 
 function firstSentence(text: string | undefined, max = 200): string {
-  const clean = (text ?? "").replace(/\s+/g, " ").trim();
+  const clean = stripConnectorTag(text).replace(/\s+/g, " ").trim();
   const end = clean.search(/[.!?](\s|$)/);
   const sentence = end > 0 ? clean.slice(0, end + 1) : clean;
   return sentence.length <= max ? sentence : `${sentence.slice(0, max - 1)}…`;
@@ -228,13 +281,28 @@ function declarationOf(tool: ToolLike): ToolDeclaration {
   return { name: tool.name, description: tool.description ?? "", parameters: tool.parameters ?? { type: "object", properties: {} } };
 }
 
+const SEARCH_LIMIT = { default: 8, max: 25 };
+const LIST_LIMIT = { default: 50, max: 100 };
+/** Matches below this share of the best score are noise, not results. */
+const RELATIVE_CUTOFF = 0.3;
+/** Matches at least this share of the best score are strong: a tie at the page edge keeps them together. */
+const STRONG_SHARE = 0.75;
+/** Below this a match is a stray word in a description, not a result. */
+const MIN_SCORE = 1;
+
 const SEARCH_PARAMETERS = {
   type: "object",
   properties: {
-    query: { type: "string", description: "What you want to do, an app or a tool name (e.g. \"create a Linear issue\", \"gmail\", \"pdf\")." },
-    limit: { type: "integer", minimum: 1, maximum: 25, description: "Most results (default 8)." },
+    query: { type: "string", description: "What you want to do, an app or a tool name (e.g. \"create a Linear issue\", \"send email\", \"pdf\"). Empty with no filter: the connectors and groups you can load." },
+    connectors: {
+      type: "array", items: { type: "string" }, maxItems: 20,
+      description: "Only these connectors (hard filter): an id such as \"gmail-2\", a connector's name or account, or an app such as \"gmail\" for all its accounts.",
+    },
+    groups: { type: "array", items: { type: "string" }, maxItems: 20, description: "Only these tool groups (hard filter), by id (e.g. \"browser\", \"documents\")." },
+    list: { type: "boolean", description: "List every loadable tool in scope (name and what it does), not just the best matches: use it when unsure, so nothing is missed." },
+    limit: { type: "integer", minimum: 1, maximum: 100, description: "Results per page (default 8 for a search, 50 for a list)." },
+    offset: { type: "integer", minimum: 0, description: "Skip this many results: the next page of a search or list." },
   },
-  required: ["query"],
   additionalProperties: false,
 };
 
@@ -246,7 +314,7 @@ const LOAD_PARAMETERS = {
       minItems: 1,
       maxItems: 50,
       items: { type: "string" },
-      description: "Tool names from tools_search, or a group name from your instructions to load all of its tools.",
+      description: "Exact tool names from tools_search, or a connector (id such as \"gmail-2\", its name, \"mcp__gmail__*\") or group id to load all of its tools.",
     },
   },
   required: ["names"],
@@ -259,7 +327,21 @@ export interface ProgressiveMetaTool {
   label: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (toolCallId: string, params: unknown) => Promise<{ content: Array<{ type: "text"; text: string }>; details: undefined }>;
+  execute: (toolCallId: string, params: unknown) => Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }>;
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
+}
+
+function stringList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  return [...new Set(raw.map((item) => String(item ?? "").trim()).filter(Boolean))];
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : /(s|x|ch|sh)$/.test(word) ? "es" : "s"}`;
 }
 
 /**
@@ -275,6 +357,7 @@ export class ProgressiveToolSet<T extends ToolLike> {
   private readonly loadedSet = new Set<string>();
   private readonly initial: string[];
   private pending: string[] = [];
+  private searchIndex?: { tools: Map<string, IndexedTool>; idf: Map<string, number>; appNames: Set<string> };
   readonly metaTools: ProgressiveMetaTool[];
 
   constructor(private readonly opts: ProgressiveToolSetOptions<T>) {
@@ -298,7 +381,8 @@ export class ProgressiveToolSet<T extends ToolLike> {
     if (this.enabled) {
       for (const name of opts.loaded ?? []) {
         if (this.groupOf.has(name)) this.loadedSet.add(name);
-        else for (const tool of this.findGroup(name)?.tools ?? []) this.loadedSet.add(tool);
+        // a connector or group loaded whole, resolved as tools_load did
+        else for (const group of this.byName.has(name) ? [] : this.resolveTarget(name)) for (const tool of group.tools) this.loadedSet.add(tool);
       }
     }
     this.initial = this.enabled
@@ -310,7 +394,8 @@ export class ProgressiveToolSet<T extends ToolLike> {
   private classify(name: string): Omit<ToolGroup, "tools"> | undefined {
     const connector = connectorIdOf(name);
     if (connector) {
-      return { id: `${MCP_PREFIX}${connector}`, label: this.opts.connectorNames?.[connector] ?? connector, kind: "connector" };
+      const app = this.opts.connectorApps?.[connector];
+      return { id: `${MCP_PREFIX}${connector}`, label: this.opts.connectorNames?.[connector] ?? connector, kind: "connector", ...(app ? { app } : {}) };
     }
     for (const rule of this.opts.groups ?? []) {
       if (rule.names?.includes(name) || rule.prefixes?.some((prefix) => name.startsWith(prefix))) {
@@ -347,7 +432,7 @@ export class ProgressiveToolSet<T extends ToolLike> {
 
   /** The deferred groups (connectors first), with every tool each holds. */
   groups(): ToolGroup[] {
-    return [...this.groupList].sort((a, b) => (a.kind === b.kind ? a.label.localeCompare(b.label) : a.kind === "connector" ? -1 : 1));
+    return [...this.groupList].sort((a, b) => (a.kind === b.kind ? a.label.localeCompare(b.label) || a.id.localeCompare(b.id) : a.kind === "connector" ? -1 : 1));
   }
 
   /** Names of the deferred tools loaded so far (earlier turns included). */
@@ -367,72 +452,325 @@ export class ProgressiveToolSet<T extends ToolLike> {
     return this.enabled && META_TOOL_NAMES.includes(name);
   }
 
-  /** Ranked text search over the deferred tools: names, descriptions and group (connector) names. */
-  search(query: string, limit = 8): SearchHit[] {
-    const terms = [...new Set(tokenize(query))];
-    const phrase = query.trim().toLowerCase().replace(/\s+/g, "_");
-    const hits: SearchHit[] = [];
+  // ── Search ──────────────────────────────────────────────────────────
+
+  /** The index over the deferred tools: built once, on the first search. */
+  private index(): { tools: Map<string, IndexedTool>; idf: Map<string, number>; appNames: Set<string> } {
+    if (this.searchIndex) return this.searchIndex;
+    const tools = new Map<string, IndexedTool>();
     for (const [name, group] of this.groupOf) {
       const tool = this.byName.get(name)!;
-      const lowerName = name.toLowerCase();
       const connector = connectorIdOf(name);
-      const nameTokens = new Set(tokenize(connector ? name.slice(`${MCP_PREFIX}${connector}__`.length) : name));
-      const groupTokens = new Set([...tokenize(group.label), ...tokenize(group.id)]);
-      const descTokens = new Set(tokenize(tool.description ?? ""));
-      let score = 0;
-      let matched = 0;
-      for (const term of terms) {
-        let best = 0;
-        if (nameTokens.has(term)) best = Math.max(best, 4);
-        else if (term.length >= 3 && [...nameTokens].some((t) => t.startsWith(term) || (t.length >= 3 && term.startsWith(t)))) best = Math.max(best, 2);
-        if (groupTokens.has(term)) best = Math.max(best, 3);
-        else if (term.length >= 3 && [...groupTokens].some((t) => t.startsWith(term))) best = Math.max(best, 1.5);
-        if (descTokens.has(term)) best = Math.max(best, 1);
-        else if (term.length >= 4 && [...descTokens].some((t) => t.startsWith(term))) best = Math.max(best, 0.5);
-        if (best > 0) matched += 1;
-        score += best;
-      }
-      if (phrase && lowerName === phrase) score += 20;
-      else if (phrase.length >= 3 && lowerName.includes(phrase)) score += 5;
-      if (terms.length > 0) score *= matched / terms.length;
-      if (score <= 0) continue;
-      hits.push({ name, group: group.label, description: firstSentence(tool.description), loaded: this.loadedSet.has(name), score });
+      const shortName = connector ? name.slice(`${MCP_PREFIX}${connector}__`.length) : name;
+      const rawTitle = typeof tool.label === "string" ? tool.label : typeof tool.title === "string" ? tool.title : "";
+      const title = rawTitle.startsWith(`${group.label}: `) ? rawTitle.slice(group.label.length + 2) : rawTitle;
+      tools.set(name, indexTool({
+        name, shortName, title, description: tool.description, parameters: tool.parameters,
+        groupText: [group.label, group.id, connector ?? "", connector?.replace(/-\d+$/, "") ?? "", group.app ?? ""].join(" "),
+      }));
     }
-    hits.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-    return hits.slice(0, Math.max(1, Math.min(25, Math.floor(limit) || 8)));
+    // words that name a connector: its id (and its app's), catalog id, the first word of its name
+    const appNames = new Set<string>();
+    for (const group of this.groupList) {
+      if (group.kind !== "connector") continue;
+      const id = this.filterValue(group).toLowerCase();
+      for (const word of [id, id.replace(/-\d+$/, ""), group.app?.toLowerCase(), tokenize(group.label)[0]]) {
+        if (word && /^[a-z0-9]+$/.test(word) && word.length >= 3) appNames.add(word);
+      }
+    }
+    this.searchIndex = { tools, idf: idfTable([...tools.values()]), appNames };
+    return this.searchIndex;
+  }
+
+  private filterValue(group: ToolGroup): string {
+    return group.kind === "connector" ? group.id.slice(MCP_PREFIX.length) : group.id;
+  }
+
+  private describeGroup(group: ToolGroup): string {
+    return `${group.label} [${group.kind} ${this.filterValue(group)}]`;
   }
 
   /**
-   * Load tools by name, or every tool of a group (its id, or a connector's name). Newly loaded
-   * tools are announced by `takeAnnouncement()` / `takeNewlyLoaded()`.
+   * Connectors (accounts) a value names. `mcp__<id>` (or `mcp__<id>__*`) is that one account; an
+   * app ("gmail": catalog id, or the id without its `-2` suffix) is every account of it; else an
+   * id or a name, exactly; else names starting with the value's words.
+   */
+  private resolveConnector(value: string): { groups: ToolGroup[]; exact: boolean } {
+    const connectors = this.groupList.filter((group) => group.kind === "connector");
+    const lower = value.trim().toLowerCase();
+    const prefixed = lower.startsWith(MCP_PREFIX);
+    const v = lower.replace(/^mcp__/, "").replace(/__\*?$|\*$/, "").replace(/__$/, "");
+    if (!v) return { groups: [], exact: false };
+    const exact = connectors.filter((group) => this.filterValue(group).toLowerCase() === v || (!prefixed && group.label.toLowerCase() === lower));
+    if (prefixed) return { groups: exact, exact: true };
+    const byApp = connectors.filter((group) => group.app?.toLowerCase() === v || this.filterValue(group).toLowerCase().replace(/-\d+$/, "") === v);
+    if (byApp.length > 1 || (byApp.length === 1 && exact.length === 0)) return { groups: byApp, exact: false };
+    if (exact.length) return { groups: exact, exact: true };
+    const words = tokenize(v).join(" ");
+    const byName = words.length >= 3
+      ? connectors.filter((group) => {
+        const label = tokenize(group.label).join(" ");
+        return label === words || label.startsWith(`${words} `) || group.label.toLowerCase().includes(lower);
+      })
+      : [];
+    return { groups: byName, exact: false };
+  }
+
+  /** Groups a value names: exact id or label, else groups whose label has every word of it. */
+  private resolveGroup(value: string): { groups: ToolGroup[]; exact: boolean } {
+    const groups = this.groupList.filter((group) => group.kind === "group");
+    const v = value.trim().toLowerCase().replace(/^group:/, "");
+    if (!v) return { groups: [], exact: false };
+    const exact = groups.filter((group) => group.id.toLowerCase() === v || group.label.toLowerCase() === v);
+    if (exact.length) return { groups: exact, exact: true };
+    const words = tokenize(v);
+    if (words.length === 0) return { groups: [], exact: false };
+    const partial = groups.filter((group) => {
+      const label = new Set([...tokenize(group.label), ...tokenize(group.id)]);
+      return words.every((word) => label.has(word) || [...synonymsOf(word)].some((syn) => label.has(syn)));
+    });
+    return { groups: partial, exact: false };
+  }
+
+  /** How a value resolved: every account of an app says how to pick one. */
+  private resolutionNote(field: string, value: string, groups: ToolGroup[]): string {
+    const accounts = groups.filter((group) => group.kind === "connector");
+    const one = accounts.length > 1 ? ` (every account of the app; for one account use its id, e.g. "${MCP_PREFIX}${this.filterValue(accounts[0])}")` : "";
+    return `${field}: "${value}" → ${groups.map((group) => this.describeGroup(group)).join(", ")}${one}`;
+  }
+
+  private validValues(): string {
+    const connectors = this.groups().filter((group) => group.kind === "connector").map((group) => `${this.filterValue(group)} (${group.label})`);
+    const groups = this.groups().filter((group) => group.kind === "group").map((group) => group.id);
+    return [connectors.length ? `connectors: ${connectors.join(", ")}` : "", groups.length ? `groups: ${groups.join(", ")}` : ""].filter(Boolean).join("; ");
+  }
+
+  /** The groups `connectors` / `groups` filters select (union), with notes on how they resolved. */
+  private resolveFilters(connectors: string[], groups: string[]): { scope?: Set<string>; notes: string[]; unknown: number } {
+    if (connectors.length === 0 && groups.length === 0) return { notes: [], unknown: 0 };
+    const scope = new Set<string>();
+    const notes: string[] = [];
+    const unknown: string[] = [];
+    const take = (value: string, kind: "connector" | "group") => {
+      const primary = kind === "connector" ? this.resolveConnector(value) : this.resolveGroup(value);
+      const other = primary.groups.length ? undefined : kind === "connector" ? this.resolveGroup(value) : this.resolveConnector(value);
+      const found = primary.groups.length ? primary : other!;
+      if (found.groups.length === 0) { unknown.push(`${kind} "${value}"`); return; }
+      for (const group of found.groups) scope.add(group.id);
+      if (!found.exact || other) notes.push(this.resolutionNote(kind === "connector" ? "connectors" : "groups", value, found.groups));
+    };
+    for (const value of connectors) take(value, "connector");
+    for (const value of groups) take(value, "group");
+    if (unknown.length) notes.push(`Unknown ${unknown.join(", ")}. You can filter by ${this.validValues() || "nothing: no tool to load"}.`);
+    return { scope, notes, unknown: unknown.length };
+  }
+
+  private hitOf(name: string, score: number): SearchHit {
+    const group = this.groupOf.get(name)!;
+    return {
+      name, group: group.label, groupId: group.id, kind: group.kind,
+      description: firstSentence(this.byName.get(name)!.description), loaded: this.loadedSet.has(name), score,
+    };
+  }
+
+  private countsOf(names: Iterable<string>, groups: Iterable<ToolGroup>): ToolSearchGroupCount[] {
+    const matches = new Map<string, number>();
+    for (const name of names) {
+      const id = this.groupOf.get(name)!.id;
+      matches.set(id, (matches.get(id) ?? 0) + 1);
+    }
+    return [...groups].map((group) => ({
+      id: group.id, filter: this.filterValue(group), label: group.label, kind: group.kind, tools: group.tools.length,
+      loaded: group.tools.filter((name) => this.loadedSet.has(name)).length, matches: matches.get(group.id) ?? 0,
+    }));
+  }
+
+  /**
+   * `tools_search`: ranked matches (search), every tool in scope (list), or the connectors and
+   * groups (summary: no query, no filter). Filters are hard; unknown filter values come back as
+   * notes listing the valid ones.
+   */
+  find(request: ToolSearchRequest): ToolSearchResult {
+    const query = (request.query ?? "").trim();
+    const connectors = stringList(request.connectors);
+    const groups = stringList(request.groups);
+    const filtered = connectors.length > 0 || groups.length > 0;
+    const listing = request.list === true || ((query === "" || query === "*") && filtered);
+    const mode: ToolSearchResult["mode"] = listing ? "list" : query === "" || query === "*" ? "summary" : "search";
+    const limits = mode === "search" ? SEARCH_LIMIT : LIST_LIMIT;
+    const limit = clampInt(request.limit, 1, limits.max, limits.default);
+    const offset = clampInt(request.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+    const { scope, notes, unknown } = this.resolveFilters(connectors, groups);
+    const empty = (extra: Partial<ToolSearchResult> = {}): ToolSearchResult => ({
+      mode, query, hits: [], total: 0, offset, limit, more: false, counts: [], scope: [...(scope ?? [])], notes, ...extra,
+    });
+    if (scope && scope.size === 0 && unknown > 0) return empty();
+    const inScope = (name: string) => !scope || scope.has(this.groupOf.get(name)!.id);
+    const scopeGroups = this.groups().filter((group) => !scope || scope.has(group.id));
+
+    if (mode === "summary") {
+      return empty({ counts: this.countsOf([], scopeGroups), total: scopeGroups.reduce((sum, group) => sum + group.tools.length, 0) });
+    }
+
+    if (mode === "list") {
+      const names = scopeGroups.flatMap((group) => [...group.tools].sort((a, b) => a.localeCompare(b)));
+      const page = names.slice(offset, offset + limit);
+      const next = offset + page.length;
+      return {
+        ...empty(), hits: page.map((name) => this.hitOf(name, 0)), total: names.length,
+        more: next < names.length, ...(next < names.length ? { nextOffset: next } : {}), counts: this.countsOf(names, scopeGroups),
+      };
+    }
+
+    const { tools, idf, appNames } = this.index();
+    const prepared = prepareQuery(query, appNames);
+    const scored: Array<{ name: string; score: number }> = [];
+    for (const [name, indexed] of tools) {
+      if (!inScope(name)) continue;
+      const score = scoreTool(indexed, prepared, idf);
+      if (score > 0) scored.push({ name, score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    const top = scored[0]?.score ?? 0;
+    const relevant = scored.filter((hit) => hit.score >= Math.max(MIN_SCORE, top * RELATIVE_CUTOFF));
+    let end = Math.min(relevant.length, offset + limit);
+    // a tie of strong matches across the page edge: when it ends a few results later, show it whole
+    const edge = relevant[end - 1];
+    if (edge && edge.score >= top * STRONG_SHARE) {
+      const cap = Math.min(end + Math.max(2, Math.ceil(limit / 2)), offset + SEARCH_LIMIT.max);
+      let tieEnd = end;
+      while (tieEnd < relevant.length && relevant[tieEnd].score === edge.score) tieEnd += 1;
+      if (tieEnd <= cap) end = tieEnd;
+    }
+    const page = relevant.slice(offset, end);
+    const more = end < relevant.length;
+    return {
+      ...empty(), hits: page.map((hit) => this.hitOf(hit.name, hit.score)), total: relevant.length, more,
+      ...(more ? { nextOffset: end } : {}),
+      counts: this.countsOf(relevant.map((hit) => hit.name), scopeGroups).filter((count) => count.matches > 0),
+    };
+  }
+
+  /** Ranked text search over the deferred tools (names, titles, descriptions, parameters, connectors and groups). */
+  search(query: string, limit = SEARCH_LIMIT.default, filters: Pick<ToolSearchRequest, "connectors" | "groups" | "offset"> = {}): SearchHit[] {
+    if (!query.trim()) return [];
+    return this.find({ ...filters, query, limit }).hits;
+  }
+
+  /** The text the model gets for a search result: grouped by connector / group, exact names to load. */
+  formatSearch(result: ToolSearchResult): string {
+    const lines: string[] = [];
+    for (const note of result.notes) lines.push(`Note: ${note}`);
+    if (result.scope.length === 0 && result.notes.some((note) => note.startsWith("Unknown")) && result.hits.length === 0 && result.counts.length === 0) {
+      lines.push("Nothing searched: fix the filter (or drop it).");
+      return lines.join("\n");
+    }
+    const quoted = JSON.stringify(result.query);
+    if (result.mode === "summary") {
+      const total = result.counts.reduce((sum, count) => sum + count.tools, 0);
+      lines.push(`Tools you can load (${total}), by connector and group:`);
+      for (const count of result.counts) {
+        lines.push(`- ${count.label} [${count.kind} ${count.filter}]: ${plural(count.tools, "tool")}${count.loaded ? `, ${count.loaded} loaded` : ""}`);
+      }
+      lines.push("Search with tools_search { query, connectors: [...] }; see all of one with tools_search { list: true, connectors: [...] } (or groups: [...]); load a whole one with tools_load { names: [id] }.");
+      return lines.join("\n");
+    }
+    if (result.hits.length === 0) {
+      if (result.mode === "list") lines.push(result.total > 0 ? `No more tools after ${result.offset} (${result.total} in all).` : "No tool to load in this scope.");
+      else {
+        lines.push(`No tool to load matches ${quoted}${result.scope.length ? " in this scope" : ""}. Try other words, a list (tools_search { list: true${result.scope.length ? ", connectors / groups as before" : ""} }), or load a whole group with tools_load.`);
+        lines.push(`Connectors and groups: ${this.groups().map((group) => `${group.label} (${this.filterValue(group)}, ${group.tools.length})`).join("; ")}.`);
+      }
+      return lines.join("\n");
+    }
+    const from = result.offset + 1;
+    const to = result.offset + result.hits.length;
+    const range = result.more || result.offset > 0
+      ? ` (showing ${from}–${to}${result.more ? `; next page: offset ${result.nextOffset}` : ""})`
+      : "";
+    lines.push(result.mode === "list"
+      ? `${plural(result.total, "tool")} to load${range}; load with tools_load:`
+      : `${plural(result.total, "match")} for ${quoted}${range}; load with tools_load:`);
+    // group the page by connector / group, in rank order
+    const order: string[] = [];
+    const byGroup = new Map<string, SearchHit[]>();
+    for (const hit of result.hits) {
+      if (!byGroup.has(hit.groupId)) { byGroup.set(hit.groupId, []); order.push(hit.groupId); }
+      byGroup.get(hit.groupId)!.push(hit);
+    }
+    const countOf = new Map(result.counts.map((count) => [count.id, count]));
+    const max = result.mode === "list" ? 110 : 160;
+    for (const id of order) {
+      const hits = byGroup.get(id)!;
+      const count = countOf.get(id);
+      const group = this.groupList.find((entry) => entry.id === id)!;
+      const size = result.mode === "list" ? plural(group.tools.length, "tool") : plural(count?.matches ?? hits.length, "match");
+      lines.push(`${this.describeGroup(group)} — ${size}:`);
+      for (const hit of hits) {
+        const description = hit.description.length > max ? `${hit.description.slice(0, max - 1)}…` : hit.description;
+        lines.push(`- ${hit.name}${hit.loaded ? " (loaded)" : ""}${description ? ` — ${description}` : ""}`);
+      }
+    }
+    if (result.mode === "search") {
+      const elsewhere = result.counts.filter((count) => !byGroup.has(count.id));
+      if (elsewhere.length) {
+        lines.push(`Also matching on later pages: ${elsewhere.map((count) => `${count.label} [${count.filter}] ${count.matches}`).join(", ")} (filter with connectors / groups).`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  // ── Load ────────────────────────────────────────────────────────────
+
+  /**
+   * Load tools by name, or every tool of a connector / group (its id, `mcp__<id>`, a connector's
+   * name, or an app for all its accounts). Newly loaded tools are announced by
+   * `takeAnnouncement()` / `takeNewlyLoaded()`. Only tools of the run can be loaded.
    */
   load(names: string[]): { loaded: string[]; already: string[]; unknown: string[] } {
-    const loaded: string[] = [];
-    const already: string[] = [];
-    const unknown: string[] = [];
+    const { loaded, already, unknown } = this.loadDetailed(names);
+    return { loaded, already, unknown };
+  }
+
+  loadDetailed(names: string[]): ToolLoadResult {
+    const result: ToolLoadResult = { loaded: [], already: [], unknown: [], groups: [], suggestions: {}, notes: [] };
+    const already = new Set<string>();
     const add = (name: string) => {
-      if (this.loadedSet.has(name)) { already.push(name); return; }
+      if (this.loadedSet.has(name)) { already.add(name); return; }
       this.loadedSet.add(name);
       this.pending.push(name);
-      loaded.push(name);
+      result.loaded.push(name);
     };
     for (const raw of names) {
       const name = String(raw ?? "").trim();
       if (!name) continue;
       if (this.groupOf.has(name)) { add(name); continue; }
-      if (this.byName.has(name)) { already.push(name); continue; }
-      const group = this.findGroup(name);
-      if (group) { for (const tool of group.tools) add(tool); continue; }
-      unknown.push(name);
+      if (this.byName.has(name)) { already.add(name); continue; }
+      const groups = this.resolveTarget(name);
+      if (groups.length) {
+        for (const group of groups) {
+          for (const tool of group.tools) add(tool);
+          result.groups.push({ asked: name, id: group.id, label: group.label, tools: group.tools.length });
+        }
+        if (groups.length > 1) result.notes.push(this.resolutionNote("names", name, groups));
+        continue;
+      }
+      result.unknown.push(name);
+      // close names, in the same connector when the name says which
+      const connector = connectorIdOf(name);
+      const inConnector = connector && this.groupList.some((group) => group.id === `${MCP_PREFIX}${connector}`) ? [connector] : undefined;
+      const close = this.search(connector ? name.slice(`${MCP_PREFIX}${connector}__`.length) : name, 3, { connectors: inConnector }).map((hit) => hit.name);
+      if (close.length) result.suggestions[name] = close;
     }
-    return { loaded, already: [...new Set(already)], unknown };
+    result.already = [...already];
+    return result;
   }
 
-  private findGroup(name: string): ToolGroup | undefined {
-    const lower = name.toLowerCase().replace(/^group:/, "");
-    return this.groupList.find((group) => group.id.toLowerCase() === lower
-      || group.label.toLowerCase() === lower
-      || (group.kind === "connector" && group.id.slice(MCP_PREFIX.length).toLowerCase() === lower));
+  /** The connectors or groups a load value names (connectors first). */
+  private resolveTarget(value: string): ToolGroup[] {
+    const connector = this.resolveConnector(value);
+    if (connector.groups.length) return connector.groups;
+    return this.resolveGroup(value).groups;
   }
 
   /** Tools loaded since the last call (each returned once). */
@@ -449,37 +787,49 @@ export class ProgressiveToolSet<T extends ToolLike> {
     return { role: "system", content: "", toolsAdded: tools.map(declarationOf), timestamp: Date.now() };
   }
 
-  /** Answer a meta tool call (the text the model gets back). */
-  run(name: string, args: Record<string, unknown> | undefined): string {
-    if (name === TOOLS_SEARCH) {
-      const query = typeof args?.query === "string" ? args.query : "";
-      const limit = typeof args?.limit === "number" ? args.limit : 8;
-      const hits = this.search(query, limit);
-      if (hits.length === 0) {
-        return `No tool to load matches "${query}". Groups: ${this.groupSummary()}. Try other words, or load a whole group with tools_load.`;
-      }
-      return [
-        `${hits.length} tool${hits.length === 1 ? "" : "s"} (load with tools_load):`,
-        ...hits.map((hit) => `- ${hit.name} [${hit.group}]${hit.loaded ? " (loaded)" : ""}${hit.description ? ` — ${hit.description}` : ""}`),
-      ].join("\n");
+  private formatLoad(result: ToolLoadResult): string {
+    const parts: string[] = [];
+    if (result.loaded.length) {
+      const whole = result.groups.length ? ` (all of ${result.groups.map((group) => `${group.label} [${group.id.replace(MCP_PREFIX, "")}]`).join(", ")})` : "";
+      const shown = result.loaded.slice(0, 40).join(", ");
+      const rest = result.loaded.length > 40 ? ` …and ${result.loaded.length - 40} more` : "";
+      parts.push(`Loaded ${plural(result.loaded.length, "tool")}${whole}: ${shown}${rest}. You can call ${result.loaded.length === 1 ? "it" : "them"} from your next step on.`);
     }
-    if (name === TOOLS_LOAD) {
-      const names = Array.isArray(args?.names) ? (args!.names as unknown[]).map(String)
-        : typeof args?.names === "string" ? [args.names] : [];
-      if (names.length === 0) return "Error: give the names of the tools to load (names: [...]).";
-      const result = this.load(names);
-      const parts: string[] = [];
-      if (result.loaded.length) parts.push(`Loaded ${result.loaded.length} tool${result.loaded.length === 1 ? "" : "s"}: ${result.loaded.join(", ")}. You can call ${result.loaded.length === 1 ? "it" : "them"} from your next step on.`);
-      if (result.already.length) parts.push(`Already available: ${result.already.join(", ")}.`);
-      if (result.unknown.length) parts.push(`Not found: ${result.unknown.join(", ")} (use tools_search for the exact names).`);
-      const text = parts.join(" ");
-      return result.loaded.length === 0 && result.already.length === 0 ? `Error: ${text}` : text;
+    if (result.already.length) parts.push(`Already available: ${result.already.join(", ")}.`);
+    if (result.unknown.length) {
+      const hints = result.unknown.map((name) => result.suggestions[name]?.length ? `${name} (did you mean ${result.suggestions[name].join(", ")}?)` : name);
+      parts.push(`Not found: ${hints.join(", ")} (use tools_search for the exact names).`);
     }
-    return `Error: Unknown tool "${name}"`;
+    for (const note of result.notes) parts.push(`Note: ${note}.`);
+    const text = parts.join(" ");
+    return result.loaded.length === 0 && result.already.length === 0 ? `Error: ${text}` : text;
   }
 
-  private groupSummary(): string {
-    return this.groups().map((group) => `${group.label} (${group.id}, ${group.tools.length})`).join("; ");
+  /** Answer a meta tool call: the text the model gets back, and structured details for UIs. */
+  runDetailed(name: string, args: Record<string, unknown> | undefined): { text: string; details?: ToolSearchResult | ToolLoadResult } {
+    if (name === TOOLS_SEARCH) {
+      const details = this.find({
+        query: typeof args?.query === "string" ? args.query : "",
+        limit: args?.limit as number | undefined,
+        offset: args?.offset as number | undefined,
+        connectors: stringList(args?.connectors),
+        groups: stringList(args?.groups),
+        list: args?.list === true || args?.list === "true",
+      });
+      return { text: this.formatSearch(details), details };
+    }
+    if (name === TOOLS_LOAD) {
+      const names = stringList(args?.names);
+      if (names.length === 0) return { text: "Error: give the names of the tools to load (names: [...])." };
+      const details = this.loadDetailed(names);
+      return { text: this.formatLoad(details), details };
+    }
+    return { text: `Error: Unknown tool "${name}"` };
+  }
+
+  /** Answer a meta tool call (the text the model gets back). */
+  run(name: string, args: Record<string, unknown> | undefined): string {
+    return this.runDetailed(name, args).text;
   }
 
   /** The prompt section that lists the deferred groups (stable for the conversation). */
@@ -493,29 +843,33 @@ export class ProgressiveToolSet<T extends ToolLike> {
     return [
       "## More tools on demand",
       "",
-      "To keep your context small, these tools are available but not loaded. When you need one, call `tools_search` (what you want to do, an app or a name), then `tools_load` with the names you need (or a group name to load all of it); loaded tools work from your next step on and stay for the rest of this conversation. Load only what you need.",
+      "To keep your context small, these tools are available but not loaded. When you need one, call `tools_search` (what you want to do, an app or a name), then `tools_load` with the exact names you need (or a connector / group id to load all of it); loaded tools work from your next step on and stay for the rest of this conversation. Load only what you need.",
+      "- When the request names an app or an account, filter: `tools_search { query: \"send email\", connectors: [\"gmail-2\"] }` (an app such as \"gmail\" covers all its accounts; `groups: [\"documents\"]` for a group).",
+      "- Results come best first with the total; page with `offset`. When unsure, list everything in scope with `tools_search { list: true, connectors: [...] }` so you miss nothing.",
       ...lines,
     ].join("\n");
   }
 
   private buildMetaTools(): ProgressiveMetaTool[] {
-    const text = (value: string) => ({ content: [{ type: "text" as const, text: value }], details: undefined });
+    const reply = (value: { text: string; details?: unknown }) => ({ content: [{ type: "text" as const, text: value.text }], details: value.details });
     return [
       {
         name: TOOLS_SEARCH,
         label: "Search tools",
         description: "Search the tools you can load but do not have yet (connectors and the optional groups listed in your instructions): "
-          + "by what you want to do, an app or a tool name. Returns tool names with what they do; then load the ones you need with tools_load.",
+          + "by what you want to do, an app or a tool name; filter by connectors (id, account name, or an app for all its accounts) or groups. "
+          + "Returns the best matches with the total (page with offset), grouped by connector, with the exact names to load. "
+          + "list: true returns every tool in scope; no query and no filter, the connectors and groups. Then load what you need with tools_load.",
         parameters: SEARCH_PARAMETERS,
-        execute: async (_id, params) => text(this.run(TOOLS_SEARCH, params as Record<string, unknown>)),
+        execute: async (_id, params) => reply(this.runDetailed(TOOLS_SEARCH, params as Record<string, unknown>)),
       },
       {
         name: TOOLS_LOAD,
         label: "Load tools",
-        description: "Load tools by name (from tools_search), or a whole group by its name, so you can call them from your next step on. "
+        description: "Load tools by exact name (from tools_search), or a whole connector or group by its id, so you can call them from your next step on. "
           + "Loaded tools stay available for the rest of this conversation. Load only what you need.",
         parameters: LOAD_PARAMETERS,
-        execute: async (_id, params) => text(this.run(TOOLS_LOAD, params as Record<string, unknown>)),
+        execute: async (_id, params) => reply(this.runDetailed(TOOLS_LOAD, params as Record<string, unknown>)),
       },
     ];
   }
