@@ -42,6 +42,7 @@ import { useAsyncAction } from "@/hooks/use-polpo";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { StatValue } from "@/components/shared/stat-value";
 import { JsonBlock } from "@/components/json-block";
 
 // ── Status styling ──
@@ -52,41 +53,41 @@ const approvalStatusConfig: Record<
 > = {
   pending: {
     icon: Clock,
-    color: "text-amber-400",
-    bg: "bg-amber-500/10",
+    color: "text-warning",
+    bg: "bg-warning/10",
     label: "Pending",
-    ring: "ring-amber-500/30",
+    ring: "ring-warning/30",
   },
   approved: {
     icon: CheckCircle2,
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
+    color: "text-success",
+    bg: "bg-success/10",
     label: "Approved",
-    ring: "ring-emerald-500/30",
+    ring: "ring-success/30",
   },
   rejected: {
     icon: XCircle,
-    color: "text-red-400",
-    bg: "bg-red-500/10",
+    color: "text-destructive",
+    bg: "bg-destructive/10",
     label: "Rejected",
-    ring: "ring-red-500/30",
+    ring: "ring-destructive/30",
   },
   timeout: {
     icon: Timer,
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
+    color: "text-muted-foreground",
+    bg: "bg-muted-foreground/10",
     label: "Timed Out",
-    ring: "ring-zinc-500/30",
+    ring: "ring-muted-foreground/30",
   },
 };
 
 // ── Stat card ──
 
 const statGradients: Record<string, string> = {
-  "text-amber-400": "from-amber-500/60 to-amber-400/20",
-  "text-sky-400": "from-sky-500/60 to-sky-400/20",
-  "text-emerald-400": "from-emerald-500/60 to-emerald-400/20",
-  "text-red-400": "from-red-500/60 to-red-400/20",
+  "text-warning": "from-warning/60 to-warning/20",
+  "text-info": "from-info/60 to-info/20",
+  "text-success": "from-success/60 to-success/20",
+  "text-destructive": "from-destructive/60 to-destructive/20",
 };
 
 function StatCard({
@@ -107,18 +108,11 @@ function StatCard({
   return (
     <Card className={cn(
       "relative overflow-hidden transition-all bg-card/80 backdrop-blur-sm border-border/40",
-      accent && value > 0 && "ring-1 ring-amber-500/30 shadow-[0_0_15px_oklch(0.75_0.15_85_/_10%)]"
+      accent && value > 0 && "ring-1 ring-warning/30 glow-warning"
     )}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              {label}
-            </p>
-            <p className={cn("text-2xl font-bold font-mono tracking-tight mt-1", accent && value > 0 && "text-amber-400")}>
-              {value}
-            </p>
-          </div>
+          <StatValue label={label} value={value} tone={accent && value > 0 ? "warning" : "default"} />
           <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", bg)}>
             <Icon className={cn("h-4 w-4", color)} />
           </div>
@@ -149,13 +143,13 @@ function RejectDialog({
       <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
-            <ShieldX className="h-4 w-4 text-red-400" />
+            <ShieldX className="h-4 w-4 text-destructive" />
             Reject Approval Request
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            <label className="text-label text-muted-foreground">
               Feedback (required)
             </label>
             <Textarea
@@ -219,7 +213,7 @@ function ApprovalCard({
   return (
     <Card className={cn(
       "transition-all bg-card/80 backdrop-blur-sm border-border/40",
-      isPending && "ring-1 ring-amber-500/20 shadow-[0_0_15px_oklch(0.75_0.15_85_/_10%)]",
+      isPending && "ring-1 ring-warning/20 glow-warning",
     )}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
@@ -238,12 +232,12 @@ function ApprovalCard({
               <span className="text-sm font-semibold">{request.gateName}</span>
               <Badge
                 variant="outline"
-                className={cn("text-[9px] px-1.5 py-0", cfg.color)}
+                className={cn("text-micro px-1.5 py-0", cfg.color)}
               >
                 {cfg.label}
               </Badge>
               {request.gateId !== request.gateName && (
-                <span className="text-[10px] font-mono text-muted-foreground">
+                <span className="text-micro font-mono text-muted-foreground">
                   {request.gateId}
                 </span>
               )}
@@ -254,7 +248,7 @@ function ApprovalCard({
               {request.taskId && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0 cursor-help">
+                    <Badge variant="secondary" className="text-micro gap-1 px-1.5 py-0 cursor-help">
                       <FileText className="h-2 w-2" />
                       Task {request.taskId.slice(0, 8)}
                     </Badge>
@@ -263,11 +257,11 @@ function ApprovalCard({
                 </Tooltip>
               )}
               {request.missionId && (
-                <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
+                <Badge variant="secondary" className="text-micro gap-1 px-1.5 py-0">
                   Mission {request.missionId.slice(0, 8)}
                 </Badge>
               )}
-              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <span className="text-micro text-muted-foreground flex items-center gap-1">
                 <Clock className="h-2.5 w-2.5" />
                 Requested {formatDistanceToNow(new Date(request.requestedAt), { addSuffix: true })}
               </span>
@@ -277,12 +271,12 @@ function ApprovalCard({
             {!!request.resolvedAt && (
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 {request.resolvedBy && (
-                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <span className="text-micro text-muted-foreground flex items-center gap-1">
                     <User className="h-2.5 w-2.5" />
                     {request.resolvedBy}
                   </span>
                 )}
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   Resolved {formatDistanceToNow(new Date(request.resolvedAt), { addSuffix: true })}
                 </span>
               </div>
@@ -299,12 +293,12 @@ function ApprovalCard({
             {/* Payload preview */}
             {request.payload != null && (
               <details className="mt-2 group/payload">
-                <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                <summary className="text-micro text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
                   View payload
                 </summary>
                 <JsonBlock
                   data={request.payload}
-                  className="text-[9px] leading-relaxed font-mono bg-muted/30 rounded-md p-2 mt-1 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto border border-border/20"
+                  className="text-micro leading-relaxed font-mono bg-muted/30 rounded-md p-2 mt-1 whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto border border-border/20"
                 />
               </details>
             )}
@@ -315,7 +309,7 @@ function ApprovalCard({
             <div className="flex flex-col gap-1.5 shrink-0">
               <Button
                 size="sm"
-                className="h-8 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
+                className="h-8 gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground"
                 disabled={disabled}
                 onClick={() => onApprove(request.id)}
               >
@@ -325,7 +319,7 @@ function ApprovalCard({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 text-rose-400 border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-300"
+                className="h-8 gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                 disabled={disabled}
                 onClick={() => onReject(request.id)}
               >
@@ -434,30 +428,30 @@ export function ApprovalsPage() {
           label="Total Requests"
           value={counts.all}
           icon={ShieldCheck}
-          color="text-sky-400"
-          bg="bg-sky-500/10"
+          color="text-info"
+          bg="bg-info/10"
         />
         <StatCard
           label="Awaiting Review"
           value={counts.pending}
           icon={ShieldAlert}
-          color="text-amber-400"
-          bg="bg-amber-500/10"
+          color="text-warning"
+          bg="bg-warning/10"
           accent
         />
         <StatCard
           label="Approved"
           value={counts.approved}
           icon={CheckCircle2}
-          color="text-emerald-400"
-          bg="bg-emerald-500/10"
+          color="text-success"
+          bg="bg-success/10"
         />
         <StatCard
           label="Rejected / Timed Out"
           value={counts.rejected}
           icon={XCircle}
-          color="text-red-400"
-          bg="bg-red-500/10"
+          color="text-destructive"
+          bg="bg-destructive/10"
         />
       </div>
 
@@ -472,7 +466,7 @@ export function ApprovalsPage() {
               size="sm"
               className={cn(
                 "h-7 text-xs gap-1.5",
-                t.accent && tab !== t.value && counts.pending > 0 && "text-amber-400"
+                t.accent && tab !== t.value && counts.pending > 0 && "text-warning"
               )}
               onClick={() => setTab(t.value)}
             >
@@ -480,8 +474,8 @@ export function ApprovalsPage() {
               <Badge
                 variant="secondary"
                 className={cn(
-                  "text-[9px]",
-                  t.accent && counts.pending > 0 && tab !== t.value && "bg-amber-500/20 text-amber-400"
+                  "text-micro",
+                  t.accent && counts.pending > 0 && tab !== t.value && "bg-warning/20 text-warning"
                 )}
               >
                 {t.count}
@@ -508,14 +502,14 @@ export function ApprovalsPage() {
       {/* ── Pending highlight banner ── */}
       {pending.length > 0 && tab !== "pending" && (
         <div
-          className="flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 backdrop-blur-sm px-4 py-2.5 cursor-pointer hover:bg-amber-500/10 transition-colors shrink-0"
+          className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/5 backdrop-blur-sm px-4 py-2.5 cursor-pointer hover:bg-warning/10 transition-colors shrink-0"
           onClick={() => setTab("pending")}
         >
-          <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />
-          <span className="text-xs font-medium text-amber-400">
+          <ShieldAlert className="h-4 w-4 text-warning shrink-0" />
+          <span className="text-xs font-medium text-warning">
             {pending.length} approval{pending.length !== 1 ? "s" : ""} awaiting review
           </span>
-          <span className="text-[10px] text-muted-foreground ml-auto">Click to view</span>
+          <span className="text-micro text-muted-foreground ml-auto">Click to view</span>
         </div>
       )}
 

@@ -41,17 +41,17 @@ function ParamCard({ param }: { param: PlaybookParameter }) {
         <div className="flex items-center gap-2">
           <code className="text-xs font-semibold font-mono">{`{{${param.name}}}`}</code>
           {param.required && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 text-rose-400 gap-0.5">
+            <Badge variant="outline" className="text-micro px-1 py-0 text-destructive gap-0.5">
               <Asterisk className="h-2 w-2" />
               required
             </Badge>
           )}
-          <Badge variant="secondary" className="text-[8px] px-1 py-0">
+          <Badge variant="secondary" className="text-micro px-1 py-0">
             {param.type ?? "string"}
           </Badge>
         </div>
-        <p className="text-[11px] text-muted-foreground mt-1">{param.description}</p>
-        <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground mt-1">{param.description}</p>
+        <div className="flex items-center gap-3 mt-1.5 text-micro text-muted-foreground">
           {param.default !== undefined && (
             <span>Default: <code className="font-mono bg-muted/40 px-1 rounded">{String(param.default)}</code></span>
           )}
@@ -151,18 +151,18 @@ export function PlaybookDetailPage() {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold truncate">{playbook.name}</h1>
-            <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
+            <h1 className="font-heading text-h2 truncate">{playbook.name}</h1>
+            <Badge variant="secondary" className="text-micro gap-1 px-1.5 py-0">
               <Hash className="h-2 w-2" />
               {params.length} param{params.length !== 1 ? "s" : ""}
             </Badge>
             {requiredParams.length > 0 && (
-              <Badge variant="outline" className="text-[9px] gap-0.5 px-1.5 py-0 text-rose-400">
+              <Badge variant="outline" className="text-micro gap-0.5 px-1.5 py-0 text-destructive">
                 <Asterisk className="h-2 w-2" />
                 {requiredParams.length} required
               </Badge>
             )}
-            <Badge variant="outline" className="text-[9px] gap-1 px-1.5 py-0">
+            <Badge variant="outline" className="text-micro gap-1 px-1.5 py-0">
               <ListChecks className="h-2 w-2" />
               {taskDefs.length} task{taskDefs.length !== 1 ? "s" : ""}
             </Badge>
@@ -217,8 +217,8 @@ export function PlaybookDetailPage() {
             {/* Blueprint banner */}
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 bg-muted/20">
               <Workflow className="h-3.5 w-3.5 text-primary/60" />
-              <span className="text-[11px] text-muted-foreground">
-                Playbook preview — placeholders shown as <code className="text-[10px] bg-muted/50 px-1 rounded">{`{{param}}`}</code>
+              <span className="text-caption text-muted-foreground">
+                Playbook preview — placeholders shown as <code className="text-micro bg-muted/50 px-1 rounded">{`{{param}}`}</code>
               </span>
             </div>
             <div className="h-[calc(100%-36px)]">
@@ -240,7 +240,7 @@ export function PlaybookDetailPage() {
               {/* Blueprint banner */}
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/30 bg-muted/20 mb-4">
                 <Workflow className="h-3.5 w-3.5 text-primary/60" />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-caption text-muted-foreground">
                   Playbook blueprint — {taskDefs.length} task{taskDefs.length !== 1 ? "s" : ""} defined
                 </span>
               </div>
@@ -291,15 +291,15 @@ export function PlaybookDetailPage() {
               {/* Team section if volatile team is defined */}
               {volatileTeam && (
                 <div className="mt-6">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Volatile Team</p>
+                  <p className="text-label text-muted-foreground mb-2">Volatile Team</p>
                   <div className="space-y-2">
                     {volatileTeam.map((member, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2">
                         <Bot className="h-4 w-4 text-primary/60 shrink-0" />
                         <div className="min-w-0">
                           <span className="text-xs font-semibold">{member.name}</span>
-                          {member.role && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{member.role}</p>}
-                          {member.model && <code className="text-[9px] font-mono text-muted-foreground/60">{member.model}</code>}
+                          {member.role && <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2">{member.role}</p>}
+                          {member.model && <code className="text-micro font-mono text-muted-foreground/60">{member.model}</code>}
                         </div>
                       </div>
                     ))}
@@ -316,7 +316,7 @@ export function PlaybookDetailPage() {
             <div className="p-4">
               <JsonBlock
                 data={playbook}
-                className="text-[11px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
+                className="text-caption leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-lg p-4 whitespace-pre-wrap overflow-x-auto"
               />
             </div>
           </ScrollArea>
