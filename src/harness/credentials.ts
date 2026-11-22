@@ -20,6 +20,8 @@ export interface ResolvedHarnessAuth extends HarnessAuth {
   files: HarnessCredentialFile[];
   /** The model the runtime uses (agent's, else the harness setting's; undefined: the runtime's default). */
   model?: string;
+  /** Where the model runs (error messages name it). */
+  provider: "anthropic" | "bedrock" | "vertex" | "openai";
 }
 
 /** Claude subscription OAuth tokens (Pro/Max): refused by policy. */
@@ -50,7 +52,7 @@ export async function resolveHarnessAuth(
   if (engine.harness === "codex") {
     const key = pickCredential(creds, ["OPENAI_API_KEY", "openaiApiKey", "CODEX_API_KEY", ...CREDENTIAL_NAMES.apiKey]);
     if (!key) throw new HarnessCredentialError(`Codex: the vault entry ${h.credentialRef.owner} / ${h.credentialRef.service} has no API key (a field named apiKey, key or OPENAI_API_KEY)`);
-    return { auth: { OPENAI_API_KEY: key }, env: {}, secrets: [key], files: [], ...(model ? { model } : {}) };
+    return { auth: { OPENAI_API_KEY: key }, env: {}, secrets: [key], files: [], provider: "openai", ...(model ? { model } : {}) };
   }
 
   const cc = settings["claude-code"]!;
@@ -61,7 +63,7 @@ export async function resolveHarnessAuth(
     return {
       auth: { ANTHROPIC_API_KEY: key },
       env: { ...CLAUDE_CODE_BASE_ENV, ...(model ? { ANTHROPIC_MODEL: model } : {}) },
-      secrets: [key], files: [], ...(model ? { model } : {}),
+      secrets: [key], files: [], provider: "anthropic", ...(model ? { model } : {}),
     };
   }
 
@@ -91,7 +93,7 @@ export async function resolveHarnessAuth(
       if (/haiku/i.test(model)) { env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model; env.ANTHROPIC_SMALL_FAST_MODEL = model; }
     }
     // auth {} = an explicit, empty authentication environment: no lookup on this server
-    return { auth: {}, env, secrets, files: [], ...(model ? { model } : {}) };
+    return { auth: {}, env, secrets, files: [], provider: "bedrock", ...(model ? { model } : {}) };
   }
 
   // vertex
@@ -108,6 +110,7 @@ export async function resolveHarnessAuth(
   return {
     auth: {}, env, secrets: [json, ...(privateKey ? [privateKey] : [])],
     files: [{ envVar: "GOOGLE_APPLICATION_CREDENTIALS", name: "vertex-service-account.json", content: json }],
+    provider: "vertex",
     ...(model ? { model } : {}),
   };
 }

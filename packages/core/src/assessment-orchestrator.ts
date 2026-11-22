@@ -816,7 +816,14 @@ export class AssessmentOrchestrator {
       }
     }
 
-    if (current.retries < current.maxRetries) {
+    // A configuration or access failure (model not enabled, credentials refused): the same agent
+    // would fail the same way, so no automatic retry; escalation still gets the final failure
+    const nonRetryable = result.retryable === false;
+    if (nonRetryable) {
+      this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] Not retried: ${(result.stderr || "non-retryable failure").split("\n")[0].slice(0, 300)}` });
+    }
+
+    if (!nonRetryable && current.retries < current.maxRetries) {
       const policy = current.retryPolicy ?? this.ctx.config.settings.defaultRetryPolicy;
       const nextAttempt = current.retries + 1;
 
@@ -853,14 +860,14 @@ export class AssessmentOrchestrator {
         fixAttempts: 0,
       });
     } else {
-      this.ctx.emitter.emit("task:maxRetries", { taskId });
+      if (!nonRetryable) this.ctx.emitter.emit("task:maxRetries", { taskId });
 
       // Run before:task:fail hook — escalation manager can intercept here
       this.ctx.hooks.runBefore("task:fail", {
         taskId,
         task: current,
         result,
-        reason: "maxRetries",
+        reason: nonRetryable ? "nonRetryable" : "maxRetries",
       }).then(async hookResult => {
         if (hookResult.cancelled) {
           this.ctx.emitter.emit("log", {
@@ -877,7 +884,7 @@ export class AssessmentOrchestrator {
           taskId,
           task: current,
           result,
-          reason: "maxRetries",
+          reason: nonRetryable ? "nonRetryable" : "maxRetries",
         }).catch(() => {});
       }).catch(async () => {
         // Hook failed — fail the task normally
