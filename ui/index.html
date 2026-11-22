@@ -23,6 +23,9 @@
     <!-- Classic script intentionally blocks the deferred application module so
          per-instance API settings are available before config.ts is evaluated. -->
     <script src="/runtime-config.js"></script>
+    <!-- The look (theme, palette, custom tokens, theme-color) applied before the stylesheet paints:
+         replaced at build time by the inline script from src/lib/appearance-kit.ts (vite.config.ts). -->
+    <!-- polpo:appearance-boot -->
     <title>Polpo ZHC — AI Factory</title>
   </head>
   <body>

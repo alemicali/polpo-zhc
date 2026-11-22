@@ -31,6 +31,9 @@ import { registerConnectorTools } from "./mcp-server/connectors.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
+import { registerSettingsTools } from "./mcp-server/settings.js";
+import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
+import { registerSetupTools } from "./mcp-server/setup.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -45,7 +48,9 @@ const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, a
   + "like the dashboard. For anything open-ended, polpo_ask delegates to Polpo itself, "
   + "which can do everything the instance can; when a turn returns status needs_input (a question or a preview to approve), "
   + "show it to the person and reply with polpo_answer. Long work runs in the background: create it, then follow it with the "
-  + "wait and get tools. Destructive actions need confirm: true, given only after the person agreed.";
+  + "wait and get tools. Destructive actions need confirm: true, given only after the person agreed. "
+  + "Secrets (tokens, API keys) never pass through here: when a tool returns setup_url and setup_id, show the person the link "
+  + "(next_step says what to paste), call polpo_setup_wait with the setup_id right away, then verify with the area's test tool and continue.";
 
 /** The MCP server for one request (stateless). `catalog` collects every tool of the enabled toolsets with its scope. */
 export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpServer {
@@ -64,6 +69,9 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerConfigTools(tool, deps);
+  registerSettingsTools(tool, deps);
+  registerChannelSetupTools(tool, deps);
+  registerSetupTools(tool, deps);
   registerRoomTools(tool, deps);
   registerChatTools(tool, deps);
   registerMemoryTools(tool, deps);

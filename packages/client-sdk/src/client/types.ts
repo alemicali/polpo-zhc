@@ -825,6 +825,18 @@ export interface BrandingConfig {
   productName?: string;
   tagline?: string;
   logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl). */
+  logoDarkUrl?: string;
+}
+
+/** A mode's design tokens (any subset): colours, fonts, radius (px), shadows. See docs/configuration. */
+export type AppearanceTokens = Record<string, string | number>;
+
+/** The dashboard's default look for everyone (settings.appearance); a person may customize their own browser. */
+export interface AppearanceConfig {
+  theme?: "light" | "dark" | "system";
+  palette?: "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
+  custom?: { enabled: boolean; derive?: boolean; light?: AppearanceTokens; dark?: AppearanceTokens };
 }
 
 export interface PolpoSettings {
@@ -832,6 +844,7 @@ export interface PolpoSettings {
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
   branding?: BrandingConfig;
+  appearance?: AppearanceConfig;
   taskTimeout?: number;
   staleThreshold?: number;
   defaultRetryPolicy?: RetryPolicy;
@@ -1189,6 +1202,8 @@ export interface UpdateSettingsRequest {
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;
+  /** The dashboard's default look; null removes it. */
+  appearance?: AppearanceConfig | null;
 }
 
 // === SSE ===

@@ -125,6 +125,14 @@ describe("Polpo MCP server", () => {
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
       "polpo_agent_get", "polpo_agent_create", "polpo_agent_update", "polpo_agent_delete", "polpo_agent_avatar_set", "polpo_teams_list", "polpo_team_save", "polpo_team_delete",
       "polpo_config_get", "polpo_config_update", "polpo_branding_get", "polpo_branding_update", "polpo_providers_list", "polpo_models_list",
+      "polpo_sandbox_get", "polpo_sandbox_update", "polpo_sandbox_provider_test", "polpo_policies_get", "polpo_policies_update",
+      "polpo_approval_gate_save", "polpo_approval_gate_delete", "polpo_members_list", "polpo_members_invite", "polpo_members_remove",
+      "polpo_mcp_access_list", "polpo_mcp_grant_revoke", "polpo_sync_status", "polpo_sync_update", "polpo_sync_disconnect", "polpo_sync_test",
+      "polpo_sync_run", "polpo_custom_providers_list", "polpo_custom_provider_save", "polpo_custom_provider_remove", "polpo_provider_disconnect",
+      "polpo_channel_save", "polpo_channel_remove",
+      "polpo_channel_routes_list", "polpo_channel_route_set", "polpo_telegram_verify", "polpo_channel_invite",
+      "polpo_channel_peers", "polpo_channel_allowlist", "polpo_channel_pairing", "polpo_whatsapp_login", "polpo_whatsapp_login_wait", "polpo_whatsapp_logout",
+      "polpo_setup_wait",
       "polpo_rooms_list", "polpo_room_create", "polpo_room_update", "polpo_room_delete", "polpo_room_messages", "polpo_room_post", "polpo_room_wait",
       "polpo_chat_sessions_list", "polpo_chat_messages", "polpo_chat_session_update", "polpo_chat_session_delete",
       "polpo_memory_get", "polpo_memory_update",
@@ -291,7 +299,7 @@ describe("Polpo MCP server", () => {
 
 describe("toolsets and scopes", () => {
   it("resolves configured toolsets", () => {
-    const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels", "computers"];
+    const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels", "computers", "settings"];
     expect(resolveToolsets()).toEqual(defaults);
     expect(resolveToolsets("core, admin")).toEqual(["core", "admin"]);
     expect(resolveToolsets(undefined, ["all"])).toEqual([...defaults, "brain", "learning", "watchers", "vault", "apps", "admin"]);

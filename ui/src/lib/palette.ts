@@ -11,8 +11,8 @@
  * is just an attribute swap.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { APPEARANCE_SCOPE_EVENT, scopedStorageKey } from "@/lib/appearance";
+import { useCallback } from "react";
+import { setBrowserChoice, useResolvedAppearance } from "@/lib/appearance";
 
 export type Palette = "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
 
@@ -93,69 +93,13 @@ export const PALETTES: PaletteMeta[] = [
   },
 ];
 
-const DEFAULT_PALETTE: Palette = "tide";
-const STORAGE_KEY = "polpo-palette";
-
-function isPalette(v: string | null): v is Palette {
-  return !!v && PALETTES.some((p) => p.id === v);
-}
-
-function applyPalette(p: Palette) {
-  document.documentElement.dataset.palette = p;
-}
-
 /**
- * Read/write the current palette. Persists to localStorage so the choice
- * survives reloads. Same shape as useTheme() for symmetry.
+ * The current palette: this browser's choice, else the instance's default
+ * (settings.appearance.palette), else Tide. Same shape as useTheme().
  */
 export function usePalette() {
-  const [palette, setPaletteState] = useState<Palette>(() => {
-    try {
-      const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
-      return isPalette(saved) ? saved : DEFAULT_PALETTE;
-    } catch {
-      return DEFAULT_PALETTE;
-    }
-  });
-
-  const setPalette = useCallback((p: Palette) => {
-    setPaletteState(p);
-    try { localStorage.setItem(scopedStorageKey(STORAGE_KEY), p); } catch { /* ignore */ }
-    applyPalette(p);
-  }, []);
-
-  useEffect(() => {
-    applyPalette(palette);
-  }, [palette]);
-
-  useEffect(() => {
-    const syncScopedPalette = () => {
-      try {
-        const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
-        const next = isPalette(saved) ? saved : DEFAULT_PALETTE;
-        setPaletteState(next);
-        applyPalette(next);
-      } catch {
-        setPaletteState(DEFAULT_PALETTE);
-        applyPalette(DEFAULT_PALETTE);
-      }
-    };
-    window.addEventListener(APPEARANCE_SCOPE_EVENT, syncScopedPalette);
-    return () => window.removeEventListener(APPEARANCE_SCOPE_EVENT, syncScopedPalette);
-  }, []);
-
+  const resolved = useResolvedAppearance();
+  const palette = (PALETTES.some((p) => p.id === resolved.palette) ? resolved.palette : "tide") as Palette;
+  const setPalette = useCallback((p: Palette) => setBrowserChoice("palette", p), []);
   return { palette, setPalette } as const;
-}
-
-/**
- * Apply the saved palette as early as possible (before React mounts) to
- * avoid a flash of wrong colours. Call from main.tsx.
- */
-export function bootstrapPalette(): void {
-  try {
-    const saved = localStorage.getItem(scopedStorageKey(STORAGE_KEY));
-    applyPalette(isPalette(saved) ? saved : DEFAULT_PALETTE);
-  } catch {
-    applyPalette(DEFAULT_PALETTE);
-  }
 }
