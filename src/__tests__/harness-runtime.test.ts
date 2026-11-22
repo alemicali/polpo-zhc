@@ -270,7 +270,7 @@ describe("harness engine (tasks)", () => {
   const task = { id: "t1", title: "Write notes", description: "Create notes.txt", expectations: [], status: "in_progress" } as any;
   const agent = { name: "ada", role: "dev", engine: { harness: "claude-code", maxBudgetUsd: 2 } } as any;
 
-  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>) {
+  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>, machineOpts: { remoteId?: () => string } = {}) {
     const root = tmp("polpo-harness-engine-");
     const polpoDir = join(root, ".polpo");
     mkdirSync(polpoDir, { recursive: true });
@@ -304,7 +304,7 @@ describe("harness engine (tasks)", () => {
     const transcript: any[] = [];
     const handle = spawnHarnessEngine(agent, task, root, { polpoDir, outputDir: join(polpoDir, "output", "t1"), vaultStore: vault } as any, {
       settings: () => settings,
-      openMachine: async () => ({ machine: machine as any, computerId: "nina", hold: () => () => {} }),
+      openMachine: async () => ({ machine: machine as any, computerId: "nina", hold: () => () => {}, ...machineOpts }),
       runtimeFactory: (s) => { spec = s; return runtime as any; },
       recordUsage: async (r) => { usage.push(r); },
     });
@@ -378,6 +378,20 @@ describe("harness engine (tasks)", () => {
     const r = await env.handle.done;
     expect(r).toMatchObject({ exitCode: 0, stdout: "recovered" });
     expect(env.created).toHaveLength(2);
+  });
+
+  it("a rotation by another process (the VM changed under the turn): re-attaches and continues once", async () => {
+    let vm = "sbx_1";
+    let env: ReturnType<typeof setup>;
+    env = setup([
+      async () => { vm = "sbx_2"; throw new Error("bridge connection lost"); },
+      async (s) => { expect(s.isResume).toBe(true); return done("recovered"); },
+    ], { remoteId: () => vm });
+    expect(await env.handle.done).toMatchObject({ exitCode: 0, stdout: "recovered" });
+    expect(env.transcript.some((e) => /VM sbx_1 replaced by sbx_2/.test(e.message ?? ""))).toBe(true);
+    // without a replacement the error is the run's
+    const env2 = setup([async () => { throw new Error("model refused"); }], { remoteId: () => "sbx_1" });
+    expect(await env2.handle.done).toMatchObject({ exitCode: 1, stderr: "model refused" });
   });
 
   it("kill aborts the run; a refused engine fails with the reason, before any machine work", async () => {

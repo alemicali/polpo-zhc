@@ -447,15 +447,24 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       let lastResult: HarnessTurnResult | undefined;
       let retriedAfterRotation = false;
       while (prompt !== undefined && !abort.signal.aborted) {
+        const vmAtStart = opened.remoteId?.();
         try {
           lastResult = await runTurn(prompt);
           await account(lastResult);
         } catch (err) {
           if (abort.signal.aborted) break;
-          // the VM was replaced under the turn (forced rotation): re-attach once and continue
-          if (interrupted && !retriedAfterRotation) {
+          // the VM was replaced under the turn (a forced rotation, here or by the server process):
+          // re-attach once (the bridge lives on in the memory snapshot) and continue
+          let replaced = interrupted;
+          if (!replaced && !retriedAfterRotation && vmAtStart && opened.remoteId) {
+            // a command goes to the computer's current VM (reconnecting after a replacement)
+            await machine.exec("true", {}).catch(() => undefined);
+            const now = opened.remoteId();
+            if (now && now !== vmAtStart) replaced = `VM ${vmAtStart} replaced by ${now}`;
+          }
+          if (replaced && !retriedAfterRotation) {
             retriedAfterRotation = true;
-            transcript({ type: "log", message: `${name}: the computer was rotated during the turn (${interrupted}); re-attaching` });
+            transcript({ type: "log", message: `${name}: the computer was rotated during the turn (${replaced}); re-attaching` });
             interrupted = undefined;
             const s = session;
             session = undefined;
