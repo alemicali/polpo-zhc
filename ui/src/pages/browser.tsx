@@ -717,11 +717,11 @@ export function BrowserPage() {
           className="contents"
         >
           <TabsList className="h-8 shrink-0" aria-label="App Preview mode">
-            <TabsTrigger value="browser" className="h-6 flex-none gap-1.5 px-2 text-[11px]">
+            <TabsTrigger value="browser" className="h-6 flex-none gap-1.5 px-2 text-caption">
               <Globe2 className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Browser</span>
             </TabsTrigger>
-            <TabsTrigger value="code" className="h-6 flex-none gap-1.5 px-2 text-[11px]">
+            <TabsTrigger value="code" className="h-6 flex-none gap-1.5 px-2 text-caption">
               <Code2 className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Code</span>
             </TabsTrigger>
@@ -757,7 +757,7 @@ export function BrowserPage() {
 
         {surface === "browser" ? <form onSubmit={handleSubmit} className="relative flex min-w-[150px] flex-1 items-center">
           {currentUrl.startsWith("https://")
-            ? <Lock className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-emerald-500" />
+            ? <Lock className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-success" />
             : <Globe2 className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-muted-foreground" />}
           <Input
             value={draft}
@@ -792,7 +792,7 @@ export function BrowserPage() {
               <DropdownMenuItem key={preset.id} onSelect={() => setDeviceId(preset.id)}>
                 <DeviceIcon id={preset.id} className="h-3.5 w-3.5" />
                 <span>{preset.label}</span>
-                <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                <span className="ml-auto font-mono text-micro text-muted-foreground">
                   {preset.width ? `${preset.width} × ${preset.height}` : "available space"}
                 </span>
                 {deviceId === preset.id && <Check className="h-3.5 w-3.5 text-primary" />}
@@ -853,7 +853,7 @@ export function BrowserPage() {
             >
               <MousePointer2 className="h-3.5 w-3.5" />
               {nodeSelections.length > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center bg-primary px-0.5 text-[8px] leading-none text-primary-foreground">
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center bg-primary px-0.5 text-micro leading-none text-primary-foreground">
                   {nodeSelections.length}
                 </span>
               )}
@@ -972,7 +972,7 @@ export function BrowserPage() {
                     height: `${(showParentHighlight.rect.height / viewport.height) * 100}%`,
                   }}
                 >
-                  <span className="absolute -top-5 left-[-2px] max-w-[280px] truncate bg-primary px-1.5 py-0.5 font-mono text-[9px] text-primary-foreground">
+                  <span className="absolute -top-5 left-[-2px] max-w-[280px] truncate bg-primary px-1.5 py-0.5 font-mono text-micro text-primary-foreground">
                     {showParentHighlight.selector}
                   </span>
                 </div>
@@ -993,7 +993,7 @@ export function BrowserPage() {
               {regionSelecting && (
                 <button
                   type="button"
-                  className="absolute inset-0 z-[60] cursor-crosshair bg-black/10"
+                  className="absolute inset-0 z-[60] cursor-crosshair bg-foreground/10"
                   onPointerDown={handleRegionPointerDown}
                   onPointerMove={handleRegionPointerMove}
                   onPointerUp={handleRegionPointerUp}
@@ -1015,7 +1015,7 @@ export function BrowserPage() {
                         height: `${(regionRect.height / viewport.height) * 100}%`,
                       }}
                     >
-                      <span className="absolute -top-5 left-[-2px] bg-primary px-1.5 py-0.5 font-mono text-[9px] text-primary-foreground">
+                      <span className="absolute -top-5 left-[-2px] bg-primary px-1.5 py-0.5 font-mono text-micro text-primary-foreground">
                         {Math.round(regionRect.width)} × {Math.round(regionRect.height)}
                       </span>
                     </span>
@@ -1051,8 +1051,8 @@ export function BrowserPage() {
               aria-label="Enlarge screenshot preview"
             >
               <img src={capturedScreenshot.dataUrl} alt="Captured App Preview" className="h-full w-full object-contain" draggable={false} />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/20">
-                <Maximize2 className="h-5 w-5 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+              <span className="absolute inset-0 flex items-center justify-center bg-background/0 transition-colors group-hover:bg-background/40">
+                <Maximize2 className="h-5 w-5 text-foreground opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
               </span>
             </button>
             <Button type="button" variant="secondary" size="icon" className="absolute right-1 top-1 z-10 h-6 w-6" onClick={() => setCapturedScreenshot(null)} aria-label="Close screenshot preview">
@@ -1060,8 +1060,8 @@ export function BrowserPage() {
             </Button>
             <div className="flex items-center gap-1.5 px-2 py-1.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[11px] font-medium">{capturedScreenshot.label}</p>
-                <p className="font-mono text-[9px] text-muted-foreground">{capturedScreenshot.width} × {capturedScreenshot.height}</p>
+                <p className="truncate text-caption font-medium">{capturedScreenshot.label}</p>
+                <p className="font-mono text-micro text-muted-foreground">{capturedScreenshot.width} × {capturedScreenshot.height}</p>
               </div>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1075,7 +1075,7 @@ export function BrowserPage() {
                 type="button"
                 variant={contextAttached && previewContext?.screenshotDataUrl === capturedScreenshot.dataUrl ? "secondary" : "default"}
                 size="sm"
-                className="h-7 gap-1 px-2 text-[10px]"
+                className="h-7 gap-1 px-2 text-micro"
                 onClick={attachScreenshot}
               >
                 {contextAttached && previewContext?.screenshotDataUrl === capturedScreenshot.dataUrl && <Check className="h-3 w-3" />}
@@ -1087,7 +1087,7 @@ export function BrowserPage() {
 
         {toolBusy === "screenshot" && (
           <div className="pointer-events-none absolute inset-0 z-[80] overflow-hidden bg-background/15">
-            <div className="app-preview-scan-line absolute inset-x-0 h-px bg-primary shadow-[0_0_18px_3px_hsl(var(--primary)/0.55)]" />
+            <div className="app-preview-scan-line absolute inset-x-0 h-px bg-primary shadow-[0_0_18px_3px_color-mix(in_oklch,var(--primary)_55%,transparent)]" />
             <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 border border-border bg-background/95 px-3 py-2 shadow-lg">
               <ScanLine className="h-4 w-4 animate-pulse text-primary" />
               <span className="text-xs font-medium">Capturing screenshot...</span>
@@ -1101,11 +1101,11 @@ export function BrowserPage() {
         <DialogContent className="flex h-[88vh] w-[94vw] max-w-[1440px] flex-col gap-0 overflow-hidden p-0">
           <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 pr-12">
             <DialogTitle className="min-w-0 flex-1 truncate text-sm">{expandedScreenshot?.label ?? "Screenshot"}</DialogTitle>
-            {expandedScreenshot && <span className="font-mono text-[10px] text-muted-foreground">{expandedScreenshot.width} × {expandedScreenshot.height}</span>}
+            {expandedScreenshot && <span className="font-mono text-micro text-muted-foreground">{expandedScreenshot.width} × {expandedScreenshot.height}</span>}
             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScreenshotZoom((value) => Math.max(0.5, value - 0.25))} disabled={screenshotZoom <= 0.5} aria-label="Zoom out">
               <ZoomOut className="h-3.5 w-3.5" />
             </Button>
-            <button type="button" className="w-12 text-center font-mono text-[10px] text-muted-foreground" onClick={() => setScreenshotZoom(1)} title="Reset zoom">
+            <button type="button" className="w-12 text-center font-mono text-micro text-muted-foreground" onClick={() => setScreenshotZoom(1)} title="Reset zoom">
               {Math.round(screenshotZoom * 100)}%
             </button>
             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScreenshotZoom((value) => Math.min(3, value + 0.25))} disabled={screenshotZoom >= 3} aria-label="Zoom in">
@@ -1237,11 +1237,11 @@ function PreviewCodePane({
     <div className="flex h-full min-h-0 w-full flex-col bg-background text-foreground">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/70 px-2">
         <Code2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={session?.cwd ?? target.cwd}>
+        <div className="min-w-0 flex-1 truncate font-mono text-caption text-muted-foreground" title={session?.cwd ?? target.cwd}>
           {session?.cwd ?? target.cwd ?? `:${target.port} ${target.label}`}
         </div>
         {session && (
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-muted-foreground" onClick={() => navigate("/coding")}>
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-micro text-muted-foreground" onClick={() => navigate("/coding")}>
             Open Coding
           </Button>
         )}
@@ -1255,7 +1255,7 @@ function PreviewCodePane({
             <Square className="h-3.5 w-3.5" />
           </Button>
         )}
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => void start(Boolean(session))}>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-micro" disabled={busy} onClick={() => void start(Boolean(session))}>
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : session ? <RotateCw className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {session ? "Restart" : "Start"}
         </Button>

@@ -103,20 +103,20 @@ function PairLabel({ from, to, avatar }: { from: string; to: string; avatar: (na
 function StatusBadge({ exchange }: { exchange: AgentExchange }) {
   if (exchange.status === "working") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] text-amber-500">
+      <Badge variant="outline" className="gap-1 text-micro text-warning">
         <Loader2 className="animate-spin" />Working
       </Badge>
     );
   }
   if (exchange.status === "failed") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] text-red-500">
+      <Badge variant="outline" className="gap-1 text-micro text-destructive">
         <AlertCircle />Failed
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1 text-[10px] text-emerald-500">
+    <Badge variant="outline" className="gap-1 text-micro text-success">
       <CheckCircle2 />Answered
     </Badge>
   );
@@ -147,12 +147,12 @@ function ExchangeCard({
     >
       <div className="flex flex-wrap items-center gap-2">
         <PairLabel from={exchange.from} to={exchange.to} avatar={avatar} />
-        <Badge variant="secondary" className="text-[10px]">
+        <Badge variant="secondary" className="text-micro">
           {exchange.kind === "handoff" ? "Handoff" : "Question"}
         </Badge>
         <StatusBadge exchange={exchange} />
       </div>
-      <div className="mt-1 text-[11px] text-muted-foreground">
+      <div className="mt-1 text-caption text-muted-foreground">
         <span title={fullDate(exchange.startedAt)}>{ago(exchange.startedAt)}</span>
         {duration && exchange.status !== "working" && (
           <span title={fullDate(exchange.answeredAt)}> · {exchange.status === "failed" ? "failed" : "answered"} after {duration}</span>
@@ -160,13 +160,13 @@ function ExchangeCard({
       </div>
       <div className="mt-2 text-sm whitespace-pre-wrap break-words">{exchange.message}</div>
       {exchange.status === "answered" && exchange.answer && (
-        <div className="mt-2 rounded-md border-l-2 border-emerald-500/50 bg-muted/40 px-3 py-2 text-sm">
-          <div className="mb-1 text-[11px] font-medium text-muted-foreground">{exchange.to} answered</div>
+        <div className="mt-2 rounded-md border-l-2 border-success/50 bg-muted/40 px-3 py-2 text-sm">
+          <div className="mb-1 text-caption font-medium text-muted-foreground">{exchange.to} answered</div>
           <MessageResponse>{exchange.answer}</MessageResponse>
         </div>
       )}
       {exchange.status === "failed" && (
-        <div className="mt-2 rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-500 break-words">
+        <div className="mt-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive break-words">
           {exchange.error || "The exchange failed."}
         </div>
       )}
@@ -233,7 +233,7 @@ function Transcript({
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : error ? (
-          <p className="text-sm text-red-500">{error}</p>
+          <p className="text-sm text-destructive">{error}</p>
         ) : messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">No messages in this conversation yet.</p>
         ) : (
@@ -244,7 +244,7 @@ function Transcript({
               const author = mine ? pair.to : pair.from;
               return (
                 <li key={message.id} className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}>
-                  <div className="flex max-w-full items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <div className="flex max-w-full items-center gap-1.5 text-caption text-muted-foreground">
                     <AgentAvatar name={author} avatar={avatar(author)} size="xs" fallbackVariant="circle" shape="circle" />
                     <span className="truncate">{intro ?? author}</span>
                     <span className="shrink-0" title={fullDate(message.ts)}>· {ago(message.ts)}</span>
@@ -326,7 +326,7 @@ export function AgentTalkPage() {
         </Button>
       </div>
       {error && (
-        <div className="shrink-0 rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</div>
+        <div className="shrink-0 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
       )}
 
       {empty ? (
@@ -337,7 +337,7 @@ export function AgentTalkPage() {
           <div className={cn("min-h-0 flex-1 flex-col gap-4 overflow-y-auto lg:flex", selected ? "hidden" : "flex")}>
             {pairs.length > 0 && (
               <section>
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Conversations</h2>
+                <h2 className="mb-2 text-label text-muted-foreground">Conversations</h2>
                 <ul className="flex flex-col gap-1.5">
                   {pairs.map((pair) => {
                     const stats = countBySession.get(pair.sessionId);
@@ -354,9 +354,9 @@ export function AgentTalkPage() {
                           aria-current={active ? "true" : undefined}
                         >
                           <div className="min-w-0 flex-1"><PairLabel from={pair.from} to={pair.to} avatar={avatar} /></div>
-                          {stats?.working ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" aria-label="Working" /> : null}
+                          {stats?.working ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" aria-label="Working" /> : null}
                           {stats?.last && (
-                            <span className="shrink-0 text-[11px] text-muted-foreground">{ago(stats.last)}</span>
+                            <span className="shrink-0 text-caption text-muted-foreground">{ago(stats.last)}</span>
                           )}
                         </button>
                       </li>
@@ -366,7 +366,7 @@ export function AgentTalkPage() {
               </section>
             )}
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recent exchanges</h2>
+              <h2 className="mb-2 text-label text-muted-foreground">Recent exchanges</h2>
               {recent.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No recent exchanges.</p>
               ) : (

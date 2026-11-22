@@ -112,7 +112,7 @@ export function ProcessesDialog({ open, onOpenChange, terminals, workspaces }: P
               size="sm"
               onClick={() => void load()}
               disabled={loading}
-              className="h-7 gap-1.5 px-2 text-[11px]"
+              className="h-7 gap-1.5 px-2 text-caption"
             >
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
               Refresh
@@ -122,7 +122,7 @@ export function ProcessesDialog({ open, onOpenChange, terminals, workspaces }: P
 
         <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
           {items.length === 0 && (
-            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-6 text-center text-[12px] text-muted-foreground">
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-6 text-center text-small text-muted-foreground">
               {loading ? "Loading…" : "No managed processes."}
             </div>
           )}
@@ -184,50 +184,50 @@ function ProcessRow({
         {item.kind === "terminal" ? (
           <TerminalIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         ) : (
-          <Code2 className="h-3.5 w-3.5 shrink-0 text-emerald-300/80" />
+          <Code2 className="h-3.5 w-3.5 shrink-0 text-success/80" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-small">
             <span className="font-medium text-foreground">
               {sessionLabel || (item.kind === "terminal" ? agentLabel(item.agentKind) : `code-server :${item.port}`)}
             </span>
             {sessionLabel && item.kind === "terminal" && (
-              <span className="text-[11px] text-muted-foreground">{agentLabel(item.agentKind)}</span>
+              <span className="text-caption text-muted-foreground">{agentLabel(item.agentKind)}</span>
             )}
             {workspaceName && (
-              <span className="rounded bg-muted/40 px-1.5 py-px text-[10px] text-muted-foreground" title={workspaceCwd}>
+              <span className="rounded bg-muted/40 px-1.5 py-px text-micro text-muted-foreground" title={workspaceCwd}>
                 {workspaceName}
               </span>
             )}
-            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/80">pid {item.pid ?? "—"}</span>
+            <span className="font-mono text-caption tabular-nums text-muted-foreground/80">pid {item.pid ?? "—"}</span>
             {item.kind === "terminal" && item.clients > 0 && (
-              <span className="rounded bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-300">
+              <span className="rounded bg-success/10 px-1.5 py-px text-micro font-medium text-success">
                 {item.clients} client{item.clients === 1 ? "" : "s"}
               </span>
             )}
             {descendants > 0 && (
-              <span className="rounded bg-muted/50 px-1.5 py-px text-[10px] text-muted-foreground">
+              <span className="rounded bg-muted/50 px-1.5 py-px text-micro text-muted-foreground">
                 +{descendants} child{descendants === 1 ? "" : "ren"}
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={item.cwd}>
+          <div className="mt-0.5 truncate font-mono text-caption text-muted-foreground" title={item.cwd}>
             {item.cwd}
           </div>
           {item.kind === "terminal" && item.agentCommand && (
-            <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground/80" title={item.agentCommand}>
+            <div className="mt-0.5 truncate font-mono text-caption text-muted-foreground/80" title={item.agentCommand}>
               ⮕ {item.agentCommand}
             </div>
           )}
         </div>
-        <div className="flex shrink-0 flex-col items-end text-right text-[10px] text-muted-foreground/80">
+        <div className="flex shrink-0 flex-col items-end text-right text-micro text-muted-foreground/80">
           <span className="tabular-nums">{timeAgo(item.startedAt)}</span>
           <Button
             size="sm"
             variant="ghost"
             disabled={killing}
             onClick={onKill}
-            className="mt-1 h-6 gap-1 rounded px-1.5 text-[10px] font-medium text-rose-300/80 hover:bg-rose-500/10 hover:text-rose-200"
+            className="mt-1 h-6 gap-1 rounded px-1.5 text-micro font-medium text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
           >
             {killing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
             Kill
@@ -248,7 +248,7 @@ function ProcessTree({ node, depth }: { node: ProcessNode; depth: number }) {
     <div>
       {node.children.map((child) => (
         <div key={child.pid} className="leading-tight" style={{ paddingLeft: depth * 12 }}>
-          <div className="flex items-baseline gap-2 truncate font-mono text-[11px] text-foreground/65">
+          <div className="flex items-baseline gap-2 truncate font-mono text-caption text-foreground/65">
             <span className="tabular-nums text-muted-foreground/80">{child.pid}</span>
             <span className="truncate" title={child.cmdline || child.command}>
               {child.cmdline || child.command || "?"}

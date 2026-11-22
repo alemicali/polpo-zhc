@@ -105,12 +105,12 @@ export function AddAgentDialog() {
           <div className="space-y-2">
             <span className="text-sm font-medium">Name</span>
             <Input placeholder="e.g. frontend-dev" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-            <p className="text-[11px] text-muted-foreground">Unique identifier. Use lowercase and hyphens.</p>
+            <p className="text-caption text-muted-foreground">Unique identifier. Use lowercase and hyphens.</p>
           </div>
           <div className="space-y-2">
             <span className="text-sm font-medium">Role</span>
             <Input placeholder="e.g. Frontend developer specializing in React" value={role} onChange={(e) => setRole(e.target.value)} />
-            <p className="text-[11px] text-muted-foreground">Helps the orchestrator assign the right tasks.</p>
+            <p className="text-caption text-muted-foreground">Helps the orchestrator assign the right tasks.</p>
           </div>
           <div className="space-y-2">
             <span className="text-sm font-medium">Model</span>
@@ -161,7 +161,7 @@ export function AddAgentDialog() {
                 </Button>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">Leave empty to use the project default.</p>
+            <p className="text-caption text-muted-foreground">Leave empty to use the project default.</p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isSubmitting}>Cancel</Button>
@@ -253,7 +253,7 @@ export function RemoveAgentDialog({ agentName }: { agentName: string }) {
         <DialogHeader>
           <DialogTitle>Remove Agent</DialogTitle>
           <DialogDescription>
-            Remove <strong>{agentName}</strong> from the team? This updates your <code className="text-[11px] bg-muted px-1 py-0.5 rounded">polpo.json</code>.
+            Remove <strong>{agentName}</strong> from the team? This updates your <code className="text-caption bg-muted px-1 py-0.5 rounded">polpo.json</code>.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

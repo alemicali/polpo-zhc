@@ -19,18 +19,18 @@ export function SummaryHeader() {
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         <div className="flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5 text-primary" />
-          <span className="text-[11px] text-muted-foreground">Teams</span>
-          <span className="text-[11px] font-bold">{teams.length}</span>
+          <span className="text-caption text-muted-foreground">Teams</span>
+          <span className="text-caption font-bold">{teams.length}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <Bot className="h-3.5 w-3.5 text-primary/70" />
-          <span className="text-[11px] text-muted-foreground">Agents</span>
-          <span className="text-[11px] font-bold">{agents.length}</span>
+          <span className="text-caption text-muted-foreground">Agents</span>
+          <span className="text-caption font-bold">{agents.length}</span>
         </div>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <Progress value={utilization} className="h-1.5 w-14 sm:w-20" />
-        <span className="text-[10px] font-mono text-muted-foreground w-7 text-right">{utilization}%</span>
+        <span className="text-micro font-mono text-muted-foreground w-7 text-right">{utilization}%</span>
       </div>
     </div>
   );

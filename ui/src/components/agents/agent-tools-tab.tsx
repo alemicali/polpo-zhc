@@ -76,23 +76,23 @@ export function AgentToolsTab() {
                     <div className={cn(
                       "flex items-center gap-2 rounded-md border px-3 py-2 cursor-help transition-colors",
                       enabled
-                        ? "border-teal-500/30 bg-teal-500/5"
+                        ? "border-primary/30 bg-primary/5"
                         : "border-border/30 bg-card/30"
                     )}>
-                      <CategoryIcon className={cn("h-3.5 w-3.5 shrink-0", enabled ? categoryColor : "text-zinc-600")} />
+                      <CategoryIcon className={cn("h-3.5 w-3.5 shrink-0", enabled ? categoryColor : "text-muted-foreground/60")} />
                       <span className={cn("text-xs font-medium", enabled ? "text-foreground" : "text-muted-foreground/60")}>
                         {label}
                       </span>
                       {enabled ? (
-                        <CheckCircle2 className="h-3 w-3 text-teal-500 shrink-0 ml-auto" />
+                        <CheckCircle2 className="h-3 w-3 text-primary shrink-0 ml-auto" />
                       ) : (
-                        <XCircle className="h-3 w-3 text-zinc-600 shrink-0 ml-auto" />
+                        <XCircle className="h-3 w-3 text-muted-foreground/60 shrink-0 ml-auto" />
                       )}
                     </div>
                   </TooltipTrigger>
                   <TooltipContent className="text-xs max-w-72">
                     <p className="font-medium mb-0.5">{label} tools — {enabled ? "Enabled" : "Disabled"}</p>
-                    <p className="text-muted-foreground font-mono text-[10px]">{tools}</p>
+                    <p className="text-muted-foreground font-mono text-micro">{tools}</p>
                   </TooltipContent>
                 </Tooltip>
               );
@@ -101,7 +101,7 @@ export function AgentToolsTab() {
 
           {/* Browser profile details */}
           {agentAllowedTools.some(t => t.toLowerCase().startsWith("browser_")) && agent.browserProfile && (
-            <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground px-1">
+            <div className="mt-3 flex items-center gap-3 text-caption text-muted-foreground px-1">
               <span>Profile: <code className="font-mono text-foreground">{agent.browserProfile}</code></span>
             </div>
           )}
@@ -109,10 +109,10 @@ export function AgentToolsTab() {
           {/* Email domain restrictions */}
           {agentAllowedTools.some(t => t.toLowerCase().startsWith("email_")) && agent.emailAllowedDomains && agent.emailAllowedDomains.length > 0 && (
             <div className="mt-3 px-1">
-              <p className="text-[10px] text-muted-foreground mb-1">Allowed email domains:</p>
+              <p className="text-micro text-muted-foreground mb-1">Allowed email domains:</p>
               <div className="flex flex-wrap gap-1">
                 {agent.emailAllowedDomains.map((d) => (
-                  <Badge key={d} variant="outline" className="text-[9px] font-mono">{d}</Badge>
+                  <Badge key={d} variant="outline" className="text-micro font-mono">{d}</Badge>
                 ))}
               </div>
             </div>
@@ -137,14 +137,14 @@ export function AgentToolsTab() {
                       <SkillIcon className={cn("h-3.5 w-3.5 shrink-0", skillMeta.color)} />
                       <span className="text-sm font-medium">{skillName}</span>
                       {info && (
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 ml-auto">{info.source}</Badge>
+                        <Badge variant="outline" className="text-micro px-1.5 py-0 ml-auto">{info.source}</Badge>
                       )}
                     </div>
                     {info?.description && (
                       <p className="text-xs text-muted-foreground">{info.description}</p>
                     )}
                     {info?.path && (
-                      <p className="text-[10px] font-mono text-muted-foreground/70 truncate" title={info.path}>
+                      <p className="text-micro font-mono text-muted-foreground/70 truncate" title={info.path}>
                         {info.path}
                       </p>
                     )}
@@ -152,12 +152,12 @@ export function AgentToolsTab() {
                       <div className="flex items-center gap-1 pt-0.5">
                         <Wrench className="h-2.5 w-2.5 text-muted-foreground" />
                         {info.allowedTools.map(t => (
-                          <Badge key={t} variant="outline" className="text-[9px] py-0 px-1 font-mono">{String(t)}</Badge>
+                          <Badge key={t} variant="outline" className="text-micro py-0 px-1 font-mono">{String(t)}</Badge>
                         ))}
                       </div>
                     )}
                     {!info && (
-                      <p className="text-[10px] text-muted-foreground italic">
+                      <p className="text-micro text-muted-foreground italic">
                         Skill not found in project pool — may be installed at runtime
                       </p>
                     )}

@@ -119,7 +119,7 @@ export function AgentComputerTab() {
         {/* Where it works now */}
         <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-header">
           <CardContent className="space-y-3 px-4 py-3 text-xs">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-label text-muted-foreground">
               <Monitor className="h-3 w-3" /> Works on
               <Button size="icon" variant="ghost" className="ml-auto h-6 w-6" onClick={() => void refresh(true)} aria-label="Refresh status">
                 <RefreshCw className="h-3 w-3" />
@@ -191,7 +191,7 @@ export function AgentComputerTab() {
                   busy={busy === c.id}
                   onAction={(a) => void run(c, a)}
                   showAgents={false}
-                  badge={isDefault ? <Badge variant="secondary" className="h-5 px-1.5 text-[10px]" data-testid="computer-default">Default</Badge> : undefined}
+                  badge={isDefault ? <Badge variant="secondary" className="h-5 px-1.5 text-micro" data-testid="computer-default">Default</Badge> : undefined}
                 >
                   <div className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto">
                     {!isDefault && (
@@ -221,7 +221,7 @@ export function AgentComputerTab() {
         {!loading && (
           <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-add">
             <CardContent className="space-y-3 px-4 py-3 text-xs">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Add a computer</div>
+              <div className="text-label text-muted-foreground">Add a computer</div>
               <div className="flex flex-wrap items-center gap-2">
                 {others.length > 0 && (
                   <>
@@ -239,7 +239,7 @@ export function AgentComputerTab() {
                 </Button>
               </div>
               {others.length > 0 && makeDefaultCheckbox}
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 All the instance's computers are on the <Link to="/computers" className="underline">Computers</Link> page.
               </p>
             </CardContent>

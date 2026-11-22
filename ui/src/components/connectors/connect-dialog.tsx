@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ConnectorIcon } from "./connector-icon";
 import type { ConnectDetails, ConnectState } from "./use-connect-flow";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 export function CopyField({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -79,8 +80,8 @@ function SetupStep({ appId, name, entry, redirectUri, onSaved }: {
   };
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-        <p className="flex items-center gap-1.5 font-medium"><KeyRound className="h-4 w-4 text-amber-500" /> One-time setup</p>
+      <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">
+        <p className="flex items-center gap-1.5 font-medium"><KeyRound className="h-4 w-4 text-warning" /> One-time setup</p>
         <p className="mt-1 text-muted-foreground">
           {intro ?? `Use an OAuth app registered with ${name} and approved for this MCP server.`}{" "}
           {requireSecret ? "Every Google connector reuses it." : null}
@@ -138,7 +139,7 @@ function DetailsStep({ entry, connector, onSubmit }: { entry?: CatalogEntry; con
               <Input value={values[f] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f]: e.target.value }))} placeholder={f} spellCheck={false} />
             </Field>
           ))}
-          <p className="break-all font-mono text-[11px] text-muted-foreground">{fillTemplate(entry!.urlTemplate!, Object.fromEntries(fields.map((f) => [f, values[f] || `{${f}}`]))).replace(/%7B|%7D/g, (m) => (m === "%7B" ? "{" : "}"))}</p>
+          <p className="break-all font-mono text-caption text-muted-foreground">{fillTemplate(entry!.urlTemplate!, Object.fromEntries(fields.map((f) => [f, values[f] || `{${f}}`]))).replace(/%7B|%7D/g, (m) => (m === "%7B" ? "{" : "}"))}</p>
         </div>
       )}
       {variants.length > 0 && (
@@ -148,7 +149,7 @@ function DetailsStep({ entry, connector, onSubmit }: { entry?: CatalogEntry; con
             <label key={v.url} className={cn("flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm", variant === v.url && "border-primary bg-primary/5")}>
               <input type="radio" name="variant" value={v.url} checked={variant === v.url} onChange={() => setVariant(v.url)} className="accent-primary" />
               <span className="font-medium">{v.label}</span>
-              <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{v.url}</span>
+              <span className="ml-auto truncate font-mono text-caption text-muted-foreground">{v.url}</span>
             </label>
           ))}
         </fieldset>
@@ -180,6 +181,7 @@ export function ConnectDialog({
   onManage: (connector: Connector) => void;
   onRetry: () => void;
 }) {
+  const product = productName(useInstanceBranding());
   const { phase, target } = state;
   const entry = target?.entry;
   const connector = state.connector ?? target?.connector;
@@ -232,15 +234,15 @@ export function ConnectDialog({
 
         {phase === "done" && connector && (
           <div className="space-y-4 py-2">
-            <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm" role="status">
-              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+            <div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 p-3 text-sm" role="status">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
               <span>
                 <span className="font-medium">{name} is connected.</span>{" "}
                 {state.toolCount !== undefined ? `${state.toolCount} tool${state.toolCount === 1 ? "" : "s"} available.` : null}
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              {connector.access.polpo ? "Polpo can use it. " : ""}
+              {connector.access.polpo ? `${product} can use it. ` : ""}
               {connector.access.agents === "*" ? "Every agent can use it." : connector.access.agents.length ? `Agents: ${connector.access.agents.join(", ")}.` : "No agent has access yet: grant it in the connector's settings."}
             </p>
             <DialogFooter>

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/config";
-import { cn } from "@/lib/utils";
+import { Switch } from "@/components/connectors/connector-bits";
 import type { CodingAgentKind, CodingCapabilities } from "./types";
 import { DEFAULT_PR_COMMAND, useCodingSettings } from "./coding-settings";
 
@@ -101,19 +101,19 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
         {/* Git identity — read-only surface so the user can confirm
             "who am I committing as" before agents run gh on their behalf. */}
         <section className="space-y-1.5">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <h3 className="text-label text-muted-foreground">
             Git identity
           </h3>
           {identityState === "loading" && (
-            <div className="text-[11.5px] text-muted-foreground">Loading…</div>
+            <div className="text-caption text-muted-foreground">Loading…</div>
           )}
           {identityState === "error" && (
-            <div className="text-[11.5px] text-rose-300/70">
+            <div className="text-caption text-destructive/70">
               Failed to load identity — restart the server to pick up <code className="font-mono">/git-identity</code>.
             </div>
           )}
           {identityState === "ok" && identity && (
-            <div className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-2 text-[11.5px]">
+            <div className="space-y-1 rounded-md border border-border/70 bg-muted/20 p-2 text-caption">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">git user</span>
                 <span className="truncate font-mono text-foreground">
@@ -130,27 +130,27 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
                     href={identity.gh.url ?? `https://github.com/${identity.gh.login}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="truncate font-mono text-emerald-300/85 hover:text-emerald-200"
+                    className="truncate font-mono text-success/85 hover:text-success"
                   >
                     @{identity.gh.login}
                   </a>
                 ) : (
-                  <span className="font-mono text-rose-300/70">not signed in</span>
+                  <span className="font-mono text-destructive/70">not signed in</span>
                 )}
               </div>
             </div>
           )}
-          <p className="text-[10.5px] text-muted-foreground/80">
+          <p className="text-caption text-muted-foreground/80">
             Configure with <code className="font-mono">git config --global user.name/email</code> and <code className="font-mono">gh auth login</code>.
           </p>
         </section>
 
         {/* Agent commands */}
         <section className="space-y-2">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <h3 className="text-label text-muted-foreground">
             Agent commands
           </h3>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Shell command launched when you start an agent session. Leave empty to use the server default.
           </p>
           <div className="space-y-2">
@@ -160,19 +160,19 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               const overridden = settings.agentCommands[kind] !== undefined;
               return (
                 <div key={kind} className="grid grid-cols-[5rem_1fr_auto] items-center gap-2">
-                  <label className="text-[12px] font-medium text-foreground/70">{AGENT_LABEL[kind]}</label>
+                  <label className="text-small font-medium text-foreground/70">{AGENT_LABEL[kind]}</label>
                   <Input
                     value={value}
                     onChange={(e) => setCommand(kind, e.target.value)}
                     placeholder={fallback || "(unavailable)"}
-                    className="h-8 border-border bg-muted/30 font-mono text-[12px] text-foreground"
+                    className="h-8 border-border bg-muted/30 font-mono text-small text-foreground"
                   />
                   <Button
                     variant="ghost"
                     size="sm"
                     disabled={!overridden}
                     onClick={() => resetCommand(kind)}
-                    className="h-8 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                    className="h-8 px-2 text-micro text-muted-foreground hover:text-foreground"
                     title="Reset to server default"
                   >
                     Reset
@@ -185,10 +185,10 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
 
         {/* PR command */}
         <section className="space-y-2 border-t border-border/70 pt-4">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <h3 className="text-label text-muted-foreground">
             PR command
           </h3>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Run by the workspace "PR" button when the current branch has no open PR.
             Defaults to a non-interactive Claude prompt that pushes + opens a PR.
           </p>
@@ -197,7 +197,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
             onChange={(e) => update({ prCommand: e.target.value })}
             rows={3}
             placeholder={DEFAULT_PR_COMMAND}
-            className="border-border bg-muted/30 font-mono text-[12px] text-foreground"
+            className="border-border bg-muted/30 font-mono text-small text-foreground"
           />
           <div className="flex justify-end">
             <Button
@@ -205,7 +205,7 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
               size="sm"
               onClick={() => update({ prCommand: DEFAULT_PR_COMMAND })}
               disabled={settings.prCommand === DEFAULT_PR_COMMAND}
-              className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+              className="h-7 px-2 text-micro text-muted-foreground hover:text-foreground"
             >
               Reset to default
             </Button>
@@ -216,48 +216,36 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
         <section className="space-y-2 border-t border-border/70 pt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              <h3 className="text-label text-muted-foreground">
                 Workspaces outside server root
               </h3>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-caption text-muted-foreground">
                 Allow "Add workspace" to pick from paths beyond the server work dir.
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.allowOutsideWorkspace}
-              onClick={() => update({ allowOutsideWorkspace: !settings.allowOutsideWorkspace })}
-              className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-                settings.allowOutsideWorkspace ? "bg-emerald-500/70" : "bg-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform",
-                  settings.allowOutsideWorkspace ? "translate-x-[1.125rem]" : "translate-x-0.5",
-                )}
-              />
-            </button>
+            <Switch
+              label="Workspaces outside server root"
+              checked={settings.allowOutsideWorkspace}
+              onChange={(allowOutsideWorkspace) => update({ allowOutsideWorkspace })}
+            />
           </div>
 
           {settings.allowOutsideWorkspace && (
             <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-2">
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-caption text-muted-foreground">
                 Whitelisted roots (absolute paths). These appear as alternative starting points in the picker.
               </div>
               <div className="space-y-1">
                 {settings.allowedExtraRoots.length === 0 && (
-                  <div className="text-[11px] italic text-muted-foreground/80">No paths added yet.</div>
+                  <div className="text-caption italic text-muted-foreground/80">No paths added yet.</div>
                 )}
                 {settings.allowedExtraRoots.map((path) => (
                   <div key={path} className="flex items-center gap-1.5 rounded bg-muted/30 px-2 py-1">
-                    <code className="flex-1 truncate font-mono text-[11.5px] text-foreground/80">{path}</code>
+                    <code className="flex-1 truncate font-mono text-caption text-foreground/80">{path}</code>
                     <button
                       type="button"
                       onClick={() => removePath(path)}
-                      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-rose-300"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
                       title="Remove"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -273,13 +261,13 @@ export function CodingSettingsDialog({ open, onOpenChange }: Props) {
                   value={newPath}
                   onChange={(e) => setNewPath(e.target.value)}
                   placeholder="/data/some-project"
-                  className="h-7 flex-1 border-border bg-muted/30 font-mono text-[11.5px] text-foreground"
+                  className="h-7 flex-1 border-border bg-muted/30 font-mono text-caption text-foreground"
                 />
                 <Button
                   type="submit"
                   size="sm"
                   disabled={!newPath.trim().startsWith("/")}
-                  className="h-7 gap-1 px-2 text-[11px]"
+                  className="h-7 gap-1 px-2 text-caption"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add

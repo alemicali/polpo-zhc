@@ -101,7 +101,7 @@ export function RightPanel({ workspaces, terminals, activeWorkspaceId, activeTer
           )}
         </TabPane>
 
-        <TabPane visible={tab === "terminal"} className="bg-[#0a0a0a]">
+        <TabPane visible={tab === "terminal"} className="bg-card">
           {workspaces.length === 0 ? (
             <PlaceholderTab title="No workspace" detail="Open a workspace first." />
           ) : (
@@ -163,7 +163,7 @@ function RightTabTrigger({ value, icon, label }: { value: RightTab; icon: React.
     <TabsTrigger
       value={value}
       title={label}
-      className="h-6 flex-none gap-1.5 px-2 text-[11px]"
+      className="h-6 flex-none gap-1.5 px-2 text-caption"
     >
       {icon}
       {/* Container query: only render the label when the right panel is wide
@@ -178,7 +178,7 @@ function PlaceholderTab({ title, detail }: { title: string; detail: string }) {
     <div className="flex h-full items-center justify-center p-6">
       <div className="text-center">
         <p className="text-xs font-medium text-foreground">{title}</p>
-        <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{detail}</p>
       </div>
     </div>
   );
@@ -281,7 +281,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-border/70 px-2 py-1.5">
-        <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{cwd}</div>
+        <div className="min-w-0 flex-1 truncate font-mono text-caption text-muted-foreground">{cwd}</div>
         {externalUrl && (
           <a
             href={externalUrl}
@@ -300,7 +300,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
             size="sm"
             disabled={busy}
             onClick={stop}
-            className="h-6 rounded px-2 text-[10px] font-medium text-muted-foreground disabled:opacity-60"
+            className="h-6 rounded px-2 text-micro font-medium text-muted-foreground disabled:opacity-60"
           >
             <Square className="h-3 w-3" />
             Stop
@@ -312,7 +312,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
           size="sm"
           disabled={busy}
           onClick={start}
-          className="h-6 rounded px-2 text-[10px] font-medium disabled:opacity-60"
+          className="h-6 rounded px-2 text-micro font-medium disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           {url ? "Restart" : "Start"}
@@ -335,13 +335,13 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
               <Code2 className="h-5 w-5" />
             </span>
             <p className="mt-3 text-xs font-medium text-foreground">VS Code for this workspace</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Start a code-server instance rooted at the selected workspace.</p>
+            <p className="mt-1 text-caption text-muted-foreground">Start a code-server instance rooted at the selected workspace.</p>
             <Button
               type="button"
               size="sm"
               disabled={busy}
               onClick={start}
-              className="mt-4 h-7 rounded-md px-3 text-[11px]"
+              className="mt-4 h-7 rounded-md px-3 text-caption"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               Start VS Code

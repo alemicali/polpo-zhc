@@ -31,7 +31,7 @@ function AppRow({ app, onChanged }: { app: OAuthApp; onChanged: () => Promise<vo
         <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{app.name ?? app.id} <span className="font-mono text-xs font-normal text-muted-foreground">{app.id}</span></p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{app.clientId}{app.hasSecret ? " · secret set" : " · no secret"}</p>
+          <p className="truncate font-mono text-caption text-muted-foreground">{app.clientId}{app.hasSecret ? " · secret set" : " · no secret"}</p>
         </div>
         <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditing((v) => !v)}>{editing ? "Cancel" : "Replace"}</Button>
         <Button
