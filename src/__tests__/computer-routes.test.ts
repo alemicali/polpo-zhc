@@ -10,6 +10,7 @@ import { agentRoutes } from "@polpo-ai/server";
 import { resolveSandbox, type ComputerConfig, type RemoteSandboxProvider } from "@polpo-ai/core/sandbox";
 import { ComputerManager } from "../sandbox/computers.js";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "../server/routes/computers.js";
+import { expectValidOutput } from "./helpers/mcp-output.js";
 import type { CreateSpec, RemoteAdapter, RemoteDriver, RemoteVmSummary } from "../sandbox/remote-adapters.js";
 
 const dirs: string[] = [];
@@ -190,7 +191,12 @@ describe("MCP computer tools", () => {
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     }), deps)).json()).result;
-    return { t, rpc, call: (name: string, args: Record<string, unknown>) => rpc("tools/call", { name, arguments: args }) };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await rpc("tools/call", { name, arguments: args });
+      await expectValidOutput(deps, async () => (await rpc("tools/list")).tools, name, result);
+      return result;
+    };
+    return { t, rpc, call };
   }
 
   it("save creates then changes; control starts and stops; reset and delete need confirm", async () => {

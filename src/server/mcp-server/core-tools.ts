@@ -42,13 +42,27 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   return { ok: true, card };
 }
 
-/** The card's main parts (the widget reads the rest). */
-const cardOutput = {
+/**
+ * The card as returned (AgentCard): every field declared, and open to new ones. Clients built on
+ * the official MCP SDK validate structuredContent with Ajv, so a closed schema that misses a
+ * field breaks the tool for them (seen live: "data must NOT have additional properties").
+ */
+const cardOutput = z.object({
+  key: z.object({ createdAt: z.number(), seq: z.number() }).passthrough().optional().describe("Orders the cards of one agent: a newer card supersedes older ones"),
+  generatedAt: z.string().optional(),
   agent: z.object({ name: z.string(), role: z.string().optional() }).passthrough().describe("Who the agent is"),
-  current: looseObject.nullable().optional().describe("The task at hand"),
-  goal: looseObject.nullable().optional().describe("Its main goal"),
+  status: z.string().optional().describe("working, waiting, idle…"),
+  current: looseObject.nullable().optional().describe("The task at hand (or the last one it finished)"),
+  today: z.object({ done: z.number(), failed: z.number(), waiting: z.number() }).passthrough().optional().describe("Today's tasks"),
   next: looseObject.nullable().optional().describe("What it plans next"),
-};
+  goal: looseObject.nullable().optional().describe("Its main goal"),
+  drive: z.boolean().optional().describe("Whether it has goals and initiative on"),
+  portrait: z.string().optional(),
+  tasks: z.array(looseObject).optional(),
+  goals: z.array(looseObject).optional().describe("Its goals"),
+  routine: z.array(looseObject).optional().describe("What it does on a schedule, and what it proposes"),
+  journal: z.array(looseObject).optional().describe("Its latest reflections"),
+}).passthrough();
 
 const cardResult = (card: AgentCard) => ({
   content: [{ type: "text" as const, text: agentCardText(card) }],
