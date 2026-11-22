@@ -3,7 +3,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
 import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
-import { agentHarness, HARNESS_NAMES, parseHarnessesSettings, type HarnessesSettings } from "@polpo-ai/core/harnesses";
+import { agentHarness, HARNESS_NAMES, harnessesVaultProblems, parseHarnessesSettings, type HarnessesSettings } from "@polpo-ai/core/harnesses";
 import {
   UpdateSettingsSchema,
   PLAIN_SETTINGS_KEYS,
@@ -285,6 +285,8 @@ export function configRoutes(getDeps: () => {
   /** Save a modified config. Replaces loadPolpoConfig/savePolpoConfig coupling. */
   saveConfig: (config: any) => Promise<void>;
   getNotificationRouter: () => any;
+  /** The vault, to check the vault references of harness gateway headers (optional). */
+  getVaultStore?: () => { get(owner: string, service: string): Promise<{ credentials?: Record<string, string> } | undefined> } | undefined;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -370,6 +372,11 @@ export function configRoutes(getDeps: () => {
         harnesses = body.harnesses === null ? null : parseHarnessesSettings(body.harnesses);
       } catch (err) {
         return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+      // secret gateway headers must be in the vault (the main credential may come later: a setup link)
+      if (harnesses) {
+        const problems = await harnessesVaultProblems(harnesses, deps.getVaultStore?.());
+        if (problems.length) return c.json({ ok: false, error: `${problems.join("; ")}. Add the entry in that agent's Credentials tab first.` }, 400);
       }
       const enabled = new Set(harnesses?.enabled ?? []);
       const config = deps.getConfig();

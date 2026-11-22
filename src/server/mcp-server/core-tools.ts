@@ -28,14 +28,16 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   const list = (agents.data as AgentCardAgent[]) ?? [];
   const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
   if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
-  const [tasks, drive] = await Promise.all([
+  const [tasks, drive, connectors] = await Promise.all([
     deps.api("GET", "/api/v1/tasks").then(unwrap),
     deps.api("GET", `/api/v1/drive/${enc(agent.name)}`).then(unwrap),
+    deps.api("GET", "/api/v1/connectors").then(unwrap),
   ]);
   const card = buildAgentCard({
     agent,
     tasks: tasks.ok ? (tasks.data as Parameters<typeof buildAgentCard>[0]["tasks"]) ?? [] : [],
     ...(drive.ok ? { drive: drive.data as Parameters<typeof buildAgentCard>[0]["drive"] } : {}),
+    ...(connectors.ok ? { connectors: (connectors.data as { connectors?: Parameters<typeof buildAgentCard>[0]["connectors"] })?.connectors ?? [] } : {}),
     now: new Date(),
     key: { createdAt: Date.now(), seq: ++cardSeq },
   });
@@ -62,6 +64,7 @@ const cardOutput = z.object({
   goals: z.array(looseObject).optional().describe("Its goals"),
   routine: z.array(looseObject).optional().describe("What it does on a schedule, and what it proposes"),
   journal: z.array(looseObject).optional().describe("Its latest reflections"),
+  connectors: z.array(looseObject).optional().describe("The connectors it may use, with their accounts (gmail, gmail-2…) and how many of their tools it gets"),
 }).passthrough();
 
 const cardResult = (card: AgentCard) => ({
@@ -113,8 +116,9 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
 
   registerAppTool(server, "polpo_agent_show", {
     title: "Show an agent",
-    description: "Show one agent's card: whether it is working, the task at hand, today's results, what it plans next "
-      + "and its main goal; it opens to its tasks, goals and routine. Use it when the person asks how an agent is doing (polpo_agents_list for names).",
+    description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex) and computer, the task at hand "
+      + "(with the engine, model, computer and cost of its latest run, or why it failed), today's results, what it plans next, "
+      + "its main goal and the connectors it may use; it opens to its tasks, goals and routine. Use it when the person asks how an agent is doing (polpo_agents_list for names).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name or display name") },
     annotations: { title: "Show an agent", ...READ },
     outputSchema: cardOutput,

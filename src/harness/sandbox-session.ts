@@ -10,6 +10,14 @@
  *   and a minimal environment — never the server's HOME (~/.claude, ~/.codex) nor its env.
  *
  * stop/destroy are no-ops: Polpo's ComputerManager owns the machine's lifecycle.
+ *
+ * Credential brokering is implemented here once, for every provider: the session offers the AI
+ * SDK's `addRequestTransformations` / `setRequestTransformations` when the run has a broker — the
+ * provider's native egress transformer (`HarnessMachine.nativeRequestTransformations`, e.g. a
+ * sandbox network policy that rewrites headers), else Polpo's model relay lease (relay.ts). Both
+ * get the same rules (the SDK's, presented per the gateway's auth scheme, plus Polpo's gateway
+ * headers) with the same semantics. Without a broker the methods are absent and the SDK forwards
+ * the credential into the VM (the fallback).
  */
 import { spawn as spawnChild } from "node:child_process";
 import { createServer } from "node:net";
@@ -17,7 +25,8 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import type { RemoteDriver, RemotePortEndpoint, RemoteProcess } from "../sandbox/remote-adapters.js";
-import type { HarnessSandbox } from "./types.js";
+import type { HarnessSandbox, RequestTransformation } from "./types.js";
+import { presentCredential, type HarnessRelayLease } from "./relay.js";
 
 /** What a harness needs from a machine. Paths are absolute (relative ones resolve against workDir). */
 export interface HarnessMachine {
@@ -36,6 +45,14 @@ export interface HarnessMachine {
   portEndpoint(port: number, protocol: "http" | "https" | "ws"): Promise<RemotePortEndpoint>;
   /** Stop following process output (processes keep running). */
   close(): void;
+  /**
+   * Optional provider capability: the provider rewrites the VM's outbound HTTPS requests itself
+   * (outside the VM), with the semantics of the AI SDK's request transformations: rules match on
+   * host / path / method / query / headers, credential headers the VM sent are dropped, matching
+   * rules' headers are set ("" removes a header). `replace`: the rules replace the previous set.
+   * Providers without it are brokered by Polpo's model relay.
+   */
+  nativeRequestTransformations?(rules: ReadonlyArray<RequestTransformation>, opts: { replace: boolean }): Promise<void>;
 }
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -62,7 +79,11 @@ async function bytesOf(stream: ReadableStream<Uint8Array> | AsyncIterable<Uint8A
  * for the whole run; it follows the computer to a new VM). Processes and ports need the driver's
  * optional `spawn`/`portEndpoint` (Daytona v2): others are refused with a clear message.
  */
-export function remoteHarnessMachine(o: { driver: () => Promise<RemoteDriver>; workDir: string; label: string; portTtlSeconds?: number }): HarnessMachine {
+export function remoteHarnessMachine(o: {
+  driver: () => Promise<RemoteDriver>; workDir: string; label: string; portTtlSeconds?: number;
+  /** The driver rewrites outbound requests natively (RemoteDriver.requestTransformations). */
+  nativeTransformations?: boolean;
+}): HarnessMachine {
   const followed = new Set<RemoteProcess>();
   const abs = (p: string) => (p.startsWith("/") ? p : posix.join(o.workDir, p));
   const machine: HarnessMachine = {
@@ -131,6 +152,13 @@ export function remoteHarnessMachine(o: { driver: () => Promise<RemoteDriver>; w
       followed.clear();
     },
   };
+  if (o.nativeTransformations) {
+    machine.nativeRequestTransformations = async (rules, x) => {
+      const d = await o.driver();
+      if (!d.requestTransformations) throw new Error(`Computer ${o.label} cannot rewrite outbound requests`);
+      await d.requestTransformations(rules, x);
+    };
+  }
   return machine;
 }
 
@@ -278,11 +306,53 @@ export async function freeMachinePort(machine: Pick<HarnessMachine, "exec">, fro
 }
 
 /**
- * The harness sandbox session over a machine (structurally `HarnessV1NetworkSandboxSession`).
- * `port`: the bridge port this session's runtime listens on.
+ * Who brokers a run's model credential: the machine's provider natively, or Polpo's relay lease.
+ * `scheme` presents the brokered key the way a custom gateway wants it; `rules` are Polpo's own
+ * (gateway headers, for the upstream host).
  */
-export function createHarnessSandboxSession(machine: HarnessMachine, opts: { port: number }): HarnessSandbox {
+export interface HarnessCredentialBroker {
+  lease?: Pick<HarnessRelayLease, "addRules" | "setRules">;
+  scheme?: "x-api-key" | "bearer" | "none";
+  rules?: RequestTransformation[];
+}
+
+/** "native" (the provider rewrites requests), "relay" (Polpo's lease) or "none" (no brokering). */
+export function brokeringOf(machine: Pick<HarnessMachine, "nativeRequestTransformations">, broker: HarnessCredentialBroker | undefined): "native" | "relay" | "none" {
+  if (!broker) return "none";
+  if (machine.nativeRequestTransformations) return "native";
+  return broker.lease ? "relay" : "none";
+}
+
+/**
+ * The harness sandbox session over a machine (structurally `HarnessV1NetworkSandboxSession`).
+ * `port`: the bridge port this session's runtime listens on. `broker`: credential brokering
+ * (addRequestTransformations / setRequestTransformations), for any provider.
+ */
+export function createHarnessSandboxSession(machine: HarnessMachine, opts: { port: number; broker?: HarnessCredentialBroker }): HarnessSandbox {
   const abs = (p: string) => (p.startsWith("/") ? p : posix.join(machine.workDir, p));
+  const brokering = brokeringOf(machine, opts.broker);
+  const polpoRules = opts.broker?.rules ?? [];
+  let nativeRules: RequestTransformation[] | undefined;
+  const transformations: Record<string, (rules: ReadonlyArray<RequestTransformation>) => Promise<void>> = brokering === "native"
+    ? {
+        // Polpo's rules go with the first set; later additions only add the runtime's
+        addRequestTransformations: async (rules) => {
+          const add = presentCredential(rules, opts.broker!.scheme);
+          if (!nativeRules) { nativeRules = [...polpoRules, ...add]; await machine.nativeRequestTransformations!(nativeRules, { replace: true }); return; }
+          nativeRules.push(...add);
+          await machine.nativeRequestTransformations!(add, { replace: false });
+        },
+        setRequestTransformations: async (rules) => {
+          nativeRules = [...polpoRules, ...presentCredential(rules, opts.broker!.scheme)];
+          await machine.nativeRequestTransformations!(nativeRules, { replace: true });
+        },
+      }
+    : brokering === "relay"
+      ? {
+          addRequestTransformations: async (rules) => { opts.broker!.lease!.addRules(rules); },
+          setRequestTransformations: async (rules) => { opts.broker!.lease!.setRules(rules); },
+        }
+      : {};
   const session: Record<string, any> = {
     id: machine.id,
     description: machine.description,
@@ -333,8 +403,12 @@ export function createHarnessSandboxSession(machine: HarnessMachine, opts: { por
     // the machine outlives every session: Polpo's ComputerManager stops and deletes it
     stop: async () => {},
     destroy: async () => {},
+    ...transformations,
     restricted: () => {
-      const { getPortEndpoint, getPortUrl, stop, destroy, restricted, ports, id, defaultWorkingDirectory, ...basic } = session;
+      const {
+        getPortEndpoint, getPortUrl, stop, destroy, restricted, ports, id, defaultWorkingDirectory,
+        addRequestTransformations, setRequestTransformations, ...basic
+      } = session;
       return basic;
     },
   };

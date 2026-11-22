@@ -19,7 +19,8 @@ import {
   applyHostStyleVariables,
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
-import type { AgentCard, AgentCardRoutineItem } from "../../src/server/mcp-agent-card.js";
+import type { AgentCard, AgentCardRoutineItem, AgentCardTask } from "../../src/server/mcp-agent-card.js";
+import { brandMark } from "../shared/brand.js";
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,8 @@ const STRINGS = {
     horizon: { long: "6–12 months", quarter: "Quarter", month: "Month", week: "Week", day: "Today" } as Record<string, string>,
     status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft" } as Record<string, string>,
     error: "Could not load the agent",
+    on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
+    notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
   },
   it: {
     working: "Al lavoro", idle: "Libero", waiting: "In attesa di te",
@@ -55,6 +58,8 @@ const STRINGS = {
     horizon: { long: "6–12 mesi", quarter: "Trimestre", month: "Mese", week: "Settimana", day: "Oggi" } as Record<string, string>,
     status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza" } as Record<string, string>,
     error: "Non riesco a caricare l'agente",
+    on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
+    notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
   },
 };
 type Strings = typeof STRINGS.en;
@@ -134,14 +139,16 @@ function header(c: AgentCard, s: Strings): HTMLElement {
     h("div", { class: "avatar", "aria-hidden": "true" }, initials(name)),
     h("div", { class: "who" },
       h("div", { class: "name" }, name),
-      h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · "))),
+      h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · ")),
+      c.agent.engine ? h("div", { class: "role marks" }, brandMark(c.agent.engine.mark, 14),
+        [c.agent.engine.label, c.agent.engine.modelLabel, c.agent.computer ? `${s.on} ${c.agent.computer}` : undefined].filter(Boolean).join(" · ")) : null),
     h("span", { class: `chip chip-${c.status === "working" ? "info" : c.status === "waiting" ? "warning" : "neutral"}` }, s[c.status]));
 }
 
 function inlineCard(c: AgentCard, s: Strings): HTMLElement {
   const nextText = (n: AgentCardRoutineItem) => `${formatTime(n.at)} · ${n.text}`;
   const rows: Array<[string, Node | string]> = [
-    [c.current?.active ? s.workingOn : s.lastDone, c.current ? c.current.title : s.noTask],
+    [c.current?.active ? s.workingOn : s.lastDone, c.current ? taskSummary(c.current, s) : s.noTask],
     [s.today, `${c.today.done} ${s.done} · ${c.today.failed} ${s.failed} · ${c.today.waiting} ${s.toApprove}`],
     [s.next, c.next ? h("span", {}, nextText(c.next), c.next.proposed ? h("span", { class: "chip chip-warning chip-sm" }, s.toConfirm) : null) : s.nothingPlanned],
     [s.goal, c.goal
@@ -154,6 +161,24 @@ function inlineCard(c: AgentCard, s: Strings): HTMLElement {
     h("div", { class: "actions" },
       canFullscreen() ? h("button", { class: "btn btn-primary", disabled: superseded, onclick: openFull }, s.open) : null,
       h("button", { class: "btn", disabled: superseded, onclick: askUpdate }, s.askUpdate)));
+}
+
+/** A task's title, its latest run (engine and model, computer, cost) and why it failed. */
+function taskSummary(x: AgentCardTask, s: Strings): HTMLElement {
+  const r = x.run;
+  const cost = r?.costUsd === undefined ? "" : r.costUsd < 0.01 ? `$${r.costUsd.toFixed(4)}` : `$${r.costUsd.toFixed(2)}`;
+  return h("div", { class: "task-sum" },
+    h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
+    r ? h("div", { class: "muted small marks" }, brandMark(r.engineMark, 14),
+      [`${r.engineLabel}${r.modelLabel ? ` ${r.modelLabel}` : ""}`, r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · ")) : null,
+    x.failure ? h("div", { class: "small fail-text" }, `${s.failedBecause}: ${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried})`}`) : null);
+}
+
+function connectorsSection(c: AgentCard, s: Strings): HTMLElement | null {
+  if (!c.connectors?.length) return null;
+  return h("section", {}, h("h3", {}, s.connectors), ...c.connectors.map((x) => h("div", { class: "row" },
+    h("div", { class: "row-main" }, h("div", {}, x.label), h("div", { class: "muted small" }, `${x.id} · ${x.tools === "all" ? s.allTools : s.tools(x.tools)}`)),
+    x.status ? h("span", { class: `chip chip-sm chip-${x.status === "connected" ? "success" : x.status === "error" || x.status === "needs_reauth" ? "danger" : "neutral"}` }, x.status.replace(/_/g, " ")) : null)));
 }
 
 function tabs(s: Strings): HTMLElement {
@@ -170,6 +195,7 @@ function overviewTab(c: AgentCard, s: Strings): HTMLElement {
     inlineFacts(c, s),
     c.portrait ? h("section", {}, h("h3", {}, s.portrait), h("p", { class: "prose" }, c.portrait)) : null,
     top.length ? h("section", {}, h("h3", {}, s.goals), ...top.map((g) => goalRow(g, s))) : null,
+    connectorsSection(c, s),
     c.journal.length ? h("section", {}, h("h3", {}, s.reflections), ...c.journal.map((j) => h("div", { class: "row" }, h("div", { class: "row-main" }, h("div", { class: "prose" }, j.summary)), h("div", { class: "muted small" }, formatTime(j.at))))) : null);
 }
 
@@ -186,7 +212,7 @@ function tasksTab(c: AgentCard, s: Strings): HTMLElement {
   return h("div", { class: "stack" },
     h("div", { class: "chips" }, ...filters.map(([id, label]) => h("button", { class: `chip-btn${taskFilter === id ? " on" : ""}`, "aria-pressed": taskFilter === id ? "true" : "false", onclick: () => { taskFilter = id; render(); } }, label))),
     shown.length ? h("div", {}, ...shown.map((x) => h("div", { class: "row" },
-      h("div", { class: "row-main" }, h("div", {}, x.title), h("div", { class: "muted small" }, `${x.id} · ${formatTime(x.updatedAt)}`)),
+      h("div", { class: "row-main" }, taskSummary(x, s), h("div", { class: "muted small" }, `${x.id} · ${formatTime(x.updatedAt)}`)),
       h("span", { class: `chip chip-sm chip-${statusTone(x.status)}` }, s.status[x.status] ?? x.status)))) : empty(s));
 }
 

@@ -934,10 +934,10 @@
                   ]
                 }
               ],
-              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
+              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
             },
             "required": false,
-            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
             "name": "summary",
             "in": "query"
           },
@@ -957,10 +957,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview)."
+              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, failure, toolScope)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, failure, toolScope).",
             "name": "slim",
             "in": "query"
           },
@@ -1419,7 +1419,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Task details",
+            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error).",
             "content": {
               "application/json": {
                 "schema": {
@@ -5390,6 +5390,23 @@
                             "minimum": 0,
                             "exclusiveMinimum": true,
                             "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
                           }
                         },
                         "required": [
@@ -6064,6 +6081,23 @@
                             "minimum": 0,
                             "exclusiveMinimum": true,
                             "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
                           }
                         },
                         "required": [

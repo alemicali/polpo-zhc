@@ -103,15 +103,18 @@ describe("tools_search", () => {
   });
 
   it("limits the results and never returns tools that are not deferred", () => {
-    expect(set.search("issue", 2)).toHaveLength(2);
+    expect(set.search("click", 1)).toHaveLength(1);
+    // three tools tie on "issue": a tie at the page edge stays together
+    expect(set.find({ query: "issue", limit: 2 })).toMatchObject({ total: 3, more: false });
     expect(set.search("core_1").map((h) => h.name)).not.toContain("core_1");
     expect(set.search("tools_search").map((h) => h.name)).not.toContain("tools_search");
   });
 
   it("answers with names, groups and descriptions", () => {
     const text = set.run("tools_search", { query: "linear issues" });
-    expect(text).toMatch(/^3 tools \(load with tools_load\):/);
-    expect(text).toContain("- mcp__linear__list_issues [Linear] — List issues, filtered by team, assignee or state.");
+    expect(text).toMatch(/^3 matches for "linear issues"; load with tools_load:/);
+    expect(text).toContain("Linear [connector linear] — 3 matches:");
+    expect(text).toContain("- mcp__linear__list_issues — List issues, filtered by team, assignee or state.");
     expect(set.run("tools_search", { query: "kubernetes" })).toContain("No tool to load matches");
   });
 });

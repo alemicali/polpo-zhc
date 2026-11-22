@@ -35,6 +35,7 @@ export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 export * from "./run-context.js";
 export * from "./mission-cost.js";
 export * from "./dependency-results.js";
+export * from "./task-failure.js";
 export * from "./task-tool-scope.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
@@ -150,6 +151,10 @@ export type {
   ToolGroupRule,
   ToolGroup,
   SearchHit,
+  ToolSearchRequest,
+  ToolSearchResult,
+  ToolSearchGroupCount,
+  ToolLoadResult,
   ProgressiveMetaTool,
   ProgressiveToolSetOptions,
 } from "./progressive-tools.js";

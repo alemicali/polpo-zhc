@@ -140,6 +140,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_approval_resolve: "approve_request",
   polpo_tasks_list: "list_tasks",
   polpo_task_get: "get_task",
+  // the task card (an MCP App): get_task has the same (failure, dependencies, runs)
+  polpo_task_show: "get_task",
   polpo_task_create: "create_task",
   polpo_task_update: "update_task",
   polpo_task_retry: "retry_task",
@@ -150,6 +152,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_task_logs: "get_logs",
   polpo_missions_list: "list_missions",
   polpo_mission_get: "get_mission",
+  // the mission card (an MCP App): get_mission has the same (cost against the budget, tasks)
+  polpo_mission_show: "get_mission",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",

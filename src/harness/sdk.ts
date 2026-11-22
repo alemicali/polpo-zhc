@@ -125,7 +125,8 @@ function buildHarness(spec: HarnessRuntimeSpec): any {
       toolHints,
       // the agent's own MCP servers are Polpo connectors, offered as host tools: no .mcp.json in the repo
       strictMcpConfig: true,
-      ...(spec.effort ? { effort: spec.effort, thinking: { type: "adaptive" as const } } : { thinking: { type: "disabled" as const } }),
+      // non-Claude models behind a gateway: no adaptive thinking and no effort (they reject them)
+      ...(spec.effort && !spec.auth.nonClaude ? { effort: spec.effort, thinking: { type: "adaptive" as const } } : { thinking: { type: "disabled" as const } }),
       ...(spec.maxTurns ? { maxTurns: spec.maxTurns } : {}),
       ...(spec.maxBudgetUsd ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
       startupTimeoutMs: 180_000,
@@ -263,6 +264,8 @@ export function createSdkHarnessRuntime(spec: HarnessRuntimeSpec): HarnessRuntim
     id: spec.id,
     ...(spec.model ? { model: spec.model } : {}),
     instructions: spec.instructions,
+    // gateway headers sent from the VM: only when they are not brokered (no relay reachable)
+    ...(spec.auth.headers && Object.keys(spec.auth.headers).length ? { headers: { ...spec.auth.headers } } : {}),
     tools: buildTools(spec),
     skills: spec.skills.map((s) => ({ name: s.name, description: s.description, content: s.content })),
     permissionMode: spec.permissionMode,
