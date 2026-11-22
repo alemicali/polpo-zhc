@@ -127,12 +127,26 @@ export interface Task {
   sideEffects?: boolean;
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
+  /** Why it failed, in a line (GET /tasks/:id and slim lists; failed tasks only). */
+  failure?: TaskFailure;
   /** Optional narrowing of the run's tools; absent: everything the agent has. */
   toolScope?: TaskToolScope;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** model_access: the model is not enabled for the account; auth: credentials refused; budget: a spend limit; killed: stopped or timed out. */
+export type TaskFailureKind = "model_access" | "auth" | "budget" | "killed" | "assessment" | "error";
+
+/** Why a task failed: the labelled reason of its last run, whether a retry could help, a kind for badges. */
+export interface TaskFailure {
+  /** The reason in a line (a harness error says what to change). */
+  reason: string;
+  /** false: not retried automatically (a re-run of the same agent fails the same way). */
+  retryable: boolean;
+  kind: TaskFailureKind;
 }
 
 /**
@@ -224,6 +238,10 @@ export interface TaskSlim {
   };
   /** Where and with what the latest run executed. */
   lastRun?: TaskRunSummary;
+  /** Why it failed, in a line (failed tasks only). */
+  failure?: TaskFailure;
+  /** Its runs get only part of the agent's tools. */
+  toolScope?: TaskToolScope;
 }
 
 export interface TaskResult {
@@ -231,6 +249,11 @@ export interface TaskResult {
   stdout: string;
   stderr: string;
   duration: number;
+  /**
+   * false: the run failed for a reason a re-run of the same agent cannot fix (the model is not
+   * enabled for the account, the credentials are refused): no automatic retry. Omitted: retryable.
+   */
+  retryable?: boolean;
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
@@ -2002,4 +2025,47 @@ export interface EmailPreviewPayload {
   reply_to?: string;
   /** File attachments — paths sandboxed by allowedPaths at send time. */
   attachments?: Array<{ path: string; filename?: string }>;
+}
+
+// === Connectors (external apps over MCP; GET /connectors) ===
+
+export type ConnectorStatus = "disconnected" | "connecting" | "connected" | "needs_auth" | "needs_reauth" | "error" | "disabled";
+export type ConnectorToolPolicy = "allow" | "ask" | "off";
+
+/**
+ * A connector as the API shows it (secrets only say whether they are set). Several accounts of
+ * the same catalog app have their own ids (gmail, gmail-2…), names and `account`.
+ */
+export interface Connector {
+  /** Slug used in tool names (mcp__<id>__<tool>). */
+  id: string;
+  /** Display name; another account of an app says which ("Gmail – info@acme.com"). */
+  name: string;
+  /** The signed-in account (e.g. an email), when the sign-in revealed it. */
+  account?: string;
+  kind: "mcp";
+  description?: string;
+  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string };
+  auth: { type: "none" | "bearer" | "headers" | "oauth"; headerNames?: string[]; oauth?: { app?: string; scopes?: string[] } };
+  /** Who may use it: agent names or "*", and Polpo itself. */
+  access: { agents: string[] | "*"; polpo: boolean };
+  enabled: boolean;
+  /** The catalog entry it came from (another account of the same app shares it). */
+  catalogId?: string;
+  toolPolicy?: Record<string, ConnectorToolPolicy>;
+  createdAt: string;
+  updatedAt?: string;
+  status?: ConnectorStatus;
+  lastError?: string;
+  toolCount?: number;
+  lastConnectedAt?: string;
+  secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean; clientRegistered?: boolean; pending?: boolean } };
+}
+
+export interface ConnectorTool {
+  /** The server's tool name (as agent.connectorTools lists it), not mcp__… */
+  name: string;
+  title?: string;
+  description?: string;
+  policy: ConnectorToolPolicy;
 }
