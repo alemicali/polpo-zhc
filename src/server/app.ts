@@ -72,8 +72,11 @@ import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { harnessRoutes } from "./routes/harnesses.js";
+import { harnessSessionViews } from "../harness/control.js";
 import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
+import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
@@ -216,6 +219,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getChannelConfig: (name) => orchestrator?.getConfig()?.settings?.notifications?.channels?.[name],
     getAdapter: (name) => orchestrator?.getWebhookGateway(name),
   }));
+
+  // Computers' provider webhooks (Daytona, E2B): public, authenticated by the provider's signature
+  const computerWebhooks = () => {
+    if (!orchestrator?.isInitialized) return undefined;
+    const log = (level: "info" | "warn", message: string) => orchestrator.emit("log", { level, message: `[computers] ${message}` });
+    return computerWebhooksFor(orchestrator, () => computerManagerWithEvents(
+      orchestrator.getPolpoDir(), (payload) => orchestrator.emit("computer:changed", payload), log,
+      () => orchestrator.getConfig()?.settings?.computers ?? [],
+    ), log);
+  };
+  app.route("/api/v1/computers/webhooks", computerWebhookInboundRoutes({ webhooks: computerWebhooks }));
 
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
@@ -1540,10 +1554,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       await o.reloadConfig();
     },
     sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
+    tasks: () => o.getStore().getAllTasks(),
+    harnessSessions: (computerId) => harnessSessionViews(o.getPolpoDir(), { computer: computerId }),
     instance: () => o.getConfig()?.project,
     emit: (payload) => o.emit("computer:changed", payload),
   };
   authed.route("/computers", computerRoutes(computerDeps));
+  authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
   // agent harnesses (Claude Code, Codex): settings overview and their sessions (status, stop, reset)
   authed.route("/harnesses", harnessRoutes({
     polpoDir: () => o.getPolpoDir(),

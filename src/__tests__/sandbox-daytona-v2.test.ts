@@ -1245,3 +1245,103 @@ describe("agent harnesses on Daytona v2", () => {
     liveHarnessSessions.clear();
   });
 });
+
+// ── deleted at the provider (outside Polpo) ──────────────────────────────
+
+describe("Daytona v2 computers deleted at the provider", () => {
+  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 } };
+  const sb = (c: ComputerConfig = nina) => sandbox({ computer: c });
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-deleted-"));
+    dirs.push(dir);
+    const m = new ComputerManager(dir, { now: () => v2.clock, sleep: async (ms) => { v2.clock += ms; } });
+    const notices: string[] = [];
+    const changes: string[] = [];
+    m.onNotice = (_id, _level, message) => notices.push(message);
+    m.onChange = (_id, live) => changes.push(live.status);
+    return { m, notices, changes };
+  };
+  /** The person deletes the VM in the Daytona dashboard. */
+  const deleteVm = (id: string) => { v2.sandboxes.get(id)!.s.state = "destroyed"; };
+
+  test("a hibernated computer whose snapshot was deleted: deleted (not hibernated), its snapshots forgotten, an event", async () => {
+    const { m, notices, changes } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    expect((await m.refresh(nina)).status).toBe("hibernated");
+    v2.snapshots.clear(); // deleted in the dashboard
+    // asked a moment ago: the answer is reused (the list page asks for every computer)
+    expect((await m.refresh(nina)).status).toBe("hibernated");
+    const live = await m.refresh(nina, undefined, { force: true });
+    expect(live).toMatchObject({ status: "deleted", deletedAtProvider: new Date(v2.clock).toISOString(), notice: expect.stringMatching(/its snapshots were deleted at the provider/) });
+    expect(live.lastSnapshot).toBeUndefined();
+    expect(live.snapshotCount).toBeUndefined();
+    expect(m.read().nina.snapshots).toEqual([]);
+    expect(changes.at(-1)).toBe("deleted");
+    expect(notices.at(-1)).toMatch(/deleted at the provider/);
+    // announced once
+    v2.clock += 60_000;
+    expect((await m.refresh(nina, undefined, { force: true })).status).toBe("deleted");
+    expect(changes.filter((s) => s === "deleted")).toHaveLength(1);
+  });
+
+  test("the tracked snapshot is gone but an older one is listed: still hibernated (it wakes from that one)", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    const tracked = m.read().nina.snapshots!;
+    const kept = v2.snapshots.get(tracked[0]!.id)!;
+    v2.snapshots.set("snap_old", { ...kept, id: "snap_old" });
+    v2.snapshots.delete(tracked[0]!.id);
+    const live = await m.refresh(nina, undefined, { force: true });
+    expect(live.status).toBe("hibernated");
+    expect(live.snapshotCount).toBe(1);
+    expect(m.read().nina.snapshots!.map((x) => x.id)).toEqual(["snap_old"]);
+  });
+
+  test("a running computer whose VM was deleted (no snapshot): deleted; its next use makes a VM from the image and says so", async () => {
+    const { m, notices } = setup();
+    const first = await m.ensure(nina, sb());
+    deleteVm(first.remoteId);
+    expect((await m.refresh(nina, undefined, { force: true })).status).toBe("deleted");
+    const warnings: string[] = [];
+    const driver = await m.ensure(nina, sb(), (w) => warnings.push(w));
+    expect(driver.remoteId).not.toBe(first.remoteId);
+    expect(v2.creates).toHaveLength(2);
+    expect(v2.restores).toHaveLength(0);
+    const live = m.live("nina");
+    expect(live).toMatchObject({ status: "running", notice: expect.stringMatching(/deleted at the provider: a new one was made from the image/) });
+    expect(live.deletedAtProvider).toBeUndefined();
+    expect(warnings[0]).toMatch(/Computer "nina": Its machine had been deleted at the provider/);
+    expect(notices.at(-1)).toMatch(/a new one was made from the image/);
+  });
+
+  test("a woken VM deleted while it ran, its snapshot left: hibernated with a notice (its next use restores it)", async () => {
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    const second = await m.ensure(nina, sb());
+    deleteVm(second.remoteId);
+    expect(await m.refresh(nina, undefined, { force: true })).toMatchObject({ status: "hibernated", notice: expect.stringMatching(/Its VM is gone/) });
+  });
+
+  test("reconcile: one search (and one snapshot listing) for all computers; only the ones that disagree are checked", async () => {
+    const { m } = setup();
+    const box: ComputerConfig = { id: "box", name: "Box", kind: "daytona" };
+    await m.ensure(nina, sb());
+    await m.ensure(box, sb(box));
+    await m.stop(box);
+    v2.calls.length = 0;
+    expect(await m.reconcile([nina, box])).toEqual([]);
+    expect(v2.calls.filter((c) => c.startsWith("search"))).toEqual([`search ${JSON.stringify({ "polpo-scope": "computer" })}`]);
+    // both deleted at the provider: nina's VM, box's snapshot
+    deleteVm(m.read().nina.remoteId!);
+    v2.snapshots.clear();
+    expect(await m.reconcile([nina, box])).toEqual(["nina", "box"]);
+    expect(m.live("nina").status).toBe("deleted");
+    expect(m.live("box").status).toBe("deleted");
+    // a provider that cannot be asked teaches nothing
+    v2.searchError = new Error("boom");
+    expect(await m.reconcile([nina, box])).toEqual([]);
+  });
+});

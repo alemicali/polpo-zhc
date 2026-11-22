@@ -7,8 +7,11 @@
 import { z } from "zod";
 import type { ComputerConfig } from "@polpo-ai/core";
 import { describeComputerEgress, type ComputerEgressStatus } from "../../sandbox/computers.js";
-import type { EgressOverview } from "../routes/computers.js";
+import type { ComputerDetailView, EgressOverview } from "../routes/computers.js";
+
+type ComputerDetail = ComputerDetailView & { status: string };
 import { DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, type McpDeps, type Register } from "./kit.js";
+import { setupHandoff } from "./setup.js";
 
 type Computer = {
   id: string; name: string; kind: string; status: string; builtin?: boolean; snapshot?: string; image?: string; template?: string;
@@ -30,7 +33,7 @@ const computerItem = z.object({ id: z.string(), name: z.string(), kind: z.string
 const line = (c: Computer) => {
   const image = c.snapshot ? `snapshot ${c.snapshot}` : c.image ? `image ${c.image}` : c.template ? `template ${c.template}` : "";
   const users = (c.agents ?? []).map((a) => `${a.name}${a.isDefault ? " (default)" : ""}`).join(", ");
-  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}${c.status === "hibernated" ? " (resumes in a few seconds on its next use)" : ""}`
+  return `- ${c.id}${c.builtin ? " (this server)" : ` "${c.name}"`} [${c.kind}${image ? `, ${image}` : ""}]: ${c.status}${c.status === "hibernated" ? " (resumes in a few seconds on its next use)" : c.status === "deleted" ? " (deleted at the provider: its next use makes a new machine from the image)" : ""}`
     + `${c.lastUsedAt ? `, last used ${c.lastUsedAt}` : ""}${c.uptimeMinutes ? `, ${c.uptimeMinutes} min running so far` : ""}`
     + `${c.lastSnapshot ? `, ${snapshotLine(c.lastSnapshot)}` : ""}${c.notice ? `, note: ${c.notice}` : ""}`
     + `${c.lastError ? `, error: ${c.lastError}` : ""}${users ? ` · agents: ${users}` : ""}`;
@@ -42,7 +45,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
   tool("computers", "polpo_computers_list", {
     title: "List computers",
     description: "The computers agents work on: \"host\" (this server) and persistent machines (Daytona, E2B) with their live status "
-      + "(running, stopped, paused, hibernated, archived, creating, error; missing = not created yet), last use, uptime (a rough cost signal), "
+      + "(running, stopped, paused, hibernated, archived, creating, error; missing = not created yet; deleted = its machine was deleted at the provider, outside Polpo: its next use or a reset makes a new one, without its files), last use, uptime (a rough cost signal), "
       + "the last snapshot (Daytona v2: time, memory and disk size) and the agents using each. With id, one computer.",
     inputSchema: { id: z.string().optional().describe("One computer") },
     outputSchema: { items: z.array(computerItem) },
@@ -52,6 +55,82 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return id && r.status === 404 ? notFound(id) : apiError(r, "Listing computers");
     const items = id ? [r.data as Computer] : ((r.data as { computers?: Computer[] })?.computers ?? []);
     return ok(items.map(line).join("\n"), { items });
+  });
+
+  tool("computers", "polpo_computer_get", {
+    title: "Get a computer",
+    description: "One computer in full, as its page shows it: live status, the agents using it, its snapshots (Daytona v2), what a new machine "
+      + "is made from (image or snapshot, region, size), when it hibernates or stops by itself, its recent activity (status changes, wakes, "
+      + "rotations, errors, a machine deleted at the provider), the agent harness sessions on it (Claude Code, Codex: state, turns, tokens, cost), "
+      + "the recent task runs on it (agent, engine, model, status, duration, cost) and what was spent on it. Read-only: never starts it.",
+    inputSchema: { id: z.string().min(1).describe("The computer's id (polpo_computers_list)") },
+    outputSchema: { computer: computerItem },
+    annotations: READ,
+  }, async ({ id }) => {
+    const r = await apiGet(deps, `/computers/${enc(id)}?detail=1`);
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Reading computer ${id}`);
+    const c = r.data as Computer & ComputerDetail;
+    const lines = [line(c).slice(2)];
+    if (c.machine) {
+      const m = c.machine;
+      const size = m.resources ? [m.resources.cpus ? `${m.resources.cpus} CPU` : "", m.resources.memoryMb ? `${m.resources.memoryMb} MB memory` : "", m.resources.diskMb ? `${m.resources.diskMb} MB disk` : ""].filter(Boolean).join(", ") : "";
+      lines.push(`New machine from: ${m.snapshot ? `snapshot ${m.snapshot}` : m.image ? `image ${m.image}` : m.template ? `template ${m.template}` : "the provider's default"}${m.region ? `, region ${m.region}` : ""}${size ? `, ${size}` : ""}`);
+    }
+    if (c.idleStopAt) lines.push(`${c.status === "running" && c.hibernate ? "Hibernates" : "Stops"} by itself at ${c.idleStopAt} unless used`);
+    if (c.snapshots?.length) lines.push(`Snapshots (${c.snapshots.length}${c.hibernate ? `, keeps ${c.hibernate.keepSnapshots}` : ""}): ${c.snapshots.map((s) => `${s.at} ${s.status}`).join("; ")}`);
+    lines.push(`Spent: $${c.cost.totalUsd.toFixed(2)} (task runs $${c.cost.runsUsd.toFixed(2)}, chat harness sessions $${c.cost.chatSessionsUsd.toFixed(2)})`);
+    if (c.sessions.length) {
+      lines.push(`Harness sessions (${c.sessions.length}):`);
+      for (const s of c.sessions.slice(0, 10)) lines.push(`- ${s.harness} · ${s.agent}${s.taskId ? ` · task ${s.taskId}` : " · chat"}: ${s.live ? "running" : s.state}, ${s.turns} turns, $${(s.costUsd ?? 0).toFixed(2)}, updated ${s.updatedAt}`);
+    }
+    if (c.runs.length) {
+      lines.push(`Recent task runs (${c.runs.length}):`);
+      for (const x of c.runs.slice(0, 10)) lines.push(`- ${x.taskTitle} (${x.taskId}) · ${x.agent ?? "?"} · ${x.engine}${x.model ? ` ${x.model}` : ""}: ${x.status}, started ${x.startedAt}${x.durationMs !== undefined ? `, ${Math.round(x.durationMs / 1000)} s` : ""}${x.costUsd !== undefined ? `, $${x.costUsd.toFixed(2)}` : ""}`);
+    }
+    if (c.activity.length) {
+      lines.push("Recent activity:");
+      for (const a of c.activity.slice(0, 10)) lines.push(`- ${a.at} ${a.kind === "status" ? `${a.from ? `${a.from} → ` : ""}${a.status}${a.message ? ` (${a.message})` : ""}` : `${a.level ?? "info"}: ${a.message}`}`);
+    }
+    return ok(lines.join("\n"), { computer: c });
+  });
+
+  tool("computers", "polpo_computer_webhooks", {
+    title: "Computer provider webhooks",
+    description: "Whether the computers' providers push their machines' state to Polpo (webhooks), so a machine deleted, stopped or paused "
+      + "outside Polpo shows at once (without them, a check every 5 minutes; with them, every 20). action status (default): per provider "
+      + "(daytona, e2b) the state (receiving / configured / not-configured), last event, the URL to give the provider. Daytona: the person "
+      + "adds the endpoint in Daytona's dashboard (Webhooks → Add Endpoint) and enters its signing secret in the dashboard (setup_url; never in chat). "
+      + "E2B: action register (Polpo registers the endpoint with its own secret) or unregister. Needs POLPO_PUBLIC_URL, and behind Tailscale Funnel "
+      + "the /<instance>/api/v1/computers/webhooks/ path exposed.",
+    inputSchema: {
+      action: z.enum(["status", "register", "unregister"]).optional().describe("status (default), or register / unregister (E2B)"),
+      provider: z.enum(["daytona", "e2b"]).optional().describe("One provider (register and unregister: e2b)"),
+    },
+    outputSchema: { providers: z.array(z.object({ provider: z.string(), state: z.string() }).passthrough()) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ action = "status", provider }) => {
+    if (action !== "status") {
+      if (provider && provider !== "e2b") return fail("Only E2B webhooks are registered by Polpo; Daytona's endpoint is added in Daytona's dashboard (see status for the URL).");
+      const r = await apiSend(deps, action === "register" ? "POST" : "DELETE", "/computer-webhooks/e2b/register");
+      if (!r.ok) return apiError(r, `${action === "register" ? "Registering" : "Unregistering"} E2B's webhook`);
+    }
+    const r = await apiGet(deps, "/computer-webhooks");
+    if (!r.ok) return apiError(r, "Reading the computer webhooks");
+    const d = r.data as { providers: Array<Record<string, unknown> & { provider: string; label: string; state: string; url?: string; secretSet: boolean; lastEventAt?: string; registration: string; lastError?: string }>; note: string };
+    const providers = d.providers.filter((p) => !provider || p.provider === provider);
+    const lines: string[] = [];
+    const extra: Record<string, unknown> = {};
+    for (const p of providers) {
+      lines.push(`- ${p.label}: ${p.state}${p.lastEventAt ? `, last event ${p.lastEventAt}` : ""}${p.url ? `; URL ${p.url}` : "; no URL (POLPO_PUBLIC_URL is not set)"}${p.lastError ? `; last error: ${p.lastError}` : ""}`);
+      if (p.provider === "daytona" && !p.secretSet) {
+        const h = setupHandoff(deps, { kind: "computer-webhook", item: "daytona", field: "secret" }, "Daytona webhook signing secret (whsec_…, from Daytona's dashboard → Webhooks → the endpoint)");
+        Object.assign(extra, h);
+        lines.push(`  Daytona: add an endpoint with that URL in Daytona's dashboard (Webhooks → Add Endpoint; events sandbox.created, sandbox.state.updated, snapshot.removed), then ${h.next_step}`);
+      }
+      if (p.provider === "e2b" && p.state === "not-configured") lines.push("  E2B: call again with action register.");
+    }
+    lines.push(d.note);
+    return ok(lines.join("\n"), { providers, ...extra });
   });
 
   tool("computers", "polpo_computer_save", {

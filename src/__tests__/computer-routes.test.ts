@@ -38,7 +38,7 @@ class FakeProvider implements RemoteAdapter {
   async suspendById(id: string) { this.machines.get(id)!.state = "stopped"; }
 }
 
-function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKey?: boolean } = {}) {
+function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKey?: boolean; tasks?: any[]; sessions?: any[] } = {}) {
   const polpoDir = mkdtempSync(join(tmpdir(), "polpo-computers-"));
   dirs.push(polpoDir);
   const provider = new FakeProvider("daytona");
@@ -55,6 +55,8 @@ function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKe
       ? { error: "Daytona has no API key on this server: choose one in Settings → Sandbox" }
       : resolveSandbox({}, { scope: "task", computers: { computers: [computer], defaultComputer: computer.id, allowed: [computer.id] } }),
     emit: (payload) => state.events.push(payload),
+    tasks: async () => opts.tasks ?? [],
+    harnessSessions: (id) => (opts.sessions ?? []).filter((s) => s.computerId === id),
   };
   const app = computerRoutes(deps);
   const egress = egressRoutes({ ...deps, reachable: async () => true });
@@ -147,6 +149,65 @@ describe("/computers", () => {
     expect(t.provider.removed).toEqual(["m-1", "m-2"]);
     expect(t.state.events).toContainEqual({ id: "nina", action: "deleted" });
   });
+
+  it("a machine deleted at the provider: the list says deleted (with ?fresh=1 at once), Recreate (reset) makes a new one, Remove deletes the computer", async () => {
+    const t = makeApp({ computers: [{ id: "nina", name: "Nina", kind: "daytona" }] });
+    expect((await t.app.request("/nina/start", json({}))).status).toBe(200);
+    let [, nina] = (await (await t.app.request("/")).json()).data.computers;
+    expect(nina).toMatchObject({ status: "running", providerApi: "v0" });
+    t.provider.machines.get("m-1")!.deleted = true; // deleted in the provider's dashboard
+    // asked a moment ago: the answer is reused; ?fresh=1 asks the provider again
+    expect((await (await t.app.request("/")).json()).data.computers[1].status).toBe("running");
+    [, nina] = (await (await t.app.request("/?fresh=1")).json()).data.computers;
+    expect(nina).toMatchObject({ status: "deleted", deletedAtProvider: expect.any(String), notice: expect.stringMatching(/deleted at the provider/) });
+    expect(nina.remoteId).toBeUndefined();
+    expect(t.state.events).toContainEqual({ id: "nina", action: "status", status: "deleted" });
+    // Recreate: a reset (confirmed) makes a new machine from the image
+    const recreated = await t.app.request("/nina/reset", json({ confirm: true }));
+    expect((await recreated.json()).data).toMatchObject({ status: "running", remoteId: "m-2" });
+    // Remove from Polpo
+    t.provider.machines.get("m-2")!.deleted = true;
+    await t.app.request("/nina?fresh=1");
+    expect((await t.app.request("/nina", json({ confirm: true }, "DELETE"))).status).toBe(200);
+    expect(t.state.computers).toEqual([]);
+  });
+
+  it("?detail=1: activity (newest first), harness sessions, recent runs on it, cost, idle stop and the machine it gets", async () => {
+    const run = (over: Record<string, unknown>) => ({
+      runId: "r1", startedAt: "2026-11-22T10:00:00Z", endedAt: "2026-11-22T10:02:00Z", status: "done", agent: "coder", engine: "claude-code", model: "claude-sonnet-4-5",
+      computer: { id: "nina", kind: "daytona", provider: "daytona", remoteId: "m-1" }, egress: { mode: "direct" }, durationMs: 120_000, cost: { harnessUsd: 0.5, tokens: 1200 }, ...over,
+    });
+    const t = makeApp({
+      computers: [{ id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 20 }, resources: { cpus: 2 } }],
+      agents: [{ name: "coder", defaultComputer: "nina" }],
+      tasks: [
+        { id: "t1", title: "Fix the build", status: "done", group: "m1", runs: [run({}), run({ runId: "r2", startedAt: "2026-11-22T11:00:00Z", cost: { harnessUsd: 0.25 } })] },
+        { id: "t2", title: "Elsewhere", status: "done", runs: [run({ runId: "r3", computer: { id: "host", kind: "host" } })] },
+        { id: "t3", title: "Never ran", status: "pending" },
+      ],
+      sessions: [
+        { key: "task:t1", agent: "coder", harness: "claude-code", computerId: "nina", scope: "task", taskId: "t1", state: "idle", live: false, liveHere: false, resumable: true, turns: 3, costUsd: 0.75, tokens: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, createdAt: "2026-11-22T10:00:00Z", updatedAt: "2026-11-22T11:05:00Z" },
+        { key: "chat:coder:s1", agent: "coder", harness: "claude-code", computerId: "nina", scope: "chat", chatSessionId: "s1", state: "idle", live: false, liveHere: false, resumable: true, turns: 1, costUsd: 0.1, tokens: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, createdAt: "2026-11-22T09:00:00Z", updatedAt: "2026-11-22T09:10:00Z" },
+      ],
+    });
+    // without detail: the computer only
+    expect((await (await t.app.request("/nina")).json()).data.runs).toBeUndefined();
+    await t.app.request("/nina/start", json({}));
+    const d = (await (await t.app.request("/nina?detail=1")).json()).data;
+    expect(d).toMatchObject({ id: "nina", status: "running", providerApi: "v0", snapshots: [], machine: { resources: { cpus: 2 } } });
+    expect(d.activity.map((a: any) => a.status)).toEqual(["running", "creating"]);
+    expect(d.activity[0]).toMatchObject({ kind: "status", from: "creating", remoteId: "m-1" });
+    expect(Date.parse(d.idleStopAt) - Date.parse(d.lastUsedAt)).toBe(20 * 60_000);
+    expect(d.sessions.map((s: any) => s.key)).toEqual(["task:t1", "chat:coder:s1"]);
+    expect(d.runs.map((r: any) => [r.taskId, r.runId])).toEqual([["t1", "r2"], ["t1", "r1"]]);
+    expect(d.runs[1]).toMatchObject({ taskTitle: "Fix the build", mission: "m1", agent: "coder", engine: "claude-code", status: "done", durationMs: 120_000, costUsd: 0.5, tokens: 1200, remoteId: "m-1" });
+    // task runs plus chat harness sessions (a task's session is counted in its runs)
+    expect(d.cost).toEqual({ runsUsd: 0.75, chatSessionsUsd: 0.1, totalUsd: 0.85 });
+    // "host" has a detail too (its runs), and nothing of a machine
+    const host = (await (await t.app.request("/host?detail=1")).json()).data;
+    expect(host.runs.map((r: any) => r.runId)).toEqual(["r3"]);
+    expect(host.machine).toBeUndefined();
+  });
 });
 
 describe("agents' computers", () => {
@@ -220,6 +281,10 @@ describe("MCP computer tools", () => {
     const list = await call("polpo_computers_list", {});
     expect(list.structuredContent.items.map((c: any) => c.id)).toEqual(["host", "nina"]);
     expect((await call("polpo_computer_delete", { id: "nina" })).isError).toBe(true);
+    const got = await call("polpo_computer_get", { id: "nina" });
+    expect(got.structuredContent.computer).toMatchObject({ id: "nina", status: "running", sessions: [], runs: [], cost: { totalUsd: 0 } });
+    expect(got.content[0].text).toMatch(/Recent activity:\n- .* creating → running/);
+    expect((await call("polpo_computer_get", { id: "ghost" })).content[0].text).toMatch(/There is no computer "ghost"/);
     expect((await call("polpo_computer_delete", { id: "nina", confirm: true })).structuredContent).toEqual({ deleted: "nina" });
     expect(t.state.computers).toEqual([]);
   });
@@ -227,10 +292,10 @@ describe("MCP computer tools", () => {
   it("reads need polpo:read; changes need polpo:admin", async () => {
     const work = await mcp(["polpo:work"]);
     const names = ((await work.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name);
-    expect(names).toEqual(["polpo_computers_list", "polpo_egress_status"]);
+    expect(names).toEqual(["polpo_computers_list", "polpo_computer_get", "polpo_egress_status"]);
     const admin = await mcp(["polpo:admin"]);
     expect(((await admin.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name))
-      .toEqual(["polpo_computers_list", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete"]);
+      .toEqual(["polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete"]);
   });
 
   it("polpo_egress_status: proxies with the agents and host computers using them, and each remote computer's egress (read-only, never starts it)", async () => {

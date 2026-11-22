@@ -127,7 +127,7 @@ function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer
         {c.kind === "host" || c.kind === "ephemeral" ? (
           <span className="font-medium" data-testid="run-computer">{computerName}</span>
         ) : (
-          <Link to={`/computers#computer-${encodeURIComponent(c.id)}`} className="inline-flex items-center gap-0.5 font-medium hover:underline" data-testid="run-computer">
+          <Link to={`/computers/${encodeURIComponent(c.id)}`} className="inline-flex items-center gap-0.5 font-medium hover:underline" data-testid="run-computer">
             {computerName}<ArrowUpRight className="h-3 w-3 text-muted-foreground" />
           </Link>
         )}
