@@ -194,6 +194,21 @@ const { mission, report, isLoading, executeMission, abortMission } = useMission(
 
 **Returns**: `UseMissionReturn` (includes `mission`, `report: MissionReport | undefined`, and action methods)
 
+#### useMissionCost(missionId, refreshKey?)
+
+What a mission cost so far (every run of its tasks: USD, tokens, by agent and engine) against its budget, and a setter for the budget (`null` clears it; raising or clearing it lets a mission paused by its budget go on).
+
+```tsx
+const { cost, setBudget } = useMissionCost('mission-123', mission?.updatedAt);
+// cost?.usd, cost?.budgetUsd, cost?.budgetUsed, cost?.overBudget, cost?.byEngine, cost?.byAgent
+```
+
+#### useConnectors({ agent? })
+
+The connectors (external apps over MCP) with their status and signed-in `account`; with `agent`, only the ones that agent may use. Several accounts of one app have their own ids (`gmail`, `gmail-2`…); `connectorLabel(c)` gives "Gmail – info@acme.com".
+
+A failed task carries `task.failure` (`{ reason, retryable, kind }`: why it failed, whether it was retried automatically) and each run's engine, model, computer and cost in `task.runs`.
+
 #### useAgents(filter?)
 
 Get all agents.

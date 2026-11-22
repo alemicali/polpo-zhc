@@ -116,3 +116,8 @@ section h3 { margin: 0 0 8px; font-size: var(--font-heading-xs-size, 12px); font
 @keyframes pulse { 50% { opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
 .avatar.sk { border-radius: var(--border-radius-full, 9999px); }
+
+/* The task at hand: its latest run (engine, model, computer, cost) and why it failed */
+.task-sum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fail-text { color: var(--color-text-danger, light-dark(#7f2c28, #ee8884)); overflow-wrap: anywhere; }
+.role.marks { display: flex; }

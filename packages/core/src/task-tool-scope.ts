@@ -90,9 +90,15 @@ export function normalizeTaskToolScope(value: unknown): TaskToolScope | undefine
   return Object.keys(out).length ? out : undefined;
 }
 
+/** The name, plus the signed-in account when the name does not already say it ("Gmail – info@acme.com"). */
+function withAccount(connector: Pick<ConnectorConfig, "name"> & { account?: string }): string {
+  const account = connector.account?.trim();
+  return account && !connector.name.toLowerCase().includes(account.toLowerCase()) ? `${connector.name} – ${account}` : connector.name;
+}
+
 /** "Gmail 2 – info@acme.com (gmail-2)": how a connector is named in messages. */
 export function connectorScopeLabel(connector: Pick<ConnectorConfig, "id" | "name"> & { account?: string }): string {
-  return `${connector.name}${connector.account ? ` – ${connector.account}` : ""} (${connector.id})`;
+  return `${withAccount(connector)} (${connector.id})`;
 }
 
 export interface TaskToolScopeCheckContext {
@@ -230,7 +236,7 @@ export function describeTaskToolScope(scope: TaskToolScope | undefined, connecto
   if (!scope) return "inherited from the agent";
   const name = (id: string) => {
     const c = connectors.find((x) => x.id === id);
-    return c ? `${c.name}${c.account ? ` – ${c.account}` : ""}` : id;
+    return c ? withAccount(c) : id;
   };
   const parts: string[] = [];
   const ids = scope.connectors === "none" ? [] : Array.isArray(scope.connectors) ? scope.connectors : Object.keys(scope.connectorTools ?? {});

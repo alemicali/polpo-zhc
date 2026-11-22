@@ -369,6 +369,11 @@ describe("tasks, missions and configuration on a real instance", () => {
     const reasoning = await tool("polpo_config_update", { reasoning: "high" });
     expect(reasoning.structuredContent.changed).toEqual(["reasoning"]);
     expect((await tool("polpo_config_get")).structuredContent.settings.reasoning).toBe("high");
+    // how much of their dependencies' results tasks receive in their prompt
+    const deps = await tool("polpo_config_update", { dependency_results: { perTaskChars: 4000, totalChars: 30000 } });
+    expect(deps.structuredContent.changed).toEqual(["dependencyResults"]);
+    expect((await tool("polpo_config_get")).structuredContent.settings.dependencyResults).toEqual({ perTaskChars: 4000, totalChars: 30000 });
+    expect((await tool("polpo_config_update", { dependency_results: { perTaskChars: 10 } })).isError).toBe(true);
 
     const named = await tool("polpo_branding_update", { product_name: "Shoplix", tagline: "Agents for shops" });
     expect(named.structuredContent).toMatchObject({ changed: ["productName", "tagline"], branding: { productName: "Shoplix", tagline: "Agents for shops" } });
