@@ -220,6 +220,11 @@ export const UpdateSettingsSchema = z.object({
   sandbox: z.any().optional(),
   /** Context compaction settings (null removes them). */
   compaction: z.any().optional(),
+  /** Progressive tool discovery for agents and Polpo (null removes it: defaults). */
+  tools: z.object({
+    progressiveThreshold: z.number().int().min(0).optional(),
+    progressive: z.enum(["auto", "always", "never"]).optional(),
+  }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
@@ -418,6 +423,8 @@ export const AddAgentSchema = z.object({
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
+  /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never. */
+  progressiveTools: z.enum(["auto", "always", "never"]).optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   learning: z.object({
     enabled: z.boolean().optional(),
@@ -446,6 +453,8 @@ export const UpdateAgentSchema = z.object({
   sandbox: z.any().optional(),
   /** Context compaction overrides for this agent. */
   compaction: z.any().optional(),
+  /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never; null clears it. */
+  progressiveTools: z.enum(["auto", "always", "never"]).nullable().optional(),
   /** Voice replies on Telegram: off (default), voice, always. */
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   /** Learning from its conversations (memory, own skills); off by default. */

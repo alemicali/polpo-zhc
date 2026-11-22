@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Progressive tool discovery** for agents (chats and tasks) and Polpo (web chat and channels). A run with more tools than `settings.tools.progressiveThreshold` (default 30) starts with its essential tools plus `tools_search { query, limit }` and `tools_load { names }`; connector tools (`mcp__*`) and optional groups (agents: browser, email, media, Excel/PDF/Word, WhatsApp, phone, Ink, data, brain, storage; Polpo: step-by-step mission editing, apps, data, brain, storage, skills and playbooks, Ink, phone, WhatsApp, browser, computers, agent learning) are loaded on demand. The prompt lists the deferred groups and their size.
+  - Loaded tools reach the model as pi's mid-conversation tool additions: inline on Anthropic (recent Claude models), OpenAI Responses (`additional_tools` / tool search) and Kimi, so the cached prompt prefix survives; other models get the current list at the top of the request.
+  - Loaded tools stay for the conversation: later chat turns start with what earlier turns loaded or used (read back from the stored tool calls); a task keeps them for the run; a compaction declares them again.
+  - Search and load only see what the run was given (`allowedTools`, connector access, tool policy).
+  - Config: `settings.tools.progressiveThreshold`, `settings.tools.progressive` (`"auto"` default, `"always"`, `"never"`; Polpo and the default for agents) and `agent.progressiveTools` (`PATCH /api/v1/agents/:name`, `PATCH /api/v1/config/settings` with `tools`). With the default threshold Polpo's chats (about 220 tools) now start with about 100.
+
 ### Changed
 - **pi-ai and pi-agent-core 1.6** (from 1.0.4). The raw API subpaths were already on `@earendil-works/pi-ai/api/<api-id>`; what changed for Polpo:
   - Tool schemas: pi 1.6 types tool arguments through pi-schema, which understands TypeBox 1.x (`typebox`), not `@sinclair/typebox` 0.34. Every built-in tool now imports `Type` from `typebox` (same JSON Schema on the wire); `@sinclair/typebox` is no longer a dependency.

@@ -5181,6 +5181,14 @@
                   "compaction": {
                     "nullable": true
                   },
+                  "progressiveTools": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "always",
+                      "never"
+                    ]
+                  },
                   "voiceReplies": {
                     "type": "string",
                     "enum": [
@@ -5559,6 +5567,16 @@
                   },
                   "compaction": {
                     "nullable": true
+                  },
+                  "progressiveTools": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "auto",
+                      "always",
+                      "never",
+                      null
+                    ]
                   },
                   "voiceReplies": {
                     "type": "string",
@@ -9662,6 +9680,25 @@
                   },
                   "compaction": {
                     "nullable": true
+                  },
+                  "tools": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "progressiveThreshold": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "progressive": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "always",
+                          "never"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
                   },
                   "orchestratorModel": {
                     "anyOf": [
