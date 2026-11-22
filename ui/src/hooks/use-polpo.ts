@@ -2517,6 +2517,8 @@ export interface InstanceBranding {
   productName?: string;
   tagline?: string;
   logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl). */
+  logoDarkUrl?: string;
 }
 
 const BRANDING_CHANGE_EVENT = "polpo:branding-change";

@@ -1,5 +1,6 @@
 import { ChatAttachments } from "@/components/chat-attachments";
 import {
+  Fragment,
   lazy,
   Suspense,
   useState,
@@ -153,7 +154,7 @@ import { config } from "@/lib/config";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
+import { kit, useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
 import {
   clearAppPreviewContext,
   formatAppPreviewContext,
@@ -1092,10 +1093,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value);
-}
-
 function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
   const nested = preview[mode];
   if (nested && isRecord(nested)) return nested;
@@ -1107,38 +1104,24 @@ function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+/** Apply a proposed patch to a mode's tokens: any design token (kit.TOKENS; the old `text` is foreground), each checked. */
 function applyThemePatch(
   base: AppearanceThemeSettings,
   patch: Record<string, unknown> | null,
   label: string,
 ): { theme: AppearanceThemeSettings; changed: string[]; error?: string } {
-  const next = { ...base };
+  const next: AppearanceThemeSettings = { ...base };
   const changed: string[] = [];
   if (!patch) return { theme: next, changed };
 
-  for (const key of ["primary", "secondary", "text"] as const) {
-    if (patch[key] === undefined) continue;
-    if (typeof patch[key] !== "string" || !isHexColor(patch[key])) {
-      return { theme: next, changed, error: `${label} ${key} must be a 6-digit hex color` };
-    }
-    next[key] = patch[key];
-    changed.push(`${label} ${key} ${patch[key]}`);
-  }
-
-  if (patch.radius !== undefined) {
-    if (typeof patch.radius !== "number" || !Number.isFinite(patch.radius)) {
-      return { theme: next, changed, error: `${label} radius must be a number` };
-    }
-    next.radius = Math.min(24, Math.max(0, patch.radius));
-    changed.push(`${label} radius ${next.radius}px`);
-  }
-
-  if (patch.fontFamily !== undefined) {
-    if (typeof patch.fontFamily !== "string" || !patch.fontFamily.trim()) {
-      return { theme: next, changed, error: `${label} fontFamily cannot be empty` };
-    }
-    next.fontFamily = patch.fontFamily.trim();
-    changed.push(`${label} font`);
+  for (const [raw, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    const key = raw === "text" ? "foreground" : raw;
+    if (!kit.TOKENS[key]) return { theme: next, changed, error: `${label} ${raw} is not a design token` };
+    const valid = kit.tokenValue(key, value);
+    if (valid === undefined) return { theme: next, changed, error: `${label} ${raw}: ${String(value)} is not valid` };
+    next[key] = valid;
+    changed.push(`${label} ${key} ${key === "radius" ? `${valid}px` : valid}`);
   }
 
   return { theme: next, changed };
@@ -1176,26 +1159,27 @@ function hasAppearancePreview(
 }
 
 function ThemeSwatch({ label, theme }: { label: string; theme: AppearanceThemeSettings }) {
+  const color = (name: string) => (typeof theme[name] === "string" ? String(theme[name]) : undefined);
+  const rows = Object.entries(theme).slice(0, 8);
   return (
     <div className="rounded-lg border border-border/40 bg-background/70 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold">{label}</p>
-        <span className="text-[10px] text-muted-foreground">{theme.radius}px radius</span>
+        <span className="text-[10px] text-muted-foreground">{typeof theme.radius === "number" ? `${theme.radius}px radius` : "palette radius"}</span>
       </div>
       <div className="mb-2 flex h-8 overflow-hidden rounded-md border border-border/30">
-        <span className="flex-1" style={{ background: theme.primary }} />
-        <span className="flex-1" style={{ background: theme.secondary }} />
-        <span className="flex-1" style={{ background: theme.text }} />
+        <span className="flex-1" style={{ background: color("primary") ?? "var(--primary)" }} />
+        <span className="flex-1" style={{ background: color("secondary") ?? "var(--secondary)" }} />
+        <span className="flex-1" style={{ background: color("foreground") ?? "var(--foreground)" }} />
       </div>
-      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
-        <span className="text-muted-foreground">Primary</span>
-        <code className="truncate">{theme.primary}</code>
-        <span className="text-muted-foreground">Secondary</span>
-        <code className="truncate">{theme.secondary}</code>
-        <span className="text-muted-foreground">Text</span>
-        <code className="truncate">{theme.text}</code>
-        <span className="text-muted-foreground">Font</span>
-        <code className="truncate">{theme.fontFamily}</code>
+      <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
+        {rows.length === 0 && <span className="col-span-2 text-muted-foreground">The palette's own values</span>}
+        {rows.map(([name, value]) => (
+          <Fragment key={name}>
+            <span className="truncate text-muted-foreground">{name}</span>
+            <code className="truncate">{String(value)}</code>
+          </Fragment>
+        ))}
       </div>
     </div>
   );

@@ -2,7 +2,13 @@
  * Static config from env vars.
  */
 declare global {
-  var __POLPO_RUNTIME_CONFIG__: { baseUrl?: string; apiKey?: string; inkHubUrl?: string } | undefined;
+  var __POLPO_RUNTIME_CONFIG__: {
+    baseUrl?: string;
+    apiKey?: string;
+    inkHubUrl?: string;
+    /** The instance's default look (settings.appearance), inlined by the UI server; null when it could not be read. */
+    appearance?: import("./appearance-kit").InstanceAppearance | null;
+  } | undefined;
 }
 
 const runtimeConfig = globalThis.__POLPO_RUNTIME_CONFIG__;

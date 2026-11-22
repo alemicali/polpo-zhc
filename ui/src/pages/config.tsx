@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type CSSProperties } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,8 +96,8 @@ import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/
 import { summarizeRule } from "@/lib/rule-summary";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
-import { useAppearance } from "@/lib/appearance";
-import { PALETTES, usePalette } from "@/lib/palette";
+import { followInstanceDefault, setInstanceAppearance, type InstanceAppearance } from "@/lib/appearance";
+import { AppearanceEditor } from "@/components/config/appearance-editor";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
@@ -2011,81 +2011,70 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
-function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo }: {
+function LogoPicker({ label, hint, value, busy, onChange, onUpload, onRemove, uploadedUrl }: {
+  label: string;
+  hint: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onUpload: (file: File) => Promise<void>;
+  onRemove?: () => void;
+  uploadedUrl: string;
+}) {
+  return (
+    <label className="grid gap-1.5 sm:col-span-2">
+      <span className="text-xs font-medium">{label}</span>
+      <div className="flex min-w-0 gap-2">
+        <Input value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "image/png,image/jpeg,image/webp,image/gif";
+            input.onchange = () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              void onUpload(file).then(() => onChange(uploadedUrl)).catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"));
+            };
+            input.click();
+          }}
+        >
+          <Upload className="h-3.5 w-3.5" /> Upload
+        </Button>
+        {onRemove && (
+          <Button variant="ghost" disabled={busy} onClick={onRemove} title={`Remove the ${label.toLowerCase()}`}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <span className="text-[10px] text-muted-foreground">{hint}</span>
+    </label>
+  );
+}
+
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo, onSaveInstanceAppearance }: {
   branding?: BrandingConfig;
   onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
-  onUploadLogo: (file: File) => Promise<void>;
-  onRemoveLogo: () => Promise<void>;
+  onUploadLogo: (file: File, variant: "light" | "dark") => Promise<void>;
+  onRemoveLogo: (variant: "light" | "dark") => Promise<void>;
+  onSaveInstanceAppearance: (appearance: InstanceAppearance | null) => Promise<void>;
 }) {
-  const { palette, setPalette } = usePalette();
-  const { appearance, setAppearance, resetAppearance } = useAppearance();
   const [productName, setProductName] = useState(branding?.productName ?? "");
   const [tagline, setTagline] = useState(branding?.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
+  const [logoDarkUrl, setLogoDarkUrl] = useState(branding?.logoDarkUrl ?? "");
   const [brandingBusy, setBrandingBusy] = useState(false);
-  const [mode, setMode] = useState<"light" | "dark">("light");
-  const activeTheme = appearance[mode];
-  const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
-  const [secondaryDraft, setSecondaryDraft] = useState(activeTheme.secondary);
-  const [textDraft, setTextDraft] = useState(activeTheme.text);
-  const [fontDraft, setFontDraft] = useState(activeTheme.fontFamily);
-
-  const updateAppearance = (patch: Partial<typeof appearance> | { enabled: boolean }) => {
-    setAppearance({ ...appearance, ...patch });
+  const draft = { productName, tagline, logoUrl, logoDarkUrl };
+  /** Busy while it runs; errors go on to the caller. */
+  const busyRun = (work: Promise<void>) => {
+    setBrandingBusy(true);
+    return work.finally(() => setBrandingBusy(false));
   };
-
-  const updateTheme = (patch: Partial<typeof activeTheme>) => {
-    setAppearance({
-      ...appearance,
-      [mode]: {
-        ...activeTheme,
-        ...patch,
-      },
-    });
-  };
-
-  // Re-seed the drafts when the underlying theme values change (mode switch,
-  // reset, external update) — adjusted during render, not in an effect.
-  const [draftSource, setDraftSource] = useState(activeTheme);
-  if (
-    draftSource.primary !== activeTheme.primary ||
-    draftSource.secondary !== activeTheme.secondary ||
-    draftSource.text !== activeTheme.text ||
-    draftSource.fontFamily !== activeTheme.fontFamily
-  ) {
-    setDraftSource(activeTheme);
-    setPrimaryDraft(activeTheme.primary);
-    setSecondaryDraft(activeTheme.secondary);
-    setTextDraft(activeTheme.text);
-    setFontDraft(activeTheme.fontFamily);
-  }
-
-  const updateHexDraft = (
-    value: string,
-    setDraft: (value: string) => void,
-    key: "primary" | "secondary" | "text",
-  ) => {
-    setDraft(value);
-    if (/^#[0-9a-f]{6}$/i.test(value)) {
-      updateTheme({ [key]: value });
-    }
-  };
-
-  const fontPresets = [
-    { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
-    { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
-    { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
-  ];
-
-  const previewStyle = {
-    "--preview-primary": activeTheme.primary,
-    "--preview-secondary": activeTheme.secondary,
-    "--preview-text": activeTheme.text,
-    "--preview-radius": `${activeTheme.radius}px`,
-    "--preview-font": activeTheme.fontFamily,
-  } as CSSProperties;
+  /** Busy while it runs; an error becomes a toast. */
+  const busyWhile = (work: Promise<void>, failure: string) => busyRun(work)
+    .catch((error) => { toast.error(error instanceof Error ? error.message : failure); });
 
   return (
     <div className="space-y-6">
@@ -2106,358 +2095,57 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo 
               <span className="text-xs font-medium">Tagline</span>
               <Input value={tagline} maxLength={120} onChange={(event) => setTagline(event.target.value)} placeholder={DEFAULT_PRODUCT_TAGLINE} />
             </label>
-            <label className="grid gap-1.5 sm:col-span-2">
-              <span className="text-xs font-medium">Logo URL</span>
-              <div className="flex min-w-0 gap-2">
-                <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
-                <Button
-                  variant="outline"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/png,image/jpeg,image/webp,image/gif";
-                    input.onchange = () => {
-                      const file = input.files?.[0];
-                      if (!file) return;
-                      setBrandingBusy(true);
-                      void onUploadLogo(file)
-                        .then(() => setLogoUrl("/api/v1/config/branding/logo"))
-                        .catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"))
-                        .finally(() => setBrandingBusy(false));
-                    };
-                    input.click();
-                  }}
-                >
-                  <Upload className="h-3.5 w-3.5" /> Upload
-                </Button>
-              </div>
-              <span className="text-[10px] text-muted-foreground">Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB.</span>
-            </label>
+            <LogoPicker
+              label="Logo"
+              hint="Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB."
+              value={logoUrl}
+              busy={brandingBusy}
+              onChange={setLogoUrl}
+              uploadedUrl="/api/v1/config/branding/logo"
+              onUpload={(file) => busyRun(onUploadLogo(file, "light"))}
+              onRemove={branding?.logoUrl ? () => void busyWhile(onRemoveLogo("light").then(() => setLogoUrl("")), "Failed to remove logo") : undefined}
+            />
+            <LogoPicker
+              label="Logo for dark mode"
+              hint="Optional: shown in dark mode instead of the logo (which is used when this is empty)."
+              value={logoDarkUrl}
+              busy={brandingBusy}
+              onChange={setLogoDarkUrl}
+              uploadedUrl="/api/v1/config/branding/logo-dark"
+              onUpload={(file) => busyRun(onUploadLogo(file, "dark"))}
+              onRemove={branding?.logoDarkUrl ? () => void busyWhile(onRemoveLogo("dark").then(() => setLogoDarkUrl("")), "Failed to remove logo") : undefined}
+            />
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
               <Button
                 disabled={brandingBusy}
-                onClick={() => {
-                  setBrandingBusy(true);
-                  void onUpdateBranding({
-                    productName: productName.trim() || undefined,
-                    tagline: tagline.trim() || undefined,
-                    logoUrl: logoUrl.trim() || undefined,
-                  }).catch((error) => toast.error(error instanceof Error ? error.message : "Failed to update branding"))
-                    .finally(() => setBrandingBusy(false));
-                }}
+                onClick={() => void busyWhile(onUpdateBranding({
+                  productName: productName.trim() || undefined,
+                  tagline: tagline.trim() || undefined,
+                  logoUrl: logoUrl.trim() || undefined,
+                  logoDarkUrl: logoDarkUrl.trim() || undefined,
+                }), "Failed to update branding")}
               >
                 {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
               </Button>
-              {branding?.logoUrl && (
-                <Button
-                  variant="ghost"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    setBrandingBusy(true);
-                    void onRemoveLogo().then(() => setLogoUrl(""))
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to remove logo"))
-                      .finally(() => setBrandingBusy(false));
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Remove logo
-                </Button>
-              )}
             </div>
           </div>
-          <div className="flex min-h-36 items-center justify-center border border-border/50 bg-muted/15 p-5">
-            <div className="flex min-w-0 items-center gap-3">
-              <BrandMark branding={{ productName, tagline, logoUrl }} className="h-12 w-12 rounded-lg text-xl" />
-              <div className="min-w-0">
-                <div className="max-w-40 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
-                <div className="max-w-40 truncate text-[10px] uppercase text-muted-foreground">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE}</div>
+          <div className="grid gap-2">
+            {(["light", "dark"] as const).map((variant) => (
+              <div key={variant} className={cn("flex min-h-24 items-center justify-center border border-border/50 p-4", variant === "dark" ? "bg-neutral-950 text-neutral-100" : "bg-white text-neutral-900")}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <BrandMark branding={draft} variant={variant} className="h-10 w-10 rounded-lg text-xl" />
+                  <div className="min-w-0">
+                    <div className="max-w-36 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
+                    <div className="max-w-36 truncate text-[10px] uppercase opacity-60">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE} · {variant}</div>
+                  </div>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-          <PaletteIcon className="h-3.5 w-3.5" /> Palette
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {PALETTES.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setPalette(option.id)}
-              className={cn(
-                "rounded-lg border p-3 text-left transition-colors",
-                palette === option.id
-                  ? "border-primary/60 bg-primary/5"
-                  : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-accent/25",
-              )}
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold">{option.name}</span>
-                {palette === option.id && <Check className="h-3.5 w-3.5 text-primary" />}
-              </div>
-              <div className="mb-2 flex h-5 overflow-hidden rounded-md border border-border/30">
-                {option.swatchLight.map((color, index) => (
-                  <span key={index} className="flex-1" style={{ background: color }} />
-                ))}
-              </div>
-              <p className="text-[11px] leading-snug text-muted-foreground">{option.blurb}</p>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">Theme, palette, and overrides are saved in this browser and scoped to this Polpo instance.</p>
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" /> Overrides
-          </h3>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-              {[
-                { label: "No", value: false },
-                { label: "Yes", value: true },
-              ].map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() => updateAppearance({ enabled: option.value })}
-                  className={cn(
-                    "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                    appearance.enabled === option.value
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={resetAppearance}>
-              Reset
-            </Button>
-          </div>
-        </div>
-        <div className={cn(
-          "grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]",
-          !appearance.enabled && "opacity-60",
-        )}>
-          <div className="space-y-3">
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 block text-xs font-medium">Theme target</label>
-              <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-                {[
-                  { label: "Light", value: "light" as const },
-                  { label: "Dark", value: "dark" as const },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setMode(option.value)}
-                    className={cn(
-                      "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                      mode === option.value
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Primary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.primary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.primary}
-                  onChange={(event) => {
-                    setPrimaryDraft(event.target.value);
-                    updateTheme({ primary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={primaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setPrimaryDraft, "primary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Secondary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.secondary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.secondary}
-                  onChange={(event) => {
-                    setSecondaryDraft(event.target.value);
-                    updateTheme({ secondary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={secondaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setSecondaryDraft, "secondary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Text
-                <code className="text-[11px] text-muted-foreground">{activeTheme.text}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.text}
-                  onChange={(event) => {
-                    setTextDraft(event.target.value);
-                    updateTheme({ text: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={textDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setTextDraft, "text")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Font
-                <span className="text-[11px] text-muted-foreground">any CSS font stack</span>
-              </label>
-              <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                <Select
-                  value={fontPresets.some((font) => font.value === activeTheme.fontFamily) ? activeTheme.fontFamily : "custom"}
-                  onValueChange={(value) => {
-                    if (value === "custom") return;
-                    setFontDraft(value);
-                    updateTheme({ fontFamily: value });
-                  }}
-                  disabled={!appearance.enabled}
-                >
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue placeholder="Preset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fontPresets.map((font) => (
-                      <SelectItem key={font.label} value={font.value}>
-                        {font.label}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={fontDraft}
-                  onChange={(event) => {
-                    setFontDraft(event.target.value);
-                    updateTheme({ fontFamily: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Rounded
-                <code className="text-[11px] text-muted-foreground">{activeTheme.radius}px</code>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={24}
-                step={1}
-                value={activeTheme.radius}
-                onChange={(event) => updateTheme({ radius: Number(event.target.value) })}
-                disabled={!appearance.enabled}
-                className="w-full accent-primary"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4" style={previewStyle}>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold">Preview</span>
-              <Badge variant="outline" className="text-[10px]">{mode}</Badge>
-            </div>
-            <div
-              className="space-y-3 rounded-[var(--preview-radius)] border p-3"
-              style={{
-                borderColor: "color-mix(in srgb, var(--preview-primary) 28%, transparent)",
-                color: "var(--preview-text)",
-                fontFamily: "var(--preview-font)",
-              }}
-            >
-              <button
-                type="button"
-                className="h-9 w-full rounded-[var(--preview-radius)] px-3 text-sm font-medium"
-                style={{
-                  background: "var(--preview-primary)",
-                  color: "#fff",
-                }}
-              >
-                Primary action
-              </button>
-              <div
-                className="rounded-[var(--preview-radius)] p-3 text-xs"
-                style={{
-                  background: "var(--preview-secondary)",
-                  color: "var(--preview-text)",
-                }}
-              >
-                Secondary surface
-              </div>
-              <p className="text-sm" style={{ color: "var(--preview-text)" }}>
-                Text color and font preview
-              </p>
-              <div className="flex gap-2">
-                <span
-                  className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                  style={{ background: "var(--preview-primary)", color: "#fff" }}
-                >
-                  Badge
-                </span>
-                <span
-                  className="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium"
-                  style={{
-                    borderColor: "var(--preview-primary)",
-                    color: "var(--preview-text)",
-                  }}
-                >
-                  Secondary
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <AppearanceEditor onSaveInstanceDefault={onSaveInstanceAppearance} />
     </div>
   );
 }
@@ -3562,8 +3250,8 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Branding updated");
             }}
-            onUploadLogo={async (file) => {
-              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo`, {
+            onUploadLogo={async (file, variant) => {
+              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, {
                 method: "POST",
                 headers: {
                   "Content-Type": file.type,
@@ -3578,12 +3266,24 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Logo uploaded");
             }}
-            onRemoveLogo={async () => {
-              const result = await api("/config/instance-logo", { method: "DELETE" });
+            onRemoveLogo={async (variant) => {
+              const result = await api(`/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, { method: "DELETE" });
               if (!result.ok) throw new Error(result.error ?? "Failed to remove logo");
               if (result.data) setOptimistic(result.data); else await refetch();
               notifyBrandingChanged();
               toast.success("Logo removed");
+            }}
+            onSaveInstanceAppearance={async (appearance) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ appearance }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to save the instance appearance");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              setInstanceAppearance((result.data?.settings?.appearance as InstanceAppearance | undefined) ?? {});
+              // this browser follows the new default (nothing of its own left over)
+              followInstanceDefault();
+              toast.success(appearance ? "Saved as the instance default: everyone sees it now" : "Instance default cleared");
             }}
           />
         )}

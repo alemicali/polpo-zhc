@@ -1,273 +1,197 @@
 import { useCallback, useEffect, useState } from "react";
 import { config } from "@/lib/config";
+import { appearanceKit, type BootCustom, type InstanceAppearance, type KitWindow, type ResolvedAppearance, type TokenMap } from "@/lib/appearance-kit";
+
+/**
+ * The dashboard's look. Three layers, field by field (theme, palette, custom colours): what this
+ * browser chose, else the instance's default (settings.appearance, shared by everyone, set by an
+ * admin), else the built-in default. lib/appearance-kit.ts resolves and applies them, the same code
+ * index.html runs inline before the first paint.
+ */
 
 export type AppearanceMode = "light" | "dark";
+/** A mode's design tokens (any subset; see kit.TOKENS). */
+export type AppearanceThemeSettings = TokenMap;
+export type AppearanceSettings = BootCustom;
+export type { InstanceAppearance, ResolvedAppearance };
 
-export interface AppearanceThemeSettings {
-  primary: string;
-  secondary: string;
-  text: string;
-  fontFamily: string;
-  radius: number;
-}
+export const kit = appearanceKit();
 
-export interface AppearanceSettings {
-  enabled: boolean;
-  light: AppearanceThemeSettings;
-  dark: AppearanceThemeSettings;
-}
-
-const STORAGE_KEY_PREFIX = "polpo-appearance";
 export const APPEARANCE_SCOPE_EVENT = "polpo-appearance-scope-change";
-const VALUE_EVENT = "polpo-appearance-change";
-const STYLE_ID = "polpo-appearance-overrides";
-let currentScope = "default";
+/** Fired when any layer changes (a choice in this browser, the instance default): hooks re-read. */
+export const APPEARANCE_CHANGE_EVENT = "polpo-appearance-change";
 
-export const DEFAULT_LIGHT_APPEARANCE: AppearanceThemeSettings = {
-  primary: "#2563eb",
-  secondary: "#f1f5f9",
-  text: "#0f172a",
-  fontFamily: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif",
-  radius: 8,
-};
+/** No custom tokens: the palette's own. */
+export const DEFAULT_APPEARANCE: AppearanceSettings = { enabled: false, derive: true, light: {}, dark: {} };
 
-export const DEFAULT_DARK_APPEARANCE: AppearanceThemeSettings = {
-  primary: "#60a5fa",
-  secondary: "#1f2937",
-  text: "#f8fafc",
-  fontFamily: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif",
-  radius: 8,
-};
-
-export const DEFAULT_APPEARANCE: AppearanceSettings = {
-  enabled: false,
-  light: DEFAULT_LIGHT_APPEARANCE,
-  dark: DEFAULT_DARK_APPEARANCE,
-};
-
-function isHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value);
-}
-
-function slug(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._:-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "") || "default";
+function win(): KitWindow {
+  return window as unknown as KitWindow;
 }
 
 function apiScope(): string {
-  const raw = config.baseUrl || (typeof window !== "undefined" ? window.location.origin : "local");
-  try {
-    const url = new URL(raw, window.location.origin);
-    const path = url.pathname.replace(/\/+$/, "");
-    return slug(`${url.origin}${path}`);
-  } catch {
-    return slug(raw);
-  }
+  return kit.apiScope(config.baseUrl, typeof window !== "undefined" ? window.location.origin : "");
 }
+
+function storageGet(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function storageSet(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch { /* storage may be unavailable (private mode) */ }
+}
+
+// The instance this API serves: remembered from the last visit so the first paint uses its choices.
+let currentScope = storageGet(`${kit.LAST_SCOPE_KEY}:${apiScope()}`) || "default";
 
 export function instanceScope(): string {
   return currentScope;
 }
 
 export function scopedStorageKey(key: string): string {
-  return `${key}:${apiScope()}:${instanceScope()}`;
+  return kit.scopedKey(key, apiScope(), instanceScope());
 }
 
-function storageKey(): string {
-  return scopedStorageKey(STORAGE_KEY_PREFIX);
+function notify(): void {
+  window.dispatchEvent(new Event(APPEARANCE_CHANGE_EVENT));
 }
 
-function normalizeTheme(
-  value: Partial<AppearanceThemeSettings> | null | undefined,
-  fallback: AppearanceThemeSettings,
-): AppearanceThemeSettings {
-  return {
-    primary: isHexColor(value?.primary ?? "") ? value!.primary! : fallback.primary,
-    secondary: isHexColor(value?.secondary ?? "") ? value!.secondary! : fallback.secondary,
-    text: isHexColor(value?.text ?? "") ? value!.text! : fallback.text,
-    fontFamily: typeof value?.fontFamily === "string" && value.fontFamily.trim() && !/[;{}\n\r]/.test(value.fontFamily)
-      ? value.fontFamily.trim()
-      : fallback.fontFamily,
-    radius: typeof value?.radius === "number"
-      ? Math.min(24, Math.max(0, value.radius))
-      : fallback.radius,
-  };
+/** Resolve the three layers and put the result on the page. */
+export function refreshAppearance(): ResolvedAppearance {
+  const resolved = kit.resolve(kit.read(win(), config.baseUrl, currentScope));
+  kit.apply(window.document as unknown as Parameters<typeof kit.apply>[0], resolved);
+  return resolved;
 }
 
-function normalizeAppearance(value: Partial<AppearanceSettings & AppearanceThemeSettings & { accent?: string }> | null | undefined): AppearanceSettings {
-  const legacyTheme = value
-    ? normalizeTheme(
-        {
-          primary: value.primary,
-          secondary: value.secondary ?? value.accent,
-          text: value.text,
-          fontFamily: value.fontFamily,
-          radius: value.radius,
-        },
-        DEFAULT_LIGHT_APPEARANCE,
-      )
-    : DEFAULT_LIGHT_APPEARANCE;
-
-  return {
-    enabled: value?.enabled === true,
-    light: normalizeTheme(value?.light ?? legacyTheme, DEFAULT_LIGHT_APPEARANCE),
-    dark: normalizeTheme(value?.dark ?? (value?.light ? undefined : legacyTheme), DEFAULT_DARK_APPEARANCE),
-  };
-}
-
-function readableForeground(hex: string): string {
-  const r = Number.parseInt(hex.slice(1, 3), 16) / 255;
-  const g = Number.parseInt(hex.slice(3, 5), 16) / 255;
-  const b = Number.parseInt(hex.slice(5, 7), 16) / 255;
-  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance > 0.62 ? "#0f172a" : "#ffffff";
-}
-
-function ensureStyleElement(): HTMLStyleElement {
-  let element = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
-  if (!element) {
-    element = document.createElement("style");
-    element.id = STYLE_ID;
-    document.head.appendChild(element);
-  }
-  return element;
-}
-
-function removeInlineAppearanceProperties(): void {
-  const root = document.documentElement;
-  for (const property of appearanceProperties) {
-    root.style.removeProperty(property);
-  }
-}
-
-function themeCss(theme: AppearanceThemeSettings): string {
-  const properties: Record<string, string> = {
-    "--primary": theme.primary,
-    "--ring": theme.primary,
-    "--sidebar-primary": theme.primary,
-    "--primary-foreground": readableForeground(theme.primary),
-    "--sidebar-primary-foreground": readableForeground(theme.primary),
-    "--secondary": theme.secondary,
-    "--accent": theme.secondary,
-    "--secondary-foreground": readableForeground(theme.secondary),
-    "--accent-foreground": readableForeground(theme.secondary),
-    "--foreground": theme.text,
-    "--card-foreground": theme.text,
-    "--popover-foreground": theme.text,
-    "--sidebar-foreground": theme.text,
-    "--radius": `${theme.radius}px`,
-    "--app-font-family": theme.fontFamily,
-    "--font-sans": theme.fontFamily,
-  };
-
-  return Object.entries(properties)
-    .map(([key, value]) => `  ${key}: ${value};`)
-    .join("\n");
-}
-
-function applyThemeStyles(settings: AppearanceSettings): void {
-  const style = ensureStyleElement();
-  style.textContent = [
-    ":root, :root[data-palette] {",
-    themeCss(settings.light),
-    "}",
-    ":root.dark, :root.dark[data-palette] {",
-    themeCss(settings.dark),
-    "}",
-  ].join("\n");
-}
-
-const appearanceProperties = [
-  "--primary",
-  "--ring",
-  "--sidebar-primary",
-  "--primary-foreground",
-  "--sidebar-primary-foreground",
-  "--secondary",
-  "--secondary-foreground",
-  "--accent",
-  "--accent-foreground",
-  "--foreground",
-  "--card-foreground",
-  "--popover-foreground",
-  "--sidebar-foreground",
-  "--radius",
-  "--app-font-family",
-  "--font-sans",
-];
-
-function clearAppearanceStyle(): void {
-  document.getElementById(STYLE_ID)?.remove();
-}
-
-export function applyAppearance(settings: AppearanceSettings): void {
-  removeInlineAppearanceProperties();
-  if (!settings.enabled) {
-    clearAppearanceStyle();
-    return;
-  }
-
-  applyThemeStyles(settings);
-}
-
-function readAppearance(): AppearanceSettings {
-  try {
-    return normalizeAppearance(JSON.parse(localStorage.getItem(storageKey()) ?? "null"));
-  } catch {
-    return DEFAULT_APPEARANCE;
-  }
+export function currentAppearance(): ResolvedAppearance {
+  return kit.resolve(kit.read(win(), config.baseUrl, currentScope));
 }
 
 export function setAppearanceScope(scope: { org?: string; project?: string }): void {
-  const nextScope = slug(scope.org ?? scope.project ?? "default");
+  const nextScope = kit.slug(scope.org ?? scope.project ?? "default");
+  storageSet(`${kit.LAST_SCOPE_KEY}:${apiScope()}`, nextScope);
   if (currentScope === nextScope) return;
   currentScope = nextScope;
+  refreshAppearance();
   window.dispatchEvent(new Event(APPEARANCE_SCOPE_EVENT));
 }
 
+// ── The instance default ─────────────────────────────────────────────
+
+/** The instance's default look as known now (runtime-config.js, else the cached copy). */
+export function getInstanceAppearance(): InstanceAppearance | null {
+  return kit.instanceDefault(win(), apiScope());
+}
+
+/** A new instance default (from the API, or just saved by an admin): cached and applied. */
+export function setInstanceAppearance(value: InstanceAppearance | null): void {
+  const next = value && typeof value === "object" ? value : {};
+  const rc = (globalThis.__POLPO_RUNTIME_CONFIG__ ??= {});
+  const same = JSON.stringify(rc.appearance ?? null) === JSON.stringify(next);
+  rc.appearance = next;
+  storageSet(`${kit.INSTANCE_KEY}:${apiScope()}`, JSON.stringify(next));
+  if (same) return;
+  refreshAppearance();
+  notify();
+}
+
+/** Fetch the instance default (public route, no sign-in needed); older servers without it are ignored. */
+export async function loadInstanceAppearance(): Promise<void> {
+  try {
+    const res = await fetch(`${config.baseUrl}/api/v1/config/appearance`);
+    if (!res.ok) return;
+    const body = await res.json() as { ok?: boolean; data?: InstanceAppearance };
+    if (body?.ok && body.data && typeof body.data === "object") setInstanceAppearance(body.data);
+  } catch { /* offline or an older server: keep what we have */ }
+}
+
+// ── This browser's choices ───────────────────────────────────────────
+
+/** Does this browser override any part of the instance default? */
+export function isBrowserCustomized(): boolean {
+  const { sources } = currentAppearance();
+  return sources.theme === "browser" || sources.palette === "browser" || sources.custom === "browser";
+}
+
+/** Forget this browser's choices: the instance default applies again. */
+export function followInstanceDefault(): void {
+  for (const key of Object.values(kit.KEYS)) storageSet(scopedStorageKey(key), null);
+  refreshAppearance();
+  notify();
+}
+
+/** Keep the current look as this browser's own choice (it no longer follows the instance default). */
+export function customizeInBrowser(): void {
+  const r = currentAppearance();
+  storageSet(scopedStorageKey(kit.KEYS.theme), r.theme);
+  storageSet(scopedStorageKey(kit.KEYS.palette), r.palette);
+  storageSet(scopedStorageKey(kit.KEYS.custom), JSON.stringify(r.custom));
+  refreshAppearance();
+  notify();
+}
+
+/** Save one of this browser's choices and apply it. */
+export function setBrowserChoice(field: keyof typeof kit.KEYS, value: string): void {
+  storageSet(scopedStorageKey(kit.KEYS[field]), value);
+  refreshAppearance();
+  notify();
+}
+
+/** The current look as an instance default (what "Save as instance default" sends). */
+export function appearanceAsInstanceDefault(r: ResolvedAppearance = currentAppearance()): Required<InstanceAppearance> {
+  return { theme: r.theme, palette: r.palette, custom: r.custom };
+}
+
+/** Re-read the layers whenever any of them changes. */
+export function useResolvedAppearance(): ResolvedAppearance {
+  const [resolved, setResolved] = useState<ResolvedAppearance>(currentAppearance);
+  useEffect(() => {
+    const sync = () => setResolved(currentAppearance());
+    window.addEventListener(APPEARANCE_CHANGE_EVENT, sync);
+    window.addEventListener(APPEARANCE_SCOPE_EVENT, sync);
+    return () => {
+      window.removeEventListener(APPEARANCE_CHANGE_EVENT, sync);
+      window.removeEventListener(APPEARANCE_SCOPE_EVENT, sync);
+    };
+  }, []);
+  return resolved;
+}
+
+export function applyAppearance(settings: AppearanceSettings): void {
+  setBrowserChoice("custom", JSON.stringify(kit.normalizeCustom(settings)));
+}
+
+/** The custom colours (this browser's, else the instance's), and setting them in this browser. */
 export function useAppearance() {
-  const [appearance, setAppearanceState] = useState<AppearanceSettings>(readAppearance);
+  const resolved = useResolvedAppearance();
+  const appearance = resolved.custom;
 
   const setAppearance = useCallback((next: AppearanceSettings) => {
-    const normalized = normalizeAppearance(next);
-    setAppearanceState(normalized);
-    try { localStorage.setItem(storageKey(), JSON.stringify(normalized)); } catch { /* ignore */ }
-    applyAppearance(normalized);
-    window.dispatchEvent(new Event(VALUE_EVENT));
+    setBrowserChoice("custom", JSON.stringify(kit.normalizeCustom(next)));
   }, []);
 
   const resetAppearance = useCallback(() => {
-    setAppearance(DEFAULT_APPEARANCE);
-  }, [setAppearance]);
-
-  useEffect(() => {
-    applyAppearance(appearance);
-  }, [appearance]);
-
-  useEffect(() => {
-    const syncScopedAppearance = () => {
-      const scoped = readAppearance();
-      setAppearanceState(scoped);
-      applyAppearance(scoped);
-    };
-    window.addEventListener(APPEARANCE_SCOPE_EVENT, syncScopedAppearance);
-    window.addEventListener(VALUE_EVENT, syncScopedAppearance);
-    return () => {
-      window.removeEventListener(APPEARANCE_SCOPE_EVENT, syncScopedAppearance);
-      window.removeEventListener(VALUE_EVENT, syncScopedAppearance);
-    };
+    setBrowserChoice("custom", JSON.stringify(DEFAULT_APPEARANCE));
   }, []);
 
   return { appearance, setAppearance, resetAppearance } as const;
 }
 
+/**
+ * Apply the look before React mounts (index.html already did, inline; this repeats it with the
+ * app's own config) and keep it current: the OS theme, another tab, the instance default.
+ */
 export function bootstrapAppearance(): void {
-  const applySaved = () => applyAppearance(readAppearance());
-  applySaved();
-
-  window.addEventListener(APPEARANCE_SCOPE_EVENT, applySaved);
+  refreshAppearance();
+  try {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (currentAppearance().theme === "system") { refreshAppearance(); notify(); }
+    });
+  } catch { /* old browsers */ }
+  window.addEventListener("storage", (event) => {
+    if (event.key && Object.values(kit.KEYS).some((k) => event.key!.startsWith(`${k}:`))) { refreshAppearance(); notify(); }
+  });
+  void loadInstanceAppearance();
 }
