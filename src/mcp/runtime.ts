@@ -4,6 +4,7 @@
  */
 import { connectorGrants, type AgentConnectorTools, type ConnectorChangedEvent, type ConnectorConfig, type PolpoSettings, type VaultStore } from "@polpo-ai/core";
 import { getConnectorManager, type ConnectorManager } from "./manager.js";
+import { connectorLabel } from "./view.js";
 
 import { CONNECTOR_OAUTH_CALLBACK_PATH } from "./paths.js";
 export { CONNECTOR_OAUTH_CALLBACK_PATH, CONNECTOR_CLIENT_METADATA_PATH, clientMetadataDocument, clientMetadataUrlFor } from "./paths.js";
@@ -77,9 +78,17 @@ export function connectorsPromptSection(connectors: ConnectorConfig[], agent: st
         : c.status === "needs_auth" || c.status === "needs_reauth" ? "needs to be (re)connected by a person in Settings → Connectors"
         : c.status === "error" ? `unavailable${c.lastError ? `: ${c.lastError.slice(0, 160)}` : ""}`
         : c.status ?? "not connected yet";
-      return `- ${c.name} (mcp__${c.id}__*): ${state}`;
+      return `- ${connectorLabel(c)} (mcp__${c.id}__*): ${state}`;
     }),
     ...notes.map((n) => `- Note: ${n}`),
   ];
+  // several accounts of one app (gmail, gmail-2…): say how to pick
+  const byApp = new Map<string, ConnectorConfig[]>();
+  for (const c of granted) if (c.catalogId) byApp.set(c.catalogId, [...(byApp.get(c.catalogId) ?? []), c]);
+  for (const group of byApp.values()) {
+    if (group.length < 2) continue;
+    lines.push(`- ${group.length} accounts of the same app: ${group.map((c) => `${c.id} = ${connectorLabel(c)}`).join("; ")}. `
+      + "Use the tools of the account the request is about (mcp__<id>__…); if it is not clear which one, ask.");
+  }
   return lines.join("\n");
 }

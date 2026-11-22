@@ -13,7 +13,7 @@ import { AlertTriangle, Loader2, Search, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { connectorsApi, filterConnectorTools, toolLabel, type AgentConnectorTools, type Connector, type ConnectorTool } from "@/lib/connectors-api";
@@ -138,14 +138,14 @@ export function TaskToolScopeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl" data-testid="task-tool-scope-dialog">
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-xl" data-testid="task-tool-scope-dialog">
         <DialogHeader className="px-6 pt-6">
           <DialogTitle>Tools for this task</DialogTitle>
           <DialogDescription>
             By default the task gets every tool {agent.name} has. Restrict it to make the run more predictable: it can only narrow what {agent.name} has.
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-6 pt-4">
+        <DialogBody className="space-y-4">
           <SegmentedControl
             size="sm"
             aria-label="Tools for this task"
@@ -223,13 +223,13 @@ export function TaskToolScopeDialog({
             </ul>
           )}
 
-          <DialogFooter className="sticky bottom-0 z-10 -mx-6 mt-4 border-t bg-background px-6 py-4">
+          <DialogFooter sticky>
             <Button variant="ghost" disabled={saving} onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button disabled={saving || problems.length > 0} onClick={() => void save()}>
               {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save
             </Button>
           </DialogFooter>
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );
@@ -267,7 +267,7 @@ function ConnectorScopeRow({
     && (agentSelection === "*" || agentSelection.includes(t.name))), [tools, connector.toolPolicy, agentSelection]);
   const visible = useMemo(() => filterConnectorTools(offered, query), [offered, query]);
   const picked = Array.isArray(entry) ? entry : [];
-  const name = connectorScopeName(connector as Connector & { account?: string }, connector.id);
+  const name = connectorScopeName(connector, connector.id);
 
   return (
     <li className="rounded-md border border-border/40" data-testid={`task-tool-scope-connector-${connector.id}`}>

@@ -78,7 +78,10 @@ export type ConnectorStatus =
 export interface ConnectorConfig {
   /** Slug: [a-z0-9][a-z0-9-]{0,39}. Used in tool names (mcp__<id>__<tool>) and as the vault service. */
   id: string;
+  /** Display name. Several accounts of one catalog app tell themselves apart by it ("Gmail – info@acme.com"). */
   name: string;
+  /** The signed-in account (e.g. an email), when the sign-in revealed it at no extra cost (an OpenID id_token). */
+  account?: string;
   /** Only "mcp" today; kept for forward compatibility. */
   kind: "mcp";
   description?: string;
