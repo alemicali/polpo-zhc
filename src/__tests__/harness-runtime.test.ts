@@ -358,6 +358,28 @@ describe("harness engine (tasks)", () => {
     expect(JSON.stringify(status)).not.toContain("privateKey");
   });
 
+  it("reports where and with what it ran (session, VM, cost) and the runtime's lower-case tool names as file activity; Polpo tools marked host", async () => {
+    const env = setup([async (_s, onEvent) => {
+      // the AI SDK harness reports Claude Code's tools in lower case (as on lumea)
+      onEvent({ type: "tool-call", toolCallId: "c1", toolName: "write", input: { file_path: "hello.txt", content: "ciao" }, host: false });
+      onEvent({ type: "tool-result", toolCallId: "c1", toolName: "write", output: { type: "create" }, isError: false });
+      onEvent({ type: "tool-call", toolCallId: "c2", toolName: "edit", input: { file_path: "notes.txt" }, host: false });
+      onEvent({ type: "tool-call", toolCallId: "c3", toolName: "register_outcome", input: { type: "text", label: "hello" }, host: true });
+      return done("ok", 0.03);
+    }, async () => done("again", 0.02)], { remoteId: () => "vm-7" });
+    env.handle.followUp("one more");
+    await env.handle.done;
+    expect(env.handle.activity).toMatchObject({ filesCreated: ["hello.txt"], filesEdited: ["notes.txt"], toolCalls: 3 });
+    expect(env.transcript.filter((e) => e.type === "tool_use").map((e) => [e.tool, !!e.host])).toEqual([["write", false], ["edit", false], ["register_outcome", true]]);
+    expect(env.transcript.find((e) => e.type === "usage")).toMatchObject({ harness: "claude-code", inputTokens: 100, costUsd: 0.03 });
+    expect(env.handle.activity.runContext).toMatchObject({
+      remoteId: "vm-7",
+      session: { resumed: false, bootstrapMs: expect.any(Number), sessionId: "hs-1" },
+      cost: { tokens: 240, harnessUsd: 0.05 },
+    });
+    expect(JSON.stringify(env.handle.activity.runContext)).not.toContain("bedrock-secret-xyz");
+  });
+
   it("register_outcome is a host tool even when the agent's allowedTools omit it", async () => {
     const env = setup([async () => done("ok")], {}, { ...agent, allowedTools: ["read", "write", "bash"] });
     await env.handle.done;

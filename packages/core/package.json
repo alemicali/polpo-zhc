@@ -50,6 +50,10 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./run-context": {
+      "types": "./dist/run-context.d.ts",
+      "import": "./dist/run-context.js"
+    },
     "./task-control-store": {
       "types": "./dist/task-control-store.d.ts",
       "import": "./dist/task-control-store.js"

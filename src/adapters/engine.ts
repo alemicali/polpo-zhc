@@ -734,8 +734,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         if (msg && "content" in msg && msg.role === "assistant") {
           // Accumulate token usage
           if ("usage" in msg && msg.usage && typeof msg.usage === "object") {
-            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number };
+            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
             if (u.totalTokens) activity.totalTokens += u.totalTokens;
+            // the run's model cost as the provider reports it (the task's run context)
+            const usd = typeof u.cost?.total === "number" && Number.isFinite(u.cost.total) ? u.cost.total : 0;
+            const prev = activity.runContext?.cost;
+            activity.runContext = {
+              ...activity.runContext,
+              cost: { ...prev, tokens: activity.totalTokens, ...(usd > 0 || prev?.modelUsd !== undefined ? { modelUsd: (prev?.modelUsd ?? 0) + usd } : {}) },
+            };
             // the real size of what was sent: next compaction decisions start from it
             compactor.noteUsage((u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0), lastProjectedCount);
           }

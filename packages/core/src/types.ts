@@ -166,6 +166,11 @@ export interface Task {
    * Set by the orchestrator LLM when creating/planning tasks.
    */
   sideEffects?: boolean;
+  /**
+   * Where and with what each run of this task executed (engine, model, computer, egress, harness
+   * session, cost), newest last, at most MAX_TASK_RUNS. See run-context.ts.
+   */
+  runs?: import("./run-context.js").TaskRunContext[];
   createdAt: string;
   updatedAt: string;
 }
@@ -503,6 +508,8 @@ export interface AgentActivity {
   compactions?: number;
   /** The latest compaction, with the durable facts it found (saved to the agent's memory). */
   lastCompaction?: import("./context-compactor.js").CompactionInfo & { at: string; durableFacts?: string[] };
+  /** What the engine reports about where and with what it runs (merged into Task.runs). */
+  runContext?: import("./run-context.js").RunContextRuntime;
 }
 
 export interface AgentProcess {

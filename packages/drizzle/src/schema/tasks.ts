@@ -31,6 +31,8 @@ export const tasksSqlite = sqliteTable("tasks", {
   priority: text("priority"),
   sideEffects: integer("side_effects"),
   revisionCount: integer("revision_count"),
+  /** Where and with what each run executed (engine, computer, egress, session, cost): Task.runs. */
+  runs: text("runs"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
@@ -108,6 +110,8 @@ export const tasksPg = pgTable("tasks", {
   priority: pgText("priority"),
   sideEffects: pgInteger("side_effects"),
   revisionCount: pgInteger("revision_count"),
+  /** Where and with what each run executed (engine, computer, egress, session, cost): Task.runs. */
+  runs: jsonb("runs"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */

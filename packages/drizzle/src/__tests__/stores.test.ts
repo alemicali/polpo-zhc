@@ -87,6 +87,21 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(fetched!.expectations).toEqual([{ type: "llm_review", criteria: "Login works" }]);
     });
 
+    it("keeps a task's runs (where and with what each run executed)", async () => {
+      const task = await stores.taskStore.addTask({
+        title: "Runs", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],
+      });
+      expect(task.runs).toBeUndefined();
+      const runs = [{
+        runId: "r1", startedAt: "2026-11-22T10:00:00.000Z", status: "completed" as const, engine: "claude-code" as const,
+        computer: { id: "box", kind: "daytona" as const, provider: "daytona" as const, daytonaApi: "v2" as const },
+        egress: { mode: "proxy" as const, proxy: "home", tailscale: true }, session: { resumed: true, bootstrapMs: 1300 }, cost: { harnessUsd: 0.02 },
+      }];
+      await stores.taskStore.updateTask(task.id, { runs });
+      expect((await stores.taskStore.getTask(task.id))!.runs).toEqual(runs);
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.runs).toEqual(runs);
+    });
+
     it("getAllTasks returns ordered by createdAt", async () => {
       await stores.taskStore.addTask({
         title: "A", description: "first", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],

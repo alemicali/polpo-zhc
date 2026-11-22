@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
 import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
+import { summarizeTaskRun } from "@polpo-ai/core/run-context";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ const listTasksRoute = createRoute({
       group: z.string().optional(),
       assignTo: z.string().optional(),
       summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
-        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
       }),
       // `slim` is an alias for `summary` — the web UI uses `slim=true`
       // by convention (matches `/agents?slim=true`). Either flag triggers
@@ -330,6 +331,8 @@ function projectSlim(t: any): any {
     updatedAt: t.updatedAt,
     descriptionPreview: desc.length > 200 ? desc.slice(0, 200) : desc,
     ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
+    // where and with what the latest run executed (engine, model, computer): list badges
+    ...(Array.isArray(t.runs) && t.runs.length ? { lastRun: summarizeTaskRun(t.runs[t.runs.length - 1]) } : {}),
   };
 }
 

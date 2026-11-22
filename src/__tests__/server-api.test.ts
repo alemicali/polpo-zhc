@@ -255,6 +255,50 @@ describe("Tasks API", () => {
     ]);
   });
 
+  test("GET task activity returns an agent harness run's transcript (Claude Code: tools, Polpo tools marked host, usage)", async () => {
+    const taskId = "harness-run-activity-task";
+    const logsDir = join(tmpDir, ".polpo", "logs");
+    await mkdir(logsDir, { recursive: true });
+    // as the runner writes it for a Claude Code run (the transcript of lumea's M5hgPb1B0ORvFKD7lgJgg)
+    const log = [
+      { _run: true, runId: "run-harness", taskId, agentName: "coder", startedAt: "2026-11-22T14:55:55.499Z", pid: 1 },
+      { ts: "2026-11-22T14:55:55.534Z", event: "spawned" },
+      { ts: "2026-11-22T14:56:13.597Z", type: "log", message: "Claude Code session started in 14.8 s on coder-box" },
+      { ts: "2026-11-22T14:56:18.724Z", type: "assistant", text: "Creo il file hello.txt" },
+      { ts: "2026-11-22T14:56:18.830Z", type: "tool_use", tool: "write", toolId: "c1", input: { file_path: "hello.txt", content: "ciao" } },
+      { ts: "2026-11-22T14:56:18.840Z", type: "tool_result", toolId: "c1", tool: "write", content: "{\"type\":\"create\"}" },
+      { ts: "2026-11-22T14:56:21.000Z", type: "tool_use", tool: "register_outcome", toolId: "c2", input: { type: "text", label: "hello" }, host: true },
+      { ts: "2026-11-22T14:56:22.156Z", type: "usage", harness: "claude-code", inputTokens: 144154, outputTokens: 431, totalTokens: 144585, costUsd: 0.0722 },
+      { ts: "2026-11-22T14:56:22.828Z", event: "done", data: { status: "completed", exitCode: 0, duration: 26626 } },
+    ];
+    await writeFile(join(logsDir, "run-run-harness.jsonl"), log.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const body = await (await app.request(api(`/agents/processes/${taskId}/activity`))).json();
+    expect(body.data).toHaveLength(log.length);
+    expect(body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool_use", tool: "write" }),
+      expect.objectContaining({ type: "tool_use", tool: "register_outcome", host: true }),
+      expect.objectContaining({ type: "usage", harness: "claude-code", costUsd: 0.0722 }),
+      expect.objectContaining({ type: "log", message: expect.stringMatching(/session started/) }),
+    ]));
+  });
+
+  test("a task's runs (where and with what): in full on GET /tasks/:id, as lastRun in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Run context task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const run = {
+      runId: "r1", startedAt: "2026-11-22T10:00:00.000Z", status: "completed", engine: "claude-code", model: "us.anthropic.claude-haiku-4-5",
+      auth: { kind: "bedrock", region: "us-east-1" }, computer: { id: "coder-box", name: "Coder box", kind: "daytona", provider: "daytona", daytonaApi: "v2" },
+      sandbox: { provider: "daytona", ephemeral: false }, egress: { mode: "direct" }, session: { resumed: false, bootstrapMs: 14800 }, cost: { harnessUsd: 0.07 },
+    };
+    await orchestrator.getStore().updateTask(id, { runs: [run as any] });
+    const full = await (await app.request(api(`/tasks/${id}`))).json();
+    expect(full.data.runs).toEqual([run]);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    const row = slim.data.find((t: any) => t.id === id);
+    expect(row.runs).toBeUndefined();
+    expect(row.lastRun).toEqual({ engine: "claude-code", model: "us.anthropic.claude-haiku-4-5", computerId: "coder-box", computerName: "Coder box", computerKind: "daytona", provider: "daytona", status: "completed" });
+  });
+
   test("GET /tasks returns 200 with task array", async () => {
     const res = await app.request(api("/tasks"));
     expect(res.status).toBe(200);
