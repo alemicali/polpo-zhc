@@ -58,7 +58,7 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   expect([...dates].sort().reverse()).toEqual(dates);
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
   expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([
-    ["2026-11-22", 17], ["2026-11-21", 3], ["2026-11-19", 2], ["2026-11-17", 5], ["2026-11-16", 1], ["2026-11-09", 1], ["2026-11-03", 2], ["2026-10-31", 2], ["2026-10-25", 2], ["2026-10-15", 1], ["2026-10-14", 1], ["2026-10-13", 3], ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
+    ["2026-11-22", 18], ["2026-11-21", 3], ["2026-11-19", 2], ["2026-11-17", 5], ["2026-11-16", 1], ["2026-11-09", 1], ["2026-11-03", 2], ["2026-10-31", 2], ["2026-10-25", 2], ["2026-10-15", 1], ["2026-10-14", 1], ["2026-10-13", 3], ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
   ]);
   expect(CHANGELOG.find((e) => e.id === "2026-10-06-group-chats")?.cta?.to).toBe("/chat?newGroup=1");
   // the newest news lead the bar (agents talking live, threads, sending anywhere, learning, recurring checks), then group chats and the Telegram news
@@ -179,8 +179,10 @@ test("changelog page: date and time from runtime-config.js, the latest first, an
   await act(async () => root.render(<MemoryRouter><Page /></MemoryRouter>));
   const articles = [...container.querySelectorAll("article")];
   expect(articles.map((a) => a.id)).toEqual(["b", "a", "c"]);
-  expect(articles[0]!.textContent).toContain("6 ott 2026 · 18:52");
-  expect(articles[1]!.textContent).toContain("6 ott 2026 · 09:15");
+  // the row shows the time, the full date and time on hover
+  expect(articles[0]!.querySelector("time")!.textContent).toBe("18:52");
+  expect(articles[0]!.querySelector("time")!.getAttribute("title")).toContain("6 ott 2026 · 18:52");
+  expect(articles[1]!.querySelector("time")!.textContent).toBe("09:15");
   expect(articles[2]!.querySelector("time")).toBeNull(); // no time recorded: the day only
   // the mark stays while the page is open, even though opening it set everything as seen
   expect(articles.map((a) => a.textContent!.includes("Non letta"))).toEqual([true, false, false]);
