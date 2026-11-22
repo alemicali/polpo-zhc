@@ -36,6 +36,8 @@ export interface CardFieldVisibility {
   time: boolean;
   score: boolean;
   retries: boolean;
+  /** What every run of the task cost in all (not just the latest). */
+  cost: boolean;
   deps: boolean;
   expectations: boolean;
   phase: boolean;
@@ -49,6 +51,7 @@ const DEFAULT_CARD_FIELDS: CardFieldVisibility = {
   time: true,
   score: true,
   retries: false,
+  cost: true,
   deps: true,
   expectations: false,
   phase: true,

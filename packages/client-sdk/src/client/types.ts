@@ -133,6 +133,11 @@ export interface Task {
   toolScope?: TaskToolScope;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
+  /**
+   * What every run cost in all (first run, retries, continuations, directions): the breakdown on
+   * GET /tasks/:id, the compact total in slim lists. Absent on records from events (compute it from `runs`).
+   */
+  cost?: TaskCost | TaskCostSummary;
   createdAt: string;
   updatedAt: string;
 }
@@ -193,10 +198,57 @@ export interface TaskRunContext {
   sandbox?: { provider: string; ephemeral: boolean; fallbackFrom?: string };
   egress: { mode: "direct" | "proxy"; proxy?: string; tailscale?: boolean };
   session?: { resumed: boolean; bootstrapMs?: number; sessionId?: string };
-  cost?: { harnessUsd?: number; modelUsd?: number; tokens?: number };
+  cost?: {
+    harnessUsd?: number;
+    modelUsd?: number;
+    tokens?: number;
+    /** Where harnessUsd comes from (gateway, the runtime's estimate, tokens only). */
+    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+  };
   budgetUsd?: number;
   durationMs?: number;
   exitCode?: number;
+}
+
+/** One run in a task's cost breakdown (oldest first). */
+export interface TaskCostRun {
+  runId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: TaskRunContext["status"];
+  continuation?: boolean;
+  agent?: string;
+  engine: TaskRunEngine;
+  model?: string;
+  durationMs?: number;
+  /** USD; absent when the run recorded none (yet). */
+  usd?: number;
+  tokens?: number;
+  costSource?: NonNullable<TaskRunContext["cost"]>["costSource"];
+}
+
+/** What a task cost: every recorded run of it (GET /tasks/:id → cost). A mission's cost adds these up. */
+export interface TaskCost extends MissionCostBucket {
+  currency: "USD";
+  unpricedRuns: number;
+  runsActive: number;
+  byEngine: Array<MissionCostBucket & { engine: TaskRunEngine }>;
+  perRun: TaskCostRun[];
+  /** The latest run's cost, USD. */
+  lastRunUsd?: number;
+  /** Older runs were dropped (20 kept per task) and not recovered: the total may be higher. */
+  partial: boolean;
+  /** Harness cost of dropped runs, taken from the token-usage records. */
+  recoveredUsd?: number;
+  recovered?: { usd: number; tokens: number; agent: string; engine: TaskRunEngine };
+}
+
+/** The compact task cost in slim lists. */
+export interface TaskCostSummary {
+  usd: number;
+  tokens: number;
+  runs: number;
+  partial?: boolean;
 }
 
 /** The latest run in a slim task row (list badges). */
@@ -238,6 +290,8 @@ export interface TaskSlim {
   };
   /** Where and with what the latest run executed. */
   lastRun?: TaskRunSummary;
+  /** What every run cost in all (not just the latest). */
+  cost?: TaskCostSummary;
   /** Why it failed, in a line (failed tasks only). */
   failure?: TaskFailure;
   /** Its runs get only part of the agent's tools. */

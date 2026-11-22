@@ -7,9 +7,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { TaskRunContext } from "@polpo-ai/react";
-import { RunContextCard, RunBadge, TaskEngineBadge, EngineBadge } from "../src/components/shared/run-context";
+import { RunContextCard, RunBadge, TaskCostBadge, TaskEngineBadge, EngineBadge } from "../src/components/shared/run-context";
 import { BrandIcon } from "../src/components/shared/brand-icon";
 import { computerKindLabel, engineDetail, formatMs, formatUsd, latestRun, modelLabel } from "../src/lib/run-context";
+import { taskCostOf, taskCostSummaryOf } from "../src/lib/task-cost";
 import type { Computer } from "../src/lib/computers-api";
 
 let root: Root;
@@ -147,4 +148,51 @@ test("labels", () => {
   expect(formatUsd(1.5)).toBe("$1.50");
   expect(formatMs(14_800)).toBe("14.8 s");
   expect(formatMs(95_000)).toBe("1 min 35 s");
+});
+
+test("a task run more than once: the total of every run and the latest's on the Run card, each run's time, duration and cost in the list", async () => {
+  const polpoRetry: TaskRunContext = { ...nativeRun, runId: "n2", status: "completed", cost: { modelUsd: 0.25, tokens: 2000 }, durationMs: 3000 };
+  await render(<RunContextCard runs={[firstRun, polpoRetry, harnessRun]} />);
+  const total = q('[data-testid="task-cost-total"]')!;
+  expect(total.textContent).toContain("Total, 3 runs:");
+  expect(q('[data-testid="task-cost-total-usd"]')!.textContent).toBe("$1.82");
+  expect(q('[data-testid="task-cost-latest"]')!.textContent).toBe("Latest: $1.50");
+  // by engine, with their marks
+  const engines = q('[data-testid="task-cost-engines"]')!;
+  expect([...engines.querySelectorAll("[data-brand]")].map((e) => e.getAttribute("data-brand"))).toEqual(["claude-code", "polpo"]);
+  expect(engines.textContent).toMatch(/\$1\.57.*\$0\.25/);
+  // each run with its cost (the latest one too), duration and time
+  const costs = [...container.querySelectorAll('[data-testid="run-history-cost"]')].map((e) => e.textContent);
+  expect(costs).toEqual(["$0.07", "$0.25", "$1.50"]);
+  expect(q('[data-testid="run-history-n2"] [data-testid="run-history-duration"]')!.textContent).toBe("3.0 s");
+  expect(q('[data-testid="run-history-r2"] [data-testid="run-history-time"]')!.textContent).not.toBe("");
+  // a single run: the total is that run's, no "latest"
+  await render(<RunContextCard runs={[harnessRun]} />);
+  expect(q('[data-testid="task-cost-total"]')!.textContent).toMatch(/^Total:\$1\.50/);
+  expect(q('[data-testid="task-cost-latest"]')).toBeNull();
+});
+
+test("the total from the API when it recovered runs dropped past the latest 20; partial otherwise", async () => {
+  const many = Array.from({ length: 20 }, (_, i): TaskRunContext => ({ ...harnessRun, runId: `m${i}`, cost: { harnessUsd: 0.1 } }));
+  const local = taskCostOf({ runs: many })!;
+  expect(local).toMatchObject({ usd: 2, runs: 20, partial: true });
+  const fromApi = { ...local, usd: 3, harnessUsd: 3, partial: false, recoveredUsd: 1 };
+  expect(taskCostOf({ runs: many, cost: fromApi })).toBe(fromApi);
+  await render(<RunContextCard runs={many} cost={local} />);
+  expect(q('[data-testid="task-cost-total-usd"]')!.textContent).toBe("$2.00+");
+  expect(q('[data-testid="task-cost-total"]')!.textContent).toContain("older runs not counted");
+});
+
+test("TaskCostBadge: every run's total for headers, rows and cards; nothing before a run recorded a cost", async () => {
+  await render(<>
+    <div data-testid="a"><TaskCostBadge cost={taskCostSummaryOf({ runs: [firstRun, harnessRun] })} /></div>
+    <div data-testid="b"><TaskCostBadge cost={taskCostSummaryOf({ cost: { usd: 0.4, tokens: 10, runs: 1 } })} size="md" /></div>
+    <div data-testid="d"><TaskCostBadge cost={taskCostOf({ runs: [{ ...nativeRun, cost: undefined }] })} /></div>
+  </>);
+  const a = q('[data-testid="a"] [data-testid="task-cost-badge"]')!;
+  expect(a.textContent).toBe("$1.57·2");
+  expect(a.getAttribute("title")).toBe("Total cost of 2 runs: $1.57 · 144.6k tokens");
+  expect(q('[data-testid="b"] [data-testid="task-cost-badge"]')!.textContent).toBe("$0.40");
+  // no run recorded a cost yet: nothing
+  expect(q('[data-testid="d"]')!.innerHTML).toBe("");
 });

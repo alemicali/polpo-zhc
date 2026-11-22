@@ -5,13 +5,14 @@
  * a proxy through Tailscale), the harness session (new or resumed, bootstrap time), the cost
  * (the harness's estimate or the model's) against the budget, and the runs before it.
  *
- * - RunContextCard: the task detail page.
+ * - RunContextCard: the task detail page, with what every run cost in all (TaskCostSummaryLine).
+ * - TaskCostBadge: a task's total (every run, not the latest) for headers, rows and cards.
  * - EngineBadge / RunBadge: small marks for lists, cards and the activity feed.
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Globe, History, Timer } from "lucide-react";
-import type { TaskRunContext, TaskRunSummary } from "@polpo-ai/react";
+import { ArrowUpRight, Coins, Globe, History, Timer } from "lucide-react";
+import type { TaskCost, TaskCostSummary, TaskRunContext, TaskRunSummary } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -21,6 +22,8 @@ import type { Computer } from "@/lib/computers-api";
 import {
   agentEngineId, latestRun, AUTH_LABELS, authBrand, computerBrand, computerKindLabel, engineBrand, engineDetail, engineLabel, formatMs, formatUsd, modelLabel,
 } from "@/lib/run-context";
+import { hasRecordedCost, taskCostOf } from "@/lib/task-cost";
+import { formatTokens } from "@/lib/mission-cost";
 import { cn } from "@/lib/utils";
 
 const STATUS_TONE: Record<TaskRunContext["status"], string> = {
@@ -181,13 +184,85 @@ function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer
   );
 }
 
-/** The task detail page's Run card: the latest run (or the one picked) and the runs before it. */
-export function RunContextCard({ runs, computers, className }: { runs: TaskRunContext[] | undefined; computers?: Computer[]; className?: string }) {
+/**
+ * A task's total cost, every run (retries, continuations, directions), for headers, list rows and
+ * board cards: "$1.24" ("+" when older runs were dropped), with the runs and tokens in its title.
+ */
+export function TaskCostBadge({ cost, size = "sm", className }: {
+  cost: (TaskCostSummary & Partial<Pick<TaskCost, "unpricedRuns" | "recoveredUsd" | "lastRunUsd">>) | undefined;
+  /** md: the task header (next to its status). */
+  size?: "sm" | "md";
+  className?: string;
+}) {
+  if (!cost || !hasRecordedCost(cost)) return null;
+  const title = `Total cost of ${cost.runs} run${cost.runs === 1 ? "" : "s"}: ${formatUsd(cost.usd)}`
+    + `${cost.runs > 1 && cost.lastRunUsd !== undefined ? ` (latest ${formatUsd(cost.lastRunUsd)})` : ""}`
+    + `${formatTokens(cost.tokens) ? ` · ${formatTokens(cost.tokens)} tokens` : ""}`
+    + `${cost.partial ? " · partial: older runs dropped" : ""}`;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center tabular-nums",
+        size === "md" ? "gap-1 rounded-md border border-border/40 px-1.5 py-0.5 text-xs font-medium text-foreground" : "gap-0.5 text-micro text-muted-foreground",
+        className,
+      )}
+      title={title}
+      aria-label={title}
+      data-testid="task-cost-badge"
+    >
+      <Coins className={size === "md" ? "h-3 w-3 text-muted-foreground" : "h-2.5 w-2.5"} />
+      {formatUsd(cost.usd)}{cost.partial ? "+" : ""}
+      {cost.runs > 1 && (size === "md"
+        ? <span className="font-normal text-muted-foreground">· {cost.runs} runs</span>
+        : <span className="text-muted-foreground/70">·{cost.runs}</span>)}
+    </span>
+  );
+}
+
+/** "Total, 3 runs: $1.62 · Latest: $1.50", with the cost by engine when more than one ran. */
+export function TaskCostSummaryLine({ cost, className }: { cost: TaskCost; className?: string }) {
+  if (!hasRecordedCost(cost)) return null;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-small", className)} data-testid="task-cost-total">
+      <span className="inline-flex items-center gap-1">
+        <Coins className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">Total{cost.runs > 1 ? `, ${cost.runs} runs` : ""}:</span>
+        <span className="font-semibold tabular-nums" data-testid="task-cost-total-usd">{formatUsd(cost.usd)}{cost.partial ? "+" : ""}</span>
+      </span>
+      {cost.runs > 1 && cost.lastRunUsd !== undefined && (
+        <span className="text-caption text-muted-foreground" data-testid="task-cost-latest">Latest: <span className="tabular-nums">{formatUsd(cost.lastRunUsd)}</span></span>
+      )}
+      {formatTokens(cost.tokens) && <span className="text-caption text-muted-foreground">{formatTokens(cost.tokens)} tokens</span>}
+      {cost.byEngine.length > 1 && (
+        <span className="inline-flex flex-wrap items-center gap-2 text-caption text-muted-foreground" data-testid="task-cost-engines">
+          {cost.byEngine.map((e) => (
+            <span key={e.engine} className="inline-flex items-center gap-1" title={`${engineLabel(e.engine)}: ${e.runs} run${e.runs === 1 ? "" : "s"}`}>
+              <BrandIcon name={engineBrand(e.engine)} size={12} />
+              <span className="tabular-nums">{formatUsd(e.usd)}</span>
+            </span>
+          ))}
+        </span>
+      )}
+      {cost.partial && <span className="text-caption text-warning" title="A task keeps its latest 20 runs: the older ones are not counted">older runs not counted</span>}
+      {cost.recoveredUsd ? <span className="text-caption text-muted-foreground" title="Runs dropped past the latest 20: their harness cost comes from the usage records">incl. {formatUsd(cost.recoveredUsd)} from earlier runs</span> : null}
+    </div>
+  );
+}
+
+const shortTime = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+};
+
+/** The task detail page's Run card: what every run cost in all, the latest run (or the one picked) and the runs before it. */
+export function RunContextCard({ runs, cost: given, computers, className }: { runs: TaskRunContext[] | undefined; cost?: TaskCost; computers?: Computer[]; className?: string }) {
   const [picked, setPicked] = useState<string | null>(null);
   if (!runs?.length) return null;
   const current = runs.find((r) => r.runId === picked) ?? runs[runs.length - 1]!;
   const index = runs.indexOf(current);
   const computer = computers?.find((c) => c.id === current.computer.id);
+  const cost = given ?? taskCostOf({ runs })!;
+  const runUsdOf = new Map(cost.perRun.map((r) => [r.runId, r.usd]));
 
   return (
     <Card className={cn("gap-0 py-0", className)} data-testid="run-context-card">
@@ -202,6 +277,7 @@ export function RunContextCard({ runs, computers, className }: { runs: TaskRunCo
             {current.exitCode !== undefined && current.exitCode !== 0 ? ` · exit ${current.exitCode}` : ""}
           </span>
         </div>
+        <TaskCostSummaryLine cost={cost} className="border-b pb-2" />
         <RunDetail run={current} computer={computer} />
         {runs.length > 1 && (
           <div className="space-y-1 border-t pt-2" data-testid="run-history">
@@ -220,13 +296,17 @@ export function RunContextCard({ runs, computers, className }: { runs: TaskRunCo
                     data-testid={`run-history-${r.runId}`}
                   >
                     <span className="w-5 shrink-0 tabular-nums text-muted-foreground">{i + 1}</span>
+                    <span className="hidden w-28 shrink-0 tabular-nums text-muted-foreground sm:inline" data-testid="run-history-time">{shortTime(r.startedAt)}</span>
                     <BrandIcon name={engineBrand(r.engine)} size={12} />
                     <span className="truncate">{engineLabel(r.engine)}{r.model ? ` · ${modelLabel(r.model)}` : ""}</span>
                     <BrandIcon name={computerBrand(r.computer)} size={12} />
                     <span className="truncate text-muted-foreground">{r.computer.name ?? r.computer.id}</span>
                     {r.continuation && <span className="text-muted-foreground">continuation</span>}
-                    <span className={cn("ml-auto shrink-0 capitalize", r.status === "failed" ? "text-destructive" : r.status === "completed" ? "text-success" : "text-muted-foreground")}>{r.status}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">{formatUsd(r.cost?.harnessUsd ?? r.cost?.modelUsd) ?? ""}</span>
+                    <span className="ml-auto flex shrink-0 items-center gap-2">
+                      {r.durationMs !== undefined && <span className="hidden tabular-nums text-muted-foreground sm:inline" data-testid="run-history-duration">{formatMs(r.durationMs)}</span>}
+                      <span className={cn("capitalize", r.status === "failed" ? "text-destructive" : r.status === "completed" ? "text-success" : "text-muted-foreground")}>{r.status}</span>
+                      <span className="w-14 text-right tabular-nums text-foreground" data-testid="run-history-cost">{formatUsd(runUsdOf.get(r.runId)) ?? "—"}</span>
+                    </span>
                   </button>
                 </li>
               ))}

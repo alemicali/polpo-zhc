@@ -34,6 +34,7 @@ export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 // Where and with what a task run executed (engine, computer, egress, session, cost)
 export * from "./run-context.js";
 export * from "./mission-cost.js";
+export * from "./task-cost.js";
 export * from "./dependency-results.js";
 export * from "./task-failure.js";
 export * from "./task-tool-scope.js";
