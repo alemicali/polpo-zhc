@@ -28,12 +28,14 @@ export interface McpPrincipal {
   subject?: string;
   /** The OAuth client's name. */
   client?: string;
-  /** Granted scopes: "polpo" is everything; else "polpo:read", "polpo:work", "polpo:admin". */
+  /** Granted scopes (see SCOPES); "polpo", the old all-in-one scope, still means every scope. */
   scopes: string[];
+  /** An MCP key's name (settings.mcp.keys), for the dashboard and logs. */
+  keyName?: string;
 }
 
 /** A principal that may do everything (tests, local stdio). */
-export const FULL_ACCESS: McpPrincipal = { kind: "open", actor: "mcp", scopes: ["polpo"] };
+export const FULL_ACCESS: McpPrincipal = { kind: "open", actor: "mcp", scopes: ["polpo:admin"] };
 
 /** The addresses a host name resolves to. */
 export type ResolveHost = (hostname: string) => Promise<string[]>;
@@ -60,6 +62,8 @@ export interface McpDeps {
   resolveHost?: ResolveHost;
   /** Allow fetching from private addresses (tests only). */
   allowPrivateFetch?: boolean;
+  /** The protected resource metadata URL, named in the 403 for a missing scope (step-up). */
+  resourceMetadataUrl?: string;
 }
 
 /** Longest tool result returned to the model; the rest is cut with a note. */
@@ -73,7 +77,7 @@ export const TOOLSETS = {
   missions: { default: true, description: "Missions and playbooks: list, read, create, update, run, abort, wait" },
   artifacts: { default: true, description: "Artifacts: documents, html dashboards and designs, diagrams" },
   data: { default: true, description: "Structured data sources and queries" },
-  files: { default: true, description: "The instance's files: browse, search, read, write" },
+  files: { default: true, description: "The instance's files: browse, search, read, write (writes need files scope)" },
   team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
   config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
   rooms: { default: true, description: "Group chats of people and agents: rooms, their messages, posting and waiting for replies" },
@@ -81,13 +85,13 @@ export const TOOLSETS = {
   memory: { default: true, description: "Shared and per-agent memory: read, write, clear" },
   skills: { default: true, description: "Skills: list, read, create, update, install, delete, assign to agents (changes need admin scope)" },
   automation: { default: true, description: "Mission schedules (run now, pause, resume) and recurring checks" },
-  connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need admin scope)" },
-  channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (channel changes need admin scope)" },
-  computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need admin scope)" },
+  connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
+  channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (sending needs messages scope, rules admin scope)" },
+  computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
-  vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs admin scope)" },
+  vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs vault scope)" },
   apps: { default: false, description: "Registered apps (start, stop, restart) and browser profiles" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
@@ -116,25 +120,84 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
   return [...DEFAULT_TOOLSETS];
 }
 
-/** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "connectors", "channels", "learning", "vault", "computers"]);
-/** Toolsets whose reads too need "polpo:admin". */
-const ADMIN_ONLY = new Set<string>(["admin", "vault"]);
+// ── Scopes ───────────────────────────────────────────────────────────
+//
+// What a caller may do. Three levels — read ⊂ work ⊂ admin — and five areas a caller with work
+// (or less) may be given one by one. admin holds every area; any scope holds read. A tool needs
+// exactly one scope (see scopeFor); a destructive tool needs the write scope of its area.
 
-/** The scope a tool needs: reads "polpo:read" (the admin and vault toolsets "polpo:admin"), writes "polpo:work" or, for the instance's own setup, "polpo:admin". */
-export function scopeFor(toolset: ToolsetName, annotations: ToolAnnotations): string {
-  if (ADMIN_ONLY.has(toolset)) return "polpo:admin";
-  if (annotations.readOnlyHint) return "polpo:read";
-  return ADMIN_WRITES.has(toolset) ? "polpo:admin" : "polpo:work";
+/** The scopes, in the order people see them, with what they allow in plain words. */
+export const SCOPES = {
+  "polpo:read": { label: "Read", description: "See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings" },
+  "polpo:work": { label: "Work", description: "Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, rooms, memory, schedules and checks; resolve approvals" },
+  "polpo:files": { label: "Files", description: "Write, move and delete the instance's files" },
+  "polpo:messages": { label: "Messages", description: "Send messages on Telegram, WhatsApp and email, as Polpo or an agent" },
+  "polpo:connectors": { label: "Connectors", description: "Add, change, connect, disconnect and remove connectors (the services agents use)" },
+  "polpo:computers": { label: "Computers", description: "Create, start, stop, reset and delete computers (they may cost money)" },
+  "polpo:vault": { label: "Vault", description: "See the names of vault entries (never their values) and delete them" },
+  "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
+} as const;
+
+export type PolpoScope = keyof typeof SCOPES;
+export const ALL_SCOPES = Object.keys(SCOPES) as PolpoScope[];
+/** Granted when a client asks for nothing in particular: read and work, not admin. */
+export const DEFAULT_SCOPES: PolpoScope[] = ["polpo:read", "polpo:work"];
+/** The old all-in-one scope: still accepted (it means every scope), never issued by the consent unless asked for. */
+export const UMBRELLA_SCOPE = "polpo";
+/** The area scopes: one capability each, on top of work or alone. */
+export const AREA_SCOPES: PolpoScope[] = ["polpo:files", "polpo:messages", "polpo:connectors", "polpo:computers", "polpo:vault"];
+
+/**
+ * Scopes from a list or a space/comma-separated string: known ones, in order, read added when any
+ * is there; the umbrella "polpo" becomes every scope. Unknown names are dropped.
+ */
+export function normalizeScopes(input: string | readonly string[] | undefined | null): PolpoScope[] {
+  const names = (typeof input === "string" ? input.split(/[\s,]+/) : [...(input ?? [])]).map((s) => s.trim()).filter(Boolean);
+  const set = new Set<string>();
+  for (const n of names) {
+    if (n === UMBRELLA_SCOPE) ALL_SCOPES.forEach((s) => set.add(s));
+    else if ((ALL_SCOPES as string[]).includes(n)) set.add(n);
+  }
+  if (set.size > 0) set.add("polpo:read");
+  return ALL_SCOPES.filter((s) => set.has(s));
 }
 
-/** Does a principal hold a scope? "polpo" holds all; admin implies work; any polpo:* implies read. */
-export function hasScope(principal: McpPrincipal, scope: string): boolean {
+/** Toolsets whose writes change the instance itself: they need "polpo:admin". */
+const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "channels", "learning"]);
+/** Toolsets whose writes have a scope of their own (polpo:admin holds them too). */
+const AREA_WRITES: Partial<Record<ToolsetName, PolpoScope>> = {
+  files: "polpo:files", connectors: "polpo:connectors", computers: "polpo:computers", vault: "polpo:vault",
+};
+/** Toolsets whose reads too need their scope. */
+const SCOPED_READS: Partial<Record<ToolsetName, PolpoScope>> = { admin: "polpo:admin", vault: "polpo:vault" };
+
+/**
+ * The scope a tool needs: reads "polpo:read" (the vault's "polpo:vault", the REST fallback's
+ * "polpo:admin"); writes their area's scope (files, connectors, computers, vault), "polpo:admin"
+ * for the instance's own setup, else "polpo:work". A tool may name another (ToolSpec.scope).
+ */
+export function scopeFor(toolset: ToolsetName, annotations: ToolAnnotations): PolpoScope {
+  const scoped = SCOPED_READS[toolset];
+  if (scoped) return scoped;
+  if (annotations.readOnlyHint) return "polpo:read";
+  return AREA_WRITES[toolset] ?? (ADMIN_WRITES.has(toolset) ? "polpo:admin" : "polpo:work");
+}
+
+/** Does a principal hold a scope? "polpo" and "polpo:admin" hold all; admin implies work and every area; any polpo:* implies read. */
+export function hasScope(principal: Pick<McpPrincipal, "scopes">, scope: string): boolean {
   const s = new Set(principal.scopes);
-  if (s.has("polpo") || s.has(scope)) return true;
-  if (scope === "polpo:work" && s.has("polpo:admin")) return true;
+  if (s.has(UMBRELLA_SCOPE) || s.has("polpo:admin") || s.has(scope)) return true;
   if (scope === "polpo:read") return [...s].some((x) => x.startsWith("polpo:"));
   return false;
+}
+
+/** One line of the tool → scope matrix (docs, the dashboard, the step-up check). */
+export interface ToolScope {
+  name: string;
+  toolset: ToolsetName;
+  scope: PolpoScope;
+  readOnly: boolean;
+  destructive: boolean;
 }
 
 // ── Results ──────────────────────────────────────────────────────────
@@ -283,8 +346,8 @@ export interface ToolSpec<I extends z.ZodRawShape> {
   /** The structuredContent's main fields; it is published open (more fields may come: see outputObject). */
   outputSchema?: z.ZodRawShape;
   annotations: ToolAnnotations;
-  /** The scope it needs, when not the toolset's rule (e.g. sending a message, in a toolset whose changes need admin, needs polpo:work). */
-  scope?: string;
+  /** The scope it needs, when not the toolset's rule (e.g. sending a message, in a toolset whose changes need admin, needs polpo:messages). */
+  scope?: PolpoScope;
   _meta?: Record<string, unknown>;
 }
 
@@ -298,11 +361,15 @@ export type Register = <I extends z.ZodRawShape>(
 /**
  * A registrar that adds a tool only when its toolset is on and the principal holds its scope.
  * Handlers that throw become an isError result (the SDK does that), so tools return fail() for
- * expected errors and let unexpected ones surface.
+ * expected errors and let unexpected ones surface. `catalog`, when given, collects every tool of
+ * an enabled toolset with its scope, offered or not (the scope matrix).
  */
-export function registrar(server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal): Register {
+export function registrar(server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): Register {
   return (toolset, name, spec, handler) => {
-    if (!enabled.has(toolset) || !hasScope(principal, spec.scope ?? scopeFor(toolset, spec.annotations))) return;
+    const scope = spec.scope ?? scopeFor(toolset, spec.annotations);
+    if (!enabled.has(toolset)) return;
+    catalog?.push({ name, toolset, scope, readOnly: !!spec.annotations.readOnlyHint, destructive: !!spec.annotations.destructiveHint });
+    if (!hasScope(principal, scope)) return;
     server.registerTool(name, {
       title: spec.title,
       description: spec.description,
@@ -324,9 +391,16 @@ export function outputObject(shape: z.ZodRawShape) {
   return z.object(shape).passthrough();
 }
 
-/** Is this tool allowed for the principal and the toolsets (for app tools registered elsewhere)? */
-export function allowed(enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, toolset: ToolsetName, annotations: ToolAnnotations): boolean {
-  return enabled.has(toolset) && hasScope(principal, scopeFor(toolset, annotations));
+/**
+ * Is this tool allowed for the principal and the toolsets (for app tools registered elsewhere)?
+ * With `catalog` and the tools' names, they are added to the scope matrix.
+ */
+export function allowed(enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, toolset: ToolsetName, annotations: ToolAnnotations,
+  catalog?: ToolScope[], names: string[] = []): boolean {
+  if (!enabled.has(toolset)) return false;
+  const scope = scopeFor(toolset, annotations);
+  for (const name of names) catalog?.push({ name, toolset, scope, readOnly: !!annotations.readOnlyHint, destructive: !!annotations.destructiveHint });
+  return hasScope(principal, scope);
 }
 
 // Annotation presets (every tool also gets its title)

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Per-area permissions for Polpo's MCP connector.** Eight scopes instead of one: `polpo:read` (always), `polpo:work` (ask Polpo, chat, tasks, missions, artifacts, rooms, memory, schedules, approvals), five areas given one by one — `polpo:files` (write, move, delete files), `polpo:messages` (send on Telegram, WhatsApp, email; channel test), `polpo:connectors`, `polpo:computers`, `polpo:vault` (reads too) — and `polpo:admin` (team, settings, skills, notification rules, learning, the REST fallback; it includes everything). Every tool needs exactly one scope; destructive ones the write scope of their area. The tool → scope matrix is generated from the code into `docs/mcp.md` (`node scripts/generate-mcp-scopes.mjs`; a test keeps it in sync) and served at `GET /api/v1/mcp/access`.
+  - **Consent:** the OAuth page lists the scopes in plain words with checkboxes (read always; the ones the client asked for checked, the others offered); the person narrows or adds, and the token carries what was allowed (`scope` in the token response, RFC 6749). A client that asks for nothing gets read and work, not admin. A refresh may ask for fewer scopes, never more. A client allowed with an MCP key gets at most that key's scopes.
+  - **Metadata:** `scopes_supported` lists the eight scopes in the protected-resource and authorization-server documents; the first `401` suggests `scope="polpo:read polpo:work"`.
+  - **Step-up:** `tools/list` shows only the tools the caller's scopes allow; calling another anyway gets `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="<held + needed>", resource_metadata="…"` and a JSON-RPC error (`-32003`) naming the missing scope, so a client can re-authorize with more.
+  - **MCP keys with scopes:** `POLPO_MCP_KEY_SCOPES` (space-separated) narrows `POLPO_MCP_KEY`; named keys in `settings.mcp.keys: [{ name, keyRef: { owner, service }, scopes }]` keep their value in the vault (default read and work) and act as `mcp-key:<name>`.
+  - **Settings → MCP access:** the connected apps (client, who allowed it, scopes, connected, last used) with Revoke (`DELETE /api/v1/mcp/grants/:id`), and the keys with their scopes — names only, never values.
+  - **Audit:** events caused through MCP carry `scopes` next to `by`, and the server log names them on every MCP message.
+
+### Changed
+- **MCP scope changes for clients with narrowed scopes** (none existed before: every token and key held the old `polpo` scope): sending a message and testing a channel need `polpo:messages` (was `polpo:work` / `polpo:admin`); writing and managing files `polpo:files` (was `polpo:work`); connector, computer and vault tools `polpo:connectors`, `polpo:computers`, `polpo:vault` (were `polpo:admin`, which still covers them).
+
+### Deprecated
+- **The all-in-one `polpo` scope.** Tokens issued with it and the legacy `POLPO_MCP_KEY` without `POLPO_MCP_KEY_SCOPES` keep every scope, so connected Claude/ChatGPT connectors and live keys work as before; the server warns once about an unnarrowed `POLPO_MCP_KEY`, and the dashboard flags both. New consents never issue `polpo` (a client asking for it is offered every box) and metadata no longer lists it.
+
 ## [0.6.0] — 2026-11-22 — Connectors, computers, and Polpo fully on MCP
 
 ### Added

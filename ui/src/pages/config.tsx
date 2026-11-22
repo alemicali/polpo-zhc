@@ -70,6 +70,7 @@ import {
   Copy,
   type LucideIcon,
   Box as SandboxIcon,
+  Plug,
 } from "lucide-react";
 import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
@@ -109,6 +110,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
+import { McpAccessSection } from "@/components/config/mcp-access-section";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -213,6 +215,7 @@ const baseSections = [
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
   { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
+  { id: "mcp", label: "MCP access", icon: Plug },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
 ] as const;
@@ -3541,6 +3544,9 @@ export function ConfigPage() {
 
         {/* ═══ SANDBOX ═══ */}
         {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
+
+        {/* ═══ MCP ACCESS ═══ */}
+        {activeSection === "mcp" && <McpAccessSection />}
 
         {/* ═══ APPEARANCE ═══ */}
         {activeSection === "appearance" && (

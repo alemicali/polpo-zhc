@@ -47,9 +47,11 @@ import {
 } from "@polpo-ai/server";
 import { getCookie } from "hono/cookie";
 import { createHmac } from "node:crypto";
-import { handleMcpRequest, resolveToolsets, type McpPrincipal } from "./mcp.js";
-import { authorizationServerMetadata, consentPage, OAUTH_SCOPE, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
-import { hasValidApiKey } from "./middleware/instance-auth.js";
+import { ALL_SCOPES, SCOPES, handleMcpRequest, hasScope, resolveToolsets, toolScopeMatrix, type McpPrincipal } from "./mcp.js";
+import {
+  authorizationServerMetadata, consentPage, consentScopes, CONSENT_SCOPE_FIELD, OAUTH_DEFAULT_SCOPE, OAuthError, OAuthServer, protectedResourceMetadata,
+} from "./oauth.js";
+import { McpKeyRing, type McpKeyInfo } from "./mcp-keys.js";
 import { reactionHint, telegramFilesHint } from "../notifications/telegram-reactions.js";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
@@ -674,12 +676,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     if (configured && (!forwardedHost || new URL(configured).host === host)) return configured;
     return `${proto}://${host}`;
   };
-  // Keys that open the MCP connector: the server's API keys, and POLPO_MCP_KEY (comma-separated) for an
-  // instance that exposes only its connector, with no API key on the dashboard and REST API.
-  const mcpKeys = (): string[] => [
-    ...(opts?.apiKeys ?? []),
-    ...(process.env.POLPO_MCP_KEY ?? "").split(",").map((k) => k.trim()).filter(Boolean),
-  ];
+  // Keys that open the MCP connector, each with its scopes: the server's API keys (every scope),
+  // POLPO_MCP_KEY (comma-separated; POLPO_MCP_KEY_SCOPES, else every scope) for an instance that exposes
+  // only its connector, with no API key on the dashboard and REST API, and named keys in settings.mcp.keys
+  // (values in the vault). See mcp-keys.ts.
+  const mcpKeys = new McpKeyRing({
+    apiKeys: () => opts?.apiKeys ?? [],
+    env: () => process.env,
+    settings: () => orchestrator?.getConfig?.()?.settings?.mcp?.keys,
+    vault: () => orchestrator?.getVaultStore?.(),
+    warn: (message) => console.warn(`[polpo/mcp] ${message}`),
+  });
+  /** The principal for a key: who acts (named keys by name) and its scopes. */
+  const keyPrincipal = (key: McpKeyInfo): McpPrincipal => ({
+    kind: "key", actor: key.source === "settings" ? `mcp-key:${key.name}` : "mcp-key", keyName: key.name, scopes: [...key.scopes],
+  });
   let oauth: { dir: string; server: OAuthServer } | undefined;
   const oauthServer = (): OAuthServer => {
     const dir = activePolpoDir();
@@ -692,12 +703,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     : c.json({ error: "server_error", error_description: err instanceof Error ? err.message : String(err) }, 500);
   // How the person on the consent page may allow a client: signed in to the dashboard, an API or MCP key, or open (no auth at all)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any Hono context
-  const consentIdentity = (c: any): { method: "session" | "api-key" | "open"; email?: string } => {
-    const keys = mcpKeys();
+  const consentIdentity = async (c: any): Promise<{ method: "session" | "api-key" | "open"; email?: string }> => {
     const instanceAuth = isInstanceAuthEnabled();
     const session = instanceAuth && opts?.workDir ? validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME)) : null;
     if (session) return { method: "session", email: session.email };
-    if (!instanceAuth && keys.length === 0) return { method: "open" };
+    if (!instanceAuth && !(await mcpKeys.any())) return { method: "open" };
     return { method: "api-key" };
   };
   // The consent form carries a token bound to the dashboard session (and this process), checked on submit
@@ -726,15 +736,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const params = authorizeParams(c.req.query());
     try {
       const client = await oauthServer().checkAuthorizeRequest(params, `${publicOrigin(c)}/mcp`);
-      const who = consentIdentity(c);
-      return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, ...who }));
+      const who = await consentIdentity(c);
+      const requested = oauthServer().requestedScopes(params.scope);
+      return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, requested, ...who }));
     } catch (err) {
       return c.html(`<!doctype html><meta charset="utf-8"><title>Polpo</title><p>This connection request is not valid: ${err instanceof Error ? err.message.replace(/[<>&]/g, "") : "error"}</p>`, 400);
     }
   });
   app.post("/oauth/authorize", async (c) => {
-    const form = await c.req.parseBody();
+    // all: the scope checkboxes repeat one field name
+    const form = await c.req.parseBody({ all: true });
     const params = authorizeParams(form);
+    // what the person left checked (read always), shown again if the page comes back with an error
+    const chosen = consentScopes(form[CONSENT_SCOPE_FIELD]);
     const resource = `${publicOrigin(c)}/mcp`;
     let client;
     try {
@@ -749,19 +763,22 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       back.searchParams.set("error", "access_denied");
       return c.redirect(back.toString(), 302);
     }
-    const who = consentIdentity(c);
+    const who = await consentIdentity(c);
     if (typeof form.csrf !== "string" || form.csrf !== consentCsrf(c)) {
-      return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, ...who, error: "This page expired: try again." }), 400);
+      return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, requested: chosen, ...who, error: "This page expired: try again." }), 400);
     }
     let subject = who.email ?? "local";
+    let granted = chosen;
     if (who.method === "api-key") {
       // pasted from an env file or with spaces: KEY=value, or the bare value
       const key = typeof form.api_key === "string" ? form.api_key.trim().replace(/^(POLPO_MCP_KEY|POLPO_API_KEY)=/, "") : "";
-      const ok = hasValidApiKey(new Request("http://x/", { headers: { "x-api-key": key } }), mcpKeys());
-      if (!ok) return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, method: "api-key", error: "That API key is not valid." }), 401);
+      const matched = key ? await mcpKeys.match(key) : undefined;
+      if (!matched) return c.html(consentPage({ client, redirectUri: params.redirect_uri!, params: { ...params, csrf: consentCsrf(c) }, requested: chosen, method: "api-key", error: "That API key is not valid." }), 401);
       subject = "api-key";
+      // a key allows a client only what the key itself may do
+      granted = chosen.filter((scope) => hasScope({ scopes: matched.scopes }, scope));
     }
-    back.searchParams.set("code", oauthServer().issueCode(params, resource, subject));
+    back.searchParams.set("code", oauthServer().issueCode(params, resource, subject, granted));
     return c.redirect(back.toString(), 302);
   });
   app.post("/oauth/token", async (c) => {
@@ -788,10 +805,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // an OAuth client (and the person who allowed it), an API or MCP key, a dashboard session, or
   // nobody on a server without auth and keys (localhost-only). Null: not allowed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any Hono context
-  const mcpPrincipal = (c: any): McpPrincipal | null => {
-    const keys = mcpKeys();
+  const mcpPrincipal = async (c: any): Promise<McpPrincipal | null> => {
     const instanceAuth = isInstanceAuthEnabled();
-    if (hasValidApiKey(c.req.raw, keys)) return { kind: "key", actor: "mcp-key", scopes: [OAUTH_SCOPE] };
+    const key = await mcpKeys.match(c.req.raw);
+    if (key) return keyPrincipal(key);
     // an OAuth access token issued for this endpoint (Claude, ChatGPT and other connectors)
     const auth = c.req.header("authorization") as string | undefined;
     const bearer = auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined;
@@ -803,22 +820,25 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return { kind: "oauth", actor, subject: grant.subject, client, scopes: grant.scope.split(/\s+/).filter(Boolean) };
     }
     const session = instanceAuth && opts?.workDir ? validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME)) : null;
-    if (session) return { kind: "session", actor: session.email, subject: session.email, scopes: [OAUTH_SCOPE] };
-    if (!instanceAuth && keys.length === 0) return { kind: "open", actor: "mcp", scopes: [OAUTH_SCOPE] };
+    if (session) return { kind: "session", actor: session.email, subject: session.email, scopes: [...ALL_SCOPES] };
+    if (!instanceAuth && !(await mcpKeys.any())) return { kind: "open", actor: "mcp", scopes: [...ALL_SCOPES] };
     return null;
   };
   app.all("/mcp", async (c) => {
-    const principal = mcpPrincipal(c);
+    const principal = await mcpPrincipal(c);
+    const resourceMetadataUrl = `${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp`;
     if (!principal) {
-      c.header("WWW-Authenticate", `Bearer resource_metadata="${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp", scope="${OAUTH_SCOPE}"`);
+      c.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}", scope="${OAUTH_DEFAULT_SCOPE}"`);
       return c.json({ error: "Authentication required: send Authorization: Bearer <your Polpo API key>" }, 401);
     }
     if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized. Complete setup first." }, 503);
-    return withEventOrigin({ source: "api", by: principal.actor }, () => handleMcpRequest(c.req.raw, {
+    // what it does is recorded as the principal, with the scopes it acted under
+    return withEventOrigin({ source: "api", by: principal.actor, scopes: principal.scopes }, () => handleMcpRequest(c.req.raw, {
       version: POLPO_PACKAGE_VERSION,
       log: (line) => console.log(`[polpo/mcp] ${line}`),
       routes: () => app.routes,
       principal,
+      resourceMetadataUrl,
       toolsets: resolveToolsets(process.env.POLPO_MCP_TOOLSETS, orchestrator.getConfig()?.settings?.mcp?.toolsets),
       publicUrl: publicOrigin(c),
       api: async (method, path, body, headers) => {
@@ -1477,6 +1497,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/computers", computerRoutes(computerDeps));
   // every egress proxy and every remote computer's egress (read-only)
   authed.route("/egress", egressRoutes(computerDeps));
+  // Polpo's own MCP connector: who may use it (OAuth grants, MCP keys) and with which scopes
+  authed.get("/mcp/access", async (c) => c.json({ ok: true, data: {
+    scopes: ALL_SCOPES.map((id) => ({ id, ...SCOPES[id] })),
+    grants: oauthServer().listGrants(),
+    keys: await mcpKeys.list(),
+    tools: toolScopeMatrix().map(({ name, toolset, scope, destructive }) => ({ name, toolset, scope, destructive })),
+  } }));
+  authed.delete("/mcp/grants/:id", (c) => {
+    if (!oauthServer().revokeGrant(c.req.param("id"))) return c.json({ ok: false, error: "No such grant (it may have expired)" }, 404);
+    return c.json({ ok: true, data: { revoked: c.req.param("id") } });
+  });
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,

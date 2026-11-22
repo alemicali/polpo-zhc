@@ -16,6 +16,8 @@ export type EventSource = "api" | "polpo" | "agent" | "channel" | "schedule" | "
 export interface EventOrigin {
   source?: EventSource;
   by?: string;
+  /** The scopes `by` acted under, when it came through Polpo's MCP connector (e.g. ["polpo:read", "polpo:work"]). */
+  scopes?: string[];
 }
 
 export interface PolpoEventMap {
