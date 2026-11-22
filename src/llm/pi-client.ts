@@ -262,8 +262,14 @@ export function enforceModelAllowlist(spec: string): void {
  */
 export function resolveApiKey(provider: string): string | undefined {
   if (isCustomProvider(provider)) return undefined; // vault/keyless — see hasProviderCredentials
-  return getEnvApiKey(provider as KnownProvider);
+  const key = getEnvApiKey(provider as KnownProvider);
+  // pi-ai answers "<authenticated>" for ambient credentials (Bedrock bearer token / AWS chain,
+  // Vertex ADC): not a key. Passing it on would send it as the credential.
+  return key === AMBIENT_AUTH_MARKER ? undefined : key;
 }
+
+/** What pi-ai's getEnvApiKey returns when the provider authenticates from its environment. */
+const AMBIENT_AUTH_MARKER = "<authenticated>";
 
 /**
  * Synchronous "can this provider be called" check: env / ambient credentials for built-ins,
@@ -271,7 +277,7 @@ export function resolveApiKey(provider: string): string | undefined {
  */
 export function hasProviderCredentials(provider: string): boolean {
   if (isCustomProvider(provider)) return customProviderHasCredentials(provider);
-  return !!resolveApiKey(provider) || hasAmbientCredentials(provider);
+  return !!resolveApiKey(provider) || hasAmbientCredentials(provider) || getEnvApiKey(provider as KnownProvider) === AMBIENT_AUTH_MARKER;
 }
 
 /**
