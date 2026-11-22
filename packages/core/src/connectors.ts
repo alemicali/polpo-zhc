@@ -182,6 +182,11 @@ export interface ConnectorCatalogEntry {
   verified: boolean;
   /** Setup steps shown before connecting (e.g. Google: create a Web OAuth client…). */
   setup?: string;
+  /**
+   * An app manifest to create the vendor's OAuth app from (e.g. Slack: JSON with the user scopes),
+   * with "<public URL>/api/v1/connectors/oauth/callback" where this instance's redirect URI goes.
+   */
+  setupManifest?: string;
 }
 
 /** Event payload for `connector:changed`. */
