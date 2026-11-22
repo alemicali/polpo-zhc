@@ -27,6 +27,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-connector-icons",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Icone dei connettori personalizzati e configurazione automatica",
+    summary: "I connettori aggiunti con un URL ora mostrano la loro icona, e quando ne aggiungi uno Polpo capisce da solo come collegarlo.",
+    body: [
+      "- **Icone anche per i connettori personalizzati**: Polpo cerca l'icona come fa un buon client MCP: prima quella che il server MCP dichiara (anche la variante per il tema scuro), poi i dati di accesso OAuth, poi il sito del servizio (es. mcp.sitoinchat.it → sitoinchat.it: icona SVG, icone del manifest, favicon). Se non trova nulla resta l'iniziale colorata. I connettori del catalogo mantengono le loro icone ufficiali.",
+      "- Le icone sono scaricate dal server (mai caricate da siti esterni nel browser), solo in https, con limiti di dimensione e controlli di sicurezza; gli SVG vengono ripuliti.",
+      "- I connettori già aggiunti ricevono l'icona da soli alla prima apertura dell'elenco.",
+      "- Nelle impostazioni di un connettore personalizzato: **Refresh icon**, oppure carica un'immagine o indica un URL; **Automatic** torna all'icona trovata.",
+      "- **Aggiungi un connettore personalizzato**: appena inserisci l'URL, Polpo verifica il server e propone come collegarlo (nessun accesso, OAuth con registrazione automatica o con un tuo client, token) con l'opzione **Recommended** già selezionata, nome, ambiti (scopes) e icona precompilati. Puoi sempre cambiare scelta.",
+      "- Le icone compaiono ovunque ci sono i connettori: elenco, impostazioni, strumenti dell'agente e strumenti del task; via MCP (`icon_url`) e nelle risposte di Polpo. La rilevazione è disponibile anche dall'API (`POST /api/v1/connectors/discover`), da MCP (`polpo_connector_add` con `detect_only`) e chiedendolo a Polpo.",
+    ].join("\n"),
+    highlight: false,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-22-task-tool-scope",
     date: "2026-11-22",
     kind: "new",

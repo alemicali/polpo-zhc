@@ -3,9 +3,18 @@
  * secrets are set (names and booleans only).
  */
 import type { ConnectorConfig } from "@polpo-ai/core";
+import { CATALOG_ICON_FILES } from "./catalog-icons.generated.js";
 import { SECRET_KEYS } from "./secrets.js";
 
 export interface PublicConnector extends ConnectorConfig {
+  /**
+   * The connector's icon, relative to the instance: a catalog connector's bundled official icon
+   * (/connector-icons/<catalogId>.<ext>, a public dashboard asset), else a custom connector's stored one
+   * (/api/v1/connectors/<id>/icon?v=<hash>, authenticated like the rest of the API). Absent: letter tile.
+   */
+  iconUrl?: string;
+  /** A custom connector's variant for dark backgrounds, when the MCP server gave one. */
+  iconDarkUrl?: string;
   secrets: {
     bearerToken: boolean;
     headers: string[];
@@ -19,6 +28,7 @@ export function publicConnector(connector: ConnectorConfig, secretKeys: string[]
   const has = (k: string) => secretKeys.includes(k);
   return {
     ...connector,
+    ...connectorIconUrls(connector),
     secrets: {
       bearerToken: has(SECRET_KEYS.bearer),
       headers: secretKeys.filter((k) => k.startsWith("header:")).map((k) => k.slice("header:".length)),
@@ -27,6 +37,18 @@ export function publicConnector(connector: ConnectorConfig, secretKeys: string[]
       oauth: { authorized: has(SECRET_KEYS.tokens), clientRegistered: has(SECRET_KEYS.clientInfo), pending: has(SECRET_KEYS.state) },
     },
   };
+}
+
+/** Where a connector's icon is served (see PublicConnector.iconUrl). */
+export function connectorIconUrls(connector: Pick<ConnectorConfig, "id" | "catalogId" | "iconAsset">): { iconUrl?: string; iconDarkUrl?: string } {
+  if (connector.catalogId) {
+    const ext = CATALOG_ICON_FILES[connector.catalogId];
+    return ext ? { iconUrl: `/connector-icons/${connector.catalogId}.${ext}` } : {};
+  }
+  const asset = connector.iconAsset;
+  if (!asset) return {};
+  const base = `/api/v1/connectors/${encodeURIComponent(connector.id)}/icon`;
+  return { iconUrl: `${base}?v=${asset.hash}`, ...(asset.dark ? { iconDarkUrl: `${base}?theme=dark&v=${asset.dark.hash}` } : {}) };
 }
 
 /**

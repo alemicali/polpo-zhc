@@ -49,12 +49,16 @@ Catalog entries with a per-account URL (`urlTemplate`, e.g. `https://mcp.dev.azu
 | `GET` | `/api/v1/connectors/:id/tools` | The tools (`?refresh=1`), with their policy |
 | `POST` | `/api/v1/connectors/:id/oauth/start` | `{ authorizationUrl }` to open (or `{ authorized: true }`) |
 | `POST` | `/api/v1/connectors/:id/disconnect` | Revoke (best effort) and forget the OAuth tokens |
+| `POST` | `/api/v1/connectors/discover` | `{ url }`: how to connect to an MCP server (transport, sign-in options with the recommended one, scopes, name, icon). Nothing is stored |
+| `GET` | `/api/v1/connectors/:id/icon` | A custom connector's icon (`?theme=dark` for its dark variant); `404` when it has none |
+| `POST` | `/api/v1/connectors/:id/icon/refresh` | Look a custom connector's icon up again |
+| `PUT` / `DELETE` | `/api/v1/connectors/:id/icon` | Set your own icon (`{ url }` or `{ dataUri }`), or go back to the discovered one |
 | `GET` | `/api/v1/connectors/oauth/callback` | **Public**: where the browser comes back (single-use state) |
 | `GET` | `/api/v1/connectors/oauth/client-metadata.json` | **Public**: this instance's OAuth Client ID Metadata Document |
 
 ### Polpo's tools
 
-`connectors_list` (status, tools, who may use them; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL; for OAuth it returns the link the person opens; a token or an OAuth app's secret is entered by the person from a setup link, never in chat, and Polpo waits with `setup_wait`), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed); on demand (group `connectors`): `connector_catalog`, `connector_update` (name, on/off, tool policy), `connector_test`, `connector_disconnect`. Which tools of a connector an agent gets: `add_agent` / `update_agent` `connectorTools`. Polpo cannot add local (stdio) connectors.
+`connectors_list` (status, tools, who may use them, where a custom connector's icon came from; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL, probed first to pick the transport, sign-in, scopes and name; `detect_only: true` only reports how to connect; for OAuth it returns the link the person opens; a token or an OAuth app's secret is entered by the person from a setup link, never in chat, and Polpo waits with `setup_wait`), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed); on demand (group `connectors`): `connector_catalog`, `connector_update` (name, on/off, tool policy), `connector_test`, `connector_disconnect`. Which tools of a connector an agent gets: `add_agent` / `update_agent` `connectorTools`. Polpo cannot add local (stdio) connectors.
 
 ## Several accounts of the same service
 
@@ -123,6 +127,40 @@ Polpo asks Google for offline access (`access_type=offline`, `prompt=consent`) s
 ## Custom connectors
 
 Any remote MCP server: `url` (https), `transport` `http` (default; falls back to SSE) or `sse`, and `auth` `none` / `bearer` / `headers` / `oauth` (dynamic registration, CIMD, or `auth.oauth.clientId` + `secrets.clientSecret`, with optional `scopes`, `extraAuthParams` and `authorizationServer`). Non-secret headers go in `transport.headers`.
+
+### Detecting how to connect
+
+Like Claude's custom connector dialog, Polpo works out how to connect from the URL alone (`POST /api/v1/connectors/discover { url }`; the dashboard does it as soon as a URL is typed, `polpo_connector_add` / Polpo's `connector_add` when no `auth` is given, and `detect_only: true` only reports it). Server side, read only, with the icon rules below (https, no private addresses, short timeouts):
+
+1. **Transport**: `POST` an MCP `initialize` (Streamable HTTP); if the endpoint does not take it, `GET` with `Accept: text/event-stream` (legacy SSE).
+2. **Sign-in**: `initialize` succeeds → none (and the server's name, title, version, website, icons and instructions are read). `401` / `403` → the `WWW-Authenticate` `resource_metadata`, else the well-known protected resource metadata (RFC 9728: `resource`, `resource_name`, `scopes_supported`, `authorization_servers`), then the authorization server's metadata (RFC 8414, else OpenID Connect discovery): `registration_endpoint` → dynamic client registration, `client_id_metadata_document_supported` → a Client ID Metadata Document, PKCE methods, token endpoint auth methods. A `401` with no OAuth metadata at all → a bearer token.
+3. **Recommendation**: `oauth-cimd` (when the server supports it and this instance has a public https URL), else `oauth-dcr`, else `oauth-preregistered` (create a client in the vendor's console: client id and secret), `bearer`, or `none`; with the transport, every scope the resource lists (preselected; untick what you do not want), a name (`serverInfo.title` / `name`, else `resource_name`) and the icon. The other options are listed too, each with one line on what it means.
+
+```bash
+curl -X POST $POLPO/api/v1/connectors/discover -H "Authorization: Bearer $KEY" -d '{"url":"https://mcp.sitoinchat.it"}'
+# → { "transport": "http", "authRequired": true,
+#     "resource": { "resourceName": "SitoInChat", "scopes": ["sites:read","sites:write","sites:publish"], "authorizationServers": ["https://sitoinchat.it/api/auth"] },
+#     "authorizationServer": { "registration": true, "cimd": false, "pkceMethods": ["S256"], … },
+#     "options": [{ "auth": "oauth-dcr", "recommended": true, … }, { "auth": "oauth-preregistered", … }, { "auth": "bearer", … }],
+#     "recommendation": { "transport": "http", "auth": "oauth-dcr", "scopes": [...], "name": "SitoInChat", "icon": { "source": "website", "dataUri": "data:image/svg+xml;base64,…" } } }
+```
+
+### Icons
+
+Catalog connectors show their vendor's official icon, bundled with the dashboard (`ui/public/connector-icons`, `scripts/fetch-connector-icons.mjs`): they are never looked up or overridden. A **custom** connector (no `catalogId`) gets its icon the way a good MCP client finds one, first match wins:
+
+1. **The MCP server's own icons**: `initialize` → `serverInfo.icons` (MCP 2025-11-25 `Implementation.icons`: `{ src, mimeType?, sizes?, theme? }`). The best one for light backgrounds (no theme or `light`): SVG, else the largest ≥ 64 px; and, when given, the best `theme: "dark"` one as a variant the dashboard shows on a dark tile in dark mode. `serverInfo.websiteUrl` is remembered for step 3.
+2. **The OAuth metadata** (OAuth connectors): a `logo_uri` in the protected resource metadata or the authorization server's metadata.
+3. **The website**: `websiteUrl`, the server's registrable domain (`mcp.sitoinchat.it` → `sitoinchat.it`; `co.uk`-style suffixes and hosting platforms such as `*.vercel.app` handled) and the authorization server's origin. The page's `<link rel="icon" | "shortcut icon" | "apple-touch-icon" | "mask-icon">` (with `sizes` and `type`) and its web app manifest's icons, then `/apple-touch-icon.png` and `/favicon.ico` (and the `www.` host when the bare domain does not answer). Best first: SVG, then the largest square ≥ 64 px (PNG preferred); a monochrome mask icon only as a last resort.
+4. Nothing usable: the letter tile in the brand color.
+
+**When**: in the background when a custom connector is created, when it connects (its `serverInfo` may carry icons, which then replace a website icon), and lazily when the list is read, so connectors added before this get theirs; a lookup that found nothing is retried after a day, a found icon refreshed on connect after a week. Discovery never blocks or fails a connection. **Refresh icon** in the connector's sheet (or `POST /api/v1/connectors/:id/icon/refresh`) looks it up now.
+
+**Your own icon**: in the sheet, **Upload…** (PNG, SVG, ICO, JPEG, GIF or WebP, 512 KB at most) or **From URL…** (fetched once by the server); `PUT /api/v1/connectors/:id/icon` with `{ dataUri }` or `{ url }`. It is pinned: discovery leaves it alone until **Automatic** (`DELETE /api/v1/connectors/:id/icon`).
+
+**Safety**: icons are fetched by the server only (the dashboard never hotlinks a third-party site), over https, never from a private, loopback, link-local, CGNAT or other reserved address (checked on the address the connection actually uses, so DNS rebinding cannot slip past; `settings.connectors.allowPrivateNetwork` lifts this as for connectors), with at most 3 redirects (each checked again), 5 s per request, 512 KB per image and a total time budget. The image type is read from its bytes, not the Content-Type. SVGs are sanitized: no scripts, event handlers, `foreignObject`, external references (`href`, `src`, CSS `url()` and `@import`: only `#fragments` and inline raster data), DOCTYPE, entities or processing instructions. An ICO holding a PNG (most modern favicons) is stored as that PNG; other ICOs are kept as they are (browsers render them).
+
+**Storage and serving**: the bytes in `<.polpo>/connector-icons/<id>.light` (and `.dark`), the metadata in the connector's `iconAsset` (`source`: `mcp` / `oauth` / `website` / `upload` / `url`, `src`, `mimeType`, `hash`, size, `fetchedAt`, `pinned`, `dark`) and `iconCheckedAt`; removed with the connector. `GET /api/v1/connectors/:id/icon` (authenticated like the other connector routes) sends it with an `ETag` (`If-None-Match` → `304`), `Cache-Control: private, max-age=31536000, immutable` for the hashed URL (`?v=<hash>`, else `no-cache`), `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`. The API's connectors carry `iconUrl` (`/connector-icons/<catalogId>.<ext>` for a catalog connector, `/api/v1/connectors/<id>/icon?v=<hash>` for a custom one) and `iconDarkUrl`; MCP's `polpo_connectors_list` gives `icon_url` as an absolute URL. The dashboard fetches API icons with its credentials and shows them everywhere connectors appear (list, sheet, agent → Tools & Skills, a task's tool scope).
 
 ### Local (stdio) connectors — admin only
 

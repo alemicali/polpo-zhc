@@ -123,7 +123,7 @@ function ConnectorRow({
   const needsSignIn = state === "needs_auth" || state === "needs_reauth";
   return (
     <div data-testid={`connector-row-${connector.id}`} className="flex items-center gap-3 rounded-card border bg-card px-3 py-3 sm:px-4">
-      <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} />
+      <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} />
       <button type="button" onClick={onManage} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{connector.name}</span>

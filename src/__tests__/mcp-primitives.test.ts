@@ -46,7 +46,7 @@ function fakeInstance() {
   const schedules = [{ id: "sched-m1", missionId: "m1", expression: "0 9 * * 1-5", recurring: true, enabled: true, nextRunAt: "2026-11-24T09:00:00.000Z" }];
   const checks: Array<Record<string, unknown>> = [];
   const connectors = new Map<string, Record<string, unknown>>([
-    ["linear", { id: "linear", name: "Linear", kind: "mcp", transport: { type: "http", url: `https://mcp.linear.app/mcp?key=${SECRET}` }, auth: { type: "oauth" }, access: { agents: ["coach"], polpo: true }, enabled: true, status: "connected", toolCount: 12, secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true } } }],
+    ["linear", { id: "linear", name: "Linear", kind: "mcp", catalogId: "linear", iconUrl: "/connector-icons/linear.svg", transport: { type: "http", url: `https://mcp.linear.app/mcp?key=${SECRET}` }, auth: { type: "oauth" }, access: { agents: ["coach"], polpo: true }, enabled: true, status: "connected", toolCount: 12, secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true } } }],
   ]);
   const watchers: Array<Record<string, unknown>> = [];
   const vault: Record<string, Array<Record<string, unknown>>> = {
@@ -205,6 +205,21 @@ function fakeInstance() {
       const c = { id, name: b.name ?? id, kind: "mcp", transport: { type: b.transport?.type ?? "http", url: b.url ?? `https://${id}.example.com/mcp` }, auth: { type: authType }, access: { agents: b.access?.agents ?? [], polpo: true }, enabled: true, status: authType === "oauth" ? "needs_auth" : "disconnected", secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: false } } };
       connectors.set(id, c);
       return okData(c, 201);
+    }
+    if (p === "/connectors/discover" && method === "POST") {
+      const url = (body as { url: string }).url;
+      if (!/sitoinchat/.test(url)) return okData({ url, reachable: false, error: "Could not reach the server: ENOTFOUND", options: [] });
+      return okData({
+        url, reachable: true, transport: "http", authRequired: true,
+        resource: { resourceName: "SitoInChat", scopes: ["sites:read", "sites:write"], authorizationServers: ["https://sitoinchat.it/api/auth"] },
+        authorizationServer: { issuer: "https://sitoinchat.it/api/auth", registration: true, cimd: false, pkceMethods: ["S256"], tokenAuthMethods: ["none"] },
+        options: [
+          { auth: "oauth-dcr", recommended: true, description: "Sign in with OAuth; Polpo registers itself automatically." },
+          { auth: "oauth-preregistered", recommended: false, description: "Sign in with OAuth using a client id." },
+          { auth: "bearer", recommended: false, description: "Paste an API key or token." },
+        ],
+        recommendation: { transport: "http", auth: "oauth-dcr", recommended: true, scopes: ["sites:read", "sites:write"], name: "SitoInChat", icon: { dataUri: "data:image/svg+xml;base64,AA==", source: "website", src: "https://sitoinchat.it/favicon.svg" }, notes: ["Sign-in at sitoinchat.it (dynamic client registration)."] },
+      });
     }
     if ((m = p.match(/^\/connectors\/([^/]+)(\/[a-z/]+)?$/))) {
       const c = connectors.get(m[1]!);
@@ -589,6 +604,8 @@ describe("connectors", () => {
     expect(l.structuredContent.items).toEqual([expect.objectContaining({ id: "linear", status: "connected", authorized: true, agents: ["coach"], tool_count: 12 })]);
     expect(l.structuredContent.items[0].secrets).toBeUndefined();
     expect(l.structuredContent.items[0].url).toBe("https://mcp.linear.app/mcp?…");
+    // the icon, as an absolute URL (a catalog connector: the dashboard's bundled official icon)
+    expect(l.structuredContent.items[0].icon_url).toBe("https://polpo.example.com/connector-icons/linear.svg");
     expect(JSON.stringify(l)).not.toContain(SECRET);
     const one = await call(deps(f), "polpo_connectors_list", { id: "linear" });
     expect(one.structuredContent.tools).toEqual([{ name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "delete_issue", policy: "off" }]);
@@ -618,6 +635,31 @@ describe("connectors", () => {
     const custom = await call(deps(f), "polpo_connector_add", { url: "https://mcp.acme.dev/mcp" });
     expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({ url: "https://mcp.acme.dev/mcp", name: "acme.dev", transport: { type: "http" } });
     expect(custom.structuredContent.connector).toMatchObject({ status: expect.any(String) });
+  });
+
+  it("detects how to connect to a custom server, and adding one uses the detection", async () => {
+    const f = fakeInstance();
+    const d = await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it", detect_only: true });
+    // nothing was added
+    expect(f.calls.some((c) => c.method === "POST" && c.path === "/api/v1/connectors")).toBe(false);
+    expect(d.structuredContent.detected).toMatchObject({
+      reachable: true, transport: "http", auth_required: true, icon_source: "website",
+      recommended: { auth: "oauth-dcr", transport: "http", scopes: ["sites:read", "sites:write"], name: "SitoInChat" },
+    });
+    expect(d.structuredContent.detected.options[0]).toMatchObject({ auth: "oauth-dcr", recommended: true });
+    expect(d.content[0].text).toMatch(/oauth-dcr \(recommended\)/);
+    // the data URI preview stays out of the model's context
+    expect(JSON.stringify(d)).not.toContain("data:image");
+    const added = await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({
+      url: "https://mcp.sitoinchat.it", name: "SitoInChat", transport: { type: "http" }, auth: { type: "oauth", oauth: { scopes: ["sites:read", "sites:write"] } },
+    });
+    expect(added.structuredContent.authorization_url).toMatch(/^https:\/\/auth\.example\.com/);
+    // explicit choices win over the detection; an unreachable server is reported
+    await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it", auth: "none", transport: "sse", name: "Mine" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({ name: "Mine", transport: { type: "sse" }, auth: { type: "none" } });
+    expect((await call(deps(f), "polpo_connector_add", { url: "https://unreachable.example", detect_only: true })).structuredContent.detected).toMatchObject({ reachable: false, error: expect.stringMatching(/ENOTFOUND/) });
+    expect(await call(deps(f), "polpo_connector_add", { catalog_id: "notion", detect_only: true })).toMatchObject({ isError: true });
   });
 
   it("updates access and tool policy, tests, links OAuth, disconnects and removes with confirm", async () => {

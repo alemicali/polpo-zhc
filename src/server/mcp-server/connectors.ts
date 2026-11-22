@@ -16,7 +16,7 @@ import { unknownAgents } from "./tasks.js";
 type Connector = {
   id: string; name: string; account?: string; description?: string; transport: { type: string; url?: string }; auth: { type: string; oauth?: { app?: string } };
   access: { agents: string[] | "*"; polpo: boolean }; enabled: boolean; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
-  lastConnectedAt?: string; toolPolicy?: Record<string, string>;
+  lastConnectedAt?: string; toolPolicy?: Record<string, string>; iconUrl?: string; iconAsset?: { source?: string };
   secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean } };
 };
 type CatalogEntry = {
@@ -30,6 +30,7 @@ const connectorItem = z.object({
   authorized: z.boolean().optional(), credentials_set: z.boolean().optional(), last_error: z.string().optional(), catalog_id: z.string().optional(),
   tool_policy: z.record(z.string(), z.string()).optional(),
   agent_tools: z.union([z.literal("*"), z.array(z.string())]).optional(),
+  icon_url: z.string().optional().describe("The connector's icon: a catalog connector's official one, else the one found for it or set by the person (the API URL needs the instance's auth). Absent: no icon"),
 });
 
 /** Whether the connector's access lets `agent` use it (the API's connectorGrants, on the view). */
@@ -45,8 +46,12 @@ function safeUrl(url: string): string {
   }
 }
 
+/** Where the dashboard's assets and the API are, to make the icon URL absolute. */
+interface Bases { api: (path: string) => string; dashboard: (path: string) => string }
+const relative: Bases = { api: (p) => p, dashboard: (p) => p };
+
 /** What a connector is, without secrets (only whether they are set). */
-const view = (c: Connector) => ({
+const baseView = (c: Connector, bases: Bases = relative) => ({
   id: c.id, name: c.name, ...(c.account ? { account: c.account } : {}), status: c.enabled ? c.status ?? "disconnected" : "disabled", enabled: c.enabled,
   ...(c.transport.url ? { url: safeUrl(c.transport.url) } : {}), auth: c.auth.type, agents: c.access.agents, polpo: c.access.polpo,
   ...(c.toolCount !== undefined ? { tool_count: c.toolCount } : {}),
@@ -54,8 +59,9 @@ const view = (c: Connector) => ({
   ...(c.auth.type === "bearer" || c.auth.type === "headers" ? { credentials_set: !!(c.secrets?.bearerToken || c.secrets?.headers.length) } : {}),
   ...(c.lastError ? { last_error: c.lastError } : {}), ...(c.catalogId ? { catalog_id: c.catalogId } : {}),
   ...(c.toolPolicy && Object.keys(c.toolPolicy).length ? { tool_policy: c.toolPolicy } : {}),
+  ...(c.iconUrl ? { icon_url: c.iconUrl.startsWith("/api/") ? bases.api(c.iconUrl) : bases.dashboard(c.iconUrl) } : {}),
 });
-const line = (c: ReturnType<typeof view>) => `- ${c.id} "${c.name}"${c.account && !c.name.includes(c.account) ? ` (${c.account})` : ""}${c.catalog_id && c.catalog_id !== c.id ? ` (another ${c.catalog_id} account)` : ""} [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
+const line = (c: ReturnType<typeof baseView>) => `- ${c.id} "${c.name}"${c.account && !c.name.includes(c.account) ? ` (${c.account})` : ""}${c.catalog_id && c.catalog_id !== c.id ? ` (another ${c.catalog_id} account)` : ""} [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
   + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
 
 async function loadConnector(deps: McpDeps, id: string) {
@@ -65,6 +71,8 @@ async function loadConnector(deps: McpDeps, id: string) {
 const notFound = (id: string) => fail(`There is no connector "${id}". List them with polpo_connectors_list.`);
 
 export function registerConnectorTools(tool: Register, deps: McpDeps): void {
+  const apiBase = (deps.publicUrl ?? "").replace(/\/+$/, "");
+  const view = (c: Connector) => baseView(c, { api: (p) => `${apiBase}${p}`, dashboard: (p) => dashboardLink(deps, p) });
   const setupUrl = (id?: string, field?: string) => (id ? setupHandoff(deps, { kind: "connector", item: id, ...(field ? { field } : {}) }, "connector's credentials").setup_url : dashboardLink(deps, "/connectors"));
 
   /** The OAuth link to open (or that it is authorized already). */
@@ -166,30 +174,100 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       + `${p.next_cursor ? `\n(${p.total} in all; more: cursor ${p.next_cursor})` : ""}`, p);
   });
 
+  /** The probe of an MCP server URL (POST /connectors/discover). */
+  type Probe = {
+    url: string; reachable: boolean; error?: string; transport?: "http" | "sse"; authRequired?: boolean;
+    server?: { name?: string; title?: string; version?: string; instructions?: string };
+    resource?: { resourceName?: string; scopes?: string[]; authorizationServers?: string[] };
+    authorizationServer?: { issuer?: string; registration: boolean; cimd: boolean; pkceMethods: string[] };
+    options: Array<{ auth: string; recommended: boolean; description: string }>;
+    recommendation?: { transport: "http" | "sse"; auth: string; scopes: string[]; name?: string; icon?: { source: string; src?: string }; notes: string[] };
+  };
+  const probe = async (url: string, icon: boolean) => {
+    const r = await apiSend(deps, "POST", "/connectors/discover", { url, icon });
+    return r.ok ? { ok: true as const, probe: r.data as Probe } : r;
+  };
+
+  const detectedItem = z.object({
+    reachable: z.boolean(), error: z.string().optional(), transport: z.enum(["http", "sse"]).optional(), auth_required: z.boolean().optional(),
+    recommended: z.object({ transport: z.enum(["http", "sse"]), auth: z.string(), scopes: z.array(z.string()), name: z.string().optional(), notes: z.array(z.string()) }).optional(),
+    options: z.array(z.object({ auth: z.string(), recommended: z.boolean(), description: z.string() })),
+    server: z.object({ name: z.string().optional(), title: z.string().optional(), version: z.string().optional() }).optional(),
+    icon_source: z.string().optional().describe("Where its icon was found: mcp, oauth or website"),
+  }).describe("How to connect to the server, as detected (detect_only, or a custom URL added without auth)");
+
+  /** The probe, for the model: text and structured (no data URIs). */
+  const describeProbe = (url: string, p: Probe) => {
+    if (!p.recommendation) {
+      return { text: `Could not detect how to connect to ${url}: ${p.error ?? "no answer"}.`, data: { reachable: p.reachable, ...(p.error ? { error: p.error } : {}), options: [] } };
+    }
+    const rec = p.recommendation;
+    const lines = [
+      `${rec.name ?? url}: ${rec.transport === "sse" ? "legacy SSE" : "Streamable HTTP"}, ${p.authRequired ? "needs sign-in" : "no sign-in needed"}.`,
+      ...p.options.map((o) => `- ${o.auth}${o.recommended ? " (recommended)" : ""}: ${o.description}`),
+      ...(rec.scopes.length ? [`Scopes: ${rec.scopes.join(", ")}`] : []),
+      ...rec.notes,
+      p.server?.version ? `Server: ${p.server.title ?? p.server.name ?? ""} ${p.server.version}`.trim() : "",
+    ].filter(Boolean);
+    return {
+      text: lines.join("\n"),
+      data: {
+        reachable: p.reachable, ...(p.transport ? { transport: p.transport } : {}), ...(p.authRequired !== undefined ? { auth_required: p.authRequired } : {}),
+        recommended: { transport: rec.transport, auth: rec.auth, scopes: rec.scopes, ...(rec.name ? { name: rec.name } : {}), notes: rec.notes },
+        options: p.options,
+        ...(p.server ? { server: { ...(p.server.name ? { name: p.server.name } : {}), ...(p.server.title ? { title: p.server.title } : {}), ...(p.server.version ? { version: p.server.version } : {}) } } : {}),
+        ...(rec.icon ? { icon_source: rec.icon.source } : {}),
+      },
+    };
+  };
+
   tool("connectors", "polpo_connector_add", {
     title: "Add a connector",
     description: "Add a connector from the catalog (catalog_id) or a remote MCP server (url, https). For OAuth ones it returns authorization_url: "
       + "give it to the person to open and sign in. Servers that need a token or an OAuth app's secret are added but finished in the dashboard (setup_url): "
       + "secrets never go through this connector. Agents get its tools only when listed in agents; Polpo by default. "
       + "Another account of an app already added (a second Gmail inbox, one per agent): the same catalog_id again with a name that says which "
-      + "account (\"Gmail – info@acme.com\"); it gets its own id (gmail-2, gmail-3…), sign-in and tools (mcp__gmail-2__…).",
+      + "account (\"Gmail – info@acme.com\"); it gets its own id (gmail-2, gmail-3…), sign-in and tools (mcp__gmail-2__…). "
+      + "A custom URL is probed first (read only), like a custom connector dialog: the transport (Streamable HTTP or legacy SSE), the sign-in "
+      + "(none; OAuth with a client metadata document or dynamic registration; OAuth with a pre-registered client id; a token), the scopes, the name. "
+      + "detect_only: true only reports that (detected), without adding anything.",
     inputSchema: {
       catalog_id: z.string().optional().describe("A catalog id (polpo_connector_catalog)"),
       url: z.string().url().optional().describe("A remote MCP server's URL, or your account's URL for catalog entries with a url_template"),
       name: z.string().max(80).optional().describe("Display name (default: the catalog's name, or the host). For another account of the same app, say which: \"Gmail – info@acme.com\""),
       id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "lowercase letters, digits and -").optional().describe("Slug used in tool names mcp__<id>__<tool>"),
       transport: z.enum(["http", "sse"]).optional().describe("http (default: streamable HTTP, falls back to SSE) or sse"),
-      auth: z.enum(["none", "oauth"]).optional().describe("For a custom URL: none (default) or oauth. Token-based servers are set up in the dashboard"),
+      auth: z.enum(["none", "oauth"]).optional().describe("For a custom URL: none or oauth. Default: detected; token-based servers are finished in the dashboard"),
+      detect_only: z.boolean().optional().describe("Custom URL: only detect how to connect (transport, sign-in options with the recommended one, scopes, name); nothing is added"),
       agents: z.union([z.array(z.string()), z.literal("*")]).optional().describe("Agents that may use its tools ('*' for all; default none)"),
       polpo: z.boolean().optional().describe("Polpo may use its tools (default true)"),
     },
     outputSchema: {
-      connector: connectorItem, authorization_url: z.string().optional(), setup_url: z.string().optional(),
+      connector: connectorItem.optional(), authorization_url: z.string().optional(), setup_url: z.string().optional(),
+      detected: detectedItem.optional(),
       next: z.string().describe("What to do next"),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async ({ catalog_id, url, name, id, transport, auth, agents, polpo }) => {
+  }, async ({ catalog_id, url, name, id, transport, auth, detect_only, agents, polpo }) => {
     if (!catalog_id && !url) return fail("Give catalog_id (polpo_connector_catalog) or the url of a remote MCP server.");
+    if (detect_only) {
+      if (catalog_id || !url) return fail("detect_only is for a custom url: a catalog entry already knows how it connects.");
+      const d = await probe(url, true);
+      if (!d.ok) return apiError(d, "Probing the server");
+      const { text, data } = describeProbe(url, d.probe);
+      return ok(`${text}\nNothing was added: call polpo_connector_add with the url (and auth / name to change the detected ones).`, {
+        detected: data, next: d.probe.recommendation ? "polpo_connector_add with this url to add it" : "Check the URL",
+      });
+    }
+    // a custom URL: detect the transport, the sign-in and the name, unless given
+    let detected: Probe["recommendation"];
+    if (!catalog_id && url && (!auth || !transport)) {
+      const d = await probe(url, false);
+      if (d.ok) detected = d.probe.recommendation;
+    }
+    const detectedAuth = !auth && detected ? (detected.auth === "none" ? "none" : detected.auth === "bearer" ? "bearer" : "oauth") : undefined;
+    transport ??= detected?.transport;
+    name ??= detected?.name;
     if (Array.isArray(agents)) {
       const missing = await unknownAgents(deps, agents);
       if (missing) return fail(missing);
@@ -208,7 +286,8 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...(entry ? { catalogId: entry.id } : {}), ...(url ? { url } : {}), ...(derivedName ? { name: derivedName } : {}), ...(id ? { id } : {}),
       // never a local process (stdio) from here: a remote transport, the catalog's or http
       ...(transport ? { transport: { type: transport } } : entry ? {} : { transport: { type: "http" } }),
-      ...(auth ? { auth: { type: auth } } : {}),
+      ...(auth ? { auth: { type: auth } }
+        : detectedAuth ? { auth: { type: detectedAuth, ...(detectedAuth === "oauth" && detected?.scopes.length ? { oauth: { scopes: detected.scopes } } : {}) } } : {}),
       access: { ...(agents !== undefined ? { agents } : {}), ...(polpo !== undefined ? { polpo } : {}) },
     });
     if (!r.ok) return apiError(r, "Adding the connector", /url|private|https/i.test(r.error) ? "Give a public https URL of a remote MCP server." : undefined);
