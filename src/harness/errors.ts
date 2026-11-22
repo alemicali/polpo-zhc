@@ -67,7 +67,7 @@ export function classifyHarnessError(raw: string, o: { harnessName: string; prov
   const modelPart = model ? ` "${model}"` : "";
   if (MODEL_ACCESS.test(text)) {
     const fix = o.provider === "bedrock"
-      ? "enable it in the Bedrock console (Model access, in the configured region) or pick another model"
+      ? "its quota for this AWS account is 0 (Service Quotas → Amazon Bedrock; ask AWS Support to raise it) or pick another model"
       : o.provider === "vertex"
         ? "enable it in Vertex AI Model Garden (in the configured region) or pick another model"
         : "pick another model, or enable it for the account";
