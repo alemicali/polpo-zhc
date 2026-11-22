@@ -499,6 +499,12 @@ export const AgentEngineSchema = z.union([
   }),
 ]);
 
+/** Per-connector tool selection: { <connector id>: "*" (all tools, the default) | [raw MCP tool names] }. */
+export const AgentConnectorToolsSchema = z.record(
+  z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a connector id"),
+  z.union([z.literal("*"), z.array(z.string().trim().min(1).max(200)).max(1000)]),
+);
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
@@ -527,6 +533,8 @@ export const AddAgentSchema = z.object({
   compaction: z.any().optional(),
   /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never. */
   progressiveTools: z.enum(["auto", "always", "never"]).optional(),
+  /** Which tools of each granted connector it gets: "*" or a missing key = all, a list = only those. */
+  connectorTools: AgentConnectorToolsSchema.optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   learning: z.object({
     enabled: z.boolean().optional(),
@@ -557,6 +565,8 @@ export const UpdateAgentSchema = z.object({
   compaction: z.any().optional(),
   /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never; null clears it. */
   progressiveTools: z.enum(["auto", "always", "never"]).nullable().optional(),
+  /** Which tools of each granted connector it gets ("*" or a missing key = all, a list = only those); null clears it (all tools). */
+  connectorTools: AgentConnectorToolsSchema.nullable().optional(),
   /** Voice replies on Telegram: off (default), voice, always. */
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   /** Learning from its conversations (memory, own skills); off by default. */

@@ -173,6 +173,47 @@ export function connectorGrants(connector: Pick<ConnectorConfig, "access" | "ena
   return agents === "*" || (Array.isArray(agents) && agents.includes(agent));
 }
 
+/**
+ * Per-agent selection of a connector's tools, keyed by connector id. A missing key or "*" means every
+ * current and future tool of that connector; a list means only those tools (the server's raw tool
+ * names, not the prefixed `mcp__…` ones). It narrows what connector access grants; it never grants.
+ */
+export type AgentConnectorTools = Record<string, "*" | string[]>;
+
+/** Whether `agent.connectorTools` lets the agent use `toolName` of connector `connectorId`. */
+export function connectorToolSelected(selection: AgentConnectorTools | undefined, connectorId: string, toolName: string): boolean {
+  const entry = selection?.[connectorId];
+  if (entry === undefined || entry === "*") return true;
+  return Array.isArray(entry) && entry.includes(toolName);
+}
+
+/** Problems with a `connectorTools` value (empty when valid). */
+export function connectorToolsProblems(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (typeof value !== "object" || Array.isArray(value)) return ["connectorTools must be an object keyed by connector id"];
+  const problems: string[] = [];
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!CONNECTOR_ID_PATTERN.test(id)) problems.push(`connectorTools: "${id}" is not a connector id`);
+    else if (entry === "*") continue;
+    else if (!Array.isArray(entry) || entry.some((t) => typeof t !== "string" || t.trim() === "")) problems.push(`connectorTools.${id} must be "*" or a list of tool names`);
+  }
+  return problems;
+}
+
+/**
+ * Tidy a connectorTools value: deduplicated lists, "*" entries dropped (they are the default), an
+ * empty object becomes undefined. Lists stay lists, even empty ones (= no tool of that connector).
+ */
+export function normalizeConnectorTools(value: AgentConnectorTools | undefined | null): AgentConnectorTools | undefined {
+  if (!value) return undefined;
+  const out: AgentConnectorTools = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (entry === "*") continue;
+    if (Array.isArray(entry)) out[id] = [...new Set(entry.map((t) => t.trim()).filter(Boolean))];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Slugify a name into a connector id. */
 export function connectorSlug(name: string): string {
   const slug = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");

@@ -107,4 +107,19 @@ describe("Agent validation — identity, responsibilities, vault", () => {
     const agents = [{ name: "agent-1", reportsTo: "ghost" }];
     expect(() => validateAgents(agents)).toThrow('does not match any agent');
   });
+
+  it("validates and tidies connectorTools", () => {
+    const agents: any[] = [{ name: "a", connectorTools: { linear: ["x", "x", "y"], notion: "*" } }];
+    validateAgents(agents);
+    expect(agents[0].connectorTools).toEqual({ linear: ["x", "y"] });
+    const all: any[] = [{ name: "b", connectorTools: { notion: "*" } }];
+    validateAgents(all);
+    expect(all[0].connectorTools).toBeUndefined();
+    const none: any[] = [{ name: "c", connectorTools: { linear: [] } }];
+    validateAgents(none);
+    expect(none[0].connectorTools).toEqual({ linear: [] });
+    expect(() => validateAgents([{ name: "d", connectorTools: { linear: "some" } }])).toThrow(/connectorTools\.linear/);
+    expect(() => validateAgents([{ name: "e", connectorTools: { "Bad Id": "*" } }])).toThrow(/not a connector id/);
+    expect(() => validateAgents([{ name: "f", connectorTools: ["linear"] }])).toThrow(/object/);
+  });
 });

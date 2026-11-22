@@ -20,8 +20,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  connectorGrants, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS,
-  type ConnectorChangedEvent, type ConnectorConfig, type ConnectorStatus, type PolpoSettings, type VaultStore,
+  connectorGrants, connectorToolSelected, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS,
+  type AgentConnectorTools, type ConnectorChangedEvent, type ConnectorConfig, type ConnectorStatus, type PolpoSettings, type VaultStore,
 } from "@polpo-ai/core";
 import { safeEnv } from "../tools/safe-env.js";
 import { allowPrivateNetwork, checkConnectorUrl, type ResolveHost } from "./net.js";
@@ -372,10 +372,11 @@ export class ConnectorManager {
 
   /**
    * The tools of the connectors granted to `agent` (or to Polpo when undefined), as AgentTools,
-   * filtered by the connector's tool policy and, for agents, by allowedTools. A connector that cannot
+   * filtered by the connector's tool policy and, for agents, by their per-connector selection
+   * (`connectorTools`) and allowedTools: the intersection of the four. A connector that cannot
    * connect is skipped with a note; it never breaks the caller.
    */
-  async toolsFor(agent: string | undefined, allowedTools?: string[]): Promise<ConnectorToolsResult> {
+  async toolsFor(agent: string | undefined, allowedTools?: string[], connectorTools?: AgentConnectorTools): Promise<ConnectorToolsResult> {
     const connectors = this.store.list().filter((c) => connectorGrants(c, agent));
     const notes: string[] = [];
     const lists = await Promise.all(connectors.map(async (connector) => {
@@ -400,6 +401,7 @@ export class ConnectorManager {
         if (policy === "off") continue;
         // TODO(connectors): "ask" should pause for the person's approval in chat; treated as "allow" until an approval hook exists.
         const bridged = bridgeMcpTool(connector.id, connector.name, tool, (name, args, signal) => this.callTool(connector.id, name, args, signal));
+        if (agent !== undefined && !connectorToolSelected(connectorTools, connector.id, tool.name)) continue;
         if (agent !== undefined && !connectorToolAllowed(allowedTools, bridged.name)) continue;
         if (seen.has(bridged.name)) continue;
         seen.add(bridged.name);

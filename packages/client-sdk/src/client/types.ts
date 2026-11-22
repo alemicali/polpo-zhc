@@ -288,6 +288,8 @@ export interface AgentConfig {
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
+  /** Which tools of each granted connector it gets, keyed by connector id: "*" (or no key) = all, a list = only those raw MCP tool names. */
+  connectorTools?: Record<string, "*" | string[]>;
   /** Reasoning / deep thinking level for this agent's LLM calls. */
   reasoning?: ReasoningLevel;
   /** Runtime profile used by deterministic loop execution. */

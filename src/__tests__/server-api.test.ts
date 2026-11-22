@@ -1360,6 +1360,20 @@ describe("Update Agent API", () => {
     await app.request(api("/agents/agent-1"), jsonReq("PATCH", { role: "Test agent" }));
   });
 
+  test("PATCH /agents/:name sets, validates and clears connectorTools", async () => {
+    const patch = (body: unknown) => app.request(api("/agents/agent-1"), jsonReq("PATCH", body as Record<string, unknown>));
+    let res = await patch({ connectorTools: { linear: ["create_issue", "create_issue", "list_issues"], notion: "*" } });
+    expect(res.status).toBe(200);
+    // deduplicated, "*" dropped (it is the default)
+    expect((await res.json()).data.connectorTools).toEqual({ linear: ["create_issue", "list_issues"] });
+    expect((await patch({ connectorTools: { "Not An Id": "*" } })).status).toBe(400);
+    expect((await patch({ connectorTools: { linear: "all" } })).status).toBe(400);
+    expect((await patch({ connectorTools: ["linear"] })).status).toBe(400);
+    res = await patch({ connectorTools: null });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.connectorTools).toBeUndefined();
+  });
+
   test("PATCH /agents/:name returns 404 for unknown agent", async () => {
     const res = await app.request(
       api("/agents/no-such-agent"),

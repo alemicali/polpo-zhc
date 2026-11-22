@@ -6,7 +6,7 @@ import { getPolpoDir } from "./constants.js";
 import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -161,6 +161,13 @@ export function validateAgents(agents: any[]): void {
     if (agent.engine !== undefined) {
       const engine = parseAgentEngine(agent.engine, `Agent "${agent.name}": engine`);
       if (engine) agent.engine = engine; else delete agent.engine;
+    }
+    // connectorTools: { <connector id>: "*" | [tool names] } (unknown tool names are kept: the connector may be disconnected)
+    if (agent.connectorTools !== undefined) {
+      const problems = connectorToolsProblems(agent.connectorTools);
+      if (problems.length) throw new Error(`Agent "${agent.name}": ${problems[0]}`);
+      const normalized = normalizeConnectorTools(agent.connectorTools);
+      if (normalized) agent.connectorTools = normalized; else delete agent.connectorTools;
     }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.

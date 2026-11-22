@@ -1,7 +1,7 @@
 import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import type { FileSystem } from "@polpo-ai/core";
+import { normalizeConnectorTools, type FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
@@ -213,6 +213,7 @@ export function agentRoutes(getDeps: () => {
         ...(body.engine && body.engine !== "polpo" ? { engine: body.engine } : {}),
         ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
         ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools }),
+        ...(normalizeConnectorTools(body.connectorTools) ? { connectorTools: normalizeConnectorTools(body.connectorTools) } : {}),
         ...(body.learning !== undefined && { learning: body.learning }),
         ...(body.drive !== undefined && { drive: body.drive }),
       }, teamName);
@@ -520,6 +521,7 @@ export function agentRoutes(getDeps: () => {
       ...(body.sandbox !== undefined && { sandbox: normalizeSandboxSettings(body.sandbox) }),
       ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
       ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools ?? undefined }),
+      ...(body.connectorTools !== undefined && { connectorTools: normalizeConnectorTools(body.connectorTools) }),
       ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
       ...(body.learning !== undefined && { learning: body.learning }),
       ...(body.drive !== undefined && { drive: body.drive }),
