@@ -3,6 +3,8 @@ import type {
   Connector,
   ConnectorTool,
   AuthStatusResponse,
+  MemberPreferencesPatch,
+  MemberPreferencesResponse,
   VaultEntryMeta,
   Task,
   Mission,
@@ -644,6 +646,18 @@ export class PolpoClient {
    */
   getAuthStatus(): Promise<AuthStatusResponse> {
     return this.get<AuthStatusResponse>("/auth/status");
+  }
+
+  // ── Member preferences ────────────────────────────────────
+
+  /** The signed-in member's dashboard preferences (chat navigation: open chat, tabs, panels). */
+  getPreferences(): Promise<MemberPreferencesResponse> {
+    return this.get<MemberPreferencesResponse>("/preferences");
+  }
+
+  /** Merge fields into the signed-in member's preferences; returns the stored result. */
+  updatePreferences(patch: MemberPreferencesPatch): Promise<MemberPreferencesResponse> {
+    return this.patch<MemberPreferencesResponse>("/preferences", patch);
   }
 
   // ── Schedules ─────────────────────────────────────────────

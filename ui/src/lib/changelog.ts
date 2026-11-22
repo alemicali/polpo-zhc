@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-chat-navigation",
+    date: "2026-11-22",
+    kind: "fixed",
+    title: "La chat riparte da dove eri",
+    summary: "Ricaricando la pagina o riaprendo la Chat ritrovi la conversazione che avevi aperto, le schede, i pannelli e i messaggi non ancora inviati.",
+    body: [
+      "Prima, ricaricando la pagina si finiva sulla conversazione più recente invece che su quella aperta, e le preferenze di navigazione si perdevano. Ora:",
+      "",
+      "- **La conversazione è nell'indirizzo** (`/chat?session=…`): ricarica, indietro e avanti ti riportano esattamente lì, e puoi condividere il link. Vale per le chat con Polpo, con gli agenti, i gruppi e le chat arrivate da Telegram o WhatsApp.",
+      "- **Riaprendo Chat** ritrovi l'ultima conversazione che avevi aperto tu (anche una nuova chat con l'agente scelto, o un gruppo), non la più recente.",
+      "- **Le tue preferenze ti seguono** su ogni dispositivo: schede aperte, pannello della chat a destra aperto o chiuso, elenco delle conversazioni.",
+      "- **I messaggi non inviati** restano nel campo di testo di ogni conversazione anche dopo aver ricaricato, insieme al punto in cui eri arrivato a leggere (su questo dispositivo).",
+      "",
+      "Se una conversazione nel link è stata eliminata, un avviso te lo dice e si apre la tua ultima chat.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-22-whats-new-time",
     date: "2026-11-22",
     kind: "improved",

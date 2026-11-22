@@ -42,6 +42,8 @@ export { useSchedules } from "./hooks/use-schedules.js";
 export { useVaultEntries } from "./hooks/use-vault-entries.js";
 export type { UseVaultEntriesReturn } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
+export { usePreferences } from "./hooks/use-preferences.js";
+export type { UsePreferencesReturn } from "./hooks/use-preferences.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
 // Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/sdk directly)
@@ -190,6 +192,10 @@ export type {
   AuthProfileMeta,
   ProviderAuthInfo,
   AuthStatusResponse,
+  ChatNavigationPreferences,
+  MemberPreferences,
+  MemberPreferencesPatch,
+  MemberPreferencesResponse,
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,

@@ -179,6 +179,7 @@ import {
   useNewGroupRequest,
 } from "@/hooks/use-chat-room";
 import { ORCHESTRATOR_MEMBER_ID, type RoomInput } from "@/lib/rooms-api";
+import { createLocalCache } from "@/lib/chat-navigation";
 
 const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
@@ -205,12 +206,11 @@ function chatTimeAgo(date: Date): string {
 //      and the surrounding form auto-resets after submit, so we snapshot
 //      the live `value` per session id and rehydrate after each switch.
 //
-// Module-level Maps are intentional: they survive React strict-mode double
-// renders and any local re-mounts of the consuming components, but they
-// are lost on a hard refresh — which is the desired "browser tab" semantic
-// (a closed-and-reopened browser doesn't restore unsubmitted drafts).
-const chatScrollStates: Map<string, StateSnapshot> = new Map();
-const chatInputDrafts: Map<string, string> = new Map();
+// Both survive a reload too: they are kept in localStorage for this device,
+// scoped to the instance and the signed-in person (see createLocalCache),
+// bounded to the most recent chats.
+const chatScrollStates = createLocalCache<StateSnapshot>("scroll", { maxEntries: 30, maxBytes: 200_000 });
+const chatInputDrafts = createLocalCache<string>("drafts", { maxEntries: 50, maxBytes: 500_000 });
 /** Sentinel session-id used for the unsaved "new session" placeholder. */
 const NEW_SESSION_DRAFT_KEY = "__new__";
 
@@ -3958,39 +3958,53 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // (b) hydrate the textarea with the INCOMING session id's draft (if any).
   // PromptInput clears only the acknowledged draft, before new-session
   // migration; handleSubmit keeps the cached draft aligned. Cleanup saves on
-  // unmount (e.g. compact-mode sidebar takeover).
+  // unmount (e.g. compact-mode sidebar takeover). Typing saves too (onInput),
+  // so a reload finds the draft; the first mount hydrates it back.
   const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
   const prevDraftKeyRef = useRef<string>(draftKey);
+  /** What the composer was showing for a key when it was loaded or last saved. */
+  const shownDraftRef = useRef<{ key: string; value: string } | null>(null);
+  const saveDraft = useCallback((key: string, value: string) => {
+    // Untouched since it was loaded: the stored draft is already right (and an
+    // empty composer during the first restore must not erase a saved draft).
+    const shown = shownDraftRef.current;
+    if (shown && shown.key === key && shown.value === value) return;
+    if (value) chatInputDrafts.set(key, value);
+    else chatInputDrafts.delete(key);
+    shownDraftRef.current = { key, value };
+  }, []);
   useEffect(() => {
     const prevKey = prevDraftKeyRef.current;
     historyIndexRef.current = null;
     historyDraftRef.current = "";
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
-    if (textarea && prevKey !== draftKey) {
+    const firstRun = shownDraftRef.current === null;
+    if (textarea && (prevKey !== draftKey || (firstRun && !textarea.value))) {
       // Save outgoing draft (only if non-empty — keeps the map small)
-      const outgoing = textarea.value;
-      if (outgoing) chatInputDrafts.set(prevKey, outgoing);
-      else chatInputDrafts.delete(prevKey);
+      if (prevKey !== draftKey) saveDraft(prevKey, textarea.value);
       // Hydrate incoming draft. Use the native setter so React's synthetic
       // event tracking is bypassed — same trick as the speech-to-text path.
       const incoming = chatInputDrafts.get(draftKey) ?? "";
-      const nativeSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeSetter?.call(textarea, incoming);
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      shownDraftRef.current = { key: draftKey, value: incoming };
+      if (incoming || textarea.value) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )?.set;
+        nativeSetter?.call(textarea, incoming);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       setHasDraft(incoming.trim().length > 0);
+    } else if (firstRun) {
+      shownDraftRef.current = { key: draftKey, value: textarea?.value ?? "" };
     }
     prevDraftKeyRef.current = draftKey;
     return () => {
       const ta = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
       if (!ta) return;
-      const v = ta.value;
-      if (v) chatInputDrafts.set(draftKey, v);
-      else chatInputDrafts.delete(draftKey);
+      saveDraft(draftKey, ta.value);
     };
-  }, [draftKey]);
+  }, [draftKey, saveDraft]);
 
   // Resolve selected agent config for display
   const currentAgentName =
@@ -4252,6 +4266,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                 if (!applyingHistoryRef.current) {
                   historyIndexRef.current = null;
                   historyDraftRef.current = "";
+                  // Keep the draft across reloads (a recalled history entry is not a draft).
+                  saveDraft(draftKey, e.currentTarget.value);
                 }
                 setHasDraft(e.currentTarget.value.trim().length > 0);
               }}

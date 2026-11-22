@@ -67,6 +67,7 @@ import { fileRoutes } from "./routes/files.js";
 import { gitRoutes } from "./routes/git.js";
 import { audioRoutes } from "./routes/audio.js";
 import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
+import { preferencesRoutes } from "./routes/preferences.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
@@ -1502,6 +1503,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/audio", audioRoutes());
   authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
+  authed.route("/preferences", preferencesRoutes({
+    polpoDir: activePolpoDir,
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+  }));
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
   // Agent conversations: the pairs' conversations and the latest exchanges (live: agent:message events)
