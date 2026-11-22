@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-22 — MCP permissions, solid schedulers, live-test fixes
+
 ### Added
 - **Per-area permissions for Polpo's MCP connector.** Eight scopes instead of one: `polpo:read` (always), `polpo:work` (ask Polpo, chat, tasks, missions, artifacts, rooms, memory, schedules, approvals), five areas given one by one — `polpo:files` (write, move, delete files), `polpo:messages` (send on Telegram, WhatsApp, email; channel test), `polpo:connectors`, `polpo:computers`, `polpo:vault` (reads too) — and `polpo:admin` (team, settings, skills, notification rules, learning, the REST fallback; it includes everything). Every tool needs exactly one scope; destructive ones the write scope of their area. The tool → scope matrix is generated from the code into `docs/mcp.md` (`node scripts/generate-mcp-scopes.mjs`; a test keeps it in sync) and served at `GET /api/v1/mcp/access`.
   - **Consent:** the OAuth page lists the scopes in plain words with checkboxes (read always; the ones the client asked for checked, the others offered); the person narrows or adds, and the token carries what was allowed (`scope` in the token response, RFC 6749). A client that asks for nothing gets read and work, not admin. A refresh may ask for fewer scopes, never more. A client allowed with an MCP key gets at most that key's scopes.
