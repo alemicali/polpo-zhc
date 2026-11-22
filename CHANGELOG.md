@@ -93,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Member management (`/api/v1/auth/instance/members`) accepts the instance's own in-process calls, so MCP admin tools can manage members when sign-in is on.
 
 ### Changed
+- **Task page: the tool scope takes one quiet line.** "Tools: inherited from agent · Restrict" instead of a full card; a restricted scope shows as a small chip, and stale entries still show a warning.
 - **The Computers page is a table like the other lists** instead of cards: search, status and provider filters, sort; provider mark and kind (Daytona v2, Daytona, E2B), live status, agents with their engine, harness sessions, egress, last use, snapshots, the main action inline (Stop reads Hibernate on Daytona v2, Pause on E2B) and the others in a menu; compact rows on a phone. A row opens the computer's page; links to `/computers#computer-<id>` redirect there.
 - Polpo's `connector_add` is now the MCP server's tool: `catalog_id` instead of `catalogId`, and no `token` parameter — a token-based connector (or one needing an OAuth app's secret) is finished by the person from the setup link it returns.
 - **pi-ai and pi-agent-core 1.6** (from 1.0.4). The raw API subpaths were already on `@earendil-works/pi-ai/api/<api-id>`; what changed for Polpo:
