@@ -339,12 +339,31 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
         if (runDone) {
           const rc = counts(run!.tasks);
           const outcome = (rc.failed ?? 0) > 0 ? "failed" as const : "completed" as const;
+          // what comes next depends on the schedule: paused, ended, or its next run
+          const sched = await apiGet(deps, `/schedules/${enc(id)}`);
+          const s = sched.ok ? sched.data as { enabled?: boolean; nextRunAt?: string; recurring?: boolean } : undefined;
+          const expr = m.mission.schedule ? ` (${m.mission.schedule})` : "";
+          const next = !s
+            ? `It has no schedule now`
+            : s.enabled === false && s.nextRunAt
+              ? `Its schedule${expr} is paused: it does not run again until resumed (polpo_schedule_update enabled: true)`
+              : s.enabled === false
+                ? `Its schedule${expr} is done: it does not run again`
+                : s.nextRunAt
+                ? `It runs again on its schedule${expr}, next at ${s.nextRunAt}`
+                : `Its schedule${expr} has no next run`;
           return ok(`Mission ${id} (${m.mission.status}): its run #${run!.number} ${outcome === "completed" ? "completed" : "failed"} (${countText(rc)}). `
-            + `It runs again on its schedule${m.mission.schedule ? ` (${m.mission.schedule})` : ""}; read the results with polpo_mission_get.`,
+            + `${next}; read the results with polpo_mission_get.`,
             { mission: summary, task_counts: c, reached: true, timed_out: false, waited_seconds: waited, run: { number: run!.number, outcome, task_counts: rc } });
         }
-        const between = BETWEEN_RUNS.includes(m.mission.status)
-          ? ` It has ${run ? "a run in progress" : "not run yet: it runs on its schedule, or now with polpo_schedule_run"}.` : "";
+        let between = "";
+        if (BETWEEN_RUNS.includes(m.mission.status)) {
+          const sched = run ? undefined : await apiGet(deps, `/schedules/${enc(id)}`);
+          const paused = sched?.ok && (sched.data as { enabled?: boolean; nextRunAt?: string }).enabled === false && !!(sched.data as { nextRunAt?: string }).nextRunAt;
+          between = ` It has ${run ? "a run in progress" : paused
+            ? "not run yet, and its schedule is paused: resume it with polpo_schedule_update enabled: true, or run it now with polpo_schedule_run"
+            : "not run yet: it runs on its schedule, or now with polpo_schedule_run"}.`;
+        }
         return ok(reached
           ? `Mission ${id} is ${m.mission.status} (${countText(c)}).${m.mission.status === "paused" ? " It waits at a checkpoint or for a person: polpo_approvals_list, then polpo_mission_run to resume." : ""}`
           : `Mission ${id} is still ${m.mission.status} after ${waited} s (${countText(c)}).${between} Call polpo_mission_wait again to keep waiting.`,

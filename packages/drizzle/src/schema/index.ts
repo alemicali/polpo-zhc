@@ -22,6 +22,7 @@ export { pushSubscriptionsSqlite, pushVapidSqlite } from "./push-subscriptions.j
 export { tokenUsageSqlite, contextCheckpointsSqlite } from "./usage.js";
 export { appsSqlite, dataSourcesSqlite, dataViewsSqlite, dataActivitySqlite, storageEntriesSqlite } from "./registries.js";
 export { conversationChecksSqlite } from "./conversation-checks.js";
+export { schedulesSqlite, leasesSqlite, taskWatchersSqlite } from "./scheduling.js";
 export { artifactsSqlite } from "./artifacts.js";
 export { brainItemsSqlite } from "./company-brain.js";
 export { whatsappMessagesSqlite, whatsappContactsSqlite } from "./whatsapp.js";
@@ -52,6 +53,7 @@ export { pushSubscriptionsPg, pushVapidPg } from "./push-subscriptions.js";
 export { tokenUsagePg, contextCheckpointsPg } from "./usage.js";
 export { appsPg, dataSourcesPg, dataViewsPg, dataActivityPg, storageEntriesPg } from "./registries.js";
 export { conversationChecksPg } from "./conversation-checks.js";
+export { schedulesPg, leasesPg, taskWatchersPg } from "./scheduling.js";
 export { artifactsPg } from "./artifacts.js";
 export { brainItemsPg } from "./company-brain.js";
 export { whatsappMessagesPg, whatsappContactsPg } from "./whatsapp.js";

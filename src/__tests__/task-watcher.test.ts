@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TaskWatcherManager } from "../core/task-watcher.js";
 import { TypedEmitter } from "../core/events.js";
 import type { NotificationAction, TaskStatus } from "../core/types.js";
+import { InMemoryLeaseStore, InMemoryTaskWatcherStore } from "@polpo-ai/core";
 
 describe("TaskWatcherManager", () => {
   let emitter: TypedEmitter;
@@ -381,5 +382,60 @@ describe("TaskWatcherManager", () => {
     });
 
     expect(actionExecutor).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TaskWatcherManager persistence", () => {
+  const action: NotificationAction = { type: "run_script", command: "echo done" };
+  const transition = (emitter: TypedEmitter, taskId: string, to: TaskStatus) =>
+    emitter.emit("task:transition", { taskId, from: "review" as TaskStatus, to, task: {} as any });
+
+  it("watchers survive a restart; one whose task got there while the server was down fires at start", async () => {
+    const store = new InMemoryTaskWatcherStore();
+    const a = new TaskWatcherManager(new TypedEmitter(), { store });
+    a.start();
+    const kept = a.create({ taskId: "t1", targetStatus: "done", action });
+    const reached = a.create({ taskId: "t2", targetStatus: "done", action });
+    await vi.waitFor(async () => expect(await store.listWatchers()).toHaveLength(2));
+    a.dispose();
+
+    const emitter = new TypedEmitter();
+    const execute = vi.fn().mockResolvedValue("ok");
+    const b = new TaskWatcherManager(emitter, { store, taskStatus: async (id) => (id === "t2" ? "done" : "in_progress") });
+    b.setActionExecutor(execute);
+    b.start();
+    await b.ready;
+    expect(b.get(kept.id)).toMatchObject({ fired: false });
+    expect(b.get(reached.id)).toMatchObject({ fired: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    transition(emitter, "t1", "done");
+    expect(execute).toHaveBeenCalledTimes(2);
+    await vi.waitFor(async () => expect((await store.listWatchers()).every((w) => w.fired)).toBe(true));
+    b.remove(kept.id);
+    await vi.waitFor(async () => expect(await store.listWatchers()).toHaveLength(1));
+  });
+
+  it("two processes seeing the same transition run the action once", async () => {
+    const store = new InMemoryTaskWatcherStore();
+    const leases = new InMemoryLeaseStore();
+    const ea = new TypedEmitter();
+    const eb = new TypedEmitter();
+    const a = new TaskWatcherManager(ea, { store, leases });
+    a.start();
+    const w = a.create({ taskId: "t1", targetStatus: "done", action });
+    await vi.waitFor(async () => expect(await store.listWatchers()).toHaveLength(1));
+    const b = new TaskWatcherManager(eb, { store, leases });
+    b.start();
+    await b.ready;
+    const xa = vi.fn().mockResolvedValue("ok");
+    const xb = vi.fn().mockResolvedValue("ok");
+    a.setActionExecutor(xa);
+    b.setActionExecutor(xb);
+    transition(ea, "t1", "done");
+    transition(eb, "t1", "done");
+    await vi.waitFor(() => expect(xa.mock.calls.length + xb.mock.calls.length).toBe(1));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(xa.mock.calls.length + xb.mock.calls.length).toBe(1);
+    expect(a.get(w.id)!.fired && b.get(w.id)!.fired).toBe(true);
   });
 });

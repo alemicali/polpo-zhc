@@ -40,7 +40,7 @@ export function registerScheduleCommands(program: Command): void {
         for (const entry of schedules) {
           const status = entry.enabled
             ? chalk.green("enabled")
-            : chalk.dim("disabled");
+            : entry.nextRunAt ? chalk.yellow("paused") : chalk.dim("done");
           const type = entry.recurring
             ? chalk.magenta("recurring")
             : chalk.blue("one-shot");
@@ -54,7 +54,9 @@ export function registerScheduleCommands(program: Command): void {
           console.log(`  ${chalk.bold(entry.missionId)}`);
           console.log(`    Expression: ${chalk.yellow(entry.expression)}  ${type}  ${status}`);
           console.log(`    Next run:   ${next}`);
-          console.log(`    Last run:   ${last}`);
+          console.log(`    Last run:   ${last}${entry.lastOutcome ? ` (${entry.lastOutcome}${entry.lastError ? `: ${entry.lastError}` : ""})` : ""}`);
+          if (entry.missedRuns) console.log(`    Missed:     ${chalk.yellow(String(entry.missedRuns))} while the server was down${entry.lastMissedAt ? ` (latest ${new Date(entry.lastMissedAt).toLocaleString()})` : ""}`);
+          console.log(`    Catch-up:   ${entry.catchUp ?? "once"}`);
           console.log();
         }
       });

@@ -125,12 +125,12 @@ Group chats of people and agents (the dashboard's groups).
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_schedules_list` | Scheduled missions (cron or a time, paused or not, next and last run); with `mission_id`, its recent runs' tasks. | read-only |
-| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`). The expression is checked first: a cron with a value out of range (e.g. `99 99 * * *`) or a past time is refused with the reason. | write / write, idempotent |
+| `polpo_schedules_list` | Scheduled missions (cron or a time, `paused` or not, next and last run, `last_outcome` and `last_error`, `missed_runs` while the server was down, `catch_up`); with `mission_id`, its recent runs' tasks. All of it is persisted: a restart keeps a pause and the next run. | read-only |
+| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`); `catch_up`: what a run missed while the server was down does — `"once"` (default) runs it at startup when it is at most one interval late (24 h for a one-shot), `"none"` skips to the next. The expression is checked first: a cron with a value out of range (e.g. `99 99 * * *`) or a past time is refused with the reason. | write / write, idempotent |
 | `polpo_schedule_run` | Run a scheduled mission now (the next scheduled run stays; a paused schedule stays paused). | write, open world |
 | `polpo_schedule_delete` | Remove the schedule; the mission stays as a draft (`confirm: true`). | destructive |
 | `polpo_checks_list` | Recurring checks and reminders: what Polpo or an agent does on a schedule and reports in a chat; proposed ones wait for a yes. | read-only |
-| `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. | write |
+| `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. A time (`at`) that has passed is refused. | write |
 | `polpo_check_update` | Change the instructions, message, schedule or limits; `confirm: true` approves a proposed check. | write, idempotent |
 | `polpo_check_cancel` | Stop a check for good (`confirm: true`); it stays listed as cancelled. | destructive |
 | `polpo_check_delete` | Delete a check's record (cancelled, ended or still active: it stops first; `confirm: true`). Its reports stay in their chat. | destructive |

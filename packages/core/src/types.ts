@@ -1548,6 +1548,16 @@ export interface ScheduleEntry {
   nextRunAt?: string;
   /** Deadline offset — auto-set task/mission deadline to N ms after execution start. */
   deadlineOffsetMs?: number;
+  /** A run missed while the server was down: "once" (default) runs it at startup when it is at most one interval late, "none" skips to the next. */
+  catchUp?: "none" | "once";
+  /** How the last run went: started (in progress), completed, failed, skipped (a hook or another process), missed (server down), expired (endDate). */
+  lastOutcome?: "started" | "completed" | "failed" | "skipped" | "missed" | "expired";
+  /** Why the last run failed or was skipped. */
+  lastError?: string;
+  /** Runs missed (not run) because the server was down, in total. */
+  missedRuns?: number;
+  /** When the latest missed run should have happened (ISO). */
+  lastMissedAt?: string;
   /** Created at. */
   createdAt: string;
 }

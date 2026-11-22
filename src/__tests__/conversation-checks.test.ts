@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileConversationCheckStore } from "../stores/file-conversation-check-store.js";
+import { FileLeaseStore } from "../stores/file-scheduling-store.js";
 import { ConversationCheckManager, isNothingToReport, MAX_ACTIVE_CHECKS_PER_SESSION, parseCheckTime } from "../core/conversation-check-manager.js";
 import { execCancelCheck, execListChats, execListChecks, execScheduleCheck, execSendMessage, type ChatAccess } from "../tools/conversation-check-tools.js";
 import { botOrder, buildChatDirectory, chatTarget, resolveChat } from "../core/chat-directory.js";
@@ -96,6 +97,62 @@ describe("ConversationCheckManager", () => {
     await expect(manager.create({ sessionId: "run-session", prompt: "y", everyMinutes: 2 })).rejects.toThrow(/cannot schedule/);
     for (let i = 1; i < MAX_ACTIVE_CHECKS_PER_SESSION; i++) await manager.create({ sessionId: "s1", prompt: `x${i}`, everyMinutes: 2 });
     await expect(manager.create({ sessionId: "s1", prompt: "one more", everyMinutes: 2 })).rejects.toThrow(/already has/);
+  });
+
+  it("refuses a first run in the past (once, interval or cron); a moment ago is fine", async () => {
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    await expect(manager.create({ sessionId: "s1", prompt: "x", everyMinutes: 0, firstRunAt: past })).rejects.toThrow(/has already passed/);
+    await expect(manager.create({ sessionId: "s1", prompt: "x", everyMinutes: 5, firstRunAt: past })).rejects.toThrow(/has already passed/);
+    expect(await manager.list()).toEqual([]);
+    await expect(manager.create({ sessionId: "s1", prompt: "x", everyMinutes: 0, firstRunAt: new Date(Date.now() - 5_000).toISOString() })).resolves.toMatchObject({ state: "active" });
+  });
+
+  it("a check whose chat session is gone (and has no other target) ends and says why, instead of staying stuck", async () => {
+    const sessions = new Set(["s1"]);
+    const m = new ConversationCheckManager(store, () => {}, 30_000, { sessionExists: async (id) => sessions.has(id) });
+    m.setRunner(runner);
+    try {
+      const web = await m.create({ sessionId: "s1", prompt: "x", everyMinutes: 1 });
+      const tg = await m.create({ sessionId: "s1", prompt: "y", everyMinutes: 1, target: GROUP });
+      sessions.delete("s1");
+      runner.mockResolvedValue({ text: "NO_UPDATE" });
+      await m.tick(later(2));
+      await vi.waitFor(() => expect((m as any).running.size).toBe(0));
+      expect(await store.getCheck(web.id)).toMatchObject({ state: "ended", lastError: expect.stringMatching(/chat session s1 no longer exists/) });
+      // one with a Telegram target still has somewhere to report
+      expect(await store.getCheck(tg.id)).toMatchObject({ state: "active", runs: 1 });
+      expect(runner).toHaveBeenCalledTimes(1);
+    } finally {
+      m.dispose();
+    }
+  });
+
+  it("two processes on the same storage run a due check once (claims), and a deferred run is retried", async () => {
+    const leases = new FileLeaseStore(dir);
+    const a = new ConversationCheckManager(store, () => {}, 30_000, { leases });
+    const b = new ConversationCheckManager(new FileConversationCheckStore(dir), () => {}, 30_000, { leases: new FileLeaseStore(dir) });
+    const ra = vi.fn(async () => ({ text: "report" }));
+    const rb = vi.fn(async () => ({ text: "report" }));
+    a.setRunner(ra); b.setRunner(rb);
+    try {
+      const check = await a.create({ sessionId: "s1", prompt: "x", everyMinutes: 5 });
+      const at = later(6);
+      await Promise.all([a.tick(at), b.tick(at)]);
+      await vi.waitFor(() => expect((a as any).running.size + (b as any).running.size).toBe(0));
+      expect(ra.mock.calls.length + rb.mock.calls.length).toBe(1);
+      expect(await store.getCheck(check.id)).toMatchObject({ runs: 1 });
+      // deferred (the session was busy): the claim is given back, the next tick runs it
+      await a.cancel(check.id);
+      const deferred = await a.create({ sessionId: "s2", prompt: "y", everyMinutes: 5 });
+      ra.mockResolvedValueOnce("deferred" as never);
+      await a.tick(later(6));
+      await vi.waitFor(() => expect((a as any).running.size).toBe(0));
+      await b.tick(later(6));
+      await vi.waitFor(() => expect((b as any).running.size).toBe(0));
+      expect(await store.getCheck(deferred.id)).toMatchObject({ runs: 1 });
+    } finally {
+      a.dispose(); b.dispose();
+    }
   });
 
   it("isNothingToReport", () => {

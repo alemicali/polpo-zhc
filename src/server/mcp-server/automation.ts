@@ -11,20 +11,34 @@ import {
 } from "./kit.js";
 import { TASK_STATUSES, taskLine, unknownAgents } from "./tasks.js";
 
-type Schedule = { id: string; missionId: string; expression: string; recurring: boolean; enabled: boolean; lastRunAt?: string; nextRunAt?: string; createdAt?: string };
+type Schedule = {
+  id: string; missionId: string; expression: string; recurring: boolean; enabled: boolean; lastRunAt?: string; nextRunAt?: string; createdAt?: string;
+  catchUp?: "none" | "once"; lastOutcome?: string; lastError?: string; missedRuns?: number; lastMissedAt?: string;
+};
 type MissionRow = { id: string; name: string; status: string };
 
+const CATCH_UP = z.enum(["none", "once"]).describe(
+  "A run missed while the server was down: \"once\" (default) runs it at startup if it is at most one interval late, \"none\" skips to the next run",
+);
 const scheduleItem = z.object({
   mission_id: z.string(), mission: z.string().optional(), expression: z.string(), recurring: z.boolean(), enabled: z.boolean(),
+  paused: z.boolean().describe("Stopped with a run still ahead (resume with enabled: true); a one-shot that ran is enabled: false but not paused"),
   last_run_at: z.string().optional(), next_run_at: z.string().optional(),
+  last_outcome: z.string().optional().describe("started (running), completed, failed, skipped, missed (server down), expired"),
+  last_error: z.string().optional(), missed_runs: z.number().int(), last_missed_at: z.string().optional(), catch_up: z.enum(["none", "once"]),
 });
 const scheduleView = (s: Schedule, missions: Map<string, MissionRow>) => ({
   mission_id: s.missionId, ...(missions.get(s.missionId) ? { mission: missions.get(s.missionId)!.name } : {}),
-  expression: s.expression, recurring: s.recurring, enabled: s.enabled,
+  // a one-shot that ran (or an expired schedule) is not enabled, but done rather than paused
+  expression: s.expression, recurring: s.recurring, enabled: s.enabled, paused: !s.enabled && !!s.nextRunAt,
   ...(s.lastRunAt ? { last_run_at: s.lastRunAt } : {}), ...(s.nextRunAt ? { next_run_at: s.nextRunAt } : {}),
+  ...(s.lastOutcome ? { last_outcome: s.lastOutcome } : {}), ...(s.lastError ? { last_error: s.lastError } : {}),
+  missed_runs: s.missedRuns ?? 0, ...(s.lastMissedAt ? { last_missed_at: s.lastMissedAt } : {}), catch_up: s.catchUp ?? "once",
 });
-const scheduleLine = (s: ReturnType<typeof scheduleView>) => `- ${s.mission_id}${s.mission ? ` "${s.mission}"` : ""}: ${s.expression} (${s.recurring ? "recurring" : "once"}${s.enabled ? "" : ", paused"})`
-  + `${s.next_run_at ? ` · next ${s.next_run_at.slice(0, 16).replace("T", " ")}` : ""}${s.last_run_at ? ` · last ${s.last_run_at.slice(0, 16).replace("T", " ")}` : ""}`;
+const at = (iso: string) => iso.slice(0, 16).replace("T", " ");
+const scheduleLine = (s: ReturnType<typeof scheduleView>) => `- ${s.mission_id}${s.mission ? ` "${s.mission}"` : ""}: ${s.expression} (${s.recurring ? "recurring" : "once"}${s.paused ? ", PAUSED" : s.enabled ? "" : ", done"})`
+  + `${s.next_run_at ? ` · next ${at(s.next_run_at)}` : s.enabled ? " · no next run" : ""}${s.last_run_at ? ` · last ${at(s.last_run_at)}${s.last_outcome ? ` (${s.last_outcome})` : ""}` : s.last_outcome ? ` · ${s.last_outcome}` : ""}`
+  + `${s.last_error ? ` · ${s.last_error}` : ""}${s.missed_runs ? ` · ${s.missed_runs} missed while down${s.last_missed_at ? ` (latest ${at(s.last_missed_at)})` : ""}` : ""}`;
 
 async function loadSchedules(deps: McpDeps) {
   const [s, m] = await Promise.all([apiGet(deps, "/schedules"), apiGet(deps, "/missions")]);
@@ -38,7 +52,8 @@ const noSchedule = (id: string) => fail(`Mission ${id} has no schedule. List the
 export function registerAutomationTools(tool: Register, deps: McpDeps): void {
   tool("automation", "polpo_schedules_list", {
     title: "List schedules",
-    description: "Missions that run on a schedule: cron or time, recurring or once, paused or not, next and last run. "
+    description: "Missions that run on a schedule: cron or time, recurring or once, paused or not, next and last run, how the last run went, "
+      + "runs missed while the server was down. "
       + "With mission_id, that schedule and the tasks of its runs (newest first).",
     inputSchema: {
       mission_id: z.string().optional().describe("One mission's schedule, with its recent runs"),
@@ -76,11 +91,14 @@ export function registerAutomationTools(tool: Register, deps: McpDeps): void {
       expression: z.string().min(1).describe("A cron expression (5 fields) or an ISO time for a single run"),
       recurring: z.boolean().optional().describe("true to run every time the cron matches (default: once)"),
       end_date: z.string().datetime({ offset: true }).optional().describe("Stop after this time (ISO)"),
+      catch_up: CATCH_UP.optional(),
     },
     outputSchema: { schedule: scheduleItem },
     annotations: WRITE,
-  }, async ({ mission_id, expression, recurring, end_date }) => {
-    const r = await apiSend(deps, "POST", "/schedules", { missionId: mission_id, expression, ...(recurring !== undefined ? { recurring } : {}), ...(end_date ? { endDate: end_date } : {}) });
+  }, async ({ mission_id, expression, recurring, end_date, catch_up }) => {
+    const r = await apiSend(deps, "POST", "/schedules", {
+      missionId: mission_id, expression, ...(recurring !== undefined ? { recurring } : {}), ...(end_date ? { endDate: end_date } : {}), ...(catch_up ? { catchUp: catch_up } : {}),
+    });
     if (!r.ok) {
       if (r.status === 404) return fail(`There is no mission ${mission_id}. Find the id with polpo_missions_list.`);
       return apiError(r, `Scheduling mission ${mission_id}`, /expression|past/i.test(r.error) ? "Use a 5-field cron (e.g. '0 9 * * 1-5') or a future ISO time." : undefined);
@@ -100,12 +118,16 @@ export function registerAutomationTools(tool: Register, deps: McpDeps): void {
       recurring: z.boolean().optional().describe("Recurring or once"),
       enabled: z.boolean().optional().describe("false pauses it, true resumes it"),
       end_date: z.string().datetime({ offset: true }).nullable().optional().describe("Stop after this time; null removes the end"),
+      catch_up: CATCH_UP.optional(),
     },
     outputSchema: { schedule: scheduleItem, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ mission_id, expression, recurring, enabled, end_date }) => {
-    const body = { ...(expression !== undefined ? { expression } : {}), ...(recurring !== undefined ? { recurring } : {}), ...(enabled !== undefined ? { enabled } : {}), ...(end_date !== undefined ? { endDate: end_date } : {}) };
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give expression, recurring, enabled or end_date.");
+  }, async ({ mission_id, expression, recurring, enabled, end_date, catch_up }) => {
+    const body = {
+      ...(expression !== undefined ? { expression } : {}), ...(recurring !== undefined ? { recurring } : {}), ...(enabled !== undefined ? { enabled } : {}),
+      ...(end_date !== undefined ? { endDate: end_date } : {}), ...(catch_up !== undefined ? { catchUp: catch_up } : {}),
+    };
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give expression, recurring, enabled, end_date or catch_up.");
     const before = await loadSchedules(deps);
     if (!before.ok) return apiError(before, "Listing schedules");
     const prev = before.schedules.find((s) => s.missionId === mission_id);
@@ -114,6 +136,7 @@ export function registerAutomationTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return r.status === 404 ? noSchedule(mission_id) : apiError(r, `Updating the schedule of ${mission_id}`);
     const s = r.data as Schedule;
     const changed: string[] = (["expression", "recurring", "enabled"] as const).filter((k) => body[k] !== undefined && prev[k] !== s[k]);
+    if (catch_up !== undefined && (prev.catchUp ?? "once") !== (s.catchUp ?? "once")) changed.push("catchUp");
     if (end_date !== undefined) changed.push("endDate");
     const view = scheduleView(s, before.missions);
     return ok(changed.length ? `Updated the schedule of ${mission_id}: ${changed.join(", ")}.${enabled === false ? " It is paused." : enabled === true ? " It is active." : ""}` : "Nothing changed (the values were the same).",
