@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "tool_scope" jsonb;

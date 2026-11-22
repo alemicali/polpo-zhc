@@ -67,6 +67,8 @@ function fakeInstance() {
       const missingDeps = (b.dependsOn ?? []).filter((id) => !tasks.has(id));
       if (missingDeps.length) return reply(400, { ok: false, error: `dependsOn: there is no task "${missingDeps[0]}"`, code: "UNKNOWN_DEPENDENCY" });
       if ([...tasks.values()].some((t) => t.title === b.title && t.status !== "done")) return reply(409, { ok: false, error: "A task with this title already exists", code: "CONFLICT" });
+      const scope = (b as { toolScope?: { connectors?: unknown } }).toolScope;
+      if (Array.isArray(scope?.connectors) && scope.connectors.includes("notion")) return reply(400, { ok: false, error: 'Invalid toolScope: connectors: agent "writer" has no access to Notion (notion)', code: "INVALID_TOOL_SCOPE" });
       const t = { ...b, id: `t${tasks.size + 1}`, status: "pending", updatedAt: now() };
       tasks.set(t.id, t);
       return okData(t, 201);
@@ -242,6 +244,32 @@ describe("tasks", () => {
     expect(r.structuredContent.changed).toEqual(["assignTo", "maxRetries"]);
     expect(await call(deps(f), "polpo_task_update", { id: "t2" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/Nothing to change/) }] });
     expect(await call(deps(f), "polpo_task_update", { id: "t2", start: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not a draft/) }] });
+  });
+
+  it("maps connectors / connector_tools / allowed_tools to the task's toolScope, and inherit_tools clears it", async () => {
+    const f = fakeInstance();
+    const made = await call(deps(f), "polpo_task_create", {
+      title: "Send recap", description: "Email the recap", assignTo: "writer",
+      connectors: ["gmail-2"], connector_tools: { "gmail-2": ["send_email"] }, allowed_tools: ["read"],
+    });
+    expect(made.isError).toBeFalsy();
+    expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/tasks")!.body).toMatchObject({
+      toolScope: { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] }, allowedTools: ["read"] },
+    });
+    expect(made.content[0].text).toMatch(/tools restricted: gmail-2 \(1 tool\); built-in: read/);
+    // no scope arguments: no toolScope sent (the task inherits the agent's tools)
+    await call(deps(f), "polpo_task_create", { title: "Plain", description: "d", assignTo: "writer" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/tasks").at(-1)!.body).not.toHaveProperty("toolScope");
+    // a grant is refused by the server with a way out
+    const bad = await call(deps(f), "polpo_task_create", { title: "Notion", description: "d", assignTo: "writer", connectors: ["notion"] });
+    expect(bad).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/no access to Notion[\s\S]*polpo_connectors_list \{ agent \}/) }] });
+    // update: replace, then clear
+    const id = made.structuredContent.task.id;
+    let r = await call(deps(f), "polpo_task_update", { id, connectors: "none" });
+    expect(r.structuredContent.changed).toEqual(["toolScope"]);
+    expect(f.calls.at(-1)!.body).toEqual({ toolScope: { connectors: "none" } });
+    r = await call(deps(f), "polpo_task_update", { id, inherit_tools: true });
+    expect(f.calls.at(-1)!.body).toEqual({ toolScope: null });
   });
 
   it("retries only failed tasks", async () => {
@@ -493,6 +521,21 @@ describe("missions", () => {
       expect(r.isError).toBeFalsy();
       expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ computers });
     }
+  });
+
+  it("a plan task's connectors / connector_tools / allowed_tools become its toolScope", async () => {
+    const f = fakeInstance();
+    const r = await call(deps(f), "polpo_mission_create", { name: "Scoped", tasks: [
+      { title: "Send", description: "send it", assignTo: "writer", connectors: ["gmail-2"], connector_tools: { "gmail-2": ["send_email"] } },
+      { title: "Plain", description: "no scope", assignTo: "writer" },
+    ] });
+    expect(r.isError).toBeFalsy();
+    const data = JSON.parse((f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/missions")!.body as { data: string }).data);
+    expect(data.tasks[0]).toMatchObject({ title: "Send", toolScope: { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] } } });
+    expect(data.tasks[0]).not.toHaveProperty("connectors");
+    expect(data.tasks[1]).not.toHaveProperty("toolScope");
+    const bad = await call(deps(f), "polpo_mission_create", { name: "Bad", tasks: [{ title: "A", description: "a", connectors: "all" }] });
+    expect(bad).toMatchObject({ isError: true });
   });
 
   it("creates and starts at once with run: true; lists missions", async () => {

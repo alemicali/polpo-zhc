@@ -3,6 +3,7 @@ import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome } from "./types.js";
 import type { QualityController } from "./quality-controller.js";
+import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import { sanitizeExpectations, parseMissionDocument, dependencyOrder, type MissionDocumentParsed } from "./schemas.js";
 import type { CheckpointStore, CheckpointState } from "./checkpoint-store.js";
 import type { DelayStore, DelayState } from "./delay-store.js";
@@ -790,6 +791,7 @@ export class MissionExecutor {
         retryPolicy: t.retryPolicy,
         notifications: t.notifications,
         sideEffects: t.sideEffects,
+        ...(normalizeTaskToolScope(t.toolScope) ? { toolScope: normalizeTaskToolScope(t.toolScope) } : {}),
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);
@@ -958,6 +960,9 @@ export class MissionExecutor {
     maxDuration?: number;
     retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
     notifications?: unknown;
+    sideEffects?: boolean;
+    /** null clears it (back to the agent's tools). */
+    toolScope?: TaskToolScope | null;
   }): Promise<Mission> {
     const { doc } = await this.parseMissionData(missionId);
     // Enforce unique title
@@ -979,6 +984,9 @@ export class MissionExecutor {
     maxDuration?: number;
     retryPolicy?: { escalateAfter?: number; fallbackAgent?: string };
     notifications?: unknown;
+    sideEffects?: boolean;
+    /** null clears it (back to the agent's tools). */
+    toolScope?: TaskToolScope | null;
   }): Promise<Mission> {
     const { doc } = await this.parseMissionData(missionId);
     const idx = doc.tasks.findIndex(t => t.title === taskTitle);
@@ -988,6 +996,7 @@ export class MissionExecutor {
       throw new Error(`Task title "${updates.title}" already exists in this mission`);
     }
     doc.tasks[idx] = { ...doc.tasks[idx], ...updates } as MissionDocumentParsed["tasks"][number];
+    if (updates.toolScope === null) delete (doc.tasks[idx] as { toolScope?: unknown }).toolScope;
     // A rename keeps the links to the task: dependsOn of the others and the flow-control lists
     if (updates.title && updates.title !== taskTitle) {
       const rename = (titles: string[]) => titles.map(t => (t === taskTitle ? updates.title! : t));

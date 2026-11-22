@@ -83,6 +83,28 @@ describe("a mission whose tasks are listed before their dependencies", () => {
     }
   });
 
+  test("a mission task's toolScope goes onto the task it creates (absent: none)", async () => {
+    const h = executor();
+    try {
+      await h.exec.ready;
+      const mission = await h.exec.saveMission({
+        name: "scoped",
+        data: JSON.stringify({ tasks: [{ ...task("send"), toolScope: { connectors: ["gmail-2", "gmail-2"], connectorTools: { "gmail-2": ["send_email"] } } }, task("plain")] }),
+      });
+      await h.exec.executeMission(mission.id);
+      const tasks = await h.store.getAllTasks();
+      expect(tasks.find((t) => t.title === "send")!.toolScope).toEqual({ connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] } });
+      expect(tasks.find((t) => t.title === "plain")!.toolScope).toBeUndefined();
+      // set and clear it on a draft mission's task
+      const updated = await h.exec.updateMissionTask(mission.id, "plain", { toolScope: { connectors: "none" } });
+      expect(JSON.parse(updated.data).tasks[1].toolScope).toEqual({ connectors: "none" });
+      const cleared = await h.exec.updateMissionTask(mission.id, "plain", { toolScope: null });
+      expect(JSON.parse(cleared.data).tasks[1]).not.toHaveProperty("toolScope");
+    } finally {
+      h.cleanup();
+    }
+  });
+
   test("renaming a task keeps the links that point to it", async () => {
     const h = executor();
     try {

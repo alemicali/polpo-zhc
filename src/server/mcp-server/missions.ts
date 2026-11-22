@@ -9,7 +9,7 @@ import {
   limitParam, looseObject, ok, page, pageOutput, progress, short, sleep,
   type McpDeps, type Register,
 } from "./kit.js";
-import { taskLine, taskSummary, unknownAgents } from "./tasks.js";
+import { taskLine, taskSummary, toolScopeFromArgs, toolScopeInput, unknownAgents } from "./tasks.js";
 import { describeMissionCost, type MissionCost, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
 
 export const MISSION_STATUSES = ["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"] as const;
@@ -72,7 +72,15 @@ const planTask = z.object({
   maxRetries: z.number().int().min(0).max(10).optional().describe("Retries after a failure"),
   maxDuration: z.number().positive().optional().describe("Stop it after this many milliseconds"),
   sideEffects: z.boolean().optional().describe("true if it does something irreversible: never retried automatically"),
+  ...toolScopeInput,
 }).passthrough();
+
+/** A plan task's connectors / connector_tools / allowed_tools become its toolScope (the mission JSON field). */
+function planTaskToDoc(t: Record<string, unknown>): Record<string, unknown> {
+  const { connectors, connector_tools, allowed_tools, ...rest } = t as Record<string, unknown> & Parameters<typeof toolScopeFromArgs>[0];
+  const scope = toolScopeFromArgs({ connectors, connector_tools, allowed_tools });
+  return scope ? { ...rest, toolScope: scope } : rest;
+}
 
 const flowControl = z.object({
   name: z.string().min(1).describe("Its name"),
@@ -92,6 +100,7 @@ const planShape = {
 /** Validate a plan as the executor will; an error says which task or checkpoint to fix. */
 function validatePlan(plan: Record<string, unknown>): { ok: true; data: string } | { ok: false; error: string } {
   const doc = Object.fromEntries(Object.entries(plan).filter(([, v]) => v !== undefined));
+  if (Array.isArray(doc.tasks)) doc.tasks = (doc.tasks as Array<Record<string, unknown>>).map(planTaskToDoc);
   try {
     parseMissionDocument(doc);
   } catch (err) {
@@ -203,7 +212,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const missing = await unknownAgents(deps, plan.tasks.map((t) => t.assignTo));
     if (missing) return fail(missing);
     const r = await apiSend(deps, "POST", "/missions", { data: valid.data, name, ...(goal ? { prompt: goal } : {}), status: "draft", ...(budget_usd !== undefined ? { budgetUsd: budget_usd } : {}) });
-    if (!r.ok) return apiError(r, "Creating the mission");
+    if (!r.ok) return apiError(r, "Creating the mission", r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools." : undefined);
     const mission = r.data as Mission;
     if (run) {
       const ex = await apiSend(deps, "POST", `/missions/${enc(mission.id)}/execute`);
@@ -251,7 +260,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     let mission = m.mission;
     if (Object.keys(body).length) {
       const r = await apiSend(deps, "PATCH", `/missions/${enc(id)}`, body);
-      if (!r.ok) return apiError(r, `Updating mission ${id}`);
+      if (!r.ok) return apiError(r, `Updating mission ${id}`, r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools." : undefined);
       mission = r.data as Mission;
     }
     const { data: _d, ...rest } = mission;

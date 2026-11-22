@@ -1261,6 +1261,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateTaskDescription: (id: string, desc: string) => o.updateTaskDescription(id, desc),
     updateTaskAssignment: (id: string, agent: string) => o.updateTaskAssignment(id, agent),
     updateTaskExpectations: (id: string, exp: any) => o.updateTaskExpectations(id, exp),
+    updateTaskToolScope: (id: string, scope: unknown) => o.updateTaskToolScope(id, scope),
+    taskToolScopeStale: (task: any) => o.taskToolScopeStale(task),
   })));
 
   authed.route("/missions", missionRoutes(() => ({

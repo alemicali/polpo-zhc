@@ -99,6 +99,13 @@
       "when": 1795363098339,
       "tag": "0013_mission_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795371810680,
+      "tag": "0014_task_tool_scope",
+      "breakpoints": true
     }
   ]
 }

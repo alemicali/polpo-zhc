@@ -255,6 +255,8 @@ function taskToRow(task: any): Record<string, unknown> {
     priority: task.priority != null ? String(task.priority) : null,
     sideEffects: task.sideEffects === true ? 1 : task.sideEffects === false ? 0 : null,
     revisionCount: task.revisionCount ?? null,
+    runs: task.runs ? JSON.stringify(task.runs) : null,
+    toolScope: task.toolScope ? JSON.stringify(task.toolScope) : null,
     createdAt: task.createdAt ?? new Date().toISOString(),
     updatedAt: task.updatedAt ?? new Date().toISOString(),
   };

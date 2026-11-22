@@ -63,7 +63,8 @@ import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBri
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
-import { normalizeConnectorTools } from "@polpo-ai/core";
+import { normalizeConnectorTools, describeTaskToolScope } from "@polpo-ai/core";
+import { TaskToolScopeError } from "../core/task-tool-scope.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
@@ -341,6 +342,13 @@ const getLogsTool: Tool = {
 //  TASK TOOLS (8)
 // ═══════════════════════════════════════════════════════
 
+/** A task's optional tool scope (create_task / update_task / mission tasks). */
+const toolScopeParam = Type.Object({
+  connectors: Type.Optional(Type.Union([Type.Literal("none"), Type.Array(Type.String())], { description: "Connector ids the run may use (each account is its own connector, e.g. gmail-2), or \"none\". Omit: every connector the agent has." })),
+  connectorTools: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Literal("*"), Type.Array(Type.String())]), { description: "Per connector id: \"*\" or the raw tool names (connectors_list shows them). Narrows the agent's connectorTools." })),
+  allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools." })),
+}, { description: "Optional: only for runs that must be deterministic (e.g. use only Gmail 2 to send, or only 2 Linear tools). It only narrows what the agent has (never grants); omit it to inherit everything from the agent." });
+
 const createTaskTool: Tool = {
   name: "create_task",
   description: "Create a new task and assign it to an agent. Task titles MUST be unique among active tasks.",
@@ -358,12 +366,13 @@ const createTaskTool: Tool = {
       threshold: Type.Optional(Type.Number()),
     }), { description: "Acceptance criteria for this task" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects (email sends, API calls, etc.). Blocks automatic retry — requires human approval." })),
+    toolScope: Type.Optional(toolScopeParam),
   }),
 };
 
 const updateTaskTool: Tool = {
   name: "update_task",
-  description: "Update a task's description, assignment, or expectations.",
+  description: "Update a task's description, assignment, expectations or tool scope.",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to update" }),
     description: Type.Optional(Type.String({ description: "New description" })),
@@ -376,6 +385,7 @@ const updateTaskTool: Tool = {
       threshold: Type.Optional(Type.Number()),
     }), { description: "New acceptance criteria" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects. Blocks automatic retry." })),
+    toolScope: Type.Optional(Type.Union([toolScopeParam, Type.Null()], { description: "Narrow the task's tools (see create_task); null goes back to everything the agent has." })),
   }),
 };
 
@@ -587,6 +597,7 @@ const addMissionTaskTool: Tool = {
     expectations: Type.Optional(Type.Array(Type.Any(), { description: "Expectations array" })),
     expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "Expected outcome descriptors" })),
     maxDuration: Type.Optional(Type.Number({ description: "Max duration in seconds" })),
+    toolScope: Type.Optional(toolScopeParam),
   }),
 };
 
@@ -602,6 +613,7 @@ const updateMissionTaskTool: Tool = {
     dependsOn: Type.Optional(Type.Array(Type.String(), { description: "New dependency list" })),
     expectations: Type.Optional(Type.Array(Type.Any(), { description: "New expectations" })),
     expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "New expected outcomes" })),
+    toolScope: Type.Optional(Type.Union([toolScopeParam, Type.Null()], { description: "Narrow the task's tools; null goes back to everything the agent has." })),
   }),
 };
 
@@ -3891,8 +3903,11 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
-  });
-  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
+    ...(args.toolScope !== undefined && args.toolScope !== null ? { toolScope: args.toolScope } : {}),
+  }).catch((err: unknown) => err instanceof TaskToolScopeError ? err : Promise.reject(err));
+  if (task instanceof TaskToolScopeError) return `Error: ${task.message}. The scope may only narrow what ${agentName} has: check connectors_list({ agent: "${agentName}" }) and its allowedTools.`;
+  const scoped = task.toolScope ? ` (tools ${describeTaskToolScope(task.toolScope, connectorManagerFor(polpo).store.list())})` : "";
+  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${scoped}`;
 }
 
 async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3919,6 +3934,15 @@ async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>
   if (args.sideEffects !== undefined) {
     await polpo.getStore().updateTask(taskId, { sideEffects: args.sideEffects as boolean });
     changes.push(`sideEffects → ${args.sideEffects}`);
+  }
+  if (args.toolScope !== undefined) {
+    try {
+      const updated = await polpo.updateTaskToolScope(taskId, args.toolScope);
+      changes.push(`tools → ${describeTaskToolScope(updated.toolScope, connectorManagerFor(polpo).store.list())}`);
+    } catch (err) {
+      if (err instanceof TaskToolScopeError) return `Error: ${err.message}. The scope may only narrow what the agent has.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
+      throw err;
+    }
   }
   if (changes.length === 0) return "No changes specified.";
   return `Task ${taskId} updated: ${changes.join(", ")}`;
@@ -4074,6 +4098,7 @@ async function execAddMissionTask(polpo: Orchestrator, args: Record<string, unkn
       expectations: args.expectations as unknown[] | undefined,
       expectedOutcomes: args.expectedOutcomes as unknown[] | undefined,
       maxDuration: args.maxDuration as number | undefined,
+      ...(args.toolScope ? { toolScope: args.toolScope as import("@polpo-ai/core").TaskToolScope } : {}),
     });
     const parsed = m.data ? JSON.parse(m.data) : {};
     return `Task "${args.title}" added to mission "${m.name}" (${parsed.tasks?.length ?? "?"} tasks total).`;
