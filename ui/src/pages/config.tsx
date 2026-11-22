@@ -112,6 +112,7 @@ import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
+import { HarnessesSection } from "@/components/config/harnesses-section";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -216,6 +217,7 @@ const baseSections = [
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
   { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
+  { id: "harnesses", label: "Harnesses", icon: Bot },
   { id: "mcp", label: "MCP access", icon: Plug },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
@@ -3245,6 +3247,9 @@ export function ConfigPage() {
 
         {/* ═══ SANDBOX ═══ */}
         {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
+
+        {/* ═══ HARNESSES ═══ */}
+        {activeSection === "harnesses" && <HarnessesSection />}
 
         {/* ═══ MCP ACCESS ═══ */}
         {activeSection === "mcp" && <McpAccessSection />}

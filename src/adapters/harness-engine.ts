@@ -472,21 +472,21 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
 
       alive = false;
       if (abort.signal.aborted) {
-        return { exitCode: 1, stdout: lastText, stderr: "Killed", duration: Date.now() - start };
+        return { exitCode: 1, stdout: scrub(lastText), stderr: "Killed", duration: Date.now() - start };
       }
       const failed = lastResult && /error|length|budget/i.test(lastResult.finishReason) && lastResult.finishReason !== "stop";
       if (failed) {
         const message = `${name} ended the turn with "${lastResult!.finishReason}"`;
         transcript({ type: "error", message });
-        return { exitCode: 1, stdout: lastText, stderr: message, duration: Date.now() - start };
+        return { exitCode: 1, stdout: scrub(lastText), stderr: message, duration: Date.now() - start };
       }
-      return { exitCode: 0, stdout: lastText || lastResult?.text || "", stderr: "", duration: Date.now() - start };
+      return { exitCode: 0, stdout: scrub(lastText || lastResult?.text || ""), stderr: "", duration: Date.now() - start };
     } catch (err) {
       alive = false;
       const msg = scrub(err instanceof Error ? err.message : String(err));
       transcript({ type: "error", message: msg });
       await store.update(key, (cur) => (cur ? { ...cur, state: "error", lastError: msg, pid: undefined } : null)).catch(() => undefined);
-      return { exitCode: 1, stdout: lastText, stderr: msg, duration: Date.now() - start };
+      return { exitCode: 1, stdout: scrub(lastText), stderr: msg, duration: Date.now() - start };
     } finally {
       unregister?.();
       // end of the run: the runtime stops (its bridge exits); the conversation stays resumable
