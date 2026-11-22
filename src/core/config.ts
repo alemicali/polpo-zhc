@@ -401,6 +401,7 @@ function parseSettings(raw: any): PolpoSettings {
       tagline: typeof branding.tagline === "string" ? branding.tagline.trim().slice(0, 120) : undefined,
       logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl.trim() : undefined,
       logoDarkUrl: typeof branding.logoDarkUrl === "string" ? branding.logoDarkUrl.trim() : undefined,
+      logoFrame: branding.logoFrame === "box" || branding.logoFrame === "none" ? branding.logoFrame : undefined,
     };
   }
   if (raw?.appearance !== undefined && raw?.appearance !== null) {

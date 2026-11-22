@@ -38,6 +38,17 @@ export interface InstanceAppearance {
   custom?: { enabled?: boolean; derive?: boolean; light?: TokenMap; dark?: TokenMap };
 }
 
+/** The instance's branding as the API gives it (public display fields; settings.branding). */
+export interface InstanceBranding {
+  productName?: string;
+  tagline?: string;
+  logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl). */
+  logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare. */
+  logoFrame?: "box" | "none";
+}
+
 export interface ResolveInput {
   /** What this browser chose (raw localStorage values; null when not chosen). */
   stored: { theme: string | null; palette: string | null; custom: string | null };
@@ -73,6 +84,7 @@ interface KitElement {
   appendChild(child: KitElement): unknown;
 }
 interface KitDocument {
+  title: string;
   documentElement: KitElement;
   head: KitElement;
   getElementById(id: string): KitElement | null;
@@ -85,7 +97,7 @@ export interface KitWindow {
   location: { origin: string };
   localStorage?: KitStorage;
   matchMedia?: (query: string) => { matches: boolean };
-  __POLPO_RUNTIME_CONFIG__?: { baseUrl?: string; appearance?: InstanceAppearance | null } | undefined;
+  __POLPO_RUNTIME_CONFIG__?: { baseUrl?: string; appearance?: InstanceAppearance | null; branding?: InstanceBranding | null } | undefined;
 }
 
 export function appearanceKit() {
@@ -179,6 +191,19 @@ export function appearanceKit() {
   /** The instance's default look, cached per API for when runtime-config.js does not carry it. */
   const INSTANCE_KEY = "polpo-instance-appearance";
   const COLOR_RE = /^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:oklch|oklab|lab|lch|hsla?|rgba?)\(\s*[0-9a-zA-Z.%\s,/+-]{1,80}\))$/;
+  /** The instance's branding, cached per API for when runtime-config.js does not carry it. */
+  const BRANDING_KEY = "polpo-instance-branding";
+  const DEFAULT_PRODUCT_NAME = "Polpo ZHC";
+  const DEFAULT_PRODUCT_TAGLINE = "AI Factory";
+  const LOGO_PRELOAD_ID = "polpo-brand-logo-preload";
+  /**
+   * Fonts the dashboard ships (public/fonts, @font-face in index.css): the file to preload when a
+   * look uses the family, so it never flashes in late. Relative to the app's base.
+   */
+  const BUNDLED_FONTS: Record<string, string> = {
+    "Inter Tight": "fonts/inter-tight/inter-tight-latin-wght-normal.woff2",
+  };
+  const FONT_PRELOAD_PREFIX = "polpo-font-preload-";
   const FONT_RE = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
   const SHADOW_RE = /^(none|[0-9a-zA-Z.%\s,/#()+-]{1,240})$/;
 
@@ -376,8 +401,45 @@ export function appearanceKit() {
     };
   }
 
-  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color. */
-  function apply(doc: KitDocument, r: ResolvedAppearance): void {
+  /** The bundled font families a look uses (its custom fonts, either mode). */
+  function bundledFontsUsed(custom: BootCustom): string[] {
+    if (!custom.enabled) return [];
+    const fonts: string[] = [];
+    for (const mode of [custom.light, custom.dark]) {
+      for (const key of ["fontFamily", "headingFont"]) {
+        const value = mode[key];
+        if (typeof value === "string") fonts.push(value);
+      }
+    }
+    return Object.keys(BUNDLED_FONTS).filter((family) => fonts.some((stack) => stack.indexOf(family) !== -1));
+  }
+
+  /** A preload for each bundled font the look uses; none left for the others. */
+  function applyFontPreloads(doc: KitDocument, custom: BootCustom, assetBase: string): void {
+    const used = bundledFontsUsed(custom);
+    for (const family of Object.keys(BUNDLED_FONTS)) {
+      const id = FONT_PRELOAD_PREFIX + slug(family);
+      let link = doc.getElementById(id);
+      if (used.indexOf(family) === -1) {
+        if (link) link.remove();
+        continue;
+      }
+      if (!link) {
+        link = doc.createElement("link");
+        link.id = id;
+        link.setAttribute("rel", "preload");
+        link.setAttribute("as", "font");
+        link.setAttribute("type", "font/woff2");
+        link.setAttribute("crossorigin", "anonymous");
+        doc.head.appendChild(link);
+      }
+      link.setAttribute("href", assetBase + BUNDLED_FONTS[family]);
+    }
+  }
+
+  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color, font preloads. */
+  function apply(doc: KitDocument, r: ResolvedAppearance, assetBase = "/"): void {
+    try { applyFontPreloads(doc, r.custom, assetBase); } catch { /* the look applies anyway */ }
     const root = doc.documentElement;
     root.classList.toggle("dark", r.dark);
     root.dataset.palette = r.palette;
@@ -434,20 +496,105 @@ export function appearanceKit() {
   }
 
   /** Resolve and apply from the page's state; a failure leaves the page's default look. */
-  function boot(win: KitWindow, buildBaseUrl: string): ResolvedAppearance | null {
+  function boot(win: KitWindow, buildBaseUrl: string, assetBase = "/"): ResolvedAppearance | null {
+    let r: ResolvedAppearance | null = null;
     try {
-      const r = resolve(read(win, buildBaseUrl));
-      apply(win.document, r);
-      return r;
+      r = resolve(read(win, buildBaseUrl));
+      apply(win.document, r, assetBase);
     } catch {
-      return null;
+      r = null;
     }
+    // the branding after the look: the logo to preload depends on the theme just applied
+    try { bootBranding(win, buildBaseUrl, r ? r.dark : true); } catch { /* keep the page's defaults */ }
+    return r;
+  }
+
+  // ── Branding: the product name, the logo ─────────────────────────────
+
+  /** Only the display fields, as strings; an unknown frame is the default. */
+  function normalizeBranding(value: unknown): InstanceBranding {
+    const out: InstanceBranding = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+    const v = value as Record<string, unknown>;
+    for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl"] as const) {
+      const field = v[key];
+      if (typeof field === "string" && field.trim()) out[key] = field.trim();
+    }
+    if (v.logoFrame === "box" || v.logoFrame === "none") out.logoFrame = v.logoFrame;
+    return out;
+  }
+
+  /** The instance branding: runtime-config.js when it carries one (even empty), else the cached copy. */
+  function instanceBranding(win: KitWindow, api: string): InstanceBranding | null {
+    const rc = win.__POLPO_RUNTIME_CONFIG__;
+    if (rc && Object.prototype.hasOwnProperty.call(rc, "branding") && rc.branding !== undefined) return rc.branding ? normalizeBranding(rc.branding) : null;
+    const cached = parseJson(storageGet(win, `${BRANDING_KEY}:${api}`));
+    return cached && typeof cached === "object" ? normalizeBranding(cached) : null;
+  }
+
+  /**
+   * The browser tab: the product name, then " · page" when there is one; without a product name
+   * the default ("Polpo ZHC — AI Factory", or "Polpo ZHC · page").
+   */
+  function brandingTitle(b: InstanceBranding | null | undefined, page?: string): string {
+    const name = b && b.productName;
+    if (page) return `${name || DEFAULT_PRODUCT_NAME} · ${page}`;
+    return name || `${DEFAULT_PRODUCT_NAME} — ${DEFAULT_PRODUCT_TAGLINE}`;
+  }
+
+  /** A logo URL the page may load: http(s), a data: image, or a path on the API. */
+  function logoHref(url: string | undefined, baseUrl: string): string | null {
+    if (!url) return null;
+    if (url.charAt(0) === "/" && url.charAt(1) !== "/") return `${baseUrl}${url}`;
+    return /^(https?:\/\/|data:image\/)/i.test(url) ? url : null;
+  }
+
+  /** The logo shown first: in dark mode the dark one (else the logo), otherwise the logo. */
+  function brandingLogo(b: InstanceBranding | null | undefined, dark: boolean, baseUrl: string): string | null {
+    if (!b) return null;
+    return (dark ? logoHref(b.logoDarkUrl, baseUrl) : null) || logoHref(b.logoUrl, baseUrl);
+  }
+
+  /** Put the branding on the page: the title (and the home-screen name), a preload for the logo. */
+  function applyBranding(doc: KitDocument, b: InstanceBranding | null, dark: boolean, baseUrl: string, page?: string): void {
+    if (b || page) doc.title = brandingTitle(b, page);
+    if (!b) return;
+    if (b.productName) {
+      const meta = doc.querySelector("meta[name=\"apple-mobile-web-app-title\"]");
+      if (meta) meta.setAttribute("content", b.productName);
+    }
+    const href = brandingLogo(b, dark, baseUrl);
+    let link = doc.getElementById(LOGO_PRELOAD_ID);
+    if (!href) {
+      if (link) link.remove();
+      return;
+    }
+    if (!link) {
+      link = doc.createElement("link");
+      link.id = LOGO_PRELOAD_ID;
+      link.setAttribute("rel", "preload");
+      link.setAttribute("as", "image");
+      link.setAttribute("fetchpriority", "high");
+      doc.head.appendChild(link);
+    }
+    link.setAttribute("href", href);
+  }
+
+  function bootBranding(win: KitWindow, buildBaseUrl: string, dark: boolean): InstanceBranding | null {
+    const rc = win.__POLPO_RUNTIME_CONFIG__ || {};
+    const baseUrl = (rc.baseUrl !== undefined && rc.baseUrl !== null ? rc.baseUrl : buildBaseUrl) || "";
+    const b = instanceBranding(win, scopes(win, buildBaseUrl).api);
+    applyBranding(win.document, b, dark, baseUrl);
+    return b;
   }
 
   return {
     PALETTES, DEFAULT_PALETTE, DEFAULT_THEME, THEME_COLORS, TOKENS, DERIVE, STYLE_ID, KEYS, LAST_SCOPE_KEY, INSTANCE_KEY,
     slug, apiScope, scopedKey, isTheme, isPalette, tokenValue, normalizeTokens, normalizeCustom, lightness, contrastOn, deriveTokens,
     overridesCss, resolve, apply, read, boot, instanceDefault,
+    BUNDLED_FONTS, FONT_PRELOAD_PREFIX, bundledFontsUsed,
+    BRANDING_KEY, DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, LOGO_PRELOAD_ID,
+    normalizeBranding, instanceBranding, brandingTitle, brandingLogo, applyBranding, bootBranding,
   };
 }
 
@@ -455,10 +602,11 @@ export type AppearanceKit = ReturnType<typeof appearanceKit>;
 
 /**
  * The inline <head> script: the kit's own source, run on the page. `buildBaseUrl` is the API URL
- * baked in at build time (VITE_POLPO_API_URL), used when runtime-config.js does not name one.
+ * baked in at build time (VITE_POLPO_API_URL), used when runtime-config.js does not name one;
+ * `assetBase` the app's base (Vite's `base`), for the bundled fonts.
  */
-export function bootScriptSource(buildBaseUrl = ""): string {
-  const source = `(function(){try{(${appearanceKit.toString()})().boot(window,${JSON.stringify(buildBaseUrl)});}catch(e){}})();`;
+export function bootScriptSource(buildBaseUrl = "", assetBase = "/"): string {
+  const source = `(function(){try{(${appearanceKit.toString()})().boot(window,${JSON.stringify(buildBaseUrl)},${JSON.stringify(assetBase)});}catch(e){}})();`;
   // never let the source close the <script> element it is inlined in
   return source.replace(/<\/(script)/gi, "<\\/$1");
 }

@@ -26,40 +26,9 @@ import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
 import { BrandMark } from "@/components/shared/brand-mark";
+import { resolveTitle } from "@/lib/page-titles";
 import { NewChatMenu } from "@/components/groups/new-chat-menu";
 import { requestNewGroup, setActiveChatRoom, useActiveChatRoom, useActiveChatRoomTitle } from "@/hooks/use-chat-room";
-
-const titles: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/missions": "Missions",
-  "/tasks": "Tasks",
-  "/agents": "Agents",
-  "/connectors": "Connectors",
-  "/agent-talk": "Agent conversations",
-  "/skills": "Skills",
-  "/events": "Events",
-  "/chat": "Chat",
-  "/memory": "Memory",
-  "/notifications": "Notifications",
-  "/approvals": "Approvals",
-  "/playbooks": "Playbooks",
-  "/files": "Files",
-  "/config": "Configuration",
-  "/apps": "Apps",
-  "/data": "Data",
-  "/artifacts": "Artifacts",
-  "/brain": "Company Brain",
-  "/changelog": "Novità",
-};
-
-function resolveTitle(pathname: string): string {
-  if (titles[pathname]) return titles[pathname];
-  if (pathname.startsWith("/missions/")) return "Mission Detail";
-  if (pathname.startsWith("/tasks/")) return "Task Detail";
-  if (pathname.startsWith("/agents/")) return "Agent Detail";
-  if (pathname.startsWith("/skills/")) return "Skill Detail";
-  return "";
-}
 
 function ChatHeaderCenter() {
   const sessionsOpen = useChatPageSessionsOpen();
@@ -187,7 +156,7 @@ export function Header() {
             <Menu className="h-5 w-5" />
           </Button>
         </MobileNavSheet>
-        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
+        <BrandMark className="h-7 w-7 rounded-md text-sm" />
         <span className="truncate text-sm font-bold tracking-tight">{title}</span>
       </div>
 

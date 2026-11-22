@@ -19,6 +19,7 @@ import {
 } from "@/lib/appearance";
 import type { TokenGroup, TokenMap } from "@/lib/appearance-kit";
 import { parseImportedAppearance } from "@/lib/appearance-import";
+import { FONT_PRESETS } from "@/lib/font-presets";
 
 const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "brand", label: "Brand", hint: "Buttons, links, highlights" },
@@ -30,16 +31,6 @@ const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "status", label: "Status", hint: "Errors and destructive actions" },
   { id: "typography", label: "Typography", hint: "Body, headings, code" },
   { id: "shape", label: "Shape", hint: "Corners and shadows" },
-];
-
-const FONT_PRESETS: Array<{ label: string; value: string }> = [
-  { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
-  { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "IBM Plex Sans", value: "\"IBM Plex Sans\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "Newsreader", value: "\"Newsreader\", Georgia, serif" },
-  { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
-  { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
 ];
 
 function label(name: string): string {

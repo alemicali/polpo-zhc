@@ -91,7 +91,7 @@ const settingsView = z.object({
 
 type Settings = Record<string, unknown> & {
   orchestratorModel?: string | { primary?: string; fallbacks?: string[] }; imageModel?: string; reasoning?: string;
-  branding?: { productName?: string; tagline?: string; logoUrl?: string; logoDarkUrl?: string };
+  branding?: { productName?: string; tagline?: string; logoUrl?: string; logoDarkUrl?: string; logoFrame?: "box" | "none" };
   appearance?: AppearanceSettings;
   notifications?: { channels?: Record<string, { type?: string }>; rules?: Array<{ id?: string; name?: string; events?: string[]; channels?: string[] }> };
   approvalGates?: Array<{ id?: string; name?: string; hook?: string; handler?: string }>;
@@ -175,9 +175,12 @@ async function brandingNow(deps: McpDeps): Promise<Record<string, unknown>> {
   return r.ok && r.data && typeof r.data === "object" ? r.data as Record<string, unknown> : {};
 }
 
-type Branding = { productName?: string; tagline?: string; logoUrl?: string; logoDarkUrl?: string };
+type Branding = { productName?: string; tagline?: string; logoUrl?: string; logoDarkUrl?: string; logoFrame?: "box" | "none" };
 
-const brandingOutput = { productName: z.string().optional(), tagline: z.string().optional(), logoUrl: z.string().optional(), logoDarkUrl: z.string().optional() };
+const brandingOutput = {
+  productName: z.string().optional(), tagline: z.string().optional(), logoUrl: z.string().optional(), logoDarkUrl: z.string().optional(),
+  logoFrame: z.enum(["box", "none"]).optional().describe("How the logo is shown: box (a tile, the default) or none (bare)"),
+};
 
 const tokenMapOutput = z.record(z.string(), z.union([z.string(), z.number()]));
 const appearanceOutput = z.object({
@@ -426,7 +429,8 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("config", "polpo_branding_get", {
     title: "Get the branding and appearance",
-    description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo; "
+    description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo, "
+      + "how the logo is framed (logoFrame: box, the default tile, or none, bare); "
       + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows). "
       + "A person may still customize their own browser.",
     inputSchema: {},
@@ -440,7 +444,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     const darkLink = link(b.logoDarkUrl);
     return ok([
       `${b.productName ?? "Polpo (default name)"}${b.tagline ? ` — ${b.tagline}` : ""}`,
-      `logo: ${logoLink ?? "default"} · dark-mode logo: ${darkLink ?? (logoLink ? "the logo" : "default")}`,
+      `logo: ${logoLink ?? "default"} · dark-mode logo: ${darkLink ?? (logoLink ? "the logo" : "default")} · frame: ${b.logoFrame ?? "box (default)"}`,
       `appearance: ${describeAppearance(appearance)}`,
     ].join("\n"), {
       ...b, ...(logoLink ? { logo_link: logoLink } : {}), ...(darkLink ? { logo_dark_link: darkLink } : {}), appearance, tokens: APPEARANCE_TOKEN_NAMES,
@@ -449,10 +453,10 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("config", "polpo_branding_update", {
     title: "Update the branding and appearance",
-    description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, and the default look "
+    description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
       + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
-      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack), radius (0–24 px), shadows; "
+      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack; Inter Tight is bundled with the dashboard, loaded only when used: \"Inter Tight\", sans-serif), radius (0–24 px), shadows; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
@@ -461,6 +465,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       logo: logoInput.nullable().optional().describe("The new logo: { url } or { path } or { base64, mime_type }; null: the default logo"),
       logo_dark: logoInput.nullable().optional().describe("The logo in dark mode (same forms); null: use the logo"),
       remove_logo: z.boolean().optional().describe("true to go back to the default logo (same as logo: null)"),
+      logo_frame: z.enum(["box", "none"]).nullable().optional().describe("How the logo is shown: box (in a tile, the default) or none (bare, same height, no background); null: the default"),
       theme: z.enum(APPEARANCE_THEMES).nullable().optional().describe("The default theme; null: the built-in default (dark)"),
       palette: z.enum(APPEARANCE_PALETTES).nullable().optional().describe("The default palette; null: the built-in default (tide)"),
       tokens: z.object({
@@ -474,10 +479,10 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { changed: z.array(z.string()), branding: z.object({ ...brandingOutput }), appearance: appearanceOutput },
     annotations: UPDATE,
-  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, theme, palette, tokens, reset_appearance }) => {
+  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, tokens, reset_appearance }) => {
     const touchesAppearance = theme !== undefined || palette !== undefined || tokens !== undefined || reset_appearance === true;
-    if (product_name === undefined && tagline === undefined && logo === undefined && logo_dark === undefined && !remove_logo && !touchesAppearance) {
-      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, theme, palette, tokens or reset_appearance.");
+    if (product_name === undefined && tagline === undefined && logo === undefined && logo_dark === undefined && !remove_logo && logo_frame === undefined && !touchesAppearance) {
+      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, tokens or reset_appearance.");
     }
     if (logo && remove_logo) return fail("Give either logo or remove_logo, not both.");
     // the appearance first (pure validation): if it is not valid, nothing changes
@@ -513,19 +518,20 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     const text: Record<string, string> = {};
     if (product_name !== undefined) text.productName = product_name.trim();
     if (tagline !== undefined) text.tagline = tagline.trim();
+    if (logo_frame !== undefined) text.logoFrame = logo_frame ?? "";
     const brandingBefore = Object.keys(text).length ? await brandingNow(deps) : {};
     if (Object.keys(text).length) patch.branding = text;
     if (nextAppearance !== undefined) patch.appearance = nextAppearance;
     if (Object.keys(patch).length) {
       const r = await apiSend(deps, "PATCH", "/config/settings", patch);
       if (!r.ok) return apiError(r, "Updating the branding and appearance", changed.length ? `Already changed: ${changed.join(", ")}.` : undefined);
-      for (const [k, v] of Object.entries(text)) if ((brandingBefore[k] ?? "") !== v) changed.push(k);
+      for (const [k, v] of Object.entries(text)) if ((brandingBefore[k] ?? "") !== v) changed.push(k === "logoFrame" ? "logo_frame" : k);
     }
     const now = await brandingNow(deps) as Branding;
     const appearance = await appearanceNow(deps);
     if (touchesAppearance) changed.push(...appearanceChanges(before, appearance));
     return ok(changed.length
-      ? `Updated: ${changed.join(", ")}. Now: ${now.productName ?? "Polpo"}${now.tagline ? ` — ${now.tagline}` : ""}${now.logoUrl ? " with a custom logo" : ""}${now.logoDarkUrl ? " (and a dark-mode one)" : ""}; appearance: ${describeAppearance(appearance)}.`
+      ? `Updated: ${changed.join(", ")}. Now: ${now.productName ?? "Polpo"}${now.tagline ? ` — ${now.tagline}` : ""}${now.logoUrl ? " with a custom logo" : ""}${now.logoDarkUrl ? " (and a dark-mode one)" : ""}${now.logoFrame === "none" ? ", shown bare" : ""}; appearance: ${describeAppearance(appearance)}.`
       : "Nothing changed (the values were the same).",
     { changed, branding: now, appearance });
   });

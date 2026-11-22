@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { App } from "./app";
 import { config } from "./lib/config";
 import { bootstrapAppearance } from "./lib/appearance";
+import { bootstrapBranding } from "./lib/branding";
 // Iconify glyphs are generated as small, local subsets and registered by the
 // components that use them. No icon depends on the public Iconify API.
 import "./index.css";
@@ -47,6 +48,9 @@ window.fetch = (input, init) => {
 // it before the first paint (lib/appearance-kit.ts). This applies it again with the app's config,
 // keeps it current (OS theme, other tabs) and fetches the instance's default.
 bootstrapAppearance();
+// The branding (name, tagline, logo, frame) the same way: the title and logo preload are already on
+// the page, the components read it synchronously on their first render; this fetches the latest.
+bootstrapBranding();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";

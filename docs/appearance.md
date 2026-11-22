@@ -37,13 +37,15 @@ Every member can edit Configuration (members have no roles), so every member see
 Values are checked by the REST route and MCP, which refuse invalid input (400), and by the config loader, which ignores the invalid part of a hand-edited `polpo.json` with a warning in the log (the rest applies; the instance always starts):
 
 - **colours**: `#rgb`, `#rrggbb`, `#rrggbbaa`, `oklch(…)`, `oklab(…)`, `lab(…)`, `lch(…)`, `hsl(…)`, `rgb(…)` (the syntaxes the dashboard's CSS uses);
-- **fonts**: a CSS font stack of names, commas and quotes, at most 200 characters (no `;`, braces, `url(`…). The dashboard loads Satoshi, IBM Plex Sans, JetBrains Mono and Newsreader; other families need to be installed on the viewer's device (no web-font loading);
+- **fonts**: a CSS font stack of names, commas and quotes, at most 200 characters (no `;`, braces, `url(`…). The dashboard loads Satoshi, IBM Plex Sans, JetBrains Mono and Newsreader, and ships **Inter Tight** (self-hosted variable woff2, weights 100–900, latin + latin-ext, `font-display: swap`: fetched only when a look uses it, and preloaded by the inline script then; e.g. `"\"Inter Tight\", sans-serif"`); other families need to be installed on the viewer's device (no web-font loading);
 - **radius**: 0–24 px;
 - **shadows**: a `box-shadow` or `none`, no `url(`.
 
 The old shape (`primary`, `secondary`, `text`, `fontFamily`, `radius` per mode) is still read: `text` is `foreground`.
 
 The dark-mode logo is part of the branding: `settings.branding.logoDarkUrl` (an https URL or the managed `/api/v1/config/branding/logo-dark`, uploaded with `POST /api/v1/config/instance-logo?variant=dark`), shown in dark mode; the logo is used when it is missing or fails to load. The favicon is always Polpo's.
+
+`settings.branding.logoFrame` says how the logo is shown everywhere (sidebar, header, mobile nav, sign-in): `"box"` (the default) in a tile, `"none"` bare (the same height, its own width, no background, border or padding). Configuration → Appearance → "Show logo in a box"; MCP `polpo_branding_update { logo_frame: "box" | "none" | null }`; REST `PATCH /api/v1/config/settings { branding: { logoFrame } }` (`""` restores the default).
 
 ## Design tokens: before and after
 
@@ -88,3 +90,5 @@ The first frame already has the right look:
 - `index.html` runs a small inline script right after `/runtime-config.js`, before the stylesheet: it resolves the three layers (this browser's choices are read under the instance it saw last on this API) and sets the `dark` class, `data-palette`, the overrides stylesheet and `<meta name="theme-color">`. The script is `ui/src/lib/appearance-kit.ts`, inlined at build time by `vite.config.ts`; the app uses the same code after it loads.
 
 Without `runtime-config.js` (the Electron app, the nginx image) the script uses the instance default cached by the last visit; without anything, the built-in default.
+
+The branding the same way: `ui/server.mjs` also reads the public `GET /api/v1/config/branding` (display fields only: `productName`, `tagline`, `logoUrl`, `logoDarkUrl`, `logoFrame`; `POLPO_BRANDING_URL` overrides, else next to `POLPO_APPEARANCE_URL`), inlines it into `/runtime-config.js` and puts the product name in `index.html`'s `<title>`. The inline script sets the title and adds a `<link rel="preload" as="image">` for the logo of the theme just applied (the dark one in dark mode); the app reads the branding synchronously on its first render (`ui/src/lib/branding.ts`, falling back to the copy cached in this browser), so neither the name nor the logo shows Polpo's first. The browser tab is the product name, then ` · <page>` (without a product name: `Polpo ZHC — AI Factory`).

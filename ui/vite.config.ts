@@ -99,13 +99,15 @@ const pwaPlugin = VitePWA({
  */
 function appearanceBootPlugin(): Plugin {
   let buildBaseUrl = "";
+  let assetBase = "/";
   return {
     name: "polpo-appearance-boot",
     configResolved(config) {
       buildBaseUrl = String(config.env.VITE_POLPO_API_URL ?? "");
+      assetBase = config.base || "/";
     },
     transformIndexHtml(html) {
-      return html.replace("<!-- polpo:appearance-boot -->", `<script>${bootScriptSource(buildBaseUrl)}</script>`);
+      return html.replace("<!-- polpo:appearance-boot -->", `<script>${bootScriptSource(buildBaseUrl, assetBase)}</script>`);
     },
   };
 }

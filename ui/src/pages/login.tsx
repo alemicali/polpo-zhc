@@ -7,8 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { config } from "@/lib/config";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { DEFAULT_PRODUCT_NAME } from "@/lib/branding";
-import type { InstanceBranding } from "@/hooks/use-polpo";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 async function authApi(path: string, init?: RequestInit) {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
@@ -36,14 +35,8 @@ export function LoginPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [branding, setBranding] = useState<InstanceBranding | undefined>();
-
-  useEffect(() => {
-    fetch(`${config.baseUrl}/api/v1/config/branding`)
-      .then((response) => response.json())
-      .then((result) => { if (result.ok) setBranding(result.data); })
-      .catch(() => undefined);
-  }, []);
+  // known from the first render (runtime-config.js / the cached copy); main.tsx asks the API for the latest
+  const branding = useInstanceBranding();
 
   useEffect(() => {
     authApi("/status")
@@ -91,8 +84,8 @@ export function LoginPage() {
       <Card className="w-full max-w-md border-border/60 shadow-lg shadow-black/[0.03]">
         <CardContent className="pt-6 pb-6 px-6 space-y-6">
           <div className="text-center space-y-2">
-            <BrandMark branding={branding} className="mx-auto h-12 w-12 rounded-lg text-xl" />
-            <h1 className="text-2xl font-semibold tracking-tight">Sign in to {branding?.productName || DEFAULT_PRODUCT_NAME}</h1>
+            <BrandMark className="mx-auto h-12 w-12 rounded-lg text-xl" />
+            <h1 className="text-2xl font-semibold tracking-tight">Sign in to {productName(branding)}</h1>
             <p className="text-sm text-muted-foreground">
               Enter the admin email for this instance.
             </p>

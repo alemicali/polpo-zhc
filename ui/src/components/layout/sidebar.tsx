@@ -33,7 +33,7 @@ import { useEvents, usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
 import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import {
   Tooltip,
@@ -269,6 +269,7 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
 export function Sidebar() {
   const { connectionStatus } = usePolpo();
   const { info } = useProjectInfo();
+  const branding = useInstanceBranding();
   const status = statusConfig[connectionStatus];
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -298,7 +299,7 @@ export function Sidebar() {
       <div className="relative flex h-14 shrink-0 items-center border-b border-border/40 group">
         {collapsed ? (
           <div className="flex w-full items-center justify-center">
-            <BrandMark branding={info?.branding} className="rounded-xl" />
+            <BrandMark className="rounded-xl" bareMaxWidthClassName="max-w-10" />
             <button
               onClick={() => setCollapsed(false)}
               className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-muted/90 backdrop-blur-sm cursor-pointer"
@@ -310,10 +311,10 @@ export function Sidebar() {
         ) : (
           <div className="flex w-full items-center justify-between px-5">
             <div className="flex items-center gap-3">
-              <BrandMark branding={info?.branding} className="rounded-xl" />
+              <BrandMark className="rounded-xl" />
               <div>
-                <h1 className="max-w-36 truncate text-sm font-bold tracking-tight text-foreground">{info?.branding?.productName || DEFAULT_PRODUCT_NAME}</h1>
-                <p className="max-w-36 truncate text-[10px] uppercase text-muted-foreground/70">{info?.branding?.tagline || DEFAULT_PRODUCT_TAGLINE}</p>
+                <h1 className="max-w-36 truncate text-sm font-bold tracking-tight text-foreground">{productName(branding)}</h1>
+                <p className="max-w-36 truncate text-[10px] uppercase text-muted-foreground/70">{productTagline(branding)}</p>
               </div>
             </div>
             <button

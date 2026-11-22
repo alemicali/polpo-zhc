@@ -229,6 +229,8 @@ export const UpdateSettingsSchema = z.object({
     logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
     /** The logo for dark mode (the light one when absent). */
     logoDarkUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo-dark"), z.literal("")]).optional(),
+    /** How the logo is shown: "box" (default) in a tile, "none" bare; "" restores the default. */
+    logoFrame: z.enum(["box", "none", ""]).optional(),
   }).optional(),
   /**
    * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark } }

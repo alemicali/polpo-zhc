@@ -16,6 +16,7 @@ import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/
 import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
+import { loadInstanceBranding, setInstanceBranding, type InstanceBranding } from "@/lib/branding";
 import { toast } from "sonner";
 import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, resolveSessionKey, settleSteer, type SteerAppliedEvent } from "./use-chat-steering";
 
@@ -2513,13 +2514,7 @@ export function useAsyncAction<T extends unknown[]>(
 
 // ── useProjectInfo ──
 
-export interface InstanceBranding {
-  productName?: string;
-  tagline?: string;
-  logoUrl?: string;
-  /** The logo in dark mode (falls back to logoUrl). */
-  logoDarkUrl?: string;
-}
+export type { InstanceBranding };
 
 const BRANDING_CHANGE_EVENT = "polpo:branding-change";
 type ProjectInfo = { project: string; version?: string; branding?: InstanceBranding };
@@ -2528,6 +2523,7 @@ const projectInfoRequests = new WeakMap<object, Promise<ProjectInfo | null>>();
 
 export function notifyBrandingChanged(): void {
   window.dispatchEvent(new Event(BRANDING_CHANGE_EVENT));
+  void loadInstanceBranding();
 }
 
 function inferProjectNameFromConfig(value: unknown): string | null {
@@ -2575,6 +2571,8 @@ function loadProjectInfo(client: ReturnType<typeof usePolpo>["client"], force = 
     const project = inferProjectNameFromConfig(state) ?? inferProjectNameFromConfig(config);
     if (!project) return null;
     const branding = (config?.settings as { branding?: InstanceBranding } | undefined)?.branding;
+    // the config answered: its branding is the instance's now (none set: the defaults)
+    if (config) setInstanceBranding(branding ?? {});
     const value = { project, version: health?.version, branding };
     projectInfoCache.set(key, value);
     setAppearanceScope({ project });

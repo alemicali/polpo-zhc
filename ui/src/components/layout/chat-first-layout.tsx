@@ -88,7 +88,7 @@ import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { ChatTabs } from "./chat-tabs";
@@ -208,7 +208,9 @@ function isSecondaryPath(pathname: string): boolean {
 // ── Left panel header ──
 
 function ChatPanelHeader() {
-  const { info } = useProjectInfo();
+  // loads the project info (and with it the latest branding and appearance scope)
+  useProjectInfo();
+  const branding = useInstanceBranding();
   const sessionsOpen = useChatFirstSessionsOpen();
   const chatActions = useChatActions();
 
@@ -228,11 +230,11 @@ function ChatPanelHeader() {
             </Button>
           </MobileNavSheet>
         </div>
-        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
+        <BrandMark className="h-7 w-7 rounded-md text-sm" />
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-bold tracking-tight">{info?.branding?.productName || DEFAULT_PRODUCT_NAME}</h2>
+          <h2 className="truncate text-sm font-bold tracking-tight">{productName(branding)}</h2>
           <p className="truncate text-[9px] font-mono uppercase text-muted-foreground/50 leading-none">
-            {info?.branding?.tagline || DEFAULT_PRODUCT_TAGLINE}
+            {productTagline(branding)}
           </p>
         </div>
       </div>

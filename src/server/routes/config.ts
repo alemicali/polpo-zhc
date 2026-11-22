@@ -314,8 +314,14 @@ export function publicConfigRoutes(
 
   app.get("/branding", (c) => {
     const activeWorkDir = orchestrator.isInitialized ? orchestrator.getWorkDir() : workDir;
-    const branding = loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings?.branding ?? {};
-    return c.json({ ok: true, data: branding });
+    const raw = loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings?.branding ?? {};
+    // public (the sign-in page, runtime-config.js): only the display fields, never anything else
+    const branding: Record<string, string> = {};
+    for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl", "logoFrame"] as const) {
+      const value = raw[key];
+      if (typeof value === "string" && value) branding[key] = value;
+    }
+    return c.json({ ok: true, data: branding }, 200, { "cache-control": "no-cache" });
   });
 
   // The dashboard's default look (theme, palette, custom colours): public like the branding, so the

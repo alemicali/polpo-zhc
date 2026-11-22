@@ -2071,8 +2071,9 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
   const [tagline, setTagline] = useState(branding?.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
   const [logoDarkUrl, setLogoDarkUrl] = useState(branding?.logoDarkUrl ?? "");
+  const [logoBoxed, setLogoBoxed] = useState(branding?.logoFrame !== "none");
   const [brandingBusy, setBrandingBusy] = useState(false);
-  const draft = { productName, tagline, logoUrl, logoDarkUrl };
+  const draft = { productName, tagline, logoUrl, logoDarkUrl, logoFrame: logoBoxed ? "box" as const : "none" as const };
   /** Busy while it runs; errors go on to the caller. */
   const busyRun = (work: Promise<void>) => {
     setBrandingBusy(true);
@@ -2121,6 +2122,27 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
               onUpload={(file) => busyRun(onUploadLogo(file, "dark"))}
               onRemove={branding?.logoDarkUrl ? () => void busyWhile(onRemoveLogo("dark").then(() => setLogoDarkUrl("")), "Failed to remove logo") : undefined}
             />
+            <div className="flex items-center gap-3 sm:col-span-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={logoBoxed}
+                aria-label="Show logo in a box"
+                disabled={brandingBusy}
+                onClick={() => setLogoBoxed((boxed) => !boxed)}
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+                  logoBoxed ? "bg-primary" : "bg-muted-foreground/30",
+                  brandingBusy && "cursor-not-allowed opacity-40",
+                )}
+              >
+                <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform", logoBoxed ? "translate-x-[1.125rem]" : "translate-x-0.5")} />
+              </button>
+              <div className="min-w-0">
+                <div className="text-xs font-medium">Show logo in a box</div>
+                <div className="text-[11px] text-muted-foreground">Off: the logo is shown bare, at the same height, without the tile behind it.</div>
+              </div>
+            </div>
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
               <Button
                 disabled={brandingBusy}
@@ -2129,6 +2151,7 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
                   tagline: tagline.trim() || undefined,
                   logoUrl: logoUrl.trim() || undefined,
                   logoDarkUrl: logoDarkUrl.trim() || undefined,
+                  logoFrame: logoBoxed ? "box" : "none",
                 }), "Failed to update branding")}
               >
                 {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
