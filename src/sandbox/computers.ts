@@ -12,9 +12,10 @@
  *   deleted automatically: only reset (delete + recreate) and delete, both asked for by a person.
  * - Daytona v2 hibernates instead (its Linux VMs cannot pause, and their wall clock, at most
  *   24 h, deletes them): stop/idle = a memory and disk snapshot, ready in seconds, then the VM is
- *   deleted ("hibernated"); the next use (or start) makes a VM from the newest snapshot (files and
- *   running processes kept, ~3 s), re-applies its network rule and checks its tailnet again, and
- *   only then deletes older snapshots (providers.daytona.hibernate.keepSnapshots). A failed
+ *   deleted ("hibernated") and older snapshots beyond providers.daytona.hibernate.keepSnapshots
+ *   go; the next use (or start) makes a VM from the newest snapshot (files and running processes
+ *   kept, ~3 s), re-applies its network rule and checks its tailnet again, and only then deletes
+ *   older snapshots (keepSnapshots). A failed
  *   snapshot keeps the VM running (retried later). While it runs: a safety snapshot every few
  *   hours, and before the wall clock ends a rotation (snapshot, new VM) at a quiet moment. A VM
  *   that vanished anyway is restored from the last snapshot (with a notice). Commands that arrive
@@ -710,7 +711,10 @@ export class ComputerManager {
       throw new Error(message);
     }
     this.bump(c.id);
-    await this.setStatus(c, "hibernated", { remoteId: undefined, timeoutAt: undefined, retryAt: undefined, notice: undefined });
+    await this.setStatus(c, "hibernated", { remoteId: undefined, timeoutAt: undefined, retryAt: undefined, notice: undefined, restoredFrom: undefined });
+    // its VM is gone and the new snapshot is ready: a hibernated computer keeps only the newest
+    // keepSnapshots (before, the one it had woken from stayed too until the next wake)
+    await this.pruneSnapshots(c, h).catch((err) => this.onNotice?.(c.id, "warn", `Could not delete old snapshots: ${(err as Error).message}`));
     return "hibernated";
   }
 

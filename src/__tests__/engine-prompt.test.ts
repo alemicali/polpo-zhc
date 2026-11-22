@@ -273,6 +273,11 @@ describe("buildSystemPrompt — available tools", () => {
     expect(buildPrompt(task, grantsTool(agent, "bash"))).not.toContain("Bash tool rules");
   });
 
+  it("register_outcome is always named, even when allowedTools omits it", () => {
+    const prompt = buildSystemPrompt(createTestAgent({ name: "dev", allowedTools: ["read", "write", "bash"] }), CWD);
+    expect(listed(prompt, "register_outcome")).toBe(true);
+  });
+
   it("without a list the agent gets the core set, bash included; a wildcard grants what it matches", () => {
     const prompt = buildSystemPrompt(createTestAgent({ name: "dev" }), CWD);
     for (const t of ["bash", "http_fetch", "ink_search"]) expect(listed(prompt, t)).toBe(true);

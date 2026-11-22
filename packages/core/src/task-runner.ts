@@ -76,11 +76,22 @@ export class TaskRunner {
         try { await this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
       }
       // Persist auto-collected outcomes on the task.
-      // REPLACE (not append) — each execution produces its own definitive outcomes.
-      // Appending caused "exponential outcome" accumulation across retries/fix cycles.
+      // A new execution (retry, fix, Q&A re-run) REPLACES them: it produces its own definitive
+      // outcomes (appending caused "exponential outcome" accumulation across retries/fix cycles).
+      // A continuation ("continue" direction claimed by this run) builds on the previous runs'
+      // work, so its outcomes are APPENDED to the task's (by id: never twice). Same for Polpo's
+      // engine and the agent harnesses.
       if (run.outcomes && run.outcomes.length > 0) {
         try {
-          await this.ctx.registry.updateTask(run.taskId, { outcomes: run.outcomes });
+          const continued = this.ctx.taskControlStore
+            ? (await this.ctx.taskControlStore.listDirections(run.taskId)).some((d) => d.mode === "continue" && d.runId === run.id)
+            : false;
+          let outcomes = run.outcomes;
+          if (continued && task?.outcomes?.length) {
+            const fresh = new Set(run.outcomes.map((o) => o.id));
+            outcomes = [...task.outcomes.filter((o) => !fresh.has(o.id)), ...run.outcomes];
+          }
+          await this.ctx.registry.updateTask(run.taskId, { outcomes });
         } catch { /* task may already be gone */ }
       }
       if (run.result) {

@@ -29,6 +29,23 @@ describe("settings.harnesses", () => {
     expect(CLAUDE_SUBSCRIPTION_REFUSAL).toMatch(/terms/);
   });
 
+  it("the config loader refuses a subscription with the terms message (not a generic error)", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { parseConfig } = await import("../core/config.js");
+    const dir = mkdtempSync(join(tmpdir(), "polpo-harness-cfg-"));
+    try {
+      mkdirSync(join(dir, ".polpo"));
+      writeFileSync(join(dir, ".polpo", "polpo.json"), JSON.stringify({
+        project: "p", settings: { harnesses: { enabled: ["claude-code"], "claude-code": { auth: "subscription", credentialRef: ref } } },
+      }));
+      await expect(parseConfig(dir)).rejects.toThrow(CLAUDE_SUBSCRIPTION_REFUSAL);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a Codex ChatGPT login (not supported yet)", () => {
     expect(() => parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "chatgpt", credentialRef: ref } })).toThrow(/ChatGPT login is not supported/);
   });

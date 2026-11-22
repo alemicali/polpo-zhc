@@ -13,9 +13,11 @@ export interface TokenUsageRecord {
   cost: number;
 }
 
-export type TokenUsageRange = "today" | "24h" | "7d" | "30d" | "all";
+export type TokenUsageRange = "1h" | "today" | "24h" | "7d" | "30d" | "all";
+export const TOKEN_USAGE_RANGES: readonly TokenUsageRange[] = ["1h", "today", "24h", "7d", "30d", "all"];
 
 const RANGE_MS: Record<Exclude<TokenUsageRange, "all" | "today">, number> = {
+  "1h": 60 * 60 * 1_000,
   "24h": 24 * 60 * 60 * 1_000,
   "7d": 7 * 24 * 60 * 60 * 1_000,
   "30d": 30 * 24 * 60 * 60 * 1_000,

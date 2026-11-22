@@ -204,3 +204,17 @@ describe("Outcome Tools — collectOutcome integration", () => {
     expect(details.outcomeTags).toEqual(["test"]);
   });
 });
+
+// register_outcome must be offered to every agent running a task, even when its allowedTools omit
+// it (live: an agent limited to read/write/bash ended "done" with no outcome).
+describe("register_outcome is always available (Polpo's engine)", () => {
+  it("the agent's tools include it when allowedTools omits it", async () => {
+    const { createSystemTools, createAllTools } = await import("../tools/system-tools.js");
+    const names = (tools: Array<{ name: string }>) => tools.map((t) => t.name);
+    expect(names(createOutcomeTools(TMP, undefined, ["read", "write", "bash"]))).toEqual(["register_outcome"]);
+    const system = names(createSystemTools(TMP, ["read", "write", "bash"]));
+    expect(system).toContain("register_outcome");
+    expect(system).not.toContain("edit");
+    expect(names(await createAllTools({ cwd: TMP, allowedTools: ["read", "write", "bash"] }))).toContain("register_outcome");
+  });
+});
