@@ -12,7 +12,6 @@ import { toast } from "sonner";
 import { AlertTriangle, Loader2, Search, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
