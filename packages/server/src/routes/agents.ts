@@ -1,7 +1,7 @@
 import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import { normalizeConnectorTools, type FileSystem } from "@polpo-ai/core";
+import { normalizeConnectorTools, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
@@ -89,10 +89,8 @@ export function agentRoutes(getDeps: () => {
 
   /** An error for computers/defaultComputer naming a computer the instance does not have, else null. */
   const badComputers = (deps: { computerIds?: () => string[] }, body: { computers?: string[]; defaultComputer?: string }): string | null => {
-    if (body.computers === undefined && body.defaultComputer === undefined) return null;
-    const known = new Set(["host", ...(deps.computerIds?.() ?? [])]);
-    const unknown = [...(body.computers ?? []), ...(body.defaultComputer ? [body.defaultComputer] : [])].filter((id) => !known.has(id));
-    return unknown.length ? `Unknown computer${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (create ${unknown.length > 1 ? "them" : "it"} first: POST /computers)` : null;
+    const problem = unknownComputersProblem(deps.computerIds?.() ?? [], body);
+    return problem ? problem.replace(/ first\)$/, " first: POST /computers)") : null;
   };
 
   // GET /agents — list agents

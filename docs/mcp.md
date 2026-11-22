@@ -286,6 +286,10 @@ Actions that cannot be undone need an explicit `confirm: true` (deleting files, 
 - **Talk to the team in a room:** `polpo_room_post { id, text: "@writer draft the launch post" }` → `polpo_room_wait { id, after_id: message.id }` → the agents' replies.
 - **Connect an app:** `polpo_connector_catalog { text: "linear" }` → `polpo_connector_add { catalog_id: "linear", agents: ["pm"] }` → give the person `authorization_url` → `polpo_connectors_list { id: "linear" }`.
 
+### The same tools in Polpo's chat
+
+Polpo itself (web chat, Telegram, WhatsApp) has a counterpart for every tool here: its own tool, or this server's handler run in process under Polpo's name (no `polpo_` prefix: `harnesses_update`, `computer_save`, `branding_update`, `channel_save`, `setup_wait`…), with the same rules, setup links and `confirm`. The less common ones are loaded on demand (progressive tool discovery). The map, with its few exceptions (`polpo_ask`, `polpo_answer`, the REST fallback), is `src/llm/polpo-mcp-bridge.ts`.
+
 ## Toolsets
 
 An instance chooses the toolsets it offers:
