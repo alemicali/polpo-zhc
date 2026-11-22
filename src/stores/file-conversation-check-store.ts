@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
 import type { ConversationCheck, ConversationCheckStore, NewConversationCheck } from "@polpo-ai/core";
@@ -74,5 +74,11 @@ export class FileConversationCheckStore implements ConversationCheckStore {
     const next: ConversationCheck = { ...current, ...patch, id: current.id, createdAt: current.createdAt, updatedAt: new Date().toISOString() };
     atomicWrite(this.path(id), next);
     return next;
+  }
+
+  async deleteCheck(id: string): Promise<boolean> {
+    if (!existsSync(this.path(id))) return false;
+    rmSync(this.path(id), { force: true });
+    return true;
   }
 }

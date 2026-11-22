@@ -490,7 +490,7 @@ export function agentRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
-    const computersError = badComputers(deps, { computers: body.computers, defaultComputer: body.defaultComputer || undefined });
+    const computersError = badComputers(deps, { computers: body.computers ?? undefined, defaultComputer: body.defaultComputer || undefined });
     if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
 
     // Handle reportsTo: empty string clears it
@@ -521,7 +521,8 @@ export function agentRoutes(getDeps: () => {
       ...(body.pipeline !== undefined && { pipeline: body.pipeline }),
       ...(body.browserProfile !== undefined && { browserProfile: body.browserProfile }),
       ...(body.browserEgress !== undefined && { browserEgress: body.browserEgress }),
-      ...(body.computers !== undefined && { computers: body.computers }),
+      // null or [] clears the list (the field goes: only "host" and its default)
+      ...(body.computers !== undefined && { computers: body.computers?.length ? body.computers : undefined }),
       // "" clears it (back to this server)
       ...(body.defaultComputer !== undefined && { defaultComputer: body.defaultComputer || undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),

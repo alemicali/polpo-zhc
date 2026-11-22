@@ -143,6 +143,18 @@ export class ConversationCheckManager {
   }
 
   /**
+   * Remove a check for good (it is cancelled first, so a run in progress stops): its record goes,
+   * its reports stay in their chat. undefined: no such check; throws where the store cannot delete.
+   */
+  async delete(id: string): Promise<ConversationCheck | undefined> {
+    const check = await this.cancel(id);
+    if (!check) return undefined;
+    if (!this.store.deleteCheck) throw new Error("This instance's store cannot delete checks (cancelled ones stay listed)");
+    await this.store.deleteCheck(id);
+    return check;
+  }
+
+  /**
    * Change an active or proposed check: what it does (prompt or message), its schedule (every N
    * minutes, or a cron in a timezone: the next run is computed again) or its limits. Throws on bad
    * input; undefined when there is no such check.

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentRoutes, configRoutes, scheduleRoutes } from "@polpo-ai/server";
+import { agentRoutes, configRoutes, scheduleRoutes, taskRoutes } from "@polpo-ai/server";
 import { parseEgressProxies } from "@polpo-ai/core";
 import { FileConversationCheckStore } from "../stores/file-conversation-check-store.js";
 import { ConversationCheckManager } from "../core/conversation-check-manager.js";
@@ -60,6 +60,33 @@ describe("PATCH /agents/:name browserEgress", () => {
     expect(updateAgent).toHaveBeenCalledWith("coach", { browserEgress: "home" });
     expect((await res.json()).data.browserEgress).toBe("home");
   });
+
+  it("computers: null or [] clears the list (live: MCP could only leave computers: [])", async () => {
+    const agent: any = { name: "coach", role: "Coach", computers: ["nina"] };
+    const updateAgent = vi.fn(async (_name: string, u: any) => { Object.assign(agent, u); return agent; });
+    const app = agentRoutes(() => ({ getAgents: async () => [agent], updateAgent, computerIds: () => ["nina"] } as any));
+    for (const computers of [null, []]) {
+      agent.computers = ["nina"];
+      const res = await app.request("/coach", json({ computers }, "PATCH"));
+      expect(res.status).toBe(200);
+      expect(updateAgent).toHaveBeenLastCalledWith("coach", { computers: undefined });
+    }
+    expect((await app.request("/coach", json({ computers: ["ghost"] }, "PATCH"))).status).toBe(400);
+  });
+});
+
+describe("POST /tasks dependsOn", () => {
+  it("refuses a dependency that does not exist (live: the task stayed pending for ever)", async () => {
+    const tasks = new Map<string, any>([["t1", { id: "t1", title: "First", status: "done" }]]);
+    const addTask = vi.fn(async (t: any) => { const task = { ...t, id: `t${tasks.size + 1}`, status: "pending" }; tasks.set(task.id, task); return task; });
+    const app = taskRoutes(() => ({ taskStore: { getTask: async (id: string) => tasks.get(id) }, addTask } as any));
+    const bad = await app.request("/", json({ title: "E2E bad dep", description: "x", assignTo: "coach", dependsOn: ["t1", "no-such-task-e2e"] }));
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: "UNKNOWN_DEPENDENCY", error: expect.stringMatching(/there is no task "no-such-task-e2e"/) });
+    expect(addTask).not.toHaveBeenCalled();
+    const good = await app.request("/", json({ title: "Second", description: "x", assignTo: "coach", dependsOn: ["t1"] }));
+    expect(good.status).toBe(201);
+  });
 });
 
 describe("POST /schedules/:missionId/run", () => {
@@ -76,13 +103,33 @@ describe("POST /schedules/:missionId/run", () => {
   });
 });
 
+describe("POST/PATCH /schedules: the expression is checked first", () => {
+  it("refuses '99 99 * * *' with a clear error, and leaves the mission as it was (live: accepted, never ran)", async () => {
+    const mission: any = { id: "m1", name: "Digest", status: "draft" };
+    const updateMission = vi.fn(async (_id: string, u: any) => Object.assign(mission, u));
+    const entry = { id: "sched-m1", missionId: "m1", expression: "0 9 * * *", recurring: true, enabled: true };
+    const scheduler = { registerMission: vi.fn(() => entry), getScheduleByMissionId: () => entry, rescheduleMission: vi.fn(), setEnabled: vi.fn() };
+    const app = scheduleRoutes(() => ({ getScheduler: () => scheduler, getMission: async () => mission, updateMission }));
+    const bad = await app.request("/", json({ missionId: "m1", expression: "99 99 * * *", recurring: true }));
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: "INVALID_EXPRESSION", error: expect.stringMatching(/Invalid cron expression "99 99 \* \* \*": minute "99": 99 is not between 0 and 59/) });
+    expect(updateMission).not.toHaveBeenCalled();
+    expect(mission.status).toBe("draft");
+    expect((await app.request("/", json({ missionId: "m1", expression: "0 3 1 1 *", recurring: true }))).status).toBe(201);
+    const patch = await app.request("/m1", json({ expression: "61 * * * *" }, "PATCH"));
+    expect(patch.status).toBe(400);
+    expect(scheduler.rescheduleMission).not.toHaveBeenCalled();
+  });
+});
+
 describe("/checks", () => {
   let dir: string;
   let manager: ConversationCheckManager;
   const sessions = new Map<string, { id: string; title?: string; agent?: string }>([["s1", { id: "s1" }]]);
   const sessionStore = {
     getSession: async (id: string) => sessions.get(id),
-    create: async (title?: string, agent?: string) => { const id = `s${sessions.size + 1}`; sessions.set(id, { id, ...(title ? { title } : {}), ...(agent ? { agent } : {}) }); return id; },
+    create: async (title?: string, agent?: string) => { const id = `s${sessions.size + 1}-${Date.now()}`; sessions.set(id, { id, ...(title ? { title } : {}), ...(agent ? { agent } : {}) }); return id; },
+    deleteSession: async (id: string) => sessions.delete(id),
   } as any;
   const resolveChatTarget = vi.fn(async (to: string) => {
     if (to !== "Team") throw new Error(`No chat "${to}"`);
@@ -123,6 +170,29 @@ describe("/checks", () => {
     expect(bad.status).toBe(400);
     expect((await bad.json()).error).toMatch(/Invalid cron/);
     expect((await app().request("/", json({ sessionId: "s1", prompt: "x", everyMinutes: 30, extra: true }))).status).toBe(400);
+  });
+
+  it("a refused check leaves no chat session behind (live: 'Check: x' stayed after an invalid cron)", async () => {
+    const before = [...sessions.keys()];
+    const bad = await app().request("/", json({ agent: "coach", message: "x", cron: "not a cron" }));
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/Invalid cron/);
+    expect([...sessions.keys()]).toEqual(before);
+    // a good one still gets its own session
+    const good = await app().request("/", json({ agent: "coach", message: "x", everyMinutes: 30 }));
+    expect(good.status).toBe(201);
+    expect(sessions.has((await good.json()).data.sessionId)).toBe(true);
+  });
+
+  it("DELETE ?purge=true deletes a check for good (a cancelled one too); plain DELETE only cancels", async () => {
+    const check = await manager.create({ sessionId: "s1", prompt: "Say hi", everyMinutes: 60 });
+    expect((await (await app().request(`/${check.id}`, { method: "DELETE" })).json()).data.state).toBe("cancelled");
+    expect((await manager.list()).map((c) => c.id)).toEqual([check.id]);
+    const purged = await app().request(`/${check.id}?purge=true`, { method: "DELETE" });
+    expect(purged.status).toBe(200);
+    expect((await purged.json()).data).toMatchObject({ id: check.id, deleted: true });
+    expect(await manager.list()).toEqual([]);
+    expect((await app().request(`/${check.id}?purge=true`, { method: "DELETE" })).status).toBe(404);
   });
 
   it("confirms a proposed check", async () => {

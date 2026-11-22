@@ -53,6 +53,12 @@ export class DrizzleConversationCheckStore implements ConversationCheckStore {
     return next;
   }
 
+  async deleteCheck(id: string): Promise<boolean> {
+    if (!(await this.getCheck(id))) return false;
+    await this.db.delete(this.table).where(eq(this.table.id, id));
+    return true;
+  }
+
   private toRow(check: ConversationCheck) {
     return {
       id: check.id,

@@ -99,6 +99,8 @@ export interface ConversationCheckStore {
   /** Active checks due at `now`. */
   dueChecks(now: string): Promise<ConversationCheck[]>;
   updateCheck(id: string, patch: Partial<Omit<ConversationCheck, "id" | "createdAt">>): Promise<ConversationCheck | undefined>;
+  /** Remove a check's record for good (false: there was none). Stores without it keep cancelled checks. */
+  deleteCheck?(id: string): Promise<boolean>;
 }
 
 /**

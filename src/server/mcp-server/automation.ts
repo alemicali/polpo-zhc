@@ -279,6 +279,25 @@ export function registerAutomationTools(tool: Register, deps: McpDeps): void {
     const c = checkView(r.data as Check);
     return ok(`Check ${id} is ${c.state}.`, { check: c });
   });
+
+  tool("automation", "polpo_check_delete", {
+    title: "Delete a check",
+    description: "Delete a check or reminder for good: it stops (if it was active) and its record goes from the list; the reports it already "
+      + "posted stay in their chat. Use it to tidy cancelled or ended checks. It cannot be undone. Needs confirm: true.",
+    inputSchema: { id: z.string().min(1).describe("The check's id"), confirm: confirmParam("delete the check") },
+    outputSchema: { deleted: z.string() },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, confirm }) => {
+    if (confirm !== true) {
+      const all = await apiGet(deps, "/checks");
+      const c = all.ok ? ((all.data as Check[]) ?? []).find((x) => x.id === id) : undefined;
+      if (all.ok && !c) return notFoundCheck(id);
+      return fail(`Deleting ${c ? `"${short(c.message ?? c.prompt, 80)}" (${c.state})` : id} removes it for good: ask the person, then call again with confirm: true.`);
+    }
+    const r = await apiSend(deps, "DELETE", `/checks/${enc(id)}?purge=true`);
+    if (!r.ok) return r.status === 404 ? notFoundCheck(id) : apiError(r, `Deleting check ${id}`);
+    return ok(`Deleted check ${id}.`, { deleted: id });
+  });
 }
 
 // ── Watchers ──
