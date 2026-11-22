@@ -399,6 +399,13 @@ const server = createServer(async (req, res) => {
         return;
       }
     }
+    // A missing build file (an old tab or service worker asking for chunks of a previous deploy) is a
+    // real 404: answering with index.html makes the browser fail with a MIME error instead of retrying.
+    if (url.pathname.startsWith("/assets/") || /\.(?:js|mjs|css|map|woff2?|png|jpe?g|svg|webp|ico|json|wasm)$/i.test(url.pathname)) {
+      res.writeHead(404, { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    }
     await serveFile(req, res, join(root, "index.html"), "/index.html");
   } catch (error) {
     res.writeHead(500, { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" });

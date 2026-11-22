@@ -8,6 +8,7 @@ import { config } from "./lib/config";
 import { bootstrapAppearance } from "./lib/appearance";
 import { bootstrapBranding } from "./lib/branding";
 import { loadOrchestratorName } from "./lib/orchestrator-name";
+import { installStaleBuildRecovery } from "./lib/stale-build";
 // Iconify glyphs are generated as small, local subsets and registered by the
 // components that use them. No icon depends on the public Iconify API.
 import "./index.css";
@@ -58,6 +59,8 @@ void loadOrchestratorName();
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";
 const Router = isFileProtocol ? HashRouter : BrowserRouter;
+
+installStaleBuildRecovery();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
