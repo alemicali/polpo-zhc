@@ -21,6 +21,7 @@ export const STRINGS = {
     byEngine: "By engine", byAgent: "By agent", tasks: "Tasks", noTasks: "No tasks yet", runsN: (n: number) => `${n} run${n === 1 ? "" : "s"}`,
     egress: "egress", direct: "direct", resumed: "resumed session", newSession: "new session", via: "via", on: "on",
     of: "of", left: "left", partial: "older runs not counted", superseded: "There is a newer card for this below",
+    totalCost: (n: number) => `In all, ${n} run${n === 1 ? "" : "s"}`, latest: "latest",
     kind: { model_access: "Model not enabled", auth: "Authentication", budget: "Spend limit", killed: "Stopped", assessment: "Review", error: "Error" } as Record<string, string>,
     status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft", missing: "Missing", running: "Running", completed: "Completed", killed: "Stopped", active: "Active", paused: "Paused", cancelled: "Cancelled", scheduled: "Scheduled", recurring: "Recurring" } as Record<string, string>,
     error: "Could not load the card",
@@ -36,6 +37,7 @@ export const STRINGS = {
     byEngine: "Per motore", byAgent: "Per agente", tasks: "Task", noTasks: "Ancora nessun task", runsN: (n: number) => `${n} esecuzion${n === 1 ? "e" : "i"}`,
     egress: "uscita", direct: "diretta", resumed: "sessione ripresa", newSession: "nuova sessione", via: "via", on: "su",
     of: "di", left: "restanti", partial: "esecuzioni più vecchie non contate", superseded: "C'è una scheda più recente più sotto",
+    totalCost: (n: number) => `Totale ${n} esecuzion${n === 1 ? "e" : "i"}`, latest: "ultima",
     kind: { model_access: "Modello non abilitato", auth: "Autenticazione", budget: "Limite di spesa", killed: "Fermato", assessment: "Verifica", error: "Errore" } as Record<string, string>,
     status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza", missing: "Mancante", running: "In corso", completed: "Completata", killed: "Fermata", active: "Attiva", paused: "In pausa", cancelled: "Annullata", scheduled: "Programmata", recurring: "Ricorrente" } as Record<string, string>,
     error: "Non riesco a caricare la scheda",
@@ -152,6 +154,15 @@ function actions(s: Strings): HTMLElement {
 
 // ── Task card ────────────────────────────────────────────────────────────
 
+/** "In all, 3 runs: $1.20 · latest $0.40", with the engines' marks when more than one ran. */
+function taskCostLine(c: NonNullable<TaskCard["cost"]>, s: Strings): HTMLElement {
+  return h("div", { class: "cost-task" },
+    h("span", {}, `${s.totalCost(c.runs)}: `, h("strong", { class: "cost-total" }, `${usd(c.usd)}${c.partial ? "+" : ""}`),
+      c.runs > 1 && c.lastRunUsd !== undefined ? h("span", { class: "muted" }, ` · ${s.latest} ${usd(c.lastRunUsd)}`) : null),
+    c.byEngine.length > 1 ? h("span", { class: "chips" }, ...c.byEngine.map((e) => h("span", { class: "chip chip-sm marks" }, brandMark(e.mark, 12), `${e.label} ${usd(e.usd)}`))) : null,
+    c.partial ? h("span", { class: "muted small" }, ` + ${s.partial}`) : null);
+}
+
 export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
   const tk = c.task;
   const last = c.runs[0];
@@ -159,7 +170,8 @@ export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
   if (tk.assignTo) facts.push([s.agent, tk.assignTo]);
   if (c.toolScope) facts.push([s.tools, h("span", { class: "scope" }, c.toolScope.label, c.toolScope.stale?.length ? h("span", { class: "small danger-text" }, ` · ${s.staleScope}: ${c.toolScope.stale.join("; ")}`) : null)]);
   facts.push([s.lastRun, last ? runLine(last, s, full) : s.noRuns]);
-  if (c.costUsd !== undefined) facts.push([s.cost, `${usd(c.costUsd)} · ${s.runsN(c.runs.length)}`]);
+  if (c.cost) facts.push([s.cost, taskCostLine(c.cost, s)]);
+  else if (c.costUsd !== undefined) facts.push([s.cost, `${usd(c.costUsd)} · ${s.runsN(c.runs.length)}`]);
   if (c.dependencies.length) facts.push([s.dependsOn, h("div", { class: "deps" }, ...c.dependencies.map((d) => h("span", { class: "dep" }, d.title, chip(s, d.status))))]);
   return h("div", { class: full ? "full" : "card" },
     header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.status, s,

@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-task-total-cost",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Il costo totale di un task, non solo dell'ultima esecuzione",
+    summary: "Quando un task gira più volte (tentativi, continuazioni, indicazioni), la sua pagina mostra quanto è costato in tutto e quanto l'ultima esecuzione, con il dettaglio di ogni esecuzione.",
+    body: [
+      "- **Totale accanto allo stato**: nell'intestazione del task il costo di tutte le sue esecuzioni e quante sono.",
+      "- **Scheda Esecuzione**: «Totale, N esecuzioni: $X · Ultima: $Y», i token e, se ha girato su più motori, quanto su ciascuno (Claude Code, Codex, Polpo).",
+      "- **Ogni esecuzione**: nella lista delle esecuzioni data e ora, motore, modello, durata, stato e costo di ciascuna.",
+      "- **Liste e bacheca**: righe e card dei task (e i task nella pagina della missione) mostrano il totale, non l'ultima esecuzione; si può nascondere da «Campi».",
+      "- **Stessi conti ovunque**: il totale del task e quello della missione usano lo stesso calcolo; lo vedono anche l'API, l'MCP (anche nella scheda del task) e Polpo. Un task tiene le ultime 20 esecuzioni: se le più vecchie sono state scartate, il costo dei harness viene recuperato dai consumi registrati, altrimenti il totale è segnato con «+».",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-22-chat-navigation",
     date: "2026-11-22",
     kind: "fixed",

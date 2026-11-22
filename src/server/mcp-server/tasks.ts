@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { describeTaskRun, summarizeTaskRun, type TaskRunContext, type TaskRunSummary } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
+import { computeTaskCost, describeTaskCost, summarizeTaskCost, usdText, type TaskCost, type TaskCostSummary } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
@@ -24,12 +25,16 @@ export const taskSummary = z.object({
   group: z.string().optional(), missionId: z.string().optional(), updatedAt: z.string().optional(),
   last_run: z.object({ engine: z.string(), model: z.string().optional(), computerId: z.string(), computerKind: z.string() }).passthrough().optional()
     .describe("Where and with what its latest run executed: engine (polpo, claude-code, codex), model, computer"),
+  cost: z.object({ usd: z.number(), tokens: z.number(), runs: z.number(), partial: z.boolean().optional() }).passthrough().optional()
+    .describe("What every run of it cost in all (first run, retries, continuations), USD; partial: older runs were dropped"),
   failure: failureShape.optional(),
 }).passthrough();
 
 type TaskRow = {
   id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string; phase?: string;
   lastRun?: TaskRunSummary; failure?: TaskFailure; toolScope?: TaskToolScope;
+  /** Slim lists: every run's total; GET /tasks/:id: the full breakdown. */
+  cost?: TaskCostSummary | TaskCost;
 };
 type FullTask = TaskRow & {
   description?: string; dependsOn?: string[]; retries?: number; maxRetries?: number; createdAt?: string;
@@ -67,23 +72,34 @@ const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_con
 
 const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
 
-export const taskLine = (t: TaskRow) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
+/** A row's total in a list line: " · $1.50 over 2 runs". */
+const costText = (c: TaskCostSummary | undefined) => (c?.runs && c.usd > 0 ? ` · ${usdText(c.usd)}${c.partial ? "+" : ""}${c.runs > 1 ? ` over ${c.runs} runs` : ""}` : "");
+
+export const taskLine = (t: TaskRow & { runs?: TaskRunContext[] }) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
   + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${ENGINE_NAMES[t.lastRun.engine] ?? t.lastRun.engine}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
+  + costText(costOf(t))
   + `${t.toolScope ? " · tools restricted" : ""}`
   + `${t.failure ? ` · failed: ${short(t.failure.reason, 160)}${t.failure.retryable ? "" : " (not retried)"}` : ""}`;
 
 /** A row's failure: the API's (slim lists, GET /tasks/:id), else from its result. */
 const failureOf = (t: TaskRow & { result?: unknown }) => t.failure ?? taskFailure(t as Parameters<typeof taskFailure>[0]);
 
+/** A row's total cost: the API's (slim lists), else from its runs. */
+const costOf = (t: TaskRow & { runs?: TaskRunContext[] }): TaskCostSummary | undefined =>
+  t.cost ? { usd: t.cost.usd, tokens: t.cost.tokens, runs: t.cost.runs, ...(t.cost.partial ? { partial: true } : {}) }
+    : t.runs?.length ? summarizeTaskCost(computeTaskCost(t)) : undefined;
+
 const summarize = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) => {
   const last = t.lastRun ?? summarizeTaskRun(t.runs?.at(-1));
   const failure = failureOf(t);
+  const cost = costOf(t);
   return {
     id: t.id, title: t.title, status: t.status,
     ...(t.assignTo ? { assignTo: t.assignTo } : {}), ...(t.group ? { group: t.group } : {}),
     ...(t.missionId ? { missionId: t.missionId } : {}), ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
     ...(t.phase ? { phase: t.phase } : {}),
     ...(last ? { last_run: last } : {}),
+    ...(cost ? { cost } : {}),
     ...(failure ? { failure } : {}),
   };
 };
@@ -184,7 +200,9 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       failure: failureShape.optional(),
       dependencies: z.array(z.object({ id: z.string(), title: z.string(), status: z.string() }).passthrough()).optional()
         .describe("The tasks it depends on (their results reach its prompt; it reads them in full with task_result / dependency_results)"),
-      runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"), recent_activity: z.array(looseObject).optional() },
+      runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"),
+      cost: looseObject.optional().describe("What every run cost in all (first run, retries, continuations, directions): usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun (each run's usd, tokens, engine, model, duration, status; oldest first), partial (older runs dropped), recoveredUsd"),
+      recent_activity: z.array(looseObject).optional() },
     annotations: READ,
   }, async ({ id, activity }) => {
     const loaded = await loadTask(deps, id);
@@ -198,6 +216,8 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     }
     const res = t.result;
     const failure = failureOf(t);
+    // every run's total: the API's (it recovers runs dropped past the latest 20), else from the runs
+    const cost: TaskCost = t.cost && "perRun" in t.cost ? t.cost : computeTaskCost(t);
     let dependencies: Array<{ id: string; title: string; status: string; failure?: TaskFailure }> = [];
     if (t.dependsOn?.length) {
       const all = await apiGet(deps, "/tasks?slim=true");
@@ -222,7 +242,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(res.assessment?.feedback ? [`feedback: ${short(res.assessment.feedback, 600)}`] : []),
       ...(res.stdout ? [`output: ${short(res.stdout, 1500)}`] : [])] : []),
       ...(t.outcomes?.length ? ["", "outcomes:", ...t.outcomes.map((o) => `- ${o.type ?? "?"}: ${o.label ?? ""} ${o.path ?? o.url ?? short(o.text, 120)}`)] : []),
-      ...(t.runs?.length ? ["", "runs (where and with what):", ...t.runs.map((r) => `- ${describeTaskRun(r)}`)] : []),
+      ...(t.runs?.length ? ["", describeTaskCost(cost), "", "runs (where and with what):", ...t.runs.map((r) => `- ${describeTaskRun(r)}`)] : []),
       ...(recent.length ? ["", "recent activity:", ...recent.map(activityLine)] : []),
     ];
     return ok(lines.join("\n"), {
@@ -230,6 +250,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(failure ? { failure } : {}),
       ...(dependencies.length ? { dependencies } : {}),
       runs: (t.runs ?? []) as unknown as Array<Record<string, unknown>>,
+      ...(t.runs?.length ? { cost: cost as unknown as Record<string, unknown> } : {}),
       ...(n > 0 ? { recent_activity: recent } : {}),
     });
   });

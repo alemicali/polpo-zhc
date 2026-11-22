@@ -126,6 +126,10 @@ describe("the task and mission cards", () => {
     expect(card.task.failure).toMatchObject({ retryable: false, kind: "model_access" });
     expect(card.runs.map((r) => r.runId)).toEqual(["r2", "r1"]);
     expect(card.costUsd).toBeCloseTo(0.52);
+    // every run in all, the latest apart, by engine with marks
+    expect(card.cost).toMatchObject({ usd: 0.52, runs: 2, lastRunUsd: 0.42, partial: false });
+    expect(card.cost!.byEngine.map((e) => [e.engine, e.mark, e.usd])).toEqual([["claude-code", "claude-code", 0.42], ["polpo", "polpo", 0.1]]);
+    expect(taskCardText(card)).toContain("Cost: $0.52 in all over 2 runs · latest $0.42 (Claude Code $0.42, Polpo $0.10)");
     expect(card.dependencies).toEqual([{ id: "t1", title: "Collect data", status: "done", assignTo: "dev" }, { id: "Ghost", title: "Ghost", status: "missing" }]);
     expect(card.outcomes).toEqual([{ type: "file", label: "Draft", ref: "out/report.md" }]);
     const text = taskCardText(card);

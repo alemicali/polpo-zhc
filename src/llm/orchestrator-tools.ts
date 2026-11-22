@@ -41,6 +41,7 @@ import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
+import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
 import { describeTaskRun } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
 import { resolveDependencies } from "@polpo-ai/core";
@@ -251,7 +252,7 @@ const captureAppScreenshotTool: Tool = {
 
 const listTasksTool: Tool = {
   name: "list_tasks",
-  description: "List all tasks. Optionally filter by status, group, or assigned agent.",
+  description: "List all tasks, with what each cost in all (every run: retries and continuations included). Optionally filter by status, group, or assigned agent.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: pending, assigned, in_progress, review, done, failed" })),
     group: Type.Optional(Type.String({ description: "Filter by mission group name" })),
@@ -262,7 +263,8 @@ const listTasksTool: Tool = {
 const getTaskTool: Tool = {
   name: "get_task",
   description: "Get full details of a task by ID or title (partial match), then a summary: why it failed (the labelled reason, and whether it was retried), "
-    + "the tasks it depends on with their status, and where and with what each run executed (engine, model, auth, computer, egress, session, cost).",
+    + "the tasks it depends on with their status, what it cost in all (every run: retries, continuations, directions; by engine; the latest run's), "
+    + "and where and with what each run executed (engine, model, auth, computer, egress, session, cost).",
   parameters: Type.Object({
     id: Type.Optional(Type.String({ description: "Task ID" })),
     title: Type.Optional(Type.String({ description: "Task title (partial match)" })),
@@ -3744,7 +3746,9 @@ async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>)
   if (tasks.length === 0) return "No tasks found.";
   const lines = tasks.map(t => {
     const failure = taskFailure(t);
+    const cost = t.runs?.length ? computeTaskCost(t) : undefined;
     return `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
+      + (cost && cost.usd > 0 ? ` · ${usdText(cost.usd)}${cost.partial ? "+" : ""}${cost.runs > 1 ? ` over ${cost.runs} runs` : ""}` : "")
       + (failure ? ` — ${failure.reason.slice(0, 160)}${failure.retryable ? "" : " (not retried)"}` : "");
   });
   return `${tasks.length} task(s):\n${lines.join("\n")}`;
@@ -3771,7 +3775,10 @@ async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): 
     try { connectors = connectorManagerFor(polpo).store.list(); } catch { /* no connectors file */ }
     summary.push(`Tools: ${describeTaskToolScope(task.toolScope, connectors)}`);
   }
-  if (task.runs?.length) summary.push("Runs (where and with what, newest last):", ...task.runs.map((r) => `- ${describeTaskRun(r)}`));
+  if (task.runs?.length) {
+    summary.push(describeTaskCost(computeTaskCost(task), { perRun: true }));
+    summary.push("Runs (where and with what, newest last):", ...task.runs.map((r) => `- ${describeTaskRun(r)}`));
+  }
   return `${JSON.stringify(task, null, 2)}${summary.length ? `\n\n${summary.join("\n")}` : ""}`;
 }
 
