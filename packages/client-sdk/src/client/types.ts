@@ -691,10 +691,21 @@ export interface ScheduleEntry {
   missionId: string;
   expression: string;
   recurring: boolean;
+  /** false: paused (persisted: a restart keeps it). */
   enabled: boolean;
+  /** Same as !enabled. */
+  paused?: boolean;
   lastRunAt?: string;
   nextRunAt?: string;
   deadlineOffsetMs?: number;
+  /** A run missed while the server was down: "once" runs it at startup (at most one interval late), "none" skips it. */
+  catchUp?: "none" | "once";
+  /** How the last run went: started (running), completed, failed, skipped, missed (server down), expired. */
+  lastOutcome?: "started" | "completed" | "failed" | "skipped" | "missed" | "expired";
+  lastError?: string;
+  /** Runs missed (not run) because the server was down, in total. */
+  missedRuns?: number;
+  lastMissedAt?: string;
   createdAt: string;
 }
 

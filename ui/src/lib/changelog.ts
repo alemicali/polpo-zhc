@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-mcp-permissions",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Permessi per Claude e ChatGPT",
+    summary: "Quando colleghi Polpo a Claude o ChatGPT scegli cosa possono fare: leggere, lavorare, file, messaggi, computer, connettori, admin.",
+    body: [
+      "Il connettore MCP ora chiede permessi precisi invece di accesso totale.",
+      "",
+      "- **Scegli tu**: nella pagina di consenso spunti cosa concedere; di base lettura e lavoro, niente admin.",
+      "- **Vedi solo ciò che puoi usare**: gli strumenti senza permesso non compaiono.",
+      "- **Impostazioni → Accesso MCP**: le app collegate con i loro permessi, ultimo uso e revoca; le chiavi con i loro permessi.",
+      "- Le connessioni già fatte continuano a funzionare come prima.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-22-computers-home-hibernate",
     date: "2026-11-22",
     kind: "improved",

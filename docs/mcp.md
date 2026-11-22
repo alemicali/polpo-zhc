@@ -125,17 +125,17 @@ Group chats of people and agents (the dashboard's groups).
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_schedules_list` | Scheduled missions (cron or a time, paused or not, next and last run); with `mission_id`, its recent runs' tasks. | read-only |
-| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`). The expression is checked first: a cron with a value out of range (e.g. `99 99 * * *`) or a past time is refused with the reason. | write / write, idempotent |
+| `polpo_schedules_list` | Scheduled missions (cron or a time, `paused` or not, next and last run, `last_outcome` and `last_error`, `missed_runs` while the server was down, `catch_up`); with `mission_id`, its recent runs' tasks. All of it is persisted: a restart keeps a pause and the next run. | read-only |
+| `polpo_schedule_create`, `polpo_schedule_update` | Schedule a mission; change the expression, recurring, end date; pause (`enabled: false`) or resume (`enabled: true`); `catch_up`: what a run missed while the server was down does — `"once"` (default) runs it at startup when it is at most one interval late (24 h for a one-shot), `"none"` skips to the next. The expression is checked first: a cron with a value out of range (e.g. `99 99 * * *`) or a past time is refused with the reason. | write / write, idempotent |
 | `polpo_schedule_run` | Run a scheduled mission now (the next scheduled run stays; a paused schedule stays paused). | write, open world |
 | `polpo_schedule_delete` | Remove the schedule; the mission stays as a draft (`confirm: true`). | destructive |
 | `polpo_checks_list` | Recurring checks and reminders: what Polpo or an agent does on a schedule and reports in a chat; proposed ones wait for a yes. | read-only |
-| `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. | write |
+| `polpo_check_create` | Instructions or a fixed message, every N minutes, on a cron (in a timezone) or once; reports to a chat session and, with `to`, a Telegram chat. Recorded as created by the principal. A time (`at`) that has passed is refused. | write |
 | `polpo_check_update` | Change the instructions, message, schedule or limits; `confirm: true` approves a proposed check. | write, idempotent |
 | `polpo_check_cancel` | Stop a check for good (`confirm: true`); it stays listed as cancelled. | destructive |
 | `polpo_check_delete` | Delete a check's record (cancelled, ended or still active: it stops first; `confirm: true`). Its reports stay in their chat. | destructive |
 
-### connectors (on by default; changes need `polpo:admin`)
+### connectors (on by default; changes need `polpo:connectors`)
 
 | Tool | What it does | Annotations |
 |---|---|---|
@@ -149,7 +149,7 @@ Group chats of people and agents (the dashboard's groups).
 
 **Connector secrets never go through MCP**: there is no parameter for a token, a header value or an OAuth app's client secret. The person enters them on the dashboard's Connectors page (`setup_url`).
 
-### channels (on by default; channel and rule changes need `polpo:admin`, sending `polpo:work`)
+### channels (on by default; rule changes need `polpo:admin`, sending and testing `polpo:messages`)
 
 | Tool | What it does | Annotations |
 |---|---|---|
@@ -160,7 +160,7 @@ Group chats of people and agents (the dashboard's groups).
 
 Bot tokens, SMTP passwords and API keys are set up in the dashboard (`setup_url`), never through MCP.
 
-### computers (on by default; changes need `polpo:admin`)
+### computers (on by default; changes need `polpo:computers`)
 
 Computers are persistent machines agents work on (Daytona or E2B; see `docs/computers.md`).
 
@@ -183,7 +183,7 @@ Enable them with `settings.mcp.toolsets` / `POLPO_MCP_TOOLSETS` (e.g. `default,b
 | `brain` | `polpo_brain_search` (by words, or the most connected entities and counts), `polpo_brain_get` (an entity with its relations and claims), `polpo_brain_save` (an entity, a relation or a claim), `polpo_brain_delete` (`confirm: true`) | read-only / write / destructive |
 | `learning` (needs `polpo:admin`) | `polpo_learning_get` (an agent's learning settings and changes), `polpo_learning_review` (learn from its conversations now), `polpo_learning_revert` (`confirm: true`) | read-only / write / destructive |
 | `watchers` | `polpo_watchers_list`, `polpo_watcher_create` (when a task reaches a status: create a task, run a mission or notify; never a shell command), `polpo_watcher_delete` (`confirm: true`) | read-only / write / destructive |
-| `vault` (needs `polpo:admin`, also to read) | `polpo_vault_list` (each agent's entries: service, type, label and the names of the fields, never values; `setup_url` to add or change one), `polpo_vault_delete` (`confirm: true`; not entries shared from another agent) | read-only / destructive |
+| `vault` (needs `polpo:vault`, also to read) | `polpo_vault_list` (each agent's entries: service, type, label and the names of the fields, never values; `setup_url` to add or change one), `polpo_vault_delete` (`confirm: true`; not entries shared from another agent) | read-only / destructive |
 | `apps` | `polpo_apps_list` (services, whether they run, URLs, deployments, domains), `polpo_app_control` (start; stop and restart need `confirm: true`), `polpo_browser_profiles_list`, `polpo_browser_profile_clear` (`confirm: true`) | read-only / destructive |
 
 Not exposed yet: storage buckets, app registration and deployments, signing a browser profile in to a site, OAuth apps' client secrets, WhatsApp login (they need the dashboard or a person at the screen).
@@ -244,11 +244,64 @@ What a client does through MCP is recorded as the authenticated principal, in ev
 |---|---|
 | OAuth, allowed by a person signed in to the dashboard | `ada@example.com via Claude` (the person and the client's name) |
 | OAuth, allowed with the API or MCP key | `Claude (MCP key)` |
-| The API key or the MCP key directly | `mcp-key` |
+| The API key or `POLPO_MCP_KEY` directly | `mcp-key` |
+| A named key from `settings.mcp.keys` | `mcp-key:<name>` |
 | A dashboard session | the person's email |
 | A server without auth (localhost) | `mcp` |
 
-Every tool also needs a scope: reads `polpo:read`, writes `polpo:work`; changes to the team, the configuration, skills, connectors, channels and rules, computers, learning, and the `vault` and `admin` toolsets (reads too), `polpo:admin`. Sending a message (`polpo_message_send`) needs `polpo:work`. Tokens issued today carry `polpo`, which grants all of them, as do the API and MCP keys; a principal with fewer scopes is offered fewer tools.
+Events caused through MCP also carry the scopes the caller acted under (`scopes`, next to `by` and `source`), and the server log names them on every MCP message.
+
+## Scopes
+
+Every tool needs one scope. There are three levels and five areas:
+
+- **`polpo:read`** — see things. Every connection has it.
+- **`polpo:work`** — do the day-to-day work: ask Polpo, chat with agents, tasks, missions, artifacts, rooms, memory, schedules and checks, approvals.
+- **Areas**, one capability each, given on their own or on top of work: **`polpo:files`** (write, move, delete files), **`polpo:messages`** (send on Telegram, WhatsApp, email), **`polpo:connectors`**, **`polpo:computers`** (they cost money), **`polpo:vault`** (entry names, never values; reads too).
+- **`polpo:admin`** — change the instance itself (team, settings, skills, notification rules, learning, the read-only REST fallback). It includes work and every area.
+
+Any scope includes read; a destructive tool (⚠ below) needs the write scope of its area. A connection is offered only the tools its scopes allow (`tools/list` hides the others). Calling a hidden tool anyway gets a `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="<the scopes it has plus the one it needs>", resource_metadata="…"` and a JSON-RPC error that names the missing scope, so an OAuth client can ask the person for more (step-up) and retry.
+
+The matrix, generated from the code (`node scripts/generate-mcp-scopes.mjs`; a test keeps it in sync):
+
+<!-- scope-matrix:start (generated: node scripts/generate-mcp-scopes.mjs) -->
+| Scope | What it allows | Tools |
+| --- | --- | --- |
+| `polpo:read` | See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings | `polpo_agents_list`, `polpo_agent_show`, `agent_card_refresh`, `polpo_approvals_list`, `polpo_tasks_list`, `polpo_task_get`, `polpo_task_wait`, `polpo_task_logs`, `polpo_missions_list`, `polpo_mission_get`, `polpo_mission_wait`, `polpo_playbooks_list`, `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_data_sources_list`, `polpo_data_query`, `polpo_files_list`, `polpo_files_search`, `polpo_file_read`, `polpo_agent_get`, `polpo_teams_list`, `polpo_config_get`, `polpo_branding_get`, `polpo_providers_list`, `polpo_models_list`, `polpo_rooms_list`, `polpo_room_messages`, `polpo_room_wait`, `polpo_chat_sessions_list`, `polpo_chat_messages`, `polpo_memory_get`, `polpo_skills_list`, `polpo_skill_get`, `polpo_schedules_list`, `polpo_checks_list`, `polpo_connectors_list`, `polpo_connector_catalog`, `polpo_channels_list`, `polpo_brain_search`, `polpo_brain_get`, `polpo_learning_get`, `polpo_watchers_list`, `polpo_apps_list`, `polpo_browser_profiles_list`, `polpo_computers_list`, `polpo_egress_status` |
+| `polpo:work` | Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, rooms, memory, schedules and checks; resolve approvals | `polpo_ask`, `polpo_agent_chat`, `polpo_answer` ⚠, `agent_intention_decide` ⚠, `polpo_approval_resolve` ⚠, `polpo_task_create`, `polpo_task_update`, `polpo_task_retry`, `polpo_task_kill` ⚠, `polpo_task_delete` ⚠, `polpo_task_direct`, `polpo_mission_create`, `polpo_mission_update`, `polpo_mission_run`, `polpo_mission_abort` ⚠, `polpo_mission_delete` ⚠, `polpo_playbook_run`, `polpo_artifact_create`, `polpo_room_create`, `polpo_room_update`, `polpo_room_delete` ⚠, `polpo_room_post`, `polpo_chat_session_update`, `polpo_chat_session_delete` ⚠, `polpo_memory_update` ⚠, `polpo_schedule_create`, `polpo_schedule_update`, `polpo_schedule_delete` ⚠, `polpo_schedule_run`, `polpo_check_create`, `polpo_check_update`, `polpo_check_cancel` ⚠, `polpo_check_delete` ⚠, `polpo_brain_save`, `polpo_brain_delete` ⚠, `polpo_watcher_create`, `polpo_watcher_delete` ⚠, `polpo_app_control` ⚠, `polpo_browser_profile_clear` ⚠ |
+| `polpo:files` | Write, move and delete the instance's files | `polpo_file_write` ⚠, `polpo_file_manage` ⚠ |
+| `polpo:messages` | Send messages on Telegram, WhatsApp and email, as Polpo or an agent | `polpo_channel_test`, `polpo_message_send` ⚠ |
+| `polpo:connectors` | Add, change, connect, disconnect and remove connectors (the services agents use) | `polpo_connector_add`, `polpo_connector_update`, `polpo_connector_test`, `polpo_connector_connect`, `polpo_connector_disconnect` ⚠, `polpo_connector_remove` ⚠ |
+| `polpo:computers` | Create, start, stop, reset and delete computers (they may cost money) | `polpo_computer_save`, `polpo_computer_control` ⚠, `polpo_computer_delete` ⚠ |
+| `polpo:vault` | See the names of vault entries (never their values) and delete them | `polpo_vault_list`, `polpo_vault_delete` ⚠ |
+| `polpo:admin` | Change the instance itself: agents and teams, settings and branding, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above | `polpo_agent_create`, `polpo_agent_update`, `polpo_agent_delete` ⚠, `polpo_agent_avatar_set`, `polpo_team_save`, `polpo_team_delete` ⚠, `polpo_config_update`, `polpo_branding_update`, `polpo_skill_create`, `polpo_skill_update`, `polpo_skill_install`, `polpo_skill_delete` ⚠, `polpo_skill_assign`, `polpo_notification_rule_save`, `polpo_notification_rule_delete` ⚠, `polpo_learning_review`, `polpo_learning_revert` ⚠, `polpo_api_search`, `polpo_api_get` |
+<!-- scope-matrix:end -->
+
+`polpo_ask` (work) hands a request to Polpo itself, which acts with its own tools and asks for a preview or an approval before risky changes; give a connection `polpo:work` only if you are fine with Polpo acting on its requests.
+
+### Which connection gets which scopes
+
+| Connection | Scopes |
+|---|---|
+| OAuth (Claude, ChatGPT, Claude Code…) | what the person allowed on the consent page; a client that asks for nothing in particular is offered read and work |
+| The server's API key, a dashboard session, a server without auth | every scope |
+| `POLPO_MCP_KEY` | `POLPO_MCP_KEY_SCOPES` (space-separated), or every scope when it is not set (as before scopes existed; the server logs a warning) |
+| A named key in `settings.mcp.keys` | its `scopes`, default read and work |
+
+Named keys keep their value in the vault: create a vault entry with a field `key` (or `apiKey`, `token`), then reference it:
+
+```json
+{ "settings": { "mcp": { "keys": [
+  { "name": "ci", "keyRef": { "owner": "ops", "service": "mcp-ci" }, "scopes": ["polpo:read"] },
+  { "name": "assistant", "keyRef": { "owner": "ops", "service": "mcp-assistant" }, "scopes": ["polpo:work", "polpo:files"] }
+] } } }
+```
+
+To narrow the legacy key, set for example `POLPO_MCP_KEY_SCOPES="polpo:read polpo:work"` and restart. A client allowed on the consent page with a key gets at most that key's scopes.
+
+**The old `polpo` scope (deprecated).** Tokens issued before scopes carry `polpo`, which still means every scope: connectors already connected keep working as they are. The consent page never issues it any more (a client that asks for it is offered every box, which the person can uncheck); metadata documents list only the scopes above. To narrow an old connection, revoke it on Settings → MCP access and connect again.
+
+The dashboard's **Settings → MCP access** lists the OAuth grants (client, who allowed it, scopes, created, last used) with Revoke, and the MCP keys with their scopes (names only, never values).
 
 ## The agent card (MCP App)
 
@@ -326,11 +379,11 @@ The client discovers everything from the `401` it gets at first, so there is not
 3. The client registers itself, with a Client ID Metadata Document or Dynamic Client Registration.
 4. It sends you to Polpo's consent page.
 
-On the consent page you allow the app:
+On the consent page you choose what the app may do (read always; work, files, messages, connectors, computers, vault, admin — the ones it asked for are checked, read and work when it asked for nothing in particular), then allow it:
 - if you are signed in to the dashboard, with one click;
-- otherwise by entering the server's API key.
+- otherwise by entering the server's API key or an MCP key (the app then gets at most that key's scopes).
 
-Polpo then issues an access token (1 hour) and a refresh token (30 days, rotated at every use). Tokens are stored hashed in `.polpo/oauth.json`; delete a client's tokens there, or call `/oauth/revoke`, to disconnect it.
+Polpo then issues an access token (1 hour) and a refresh token (30 days, rotated at every use), with the scopes you allowed (the token response's `scope`). Tokens are stored hashed in `.polpo/oauth.json`. To disconnect an app, revoke it on Settings → MCP access (or call `/oauth/revoke`).
 
 **Reachability:** Claude's and ChatGPT's servers must reach your Polpo over public HTTPS. An instance behind Tailscale serve is only reachable on your tailnet: use Tailscale Funnel or a reverse proxy with a public hostname (see below). Polpo takes the public URL from the `X-Forwarded-Host` and `X-Forwarded-Proto` headers; set `POLPO_PUBLIC_URL` when the proxy does not send them or mounts Polpo under a path. Claude Code is a local app, so it can sign in with OAuth over the tailnet too.
 
@@ -361,7 +414,7 @@ Because these endpoints are public:
 
 ## Security
 
-- The API key and the MCP key give the same access as the REST API: keep them secret, and never put them in a URL.
+- The API key gives the same access as the REST API, and so does `POLPO_MCP_KEY` unless `POLPO_MCP_KEY_SCOPES` narrows it: keep keys secret, never put them in a URL, and give each client the fewest scopes it needs (named keys, the consent page).
 - Every tool goes through the server's own API, with the same checks as the dashboard. There is no generic write tool: every change is a typed tool with its own validation and annotations, and the read-only REST fallback (`polpo_api_get`) is off unless the admin toolset is turned on.
 - Secrets (vault entries, provider keys) never pass through MCP: the tools return a link to the dashboard page where the person enters them.
 - Serve Polpo over HTTPS when you expose it beyond localhost (for example with Tailscale or a reverse proxy).

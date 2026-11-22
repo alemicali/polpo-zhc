@@ -5,6 +5,7 @@ import {
   afterCheckRun,
   type ConversationCheck,
   type ConversationCheckStore,
+  type LeaseStore,
   type NewConversationCheck,
 } from "@polpo-ai/core";
 
@@ -43,6 +44,17 @@ export function parseCheckTime(value: string, timezone?: string): Date | undefin
 /** Active checks one chat session may have at once. */
 export const MAX_ACTIVE_CHECKS_PER_SESSION = 10;
 const RUN_TIMEOUT_MS = 10 * 60_000;
+/** How long the claim on a run lasts: past the run timeout, so a process that died mid-run frees it. */
+const RUN_CLAIM_TTL_MS = RUN_TIMEOUT_MS + 5 * 60_000;
+/** A first run this far in the past is refused (a clock a little behind is not). */
+const PAST_TOLERANCE_MS = 60_000;
+
+export interface ConversationCheckManagerOptions {
+  /** Claims shared by every process on the storage: a run of a check happens in one of them. */
+  leases?: LeaseStore;
+  /** Whether a chat session still exists: a check whose chat is gone (and has no other target) ends, saying why. */
+  sessionExists?: (sessionId: string) => Promise<boolean>;
+}
 
 /** True when an answer means "nothing worth telling" (NO_UPDATE, alone, maybe with punctuation). */
 export function isNothingToReport(text: string): boolean {
@@ -60,11 +72,13 @@ export class ConversationCheckManager {
   private timer?: ReturnType<typeof setInterval>;
   private readonly running = new Map<string, AbortController>();
   private ticking = false;
+  private readonly owner = `checks-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 
   constructor(
     private readonly store: ConversationCheckStore,
     private readonly log: (level: "info" | "warn", message: string) => void = () => {},
     private readonly pollIntervalMs = 30_000,
+    private readonly options: ConversationCheckManagerOptions = {},
   ) {}
 
   setRunner(runner: ConversationCheckRunner): void { this.runner = runner; }
@@ -109,6 +123,10 @@ export class ConversationCheckManager {
       throw new Error("Say when it runs: every N minutes, a cron expression, or a time (at)");
     }
     if (Number.isNaN(Date.parse(firstRunAt))) throw new Error("The first run time must be an ISO date");
+    // a time that has passed would never be the check's time: refused, nothing is created
+    if (input.firstRunAt !== undefined && Date.parse(firstRunAt) < Date.now() - PAST_TOLERANCE_MS) {
+      throw new Error(`The time ${firstRunAt} has already passed: give a time in the future`);
+    }
     if (input.maxRuns !== undefined && !(input.maxRuns >= 1)) throw new Error("maxRuns must be at least 1");
     if (input.endsAt !== undefined && Number.isNaN(Date.parse(input.endsAt))) throw new Error("endsAt must be an ISO date");
     // a run (the check's own session) does not start more checks
@@ -222,11 +240,17 @@ export class ConversationCheckManager {
     return afterCheckRun(check, at, next);
   }
 
+  private lastPruneMs = 0;
+
   /** Run what is due now. */
   async tick(now = new Date()): Promise<void> {
     if (this.ticking || !this.runner) return;
     this.ticking = true;
     try {
+      if (this.options.leases?.prune && now.getTime() - this.lastPruneMs > 60 * 60_000) {
+        this.lastPruneMs = now.getTime();
+        await this.options.leases.prune(new Date(now.getTime() - 24 * 60 * 60_000).toISOString()).catch(() => 0);
+      }
       const due = await this.store.dueChecks(now.toISOString());
       for (const check of due) {
         if (this.running.has(check.id)) continue;
@@ -234,7 +258,16 @@ export class ConversationCheckManager {
           await this.store.updateCheck(check.id, { state: "ended" });
           continue;
         }
-        void this.run(check);
+        // the chat it reports to is gone, and there is nowhere else to report: it ends, saying why
+        if (!check.target && this.options.sessionExists && !(await this.options.sessionExists(check.sessionId).catch(() => true))) {
+          this.log("warn", `[checks] ${check.id} ended: its chat session ${check.sessionId} no longer exists`);
+          await this.store.updateCheck(check.id, { state: "ended", lastError: `Its chat session ${check.sessionId} no longer exists: nothing to report to` });
+          continue;
+        }
+        // one run per occurrence across the processes on this storage
+        const key = this.runKey(check);
+        if (this.options.leases && !(await this.options.leases.tryClaim(key, this.owner, RUN_CLAIM_TTL_MS).catch(() => false))) continue;
+        void this.run(check, key);
       }
     } catch (err) {
       this.log("warn", `[checks] could not read the due checks: ${err instanceof Error ? err.message : String(err)}`);
@@ -243,14 +276,22 @@ export class ConversationCheckManager {
     }
   }
 
-  private async run(check: ConversationCheck): Promise<void> {
+  private runKey(check: ConversationCheck): string {
+    return `check:${check.id}@${check.nextRunAt}`;
+  }
+
+  private async run(check: ConversationCheck, claim?: string): Promise<void> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), RUN_TIMEOUT_MS);
     this.running.set(check.id, controller);
     try {
       // a fixed message (a reminder) is sent as it is, without running the agent
       const result = check.message ? { text: check.message } : await this.runner!(check, controller.signal);
-      if (result === "deferred") return;
+      if (result === "deferred") {
+        // busy: the next tick tries this occurrence again
+        if (claim) await this.options.leases?.release(claim, this.owner).catch(() => undefined);
+        return;
+      }
       const report = result.text.trim();
       const deliver = !isNothingToReport(report);
       if (deliver) await this.delivery?.(check, report);
@@ -273,6 +314,8 @@ export class ConversationCheckManager {
     } finally {
       clearTimeout(timeout);
       this.running.delete(check.id);
+      // a run that happened keeps its claim until it expires: another process holding an old
+      // copy of the check cannot run this occurrence again (the next one has its own key)
     }
   }
 }

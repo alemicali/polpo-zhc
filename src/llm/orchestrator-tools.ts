@@ -4414,7 +4414,9 @@ async function execListSchedules(polpo: Orchestrator, args: Record<string, unkno
   const lines = await Promise.all(all.map(async s => {
     const mission = await polpo.getMission(s.missionId);
     const missionName = mission ? mission.name : s.missionId;
-    return `[${s.id}] ${s.enabled ? "ACTIVE" : "DISABLED"} mission: "${missionName}" expr: ${s.expression}${s.recurring ? " (recurring)" : ""} next: ${s.nextRunAt ?? "N/A"}${s.lastRunAt ? ` last: ${s.lastRunAt}` : ""}`;
+    return `[${s.id}] ${s.enabled ? "ACTIVE" : s.nextRunAt ? "PAUSED" : "DONE"} mission: "${missionName}" expr: ${s.expression}${s.recurring ? " (recurring)" : ""} next: ${s.nextRunAt ?? "N/A"}`
+      + `${s.lastRunAt ? ` last: ${s.lastRunAt}` : ""}${s.lastOutcome ? ` outcome: ${s.lastOutcome}` : ""}${s.lastError ? ` (${s.lastError})` : ""}`
+      + `${s.missedRuns ? ` missed while down: ${s.missedRuns}` : ""} catch-up: ${s.catchUp ?? "once"}`;
   }));
   return `${all.length} schedule(s):\n${lines.join("\n")}`;
 }

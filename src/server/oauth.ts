@@ -9,7 +9,10 @@
  * - authorization code with PKCE S256 only; `iss` in the response (RFC 9207); loopback redirects match
  *   on any port (native clients such as Claude Code);
  * - opaque access tokens (1 hour) and rotating refresh tokens (30 days), stored hashed;
- * - consent: a person signed in to the dashboard, or who enters the server's API key (or MCP key), allows the client;
+ * - consent: a person signed in to the dashboard, or who enters the server's API key (or MCP key), allows the client,
+ *   and chooses its scopes (see SCOPES in mcp-server/kit.ts): read always, work, the areas, admin; a client that
+ *   asks for none gets read and work. The old all-in-one scope "polpo" is still accepted (every scope);
+ * - grants (a client allowed by a person) are listed with their scopes and last use, and revoked, from the dashboard;
  * - the endpoints may be public: open registration is capped, and metadata documents are only fetched
  *   from public addresses.
  *
@@ -20,13 +23,19 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { ALL_SCOPES, DEFAULT_SCOPES, SCOPES, UMBRELLA_SCOPE, normalizeScopes, type PolpoScope } from "./mcp-server/kit.js";
 
 export const ACCESS_TOKEN_TTL_S = 3600;
 export const REFRESH_TOKEN_TTL_S = 30 * 24 * 3600;
 const CODE_TTL_MS = 10 * 60_000;
 /** Registered (DCR) clients kept; past it the oldest without live tokens go, so open registration cannot fill the disk. */
 const MAX_DCR_CLIENTS = 200;
-export const OAUTH_SCOPE = "polpo";
+/** How often a grant's last use is written down (verifying a token happens on every MCP request). */
+const LAST_USED_RESOLUTION_MS = 60_000;
+/** The scopes in metadata documents (what a client may ask for). */
+export const OAUTH_SCOPES_SUPPORTED: readonly string[] = ALL_SCOPES;
+/** What a client gets when it names no scope, and what the first 401 suggests. */
+export const OAUTH_DEFAULT_SCOPE = DEFAULT_SCOPES.join(" ");
 
 export interface OAuthClient {
   client_id: string;
@@ -49,10 +58,37 @@ interface StoredToken {
   expires_at: number;
 }
 
+/** When a grant (a client allowed by a person) was made and last used. */
+interface GrantMeta {
+  created_at: string;
+  last_used_at?: string;
+}
+
 interface OAuthState {
   clients: OAuthClient[];
   tokens: StoredToken[];
+  /** By grant id (see grantId). */
+  grants?: Record<string, GrantMeta>;
 }
+
+/** A client allowed by a person, as the dashboard shows it. */
+export interface OAuthGrant {
+  id: string;
+  client_id: string;
+  client_name: string;
+  /** Who allowed it: an email, "api-key" or "local". */
+  subject: string;
+  /** Granted scopes ("polpo", the old all-in-one scope, shows as every scope, and legacy is true). */
+  scopes: PolpoScope[];
+  legacy: boolean;
+  created_at: string;
+  last_used_at?: string;
+  /** When its last token runs out (a client that stops refreshing loses it then). */
+  expires_at: string;
+}
+
+/** One grant per client and person: revoking it ends every token that client holds for that person. */
+const grantId = (clientId: string, subject: string) => createHash("sha256").update(`${clientId}\n${subject}`).digest("hex").slice(0, 16);
 
 interface PendingCode {
   client_id: string;
@@ -119,15 +155,18 @@ export class OAuthServer {
   private read(): OAuthState {
     try {
       const state = JSON.parse(readFileSync(this.file, "utf-8")) as Partial<OAuthState>;
-      return { clients: state.clients ?? [], tokens: state.tokens ?? [] };
+      return { clients: state.clients ?? [], tokens: state.tokens ?? [], grants: state.grants ?? {} };
     } catch {
-      return { clients: [], tokens: [] };
+      return { clients: [], tokens: [], grants: {} };
     }
   }
 
   private write(state: OAuthState): void {
     const now = Math.floor(Date.now() / 1000);
     state.tokens = state.tokens.filter((t) => t.expires_at > now);
+    // a grant's dates go with its last token
+    const live = new Set(state.tokens.map((t) => grantId(t.client_id, t.subject)));
+    state.grants = Object.fromEntries(Object.entries(state.grants ?? {}).filter(([id]) => live.has(id)));
     if (!existsSync(dirname(this.file))) mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
@@ -207,15 +246,24 @@ export class OAuthServer {
     return client;
   }
 
-  /** The person allowed the client: a single-use code for the token endpoint. */
-  issueCode(q: Record<string, string | undefined>, resource: string, subject: string): string {
+  /**
+   * The scopes a client asks for (its `scope` parameter), as the consent page offers them: known
+   * ones (the umbrella "polpo" is every scope); read and work when it names none we know.
+   */
+  requestedScopes(scope: string | undefined): PolpoScope[] {
+    const asked = normalizeScopes(scope);
+    return asked.length ? asked : [...DEFAULT_SCOPES];
+  }
+
+  /** The person allowed the client, with these scopes (default: what it asked for): a single-use code for the token endpoint. */
+  issueCode(q: Record<string, string | undefined>, resource: string, subject: string, scopes?: readonly string[]): string {
     for (const [k, v] of this.codes) if (v.expires_at < Date.now()) this.codes.delete(k);
     const code = token("polpo_code");
     this.codes.set(code, {
       client_id: q.client_id!,
       redirect_uri: q.redirect_uri!,
       code_challenge: q.code_challenge!,
-      scope: OAUTH_SCOPE,
+      scope: (scopes ? normalizeScopes(scopes) : this.requestedScopes(q.scope)).join(" ") || DEFAULT_SCOPES.join(" "),
       resource,
       subject,
       expires_at: Date.now() + CODE_TTL_MS,
@@ -241,9 +289,17 @@ export class OAuthServer {
       const stored = state.tokens.find((t) => t.kind === "refresh" && t.hash === hash);
       if (!stored || stored.expires_at <= now) throw new OAuthError("invalid_grant", "The refresh token is invalid or expired");
       if (form.client_id && form.client_id !== stored.client_id) throw new OAuthError("invalid_grant", "The refresh token was issued to another client");
+      // a refresh may ask for less, never more (RFC 6749 §6)
+      let scope = stored.scope;
+      if (form.scope) {
+        const held = normalizeScopes(stored.scope);
+        const asked = normalizeScopes(form.scope);
+        if (asked.length === 0 || asked.some((s) => !held.includes(s))) throw new OAuthError("invalid_scope", "A refresh cannot ask for scopes the grant does not have");
+        scope = asked.join(" ");
+      }
       // rotation: the old refresh token stops working now
       state.tokens = state.tokens.filter((t) => t !== stored);
-      grant = stored;
+      grant = { ...stored, scope };
     } else {
       throw new OAuthError("unsupported_grant_type", "grant_type must be authorization_code or refresh_token");
     }
@@ -252,6 +308,8 @@ export class OAuthServer {
     const base = { client_id: grant.client_id, scope: grant.scope, resource: grant.resource, subject: grant.subject };
     state.tokens.push({ ...base, hash: sha256(access), kind: "access", expires_at: now + ACCESS_TOKEN_TTL_S });
     state.tokens.push({ ...base, hash: sha256(refresh), kind: "refresh", expires_at: now + REFRESH_TOKEN_TTL_S });
+    const id = grantId(grant.client_id, grant.subject);
+    state.grants = { ...state.grants, [id]: { ...state.grants?.[id], created_at: state.grants?.[id]?.created_at ?? new Date().toISOString() } };
     this.write(state);
     return { access_token: access, token_type: "Bearer", expires_in: ACCESS_TOKEN_TTL_S, refresh_token: refresh, scope: grant.scope };
   }
@@ -263,7 +321,64 @@ export class OAuthServer {
     const hash = sha256(accessToken);
     const found = this.read().tokens.find((t) => t.kind === "access" && t.hash === hash && t.expires_at > now);
     if (!found || found.resource.replace(/\/+$/, "") !== resource.replace(/\/+$/, "")) return null;
+    this.touch(grantId(found.client_id, found.subject));
     return { subject: found.subject, client_id: found.client_id, scope: found.scope };
+  }
+
+  private lastTouched = new Map<string, number>();
+  /** Note a grant's use, at most once a minute. */
+  private touch(id: string): void {
+    const now = Date.now();
+    if (now - (this.lastTouched.get(id) ?? 0) < LAST_USED_RESOLUTION_MS) return;
+    this.lastTouched.set(id, now);
+    try {
+      const state = this.read();
+      state.grants = { ...state.grants, [id]: { created_at: state.grants?.[id]?.created_at ?? new Date(now).toISOString(), last_used_at: new Date(now).toISOString() } };
+      this.write(state);
+    } catch { /* a missed last-use date is not worth failing a request */ }
+  }
+
+  /** The grants that still hold a token: who allowed which client, with which scopes, since when. */
+  listGrants(): OAuthGrant[] {
+    const state = this.read();
+    const now = Math.floor(Date.now() / 1000);
+    const byId = new Map<string, StoredToken[]>();
+    for (const t of state.tokens) {
+      if (t.expires_at <= now) continue;
+      const id = grantId(t.client_id, t.subject);
+      byId.set(id, [...(byId.get(id) ?? []), t]);
+    }
+    const grants: OAuthGrant[] = [];
+    for (const [id, tokens] of byId) {
+      const first = tokens[0]!;
+      const raw = tokens.flatMap((t) => t.scope.split(/\s+/).filter(Boolean));
+      const meta = state.grants?.[id];
+      const latest = Math.max(...tokens.map((t) => t.expires_at));
+      // grants from before dates were kept: their oldest token tells when they were made, near enough
+      const derived = Math.min(...tokens.map((t) => t.expires_at - (t.kind === "refresh" ? REFRESH_TOKEN_TTL_S : ACCESS_TOKEN_TTL_S)));
+      grants.push({
+        id,
+        client_id: first.client_id,
+        client_name: this.clientName(first.client_id),
+        subject: first.subject,
+        scopes: normalizeScopes(raw),
+        legacy: raw.includes(UMBRELLA_SCOPE),
+        created_at: meta?.created_at ?? new Date(derived * 1000).toISOString(),
+        ...(meta?.last_used_at ? { last_used_at: meta.last_used_at } : {}),
+        expires_at: new Date(latest * 1000).toISOString(),
+      });
+    }
+    return grants.sort((a, b) => (b.last_used_at ?? b.created_at).localeCompare(a.last_used_at ?? a.created_at));
+  }
+
+  /** Revoke a grant from the dashboard: every token of that client for that person. False when there is none. */
+  revokeGrant(id: string): boolean {
+    const state = this.read();
+    const before = state.tokens.length;
+    state.tokens = state.tokens.filter((t) => grantId(t.client_id, t.subject) !== id);
+    if (state.tokens.length === before) return false;
+    this.write(state);
+    return true;
   }
 
   /** A client's name for people: its registered name, else the host of its metadata URL, else its id. */
@@ -300,7 +415,7 @@ export function protectedResourceMetadata(origin: string) {
   return {
     resource: `${origin}/mcp`,
     authorization_servers: [origin],
-    scopes_supported: [OAUTH_SCOPE],
+    scopes_supported: [...OAUTH_SCOPES_SUPPORTED],
     bearer_methods_supported: ["header"],
     resource_name: "Polpo",
   };
@@ -320,17 +435,32 @@ export function authorizationServerMetadata(origin: string) {
     token_endpoint_auth_methods_supported: ["none"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
-    scopes_supported: [OAUTH_SCOPE, "offline_access"],
+    scopes_supported: [...OAUTH_SCOPES_SUPPORTED, "offline_access"],
   };
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
-/** The consent page: who asks, where it will go back, and how to allow it. */
+/** The name of the consent form's scope checkboxes. */
+export const CONSENT_SCOPE_FIELD = "grant_scope";
+
+/**
+ * The scopes the person allowed on the consent page: the boxes they left checked, read always.
+ * They may narrow what the client asked for, or add to it.
+ */
+export function consentScopes(checked: unknown): PolpoScope[] {
+  const values = (Array.isArray(checked) ? checked : [checked]).filter((v): v is string => typeof v === "string");
+  // the umbrella never comes from the form: only explicit scopes, each one a box the person saw
+  return normalizeScopes(["polpo:read", ...values.filter((v) => v !== UMBRELLA_SCOPE)]);
+}
+
+/** The consent page: who asks, what it may do (scopes to narrow), where it will go back, and how to allow it. */
 export function consentPage(input: {
   client: OAuthClient;
   redirectUri: string;
   params: Record<string, string | undefined>;
+  /** The scopes the client asked for: checked; the others are offered unchecked. */
+  requested?: readonly PolpoScope[];
   /** How the person proves they may allow it. */
   method: "session" | "api-key" | "open";
   email?: string;
@@ -341,6 +471,16 @@ export function consentPage(input: {
   const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
   const hidden = Object.entries(input.params).filter(([, v]) => v !== undefined)
     .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v!)}">`).join("");
+  const requested = new Set<string>(input.requested ?? DEFAULT_SCOPES);
+  const scopeRows = ALL_SCOPES.map((scope) => {
+    const info = SCOPES[scope];
+    const always = scope === "polpo:read";
+    const id = `scope-${scope.replace(":", "-")}`;
+    return `<label class="scope${scope === "polpo:admin" ? " admin" : ""}" for="${id}"><input type="checkbox" id="${id}" name="${CONSENT_SCOPE_FIELD}" value="${scope}"`
+      + `${always || requested.has(scope) ? " checked" : ""}${always ? " disabled" : ""}>`
+      + `<span><b>${esc(info.label)}</b>${always ? ' <span class="muted">(always)</span>' : ""}${!always && !requested.has(scope) ? ' <span class="muted">(not asked for)</span>' : ""}`
+      + `<br><span class="muted">${esc(info.description)}</span></span></label>`;
+  }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect to Polpo</title>
 <style>body{font:15px/1.5 system-ui,sans-serif;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f6f6f7;color:#18181b}
@@ -348,11 +488,15 @@ export function consentPage(input: {
 .card{max-width:420px;width:calc(100% - 32px);background:#fff;border:1px solid #e4e4e7;border-radius:12px;padding:24px}
 h1{font-size:18px;margin:0 0 8px}.muted{color:#71717a;font-size:13px}.warn{color:#b45309;font-size:13px}.err{color:#dc2626;font-size:13px}
 input[type=password]{width:100%;box-sizing:border-box;padding:8px;border:1px solid #d4d4d8;border-radius:8px;margin:8px 0}
+fieldset{border:0;padding:0;margin:12px 0}legend{font-weight:600;margin-bottom:4px}.scope{display:flex;gap:8px;align-items:flex-start;padding:6px 0;line-height:1.35}
+.scope input{margin-top:3px}.scope.admin{border-top:1px solid #e4e4e7;margin-top:4px;padding-top:10px}
 button{padding:8px 16px;border-radius:8px;border:0;background:#18181b;color:#fff;font-weight:600;cursor:pointer}
 @media(prefers-color-scheme:dark){button{background:#e4e4e7;color:#18181b}}.row{display:flex;gap:8px;margin-top:16px}.secondary{background:transparent;color:inherit;border:1px solid #d4d4d8}</style></head>
 <body><form class="card" method="post" action="authorize">${hidden}
 <h1>Connect ${esc(input.client.client_name ?? "an app")} to Polpo</h1>
-<p>It will be able to use this Polpo instance on your behalf: ask Polpo, talk to agents, read and change tasks, missions, artifacts and data.</p>
+<p>It will be able to use this Polpo instance on your behalf, with what you allow here.</p>
+<fieldset><legend>What it may do</legend><input type="hidden" name="${CONSENT_SCOPE_FIELD}" value="polpo:read">${scopeRows}
+<p class="muted">Uncheck what it should not do; it can ask again later if it needs more. Admin includes every other box.</p></fieldset>
 <p class="muted">You will be sent back to <b>${esc(host)}</b>.</p>
 ${loopback ? `<p class="warn">This is an app on your computer (a local address). Allow it only if you just started the connection yourself.</p>` : ""}
 ${input.error ? `<p class="err">${esc(input.error)}</p>` : ""}

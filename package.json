@@ -1,6 +1,6 @@
 {
   "name": "polpo-ai",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The open-source platform for AI agent teams",
   "type": "module",
   "main": "dist/index.js",
@@ -54,6 +54,7 @@
     "lint": "pnpm --filter ui lint",
     "clean": "rm -rf dist packages/react-sdk/dist ui/dist",
     "prepublishOnly": "./node_modules/.bin/tsc && pnpm build:sdk",
+    "generate:mcp-scopes": "node scripts/generate-mcp-scopes.mjs",
     "generate:openapi": "node -e \"const{createApp}=require('./dist/server/app.js');const app=createApp(null,null);const fs=require('fs');app.fetch(new Request('http://localhost/api/v1/openapi.json')).then(r=>r.json()).then(j=>{fs.writeFileSync('docs/openapi.json',JSON.stringify(j,null,2));console.log('Generated openapi.json with',Object.keys(j.paths).length,'paths');process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})\"",
     "build:widgets": "node widgets/build.mjs",
     "typecheck:widgets": "./node_modules/.bin/tsc -p widgets/tsconfig.json"

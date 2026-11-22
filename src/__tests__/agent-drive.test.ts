@@ -114,10 +114,10 @@ describe("prompts", () => {
     expect(empty).toMatch(/Not written yet\. Define yourself now \(starting from personality: warm, direct, a bit ironic\)/);
     expect(empty).toMatch(/birthdays, name days, anniversaries/);
     const check = await checks.create({ sessionId: "s", agent: "coach", prompt: "", message: "Happy birthday Grazia!", everyMinutes: 0,
-      firstRunAt: "2026-10-14T07:00:00Z", why: "Grazia's birthday, Alessio's partner", proposed: true, target: { channel: "b", chatId: "-1", name: "Family" } });
+      firstRunAt: "2027-10-14T07:00:00Z", why: "Grazia's birthday, Alessio's partner", proposed: true, target: { channel: "b", chatId: "-1", name: "Family" } });
     const full = drivePrompt(agents[0]!, "I am Coach.", [check]);
     expect(full).toContain("I am Coach.");
-    expect(full).toContain(`- ${check.id} [proposed, waiting for a yes] Wednesday 2026-10-14 09:00 (Europe/Rome) → Family: Happy birthday Grazia! (why: Grazia's birthday, Alessio's partner)`);
+    expect(full).toContain(`- ${check.id} [proposed, waiting for a yes] Thursday 2027-10-14 09:00 (Europe/Rome) → Family: Happy birthday Grazia! (why: Grazia's birthday, Alessio's partner)`);
   });
 
   it("the reflection prompt says why it reflects, the time, and what happened", () => {
@@ -346,12 +346,12 @@ describe("goals: cascade, plan tree, review rhythm", () => {
 describe("routine and tasks", () => {
   it("the chat prompt separates its routine (recurring) from what is planned once", async () => {
     const routine = await checks.create({ sessionId: "s", agent: "coach", prompt: "End-of-day check-in with Alessio", everyMinutes: 0, cron: "30 21 * * *", timezone: "Europe/Rome", why: "close the food log every day" });
-    const once = await checks.create({ sessionId: "s", agent: "coach", prompt: "", message: "Auguri Grazia!", everyMinutes: 0, firstRunAt: "2026-10-14T07:30:00Z", why: "birthday" });
+    const once = await checks.create({ sessionId: "s", agent: "coach", prompt: "", message: "Auguri Grazia!", everyMinutes: 0, firstRunAt: "2027-10-14T07:30:00Z", why: "birthday" });
     const prompt = drivePrompt(agents[0]!, "me", [routine, once]);
     const routinePart = prompt.slice(prompt.indexOf("### Your routine (recurring)"), prompt.indexOf("### Planned once"));
     expect(routinePart).toContain(`${routine.id} cron "30 21 * * *"`);
     expect(routinePart).not.toContain(once.id);
-    expect(prompt.slice(prompt.indexOf("### Planned once"))).toContain(`${once.id} Wednesday 2026-10-14 09:30 (Europe/Rome)`);
+    expect(prompt.slice(prompt.indexOf("### Planned once"))).toContain(`${once.id} Thursday 2027-10-14 09:30 (Europe/Rome)`);
     expect(prompt).toContain("- Keep a routine: the recurring moments your purpose, responsibilities, goals and tasks need");
   });
 

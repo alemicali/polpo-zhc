@@ -655,6 +655,14 @@ export class MissionExecutor {
     return { retried, pending: pendingTasks.length };
   }
 
+  /** Whether a run that started before a restart came from a recurring or a one-shot schedule. */
+  private async storedScheduleOrigin(mission: Mission): Promise<"scheduled" | "recurring" | undefined> {
+    if (!mission.schedule) return undefined;
+    const state = await this.ctx.scheduleStore?.getSchedule(mission.id).catch(() => undefined);
+    if (!state || state.expression !== mission.schedule) return undefined;
+    return state.recurring ? "recurring" : "scheduled";
+  }
+
   async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> {
     const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
@@ -851,7 +859,8 @@ export class MissionExecutor {
         }
 
         // Determine final status based on scheduled origin
-        const origin = this.scheduledOrigin.get(group);
+        // in memory since the run started; after a restart, from the schedule's stored state
+        const origin = this.scheduledOrigin.get(group) ?? await this.storedScheduleOrigin(mission);
         let finalStatus: MissionStatus;
         if (origin === "recurring") {
           // Recurring missions always return to "recurring" — ready for next cron tick

@@ -103,6 +103,31 @@ describe("POST /schedules/:missionId/run", () => {
   });
 });
 
+describe("GET /schedules: the status of every schedule", () => {
+  it("shows paused or not, next and last run, last outcome, missed runs and catch-up; one by mission; PATCH catchUp", async () => {
+    const entries: any[] = [
+      { id: "sched-m1", missionId: "m1", expression: "0 9 * * *", recurring: true, enabled: false, nextRunAt: "2026-12-01T09:00:00.000Z", lastRunAt: "2026-11-30T09:00:00.000Z", lastOutcome: "failed", lastError: "boom", missedRuns: 2, lastMissedAt: "2026-11-29T09:00:00.000Z" },
+      { id: "sched-m2", missionId: "m2", expression: "2026-11-30T09:00:00.000Z", recurring: false, enabled: false, lastRunAt: "2026-11-30T09:00:00.000Z", lastOutcome: "completed" },
+    ];
+    const setCatchUp = vi.fn((id: string, catchUp: string) => Object.assign(entries.find((e) => e.missionId === id), { catchUp }));
+    const scheduler = { getAllSchedules: () => entries, getScheduleByMissionId: (id: string) => entries.find((e) => e.missionId === id), setCatchUp };
+    const app = scheduleRoutes(() => ({ getScheduler: () => scheduler, getMission: async () => undefined, updateMission: async () => undefined }));
+    const list = (await (await app.request("/")).json()).data;
+    expect(list[0]).toMatchObject({ enabled: false, paused: true, nextRunAt: "2026-12-01T09:00:00.000Z", lastOutcome: "failed", lastError: "boom", missedRuns: 2, catchUp: "once" });
+    // a one-shot that ran is done, not paused
+    expect(list[1]).toMatchObject({ enabled: false, paused: false, lastOutcome: "completed", missedRuns: 0 });
+    const one = await app.request("/m1");
+    expect(one.status).toBe(200);
+    expect((await one.json()).data).toMatchObject({ missionId: "m1", paused: true });
+    expect((await app.request("/m9")).status).toBe(404);
+    const patched = await app.request("/m1", json({ catchUp: "none" }, "PATCH"));
+    expect(patched.status).toBe(200);
+    expect(setCatchUp).toHaveBeenCalledWith("m1", "none");
+    expect((await patched.json()).data.catchUp).toBe("none");
+    expect((await app.request("/m1", json({ catchUp: "always" }, "PATCH"))).status).toBe(400);
+  });
+});
+
 describe("POST/PATCH /schedules: the expression is checked first", () => {
   it("refuses '99 99 * * *' with a clear error, and leaves the mission as it was (live: accepted, never ran)", async () => {
     const mission: any = { id: "m1", name: "Digest", status: "draft" };
@@ -193,6 +218,17 @@ describe("/checks", () => {
     expect((await purged.json()).data).toMatchObject({ id: check.id, deleted: true });
     expect(await manager.list()).toEqual([]);
     expect((await app().request(`/${check.id}?purge=true`, { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("refuses a time that has passed, before making anything (live: accepted, stayed active, never ran, left a session)", async () => {
+    const before = [...sessions.keys()];
+    const past = new Date(Date.now() - 3600_000).toISOString();
+    const res = await app().request("/", json({ agent: "coach", message: "x", at: past }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/has already passed/);
+    expect([...sessions.keys()]).toEqual(before);
+    expect(await manager.list()).toEqual([]);
+    expect((await app().request("/", json({ sessionId: "s1", message: "x", at: new Date(Date.now() + 3600_000).toISOString() }))).status).toBe(201);
   });
 
   it("confirms a proposed check", async () => {

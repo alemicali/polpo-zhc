@@ -1200,6 +1200,32 @@
               }
             }
           },
+          "400": {
+            "description": "dependsOn names a task that does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "A task with this title already exists among active tasks",
             "content": {
@@ -5694,6 +5720,7 @@
                   },
                   "computers": {
                     "type": "array",
+                    "nullable": true,
                     "items": {
                       "type": "string",
                       "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
@@ -12048,7 +12075,7 @@
           "Schedules"
         ],
         "summary": "Run a scheduled mission now",
-        "description": "Runs the mission out of turn; the next scheduled run stays as it is.",
+        "description": "Runs the mission out of turn; the next scheduled run stays as it is, and a paused schedule stays paused.",
         "parameters": [
           {
             "schema": {
@@ -12142,6 +12169,7 @@
           "Schedules"
         ],
         "summary": "List schedules",
+        "description": "Every mission schedule: paused or not, next and last run, how the last run went, runs missed while the server was down.",
         "responses": {
           "200": {
             "description": "List of schedule entries",
@@ -12195,6 +12223,14 @@
                   "endDate": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "catchUp": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "once"
+                    ],
+                    "description": "A run missed while the server was down: \"once\" (default) runs it at startup when it is at most one interval late (24 h for a one-shot), \"none\" skips to the next run"
                   }
                 },
                 "required": [
@@ -12283,6 +12319,72 @@
       }
     },
     "/api/v1/schedules/{missionId}": {
+      "get": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Get a schedule",
+        "description": "One mission's schedule: paused or not, next and last run, how the last run went, runs missed while the server was down.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "missionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Schedule not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "Schedules"
@@ -12318,6 +12420,14 @@
                     "type": "string",
                     "nullable": true,
                     "format": "date-time"
+                  },
+                  "catchUp": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "once"
+                    ],
+                    "description": "A run missed while the server was down: \"once\" (default) runs it at startup when it is at most one interval late (24 h for a one-shot), \"none\" skips to the next run"
                   }
                 }
               }
@@ -12341,6 +12451,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid expression",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }

@@ -78,6 +78,13 @@
       "when": 1792940249916,
       "tag": "0010_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795310849165,
+      "tag": "0011_scheduling",
+      "breakpoints": true
     }
   ]
 }

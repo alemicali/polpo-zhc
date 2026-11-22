@@ -92,6 +92,8 @@ export function checkRoutes(getDeps: () => CheckRoutesDeps): OpenAPIHono {
     if (b.at) {
       const at = parseCheckTime(b.at, b.timezone);
       if (!at) return fail(c, 400, "at must be a date (\"2026-10-14T09:00\" or ISO)");
+      // refused before anything is made (a past time never runs, and its chat would be left behind)
+      if (at.getTime() < Date.now() - 60_000) return fail(c, 400, `at ${at.toISOString()} has already passed (now ${new Date().toISOString()}): give a future time`);
       firstRunAt = at.toISOString();
     }
     let target: ConversationCheckTarget | undefined;

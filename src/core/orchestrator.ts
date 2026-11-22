@@ -15,6 +15,7 @@ import { FileSessionStore } from "../stores/file-session-store.js";
 import { FileChatQueueStore } from "../stores/file-chat-queue-store.js";
 import { FileRoomStore } from "../stores/file-room-store.js";
 import { FileConversationCheckStore } from "../stores/file-conversation-check-store.js";
+import { FileLeaseStore, FileScheduleStore, FileTaskWatcherStore } from "../stores/file-scheduling-store.js";
 import { botOrder, buildChatDirectory, chatTarget, resolveChat, type ChatBot, type ReachableChat } from "./chat-directory.js";
 import type { ConversationCheckTarget } from "@polpo-ai/core";
 import type { SessionStore } from "./session-store.js";
@@ -1032,6 +1033,9 @@ export class Orchestrator extends TypedEmitter {
         return readFileSync(logPath, "utf-8");
       },
       notifySocketPath: getSocketPath(this.polpoDir),
+      // Schedules' state and the claims that keep a run to one process: never only in memory
+      scheduleStore: this.getScheduleStore(),
+      leaseStore: this.getLeaseStore(),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
@@ -1187,11 +1191,19 @@ export class Orchestrator extends TypedEmitter {
     }
 
     // Initialize task watcher manager (always available — zero cost when no watchers)
-    this.watcherMgr = new TaskWatcherManager(this);
+    this.watcherMgr = new TaskWatcherManager(this, {
+      store: this.getTaskWatcherStore(),
+      leases: this.getLeaseStore(),
+      taskStatus: async (taskId) => (await this.registry.getTask(taskId))?.status,
+      log: (level, message) => this.emit("log", { level, message }),
+    });
     this.watcherMgr.setActionExecutor(actionExecutor);
     this.watcherMgr.start();
 
-    this.conversationCheckMgr = new ConversationCheckManager(this.getConversationCheckStore(), (level, message) => this.emit("log", { level, message }));
+    this.conversationCheckMgr = new ConversationCheckManager(this.getConversationCheckStore(), (level, message) => this.emit("log", { level, message }), undefined, {
+      leases: this.getLeaseStore(),
+      sessionExists: async (sessionId) => !!(await this.sessionStore.getSession(sessionId)),
+    });
     this.conversationCheckMgr.setDelivery((check, text) => this.deliverCheckReport(check, text));
     if (this.conversationCheckRunner) this.conversationCheckMgr.setRunner(this.conversationCheckRunner);
     this.conversationCheckMgr.start();
@@ -1537,6 +1549,24 @@ export class Orchestrator extends TypedEmitter {
     return this.drizzleStores?.conversationCheckStore ?? (this.fileConversationCheckStore ??= new FileConversationCheckStore(this.polpoDir));
   }
   private fileConversationCheckStore?: FileConversationCheckStore;
+
+  /** Schedules' runtime state (paused, next/last run, missed runs): database-backed, `.polpo/schedules/` otherwise. */
+  getScheduleStore(): import("@polpo-ai/core").ScheduleStore {
+    return this.drizzleStores?.scheduleStore ?? (this.fileScheduleStore ??= new FileScheduleStore(this.polpoDir));
+  }
+  private fileScheduleStore?: FileScheduleStore;
+
+  /** Claims shared by the processes on this storage (a schedule's run, a check's run, a watcher's action fire once). */
+  getLeaseStore(): import("@polpo-ai/core").LeaseStore {
+    return this.drizzleStores?.leaseStore ?? (this.fileLeaseStore ??= new FileLeaseStore(this.polpoDir));
+  }
+  private fileLeaseStore?: FileLeaseStore;
+
+  /** Task watchers: database-backed, `.polpo/watchers/` otherwise. */
+  getTaskWatcherStore(): import("@polpo-ai/core").TaskWatcherStore {
+    return this.drizzleStores?.taskWatcherStore ?? (this.fileTaskWatcherStore ??= new FileTaskWatcherStore(this.polpoDir));
+  }
+  private fileTaskWatcherStore?: FileTaskWatcherStore;
 
   /**
    * A check's report: added to the chat it was asked in (the agent finds it there next time), sent to

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
+import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
 
@@ -455,8 +456,12 @@ function parseSettings(raw: any): PolpoSettings {
     if (typeof raw.connectors.toolTimeoutMs === "number" && raw.connectors.toolTimeoutMs > 0) connectors.toolTimeoutMs = raw.connectors.toolTimeoutMs;
     settings.connectors = connectors;
   }
-  if (raw?.mcp && typeof raw.mcp === "object" && Array.isArray(raw.mcp.toolsets)) {
-    settings.mcp = { toolsets: (raw.mcp.toolsets as unknown[]).filter((t): t is string => typeof t === "string") };
+  if (raw?.mcp && typeof raw.mcp === "object") {
+    const mcp: NonNullable<PolpoSettings["mcp"]> = {};
+    if (Array.isArray(raw.mcp.toolsets)) mcp.toolsets = (raw.mcp.toolsets as unknown[]).filter((t): t is string => typeof t === "string");
+    const keys = parseMcpKeyConfigs(raw.mcp.keys);
+    if (keys.length) mcp.keys = keys;
+    if (mcp.toolsets || mcp.keys) settings.mcp = mcp;
   }
 
   // Storage backend.
@@ -597,4 +602,19 @@ export function effectiveCompactionSettings(
   agent: import("@polpo-ai/core").CompactionSettings | undefined,
 ): import("@polpo-ai/core").CompactionSettings {
   return { ...(global ?? {}), ...(normalizeCompactionSettings(agent) ?? {}) };
+}
+
+/** Parse settings.mcp.keys from the config file: well-formed entries only, unique names. */
+export function parseMcpKeyConfigs(raw: unknown): NonNullable<NonNullable<PolpoSettings["mcp"]>["keys"]> {
+  if (!Array.isArray(raw)) return [];
+  const out: NonNullable<NonNullable<PolpoSettings["mcp"]>["keys"]> = [];
+  for (const item of raw as Array<Record<string, unknown> | null>) {
+    if (!item || typeof item !== "object" || typeof item.name !== "string" || !item.name.trim()) continue;
+    const keyRef = normalizeVaultRef(item.keyRef);
+    if (!keyRef || out.some((k) => k.name === (item.name as string).trim())) continue;
+    const scopes = Array.isArray(item.scopes) ? item.scopes.filter((s): s is string => typeof s === "string")
+      : typeof item.scopes === "string" ? item.scopes.split(/[\s,]+/).filter(Boolean) : undefined;
+    out.push({ name: (item.name as string).trim(), keyRef, ...(scopes ? { scopes } : {}) });
+  }
+  return out;
 }

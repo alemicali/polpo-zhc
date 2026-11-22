@@ -47,7 +47,7 @@ describe("MCP connector published on its own", () => {
   it("needs the MCP key or a token, and points clients to the public URL", async () => {
     const res = await initialize(publicHeaders);
     expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource/mcp", scope="polpo"`);
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource/mcp", scope="polpo:read polpo:work"`);
     expect((await initialize({ ...publicHeaders, authorization: `Bearer ${MCP_KEY}` })).status).toBe(200);
     expect((await initialize({ ...publicHeaders, authorization: "Bearer wrong" })).status).toBe(401);
   });
@@ -194,6 +194,104 @@ describe("who acts through the connector", () => {
     expect(names).toEqual(expect.arrayContaining(["polpo_ask", "polpo_answer", "polpo_agent_show"]));
     expect(names).not.toContain("polpo_api_get");
     expect(names).not.toContain("call_operation");
+  });
+});
+
+describe("scopes on a real instance", () => {
+  const rawCall = (authorization: string, method: string, params: Record<string, unknown>) => app.request("/mcp", {
+    method: "POST",
+    headers: { ...publicHeaders, "content-type": "application/json", accept: "application/json, text/event-stream", authorization },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 9, method, params }),
+  });
+  /** Through the consent page as a person would: GET, uncheck/check boxes, POST, then the token endpoint. */
+  async function consent(opts: { scope?: string; boxes: string[]; apiKey?: string }) {
+    const reg = await (await app.request("/oauth/register", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Claude", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"] }),
+    })).json();
+    const verifier = randomBytes(32).toString("base64url");
+    const params: Record<string, string> = {
+      response_type: "code", client_id: reg.client_id, redirect_uri: "https://claude.ai/api/mcp/auth_callback",
+      code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", state: "s", resource: `${PUBLIC}/mcp`,
+      ...(opts.scope ? { scope: opts.scope } : {}),
+    };
+    const page = await (await app.request(`/oauth/authorize?${new URLSearchParams(params)}`, { headers: publicHeaders })).text();
+    const csrf = page.match(/name="csrf" value="([^"]+)"/)?.[1] ?? "";
+    const form = new URLSearchParams({ ...params, csrf, decision: "allow", api_key: opts.apiKey ?? MCP_KEY });
+    for (const b of opts.boxes) form.append("grant_scope", b);
+    const res = await app.request("/oauth/authorize", { method: "POST", headers: { ...publicHeaders, "content-type": "application/x-www-form-urlencoded" }, body: form.toString() });
+    const code = new URL(res.headers.get("location")!).searchParams.get("code")!;
+    const tokens = await (await app.request("/oauth/token", {
+      method: "POST", headers: { ...publicHeaders, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: params.redirect_uri!, code_verifier: verifier, client_id: reg.client_id }).toString(),
+    })).json();
+    return { page, tokens };
+  }
+
+  it("the consent page shows what the client asked for; the person narrows it; the token carries what was allowed", async () => {
+    const { page, tokens } = await consent({ scope: "polpo", boxes: ["polpo:work", "polpo:files"] });
+    // asked for the old umbrella: every box offered checked
+    for (const s of ["polpo:work", "polpo:files", "polpo:vault", "polpo:admin"]) expect(page).toMatch(new RegExp(`value="${s}" checked`));
+    expect(tokens.scope).toBe("polpo:read polpo:work polpo:files");
+    const names = ((await callAs(`Bearer ${tokens.access_token}`, "tools/list", {})).tools as Array<{ name: string }>).map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["polpo_file_write", "polpo_task_create"]));
+    expect(names).not.toContain("polpo_agent_create");
+    expect(names).not.toContain("polpo_computer_save");
+  });
+
+  it("a call without the scope is a 403 the client can step up from", async () => {
+    const token = await oauthToken("ada@example.com"); // read and work
+    const res = await rawCall(`Bearer ${token}`, "tools/call", { name: "polpo_computer_save", arguments: { id: "x", kind: "host" } });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("www-authenticate")).toContain(`Bearer error="insufficient_scope", scope="polpo:read polpo:work polpo:computers", resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource/mcp"`);
+    expect((await res.json()).error).toMatchObject({ code: -32003, data: { required_scope: "polpo:computers" } });
+  });
+
+  it("events caused through MCP carry the caller's scopes", async () => {
+    const token = await oauthToken("ada@example.com");
+    const seen: Array<{ by?: string; scopes?: string[] }> = [];
+    const onCreated = (p: { by?: string; scopes?: string[] }) => seen.push(p);
+    orchestrator.on("task:created", onCreated);
+    try {
+      const created = await callAs(`Bearer ${token}`, "tools/call", { name: "polpo_task_create", arguments: { title: "Scoped work", description: "x", assignTo: "agent-1" } });
+      expect(created.isError).toBeFalsy();
+      expect(seen.at(-1)).toMatchObject({ by: "ada@example.com via Claude", scopes: ["polpo:read", "polpo:work"] });
+    } finally {
+      orchestrator.off("task:created", onCreated);
+    }
+  });
+
+  it("the legacy MCP key keeps every scope; POLPO_MCP_KEY_SCOPES narrows it, and what it can allow on the consent page", async () => {
+    const all = ((await callAs(`Bearer ${MCP_KEY}`, "tools/list", {})).tools as Array<{ name: string }>).map((t) => t.name);
+    expect(all).toEqual(expect.arrayContaining(["polpo_file_write", "polpo_computer_save", "polpo_agent_create", "polpo_message_send"]));
+    process.env.POLPO_MCP_KEY_SCOPES = "polpo:read";
+    try {
+      const res = await rawCall(`Bearer ${MCP_KEY}`, "tools/call", { name: "polpo_task_create", arguments: { title: "t", description: "d", assignTo: "agent-1" } });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.message).toMatch(/POLPO_MCP_KEY_SCOPES/);
+      const { tokens } = await consent({ boxes: ["polpo:work", "polpo:admin"] });
+      expect(tokens.scope).toBe("polpo:read");
+    } finally {
+      delete process.env.POLPO_MCP_KEY_SCOPES;
+    }
+  });
+
+  it("the dashboard lists grants and keys (never values), and revokes a grant", async () => {
+    const token = await oauthToken("grace@example.com");
+    expect((await rawCall(`Bearer ${token}`, "tools/list", {})).status).toBe(200);
+    const access = (await (await app.request("/api/v1/mcp/access")).json()).data;
+    expect(access.scopes.map((s: { id: string }) => s.id)).toContain("polpo:files");
+    expect(access.keys).toContainEqual(expect.objectContaining({ name: "POLPO_MCP_KEY", source: "env", explicit: false }));
+    expect(JSON.stringify(access)).not.toContain(MCP_KEY);
+    expect(JSON.stringify(access)).not.toContain(token);
+    const grant = access.grants.find((g: { subject: string }) => g.subject === "grace@example.com");
+    expect(grant).toMatchObject({ client_name: "Claude", scopes: ["polpo:read", "polpo:work"], legacy: false });
+    expect(grant.last_used_at).toBeTruthy();
+    expect(access.tools).toContainEqual({ name: "polpo_file_write", toolset: "files", scope: "polpo:files", destructive: true });
+
+    expect((await app.request(`/api/v1/mcp/grants/${grant.id}`, { method: "DELETE" })).status).toBe(200);
+    expect((await rawCall(`Bearer ${token}`, "tools/list", {})).status).toBe(401);
+    expect((await app.request(`/api/v1/mcp/grants/${grant.id}`, { method: "DELETE" })).status).toBe(404);
   });
 });
 

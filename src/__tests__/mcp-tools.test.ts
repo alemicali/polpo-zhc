@@ -17,6 +17,7 @@ function fakeInstance() {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
   const tasks = new Map<string, Task>();
   const missions = new Map<string, Mission>();
+  const schedules = new Map<string, { missionId: string; expression: string; recurring: boolean; enabled: boolean; nextRunAt?: string }>();
   const activity: Array<Record<string, unknown>> = Array.from({ length: 45 }, (_, i) => ({ type: "assistant", ts: `2026-11-21T10:00:${String(i).padStart(2, "0")}Z`, text: `step ${i + 1}` }));
   let settings: Record<string, unknown> = { orchestratorModel: "anthropic:claude-opus-5-5", reasoning: "medium", maxRetries: 2, notifications: { channels: { ops: { type: "telegram", botToken: "[REDACTED]" } }, rules: [{ id: "r1", name: "Failures", events: ["task:failed"], channels: ["ops"] }] }, approvalGates: [{ id: "g1", name: "Deploy", hook: "task:complete", handler: "human" }] };
   let branding: Record<string, string> = { productName: "Acme" };
@@ -134,9 +135,13 @@ function fakeInstance() {
       { id: "claude-opus-5-5", name: "Claude Opus", provider: "anthropic", contextWindow: 1000000, reasoning: true },
       { id: "gpt-6", name: "GPT-6", provider: "openai", contextWindow: 400000, reasoning: true },
     ].filter((x) => !q.get("provider") || x.provider === q.get("provider")));
+    if ((m = p.match(/^\/schedules\/([^/]+)$/)) && method === "GET") {
+      const s = schedules.get(decodeURIComponent(m[1]!));
+      return s ? okData(s) : notFound("Schedule");
+    }
     return reply(404, { ok: false, error: `No route ${method} ${p}` });
   });
-  return { api, calls, tasks, missions, logo: () => logo };
+  return { api, calls, tasks, missions, schedules, logo: () => logo };
 }
 
 type Fake = ReturnType<typeof fakeInstance>;
@@ -340,6 +345,7 @@ describe("missions", () => {
   it("polpo_mission_wait returns for a recurring mission once its run finished, with the run's outcome (live: it never settled)", async () => {
     const f = fakeInstance();
     f.missions.set("mr", { id: "mr", name: "Digest", status: "recurring", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z", executionCount: 2, schedule: "0 3 1 1 *" });
+    f.schedules.set("mr", { missionId: "mr", expression: "0 3 1 1 *", recurring: true, enabled: true, nextRunAt: "2027-01-01T03:00:00.000Z" });
     // run #1 finished long ago; run #2 is under way
     f.tasks.set("r1", { id: "r1", title: "Write", description: "", status: "done", assignTo: "coach", missionId: "mr", group: "Digest", updatedAt: "2026-11-21T09:00:00Z" } as Task);
     f.tasks.set("r2", { id: "r2", title: "Write", description: "", status: "in_progress", assignTo: "coach", missionId: "mr", group: "Digest #2", updatedAt: "2026-11-21T10:00:00Z" } as Task);
@@ -350,12 +356,20 @@ describe("missions", () => {
     f.tasks.get("r2")!.status = "failed";
     const done = await call(deps(f), "polpo_mission_wait", { id: "mr", timeout_seconds: 5 });
     expect(done.structuredContent).toMatchObject({ reached: true, timed_out: false, mission: { status: "recurring" }, run: { number: 2, outcome: "failed", task_counts: { failed: 1 } } });
-    expect(done.content[0].text).toMatch(/run #2 failed .* runs again on its schedule \(0 3 1 1 \*\)/);
+    expect(done.content[0].text).toMatch(/run #2 failed .* runs again on its schedule \(0 3 1 1 \*\), next at 2027-01-01T03:00/);
+    // paused: it does not say it runs again (live: "It runs again on its schedule" on a paused one)
+    f.schedules.get("mr")!.enabled = false;
+    const paused = await call(deps(f), "polpo_mission_wait", { id: "mr", timeout_seconds: 5 });
+    expect(paused.content[0].text).toMatch(/schedule \(0 3 1 1 \*\) is paused: it does not run again until resumed/);
+    expect(paused.content[0].text).not.toMatch(/runs again on its schedule/);
     // never ran: it waits for its first run (and says how to start one)
     f.missions.set("mn", { id: "mn", name: "Never", status: "recurring", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z", executionCount: 0 });
     const never = await call(deps(f), "polpo_mission_wait", { id: "mn", timeout_seconds: 1 });
     expect(never.structuredContent).toMatchObject({ reached: false });
     expect(never.content[0].text).toMatch(/not run yet.*polpo_schedule_run/);
+    f.schedules.set("mn", { missionId: "mn", expression: "0 3 1 1 *", recurring: true, enabled: false, nextRunAt: "2027-01-01T03:00:00.000Z" });
+    const neverPaused = await call(deps(f), "polpo_mission_wait", { id: "mn", timeout_seconds: 1 });
+    expect(neverPaused.content[0].text).toMatch(/not run yet, and its schedule is paused/);
   });
 
   it("polpo_mission_delete and polpo_task_delete: confirm, not while running, then gone", async () => {

@@ -143,6 +143,8 @@ export { TaskWatcherManager } from "./task-watcher.js";
 export { QualityController } from "./quality-controller.js";
 export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
+export { InMemoryScheduleStore, InMemoryLeaseStore, InMemoryTaskWatcherStore, scheduleRunKey } from "./schedule-store.js";
+export type { ScheduleState, ScheduleStore, ScheduleCatchUp, ScheduleOutcome, LeaseStore, TaskWatcherStore } from "./schedule-store.js";
 
 // ── MissionExecutor ─────────────────────────────────────────────────────
 export { MissionExecutor, MISSION_EDIT } from "./mission-executor.js";

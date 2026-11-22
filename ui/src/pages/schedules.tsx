@@ -18,6 +18,15 @@ import {
 } from "lucide-react";
 import { useSchedules, useMissions } from "@polpo-ai/react";
 import type { ScheduleEntry, Mission } from "@polpo-ai/react";
+
+const OUTCOME_CLASS: Record<NonNullable<ScheduleEntry["lastOutcome"]>, string> = {
+  started: "text-blue-400",
+  completed: "text-emerald-400",
+  failed: "text-red-400",
+  skipped: "text-amber-400",
+  missed: "text-amber-400",
+  expired: "text-muted-foreground",
+};
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { useNow } from "@/hooks/use-now";
 import { formatDistanceToNow, format } from "date-fns";
@@ -63,8 +72,8 @@ function ScheduleRow({
           <span className="text-sm font-medium truncate">
             {mission?.name ?? entry.missionId}
           </span>
-          <Badge variant="outline" className={cn("text-[10px] shrink-0", entry.enabled ? "text-emerald-400" : "text-zinc-500")}>
-            {entry.enabled ? "Enabled" : "Disabled"}
+          <Badge variant="outline" className={cn("text-[10px] shrink-0", entry.enabled ? "text-emerald-400" : "text-amber-400")}>
+            {entry.enabled ? "Enabled" : entry.nextRunAt ? "Paused" : "Done"}
           </Badge>
           {entry.recurring ? (
             <Badge variant="outline" className="text-[10px] gap-0.5 text-violet-400 shrink-0">
@@ -100,6 +109,22 @@ function ScheduleRow({
           )}
           <span>created {format(new Date(entry.createdAt), "MMM d, HH:mm")}</span>
         </div>
+
+        {/* How the last run went, runs missed while the server was down */}
+        {(entry.lastOutcome || (entry.missedRuns ?? 0) > 0) && (
+          <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
+            {entry.lastOutcome && (
+              <span className={cn(OUTCOME_CLASS[entry.lastOutcome])} title={entry.lastError}>
+                Last outcome: {entry.lastOutcome}{entry.lastError ? ` — ${entry.lastError}` : ""}
+              </span>
+            )}
+            {(entry.missedRuns ?? 0) > 0 && (
+              <span className="text-amber-400" title={entry.lastMissedAt ? `Latest missed: ${format(new Date(entry.lastMissedAt), "MMM d, HH:mm")}` : undefined}>
+                {entry.missedRuns} missed while the server was down
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Enabled indicator */}
@@ -161,7 +186,7 @@ export function SchedulesPage() {
 
   const sections = [
     { label: "Active", schedules: enabled, defaultOpen: true },
-    { label: "Disabled", schedules: disabled, defaultOpen: false },
+    { label: "Paused or done", schedules: disabled, defaultOpen: false },
   ].filter(s => s.schedules.length > 0);
 
   return (

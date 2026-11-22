@@ -2,7 +2,7 @@
  * Connectors: MCP servers the agents and Polpo use (Linear, Notion, Gmail…). Add from the catalog
  * or a remote URL, choose who may use them and which tools, test, authorize with OAuth (the person
  * opens the link), disconnect and remove. Secrets never pass through here: API tokens, header values
- * and OAuth app client secrets are entered in the dashboard (setup_url). Changes need polpo:admin.
+ * and OAuth app client secrets are entered in the dashboard (setup_url). Changes need polpo:connectors (or polpo:admin).
  */
 import { z } from "zod";
 import {
