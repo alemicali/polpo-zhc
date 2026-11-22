@@ -87,7 +87,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     title: "List connectors",
     description: "The connectors (MCP servers agents and Polpo use): status, auth and whether it is authorized or has its token (never the secrets), "
       + "tool count, who may use them. With id, that connector and its tools with their policy (allow, ask, off). "
-      + "With agent, only the connectors granted to that agent and which of their tools it gets (its connector_tools selection; with id, each tool's effective state).",
+      + "With agent, only the connectors granted to that agent and which of their tools it gets (its connector_tools selection; with id, each tool's effective state), and the ones it has no access to (no_access: grant one before scoping a task to it).",
     inputSchema: {
       id: z.string().optional().describe("One connector, with its tools"),
       agent: z.string().optional().describe("An agent's name: the connectors it may use and the tools it gets from them"),
@@ -98,6 +98,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...pageOutput(connectorItem),
       tools: z.array(z.object({ name: z.string(), description: z.string().optional(), policy: z.string(), agent_gets: z.boolean().optional() })).optional(),
       stale_tools: z.array(z.string()).optional(),
+      no_access: z.array(z.string()).optional().describe("With agent: the connectors it has no access to (grant one before scoping a task to it)"),
     },
     annotations: READ,
   }, async ({ id, agent, limit, cursor }) => {
@@ -113,7 +114,10 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     if (id) {
       const c = await loadConnector(deps, id);
       if (!c.ok) return c.status === 404 ? notFound(id) : apiError(c, `Reading connector ${id}`);
-      if (agent && !grants(c.connector, agent)) return fail(`${agent} may not use connector ${id}: grant it with polpo_connector_update_access first.`);
+      if (agent && !grants(c.connector, agent)) {
+        return fail(`Agent "${agent}" has no access to connector ${id}${c.connector.enabled ? "" : " (it is turned off)"}: a task's tool scope never grants it. `
+          + `Offer the person to grant it first (polpo_connector_update { id: "${id}", add_agents: ["${agent}"] }), then set the scope.`);
+      }
       const t = await apiGet(deps, `/connectors/${enc(id)}/tools`);
       const picked = agent ? selection?.[id] ?? "*" : undefined;
       const tools = t.ok ? ((t.data as { tools?: Array<{ name: string; description?: string; policy: string }> })?.tools ?? []).map((x) => ({
@@ -129,11 +133,19 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     }
     const r = await apiGet(deps, "/connectors");
     if (!r.ok) return apiError(r, "Listing connectors");
-    const all = ((r.data as { connectors?: Connector[] })?.connectors ?? []).filter((c) => !agent || grants(c, agent));
+    const every = (r.data as { connectors?: Connector[] })?.connectors ?? [];
+    const all = every.filter((c) => !agent || grants(c, agent));
     const p = page(all.map(agentView), limit ?? 50, cursor);
     if (!p) return fail(BAD_CURSOR);
     const empty = agent ? `No connectors are granted to ${agent}.` : "No connectors. Find one with polpo_connector_catalog.";
-    return ok(`${p.items.map((v) => `${line(v)}${agentNote(v)}`).join("\n") || empty}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
+    // the ones the agent may not use: a task scope cannot pick them until they are granted
+    const denied = agent ? every.filter((c) => !grants(c, agent)) : [];
+    const deniedNote = denied.length
+      ? `\n${agent} has no access to: ${denied.map((c) => `${c.id}${c.account ? ` (${c.account})` : ""}${c.enabled ? "" : " (turned off)"}`).join(", ")}. `
+        + `A task's tool scope never grants: offer the person to grant one first (polpo_connector_update { id, add_agents: ["${agent}"] }), then set the scope.`
+      : "";
+    return ok(`${p.items.map((v) => `${line(v)}${agentNote(v)}`).join("\n") || empty}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}${deniedNote}`,
+      { ...p, ...(agent ? { no_access: denied.map((c) => c.id) } : {}) });
   });
 
   const catalogItem = z.object({

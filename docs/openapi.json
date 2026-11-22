@@ -1040,6 +1040,16 @@
             "description": "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored.",
             "name": "q",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Only tasks updated at or after this time: an ISO date/time (`2026-11-21T08:00:00Z`) or a duration back from now (`30m`, `24h`, `7d`, `2w`, `PT24H`). 400 INVALID_SINCE otherwise."
+            },
+            "required": false,
+            "description": "Only tasks updated at or after this time: an ISO date/time (`2026-11-21T08:00:00Z`) or a duration back from now (`30m`, `24h`, `7d`, `2w`, `PT24H`). 400 INVALID_SINCE otherwise.",
+            "name": "updatedSince",
+            "in": "query"
           }
         ],
         "responses": {
@@ -1066,6 +1076,32 @@
           },
           "304": {
             "description": "Not modified — client has the current list per ETag"
+          },
+          "400": {
+            "description": "`updatedSince` is neither an ISO date/time nor a duration (INVALID_SINCE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
           }
         }
       },

@@ -1521,12 +1521,14 @@ export class Orchestrator extends TypedEmitter {
     let doc: { tasks?: Array<{ title?: string; assignTo?: string; toolScope?: unknown }> };
     try { doc = JSON.parse(data); } catch { return; }
     const problems: string[] = [];
+    const missingGrants: NonNullable<Awaited<ReturnType<typeof checkTaskToolScope>>["missingGrants"]> = [];
     for (const t of Array.isArray(doc?.tasks) ? doc.tasks : []) {
       if (t?.toolScope === undefined || t.toolScope === null) continue;
       const r = await checkTaskToolScope(this.toolScopeHost(), t.assignTo, t.toolScope);
       problems.push(...r.problems.map((p) => `task "${t.title ?? "?"}": ${p}`));
+      for (const g of r.missingGrants ?? []) if (!missingGrants.some((m) => m.agent === g.agent && m.id === g.id)) missingGrants.push(g);
     }
-    if (problems.length) throw new TaskToolScopeError(problems);
+    if (problems.length) throw new TaskToolScopeError(problems, missingGrants);
   }
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.engine.updateTaskDescription(taskId, description); }
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }

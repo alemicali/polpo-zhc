@@ -6,6 +6,7 @@ import { describeTaskRun, summarizeTaskRun, type TaskRunContext, type TaskRunSum
 import { describeTaskFailure, taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import { computeTaskCost, describeTaskCost, summarizeTaskCost, usdText, type TaskCost, type TaskCostSummary } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
+import { parseSince } from "@polpo-ai/core/iso-duration";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
   encodeCursor, enc, fail, limitParam, looseObject, ok, pageOutput, progress, qs, short, sleep,
@@ -22,7 +23,7 @@ const failureShape = z.object({ reason: z.string(), retryable: z.boolean(), kind
 
 export const taskSummary = z.object({
   id: z.string(), title: z.string(), status: z.string(), assignTo: z.string().optional(),
-  group: z.string().optional(), missionId: z.string().optional(), updatedAt: z.string().optional(),
+  group: z.string().optional(), missionId: z.string().optional(), createdAt: z.string().optional(), updatedAt: z.string().optional(),
   last_run: z.object({ engine: z.string(), model: z.string().optional(), computerId: z.string(), computerKind: z.string() }).passthrough().optional()
     .describe("Where and with what its latest run executed: engine (polpo, claude-code, codex), model, computer"),
   cost: z.object({ usd: z.number(), tokens: z.number(), runs: z.number(), partial: z.boolean().optional() }).passthrough().optional()
@@ -31,13 +32,13 @@ export const taskSummary = z.object({
 }).passthrough();
 
 type TaskRow = {
-  id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string; phase?: string;
+  id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; createdAt?: string; updatedAt?: string; phase?: string;
   lastRun?: TaskRunSummary; failure?: TaskFailure; toolScope?: TaskToolScope;
   /** Slim lists: every run's total; GET /tasks/:id: the full breakdown. */
   cost?: TaskCostSummary | TaskCost;
 };
 type FullTask = TaskRow & {
-  description?: string; dependsOn?: string[]; retries?: number; maxRetries?: number; createdAt?: string;
+  description?: string; dependsOn?: string[]; retries?: number; maxRetries?: number;
   result?: { exitCode?: number; duration?: number; stdout?: string; stderr?: string; assessment?: { passed?: boolean; globalScore?: number; feedback?: string } };
   outcomes?: Array<{ type?: string; label?: string; path?: string; url?: string; text?: string }>;
   sideEffects?: boolean;
@@ -68,7 +69,8 @@ export function toolScopeFromArgs(a: { connectors?: string[] | "none"; connector
   };
 }
 
-const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools.";
+const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools. "
+  + "A scope never grants: when the agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope.";
 
 const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
 
@@ -78,6 +80,7 @@ const costText = (c: TaskCostSummary | undefined) => (c?.runs && c.usd > 0 ? ` �
 export const taskLine = (t: TaskRow & { runs?: TaskRunContext[] }) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
   + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${ENGINE_NAMES[t.lastRun.engine] ?? t.lastRun.engine}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
   + costText(costOf(t))
+  + `${t.updatedAt ? ` · updated ${t.updatedAt}` : ""}`
   + `${t.toolScope ? " · tools restricted" : ""}`
   + `${t.failure ? ` · failed: ${short(t.failure.reason, 160)}${t.failure.retryable ? "" : " (not retried)"}` : ""}`;
 
@@ -96,7 +99,7 @@ const summarize = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) =
   return {
     id: t.id, title: t.title, status: t.status,
     ...(t.assignTo ? { assignTo: t.assignTo } : {}), ...(t.group ? { group: t.group } : {}),
-    ...(t.missionId ? { missionId: t.missionId } : {}), ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
+    ...(t.missionId ? { missionId: t.missionId } : {}), ...(t.createdAt ? { createdAt: t.createdAt } : {}), ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
     ...(t.phase ? { phase: t.phase } : {}),
     ...(last ? { last_run: last } : {}),
     ...(cost ? { cost } : {}),
@@ -148,37 +151,46 @@ export async function unknownAgents(deps: McpDeps, names: Array<string | undefin
 export function registerTaskTools(tool: Register, deps: McpDeps): void {
   tool("tasks", "polpo_tasks_list", {
     title: "List tasks",
-    description: "Tasks, most recently updated first: id, title, status, agent, mission. Filter by status, agent, mission or words; "
-      + "page with cursor. Use polpo_task_get for one task in full.",
+    description: "Tasks, most recently updated first: id, title, status, agent, mission, when it was last updated, what it cost and, for a failed one, "
+      + "why (the labelled reason; whether it was retried). Filter by status, agent, mission, words or time (updated_since: \"24h\", \"7d\" or an ISO date, "
+      + "for \"in the last 24 hours\"); page with cursor. Use polpo_task_get for one task in full.",
     inputSchema: {
       status: z.enum(TASK_STATUSES).optional().describe("Only tasks in this status"),
       agent: z.string().optional().describe("Only tasks assigned to this agent"),
       mission_id: z.string().optional().describe("Only the tasks of this mission (polpo_missions_list)"),
       group: z.string().optional().describe("Only tasks of this group (a mission's tasks are grouped by its name)"),
       text: z.string().optional().describe("Words in the title or description"),
+      updated_since: z.string().optional().describe("Only tasks updated since then: a duration back from now (30m, 24h, 7d, 2w) or an ISO date/time"),
       limit: limitParam(20, 100),
       cursor: cursorParam(),
     },
     outputSchema: pageOutput(taskSummary),
     annotations: READ,
-  }, async ({ status, agent, mission_id, group, text, limit, cursor }) => {
+  }, async ({ status, agent, mission_id, group, text, updated_since, limit, cursor }) => {
     const c = decodeCursor(cursor);
     if (!c) return fail(BAD_CURSOR);
     const n = limit ?? 20;
+    let since: string | undefined;
+    if (updated_since) {
+      const at = parseSince(updated_since);
+      if (at === undefined) return fail(`updated_since "${updated_since}" is neither a duration (30m, 24h, 7d, 2w) nor an ISO date/time.`);
+      since = new Date(at).toISOString();
+    }
     // a mission's tasks: all of them (one mission's runs), filtered here
     if (mission_id) {
       const r = await apiGet(deps, `/tasks${qs({ slim: "true", status, assignTo: agent })}`);
       if (!r.ok) return apiError(r, "Listing tasks");
       const words = (text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
       const all = ((r.data as TaskRow[]) ?? [])
-        .filter((t) => t.missionId === mission_id && (!group || t.group === group) && words.every((w) => t.title.toLowerCase().includes(w)))
+        .filter((t) => t.missionId === mission_id && (!group || t.group === group) && words.every((w) => t.title.toLowerCase().includes(w))
+          && (!since || (t.updatedAt ?? t.createdAt ?? "") >= since))
         .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
       const start = c.o ?? 0;
       const items = all.slice(start, start + n).map(summarize);
       const next = start + n < all.length ? encodeCursor({ o: start + n }) : null;
       return ok(`${all.slice(start, start + n).map(taskLine).join("\n") || `No tasks for mission ${mission_id}.`}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
     }
-    const r = await apiGet(deps, `/tasks${qs({ slim: "true", status, assignTo: agent, group, limit: n, ...(text ? { q: text } : { cursor: c.u }) })}`);
+    const r = await apiGet(deps, `/tasks${qs({ slim: "true", status, assignTo: agent, group, limit: n, updatedSince: since, ...(text ? { q: text } : { cursor: c.u }) })}`);
     if (!r.ok) return apiError(r, "Listing tasks");
     const data = r.data as { tasks?: TaskRow[]; nextCursor?: string | null; hasMore?: boolean };
     const items = (data.tasks ?? []).map(summarize);

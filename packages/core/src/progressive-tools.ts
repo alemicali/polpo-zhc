@@ -114,7 +114,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["computer_"], names: ["computers_list", "sandbox_status"],
   },
   {
-    id: "harnesses", label: "Agent harnesses: Claude Code and Codex settings (enable, auth: API key, Bedrock, Vertex, Vercel AI Gateway, custom model gateways such as Cloudflare, OpenRouter, LiteLLM, Portkey; credentials via setup link), connection test, and their sessions (list, stop, reset)",
+    id: "harnesses", label: "Agent harnesses: Claude Code and Codex settings (enable, auth: API key, Bedrock, Vertex, Vercel AI Gateway, custom model gateways such as Cloudflare, OpenRouter, LiteLLM, Portkey; credentials via the setup link harnesses_update returns, never in chat), connection test, and their sessions (list, stop, reset). For any question on harness models, auth or gateways: harnesses_get first, then describe the current setup (engine, auth, model per agent)",
     names: ["harnesses_get", "harnesses_update", "harness_sessions_list", "harness_session_control"],
   },
   {
