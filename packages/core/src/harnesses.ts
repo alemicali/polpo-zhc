@@ -1,6 +1,6 @@
 /**
  * Agent harnesses (settings.harnesses + agent.engine): an agent may run on an official agent
- * runtime (Claude Code, Codex) instead of Polpo's own engine. The runtime runs inside the agent's
+ * runtime (Claude Code, Codex, OpenCode) instead of Polpo's own engine. The runtime runs inside the agent's
  * computer (a remote VM), Polpo's tools are offered to it as host tools, and its usage is metered
  * as Polpo's own.
  *
@@ -14,6 +14,12 @@
  *   subscription (Pro/Max login, OAuth token) is refused: Anthropic's terms do not allow it in a
  *   product that serves other people. Codex: an OpenAI API key, the Vercel AI Gateway or a custom
  *   gateway that speaks the OpenAI Responses API (ChatGPT login is not supported yet).
+ * - OpenCode: any model OpenCode supports, with an explicit credential only: a provider API key
+ *   (Anthropic, OpenAI, Google, xAI, Mistral, Groq, DeepSeek, OpenRouter, Moonshot, Z.ai…), an
+ *   Amazon Bedrock API key (open-weight models such as Kimi, GLM, Qwen, DeepSeek on Bedrock), the
+ *   Vercel AI Gateway or a custom gateway (Anthropic, OpenAI Responses or OpenAI Chat Completions
+ *   format). Subscriptions OpenCode can use on a laptop (ChatGPT/Codex, Copilot, xAI, OpenCode
+ *   Zen/Go, GitLab Duo…) are refused: Polpo never reads a login.
  * - Gateway keys and secret gateway headers are vault references too. At run time Polpo's model
  *   relay (src/harness/relay.ts) injects them outside the VM; the VM only sees placeholders.
  * - An agent on a harness needs a sandboxed computer: a remote computer (Daytona v2), or this
@@ -23,18 +29,65 @@
 import { normalizeVaultRef, type VaultRef } from "./vault-ref.js";
 import { HOST_COMPUTER_ID, isRemoteComputer, type ComputerConfig } from "./computers.js";
 
-export type HarnessId = "claude-code" | "codex";
-export const HARNESS_IDS: readonly HarnessId[] = ["claude-code", "codex"];
-export const HARNESS_NAMES: Record<HarnessId, string> = { "claude-code": "Claude Code", codex: "Codex" };
+export type HarnessId = "claude-code" | "codex" | "opencode";
+export const HARNESS_IDS: readonly HarnessId[] = ["claude-code", "codex", "opencode"];
+export const HARNESS_NAMES: Record<HarnessId, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 export type ClaudeCodeAuth = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
 export const CLAUDE_CODE_AUTHS: readonly ClaudeCodeAuth[] = ["api-key", "bedrock", "vertex", "ai-gateway", "gateway"];
 export type CodexAuth = "api-key" | "ai-gateway" | "gateway";
 export const CODEX_AUTHS: readonly CodexAuth[] = ["api-key", "ai-gateway", "gateway"];
+/** OpenCode: a provider API key, a Bedrock API key, the Vercel AI Gateway or a custom gateway. */
+export type OpenCodeAuth = "api-key" | "bedrock" | "ai-gateway" | "gateway";
+export const OPENCODE_AUTHS: readonly OpenCodeAuth[] = ["api-key", "bedrock", "ai-gateway", "gateway"];
 
-/** The wire format a custom gateway speaks: Anthropic Messages (Claude Code) or OpenAI Responses (Codex). */
-export type GatewayFormat = "anthropic" | "openai-responses";
-export const GATEWAY_FORMATS: readonly GatewayFormat[] = ["anthropic", "openai-responses"];
+/** How a model provider takes its key: x-api-key, Authorization: Bearer, or x-goog-api-key. */
+export type OpenCodeKeyHeader = "x-api-key" | "bearer" | "x-goog-api-key";
+/** The wire format of an OpenCode provider (the connection test speaks it). */
+export type OpenCodeWireFormat = "anthropic" | "openai-responses" | "openai-chat" | "google";
+
+export interface OpenCodeProviderInfo {
+  name: string;
+  /** The base URL OpenCode's provider SDK calls (the relay forwards to it). */
+  baseUrl: string;
+  keyHeader: OpenCodeKeyHeader;
+  format: OpenCodeWireFormat;
+  /** Vault field names tried first for the key (then apiKey / key / token). */
+  keyNames: readonly string[];
+  /** An example model id (the dashboard's placeholder). */
+  example: string;
+}
+
+/**
+ * The model providers OpenCode runs on with an API key (auth "api-key"), by OpenCode's provider id
+ * (models.dev). Bedrock ("amazon-bedrock"), the Vercel AI Gateway ("vercel") and custom gateways
+ * have their own auth types.
+ */
+export const OPENCODE_PROVIDERS = {
+  anthropic: { name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", keyHeader: "x-api-key", format: "anthropic", keyNames: ["ANTHROPIC_API_KEY", "anthropicApiKey"], example: "claude-sonnet-4-5" },
+  openai: { name: "OpenAI", baseUrl: "https://api.openai.com/v1", keyHeader: "bearer", format: "openai-responses", keyNames: ["OPENAI_API_KEY", "openaiApiKey"], example: "gpt-5" },
+  google: { name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", keyHeader: "x-goog-api-key", format: "google", keyNames: ["GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"], example: "gemini-2.5-pro" },
+  xai: { name: "xAI", baseUrl: "https://api.x.ai/v1", keyHeader: "bearer", format: "openai-chat", keyNames: ["XAI_API_KEY"], example: "grok-4" },
+  mistral: { name: "Mistral", baseUrl: "https://api.mistral.ai/v1", keyHeader: "bearer", format: "openai-chat", keyNames: ["MISTRAL_API_KEY"], example: "devstral-medium-2507" },
+  groq: { name: "Groq", baseUrl: "https://api.groq.com/openai/v1", keyHeader: "bearer", format: "openai-chat", keyNames: ["GROQ_API_KEY"], example: "moonshotai/kimi-k2-instruct-0905" },
+  deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", keyHeader: "bearer", format: "openai-chat", keyNames: ["DEEPSEEK_API_KEY"], example: "deepseek-chat" },
+  openrouter: { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", keyHeader: "bearer", format: "openai-chat", keyNames: ["OPENROUTER_API_KEY"], example: "moonshotai/kimi-k2" },
+  moonshotai: { name: "Moonshot AI", baseUrl: "https://api.moonshot.ai/v1", keyHeader: "bearer", format: "openai-chat", keyNames: ["MOONSHOT_API_KEY"], example: "kimi-k2-0905-preview" },
+  zai: { name: "Z.ai", baseUrl: "https://api.z.ai/api/paas/v4", keyHeader: "bearer", format: "openai-chat", keyNames: ["ZHIPU_API_KEY", "ZAI_API_KEY"], example: "glm-4.6" },
+} as const satisfies Record<string, OpenCodeProviderInfo>;
+export type OpenCodeProviderId = keyof typeof OPENCODE_PROVIDERS;
+export const OPENCODE_PROVIDER_IDS = Object.keys(OPENCODE_PROVIDERS) as OpenCodeProviderId[];
+/** OpenCode's provider ids for the other auth types (the model's prefix). */
+export const OPENCODE_BEDROCK_PROVIDER = "amazon-bedrock";
+export const OPENCODE_AI_GATEWAY_PROVIDER = "vercel";
+export const OPENCODE_GATEWAY_PROVIDER = "polpo-gateway";
+
+/**
+ * The wire format a custom gateway speaks: Anthropic Messages (Claude Code, OpenCode), OpenAI
+ * Responses (Codex, OpenCode) or OpenAI Chat Completions (OpenCode: most gateways and open models).
+ */
+export type GatewayFormat = "anthropic" | "openai-responses" | "openai-chat";
+export const GATEWAY_FORMATS: readonly GatewayFormat[] = ["anthropic", "openai-responses", "openai-chat"];
 /** How the gateway key is presented: x-api-key, Authorization: Bearer, or not at all (auth in a header). */
 export type GatewayAuthScheme = "x-api-key" | "bearer" | "none";
 export const GATEWAY_AUTH_SCHEMES: readonly GatewayAuthScheme[] = ["x-api-key", "bearer", "none"];
@@ -86,6 +139,10 @@ export const CLAUDE_SUBSCRIPTION_REFUSAL =
   "A Claude subscription (Pro/Max login or OAuth token) cannot run Claude Code for Polpo agents: Anthropic's terms do not allow a consumer subscription in a product that runs agents for other people. Use an Anthropic API key, Amazon Bedrock, Google Vertex AI or a model gateway";
 export const CODEX_CHATGPT_REFUSAL =
   "Codex with a ChatGPT login is not supported yet: use an OpenAI API key or a model gateway";
+/** Logins OpenCode can use on a laptop, refused for Polpo agents. */
+const OPENCODE_SUBSCRIPTION_AUTHS = new Set(["subscription", "login", "oauth", "native", "direct", "chatgpt", "codex", "copilot", "github-copilot", "opencode", "opencode-zen", "opencode-go", "zen", "gitlab", "gitlab-duo", "poe", "claude.ai", "pro", "max"]);
+export const OPENCODE_SUBSCRIPTION_REFUSAL =
+  "OpenCode runs Polpo agents with an explicit credential only: a provider API key, a Bedrock API key, the Vercel AI Gateway or a model gateway. Personal subscriptions and logins (ChatGPT/Codex, GitHub Copilot, OpenCode Zen/Go, GitLab Duo, a Claude plan…) are not used";
 
 export interface ClaudeCodeHarnessSettings {
   auth: ClaudeCodeAuth;
@@ -109,12 +166,25 @@ export interface CodexHarnessSettings {
   model?: string;
 }
 
+export interface OpenCodeHarnessSettings {
+  auth: OpenCodeAuth;
+  /** api-key: the model provider (OpenCode's id: anthropic, openai, google, xai, openrouter…). */
+  provider?: OpenCodeProviderId;
+  /** api-key: the provider's API key entry; bedrock: a Bedrock API key (bearer token). Gateways keep theirs in gateway.credentialRef. */
+  credentialRef?: VaultRef;
+  gateway?: HarnessGatewaySettings;
+  bedrock?: { region: string };
+  /** Default model id (the provider's id, e.g. "claude-sonnet-4-5", "global.moonshotai.kimi-k3.1"; an agent may choose its own). */
+  model?: string;
+}
+
 export interface HarnessesSettings {
   enabled: HarnessId[];
   /** Agents on this server (computer "host") may use a harness; it runs with an isolated HOME. Default false. */
   allowHost?: boolean;
   "claude-code"?: ClaudeCodeHarnessSettings;
   codex?: CodexHarnessSettings;
+  opencode?: OpenCodeHarnessSettings;
 }
 
 /** The harness's main credential reference (the gateway's for gateways), if any. */
@@ -271,11 +341,12 @@ function parseGatewayHeaders(raw: unknown, where: string): GatewayHeader[] | und
   return out.length ? out : undefined;
 }
 
-function parseGatewayModels(raw: unknown, where: string): GatewayModels | undefined {
+function parseGatewayModels(raw: unknown, where: string, harness: HarnessId): GatewayModels | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (typeof raw !== "object" || Array.isArray(raw)) throw new HarnessConfigError(`${where} must be { main, haiku?, sonnet?, opus? }`);
   const r = raw as Record<string, unknown>;
   for (const k of Object.keys(r)) if (!["main", "haiku", "sonnet", "opus"].includes(k)) throw new HarnessConfigError(`${where}.${k} is not a model slot (main, haiku, sonnet, opus)`);
+  if (harness === "opencode") for (const k of Object.keys(r)) if (k !== "main" && r[k] !== undefined && r[k] !== null && r[k] !== "") throw new HarnessConfigError(`${where}.${k}: OpenCode uses one model (models.main)`);
   const main = parseModel(r.main, `${where}.main`);
   if (!main) throw new HarnessConfigError(`${where}.main is required (the gateway's model id)`);
   const out: GatewayModels = { main };
@@ -308,12 +379,19 @@ function parseGateway(raw: unknown, auth: "ai-gateway" | "gateway", harness: Har
     return out;
   }
   const format = str(r.format);
-  const wanted: GatewayFormat = harness === "claude-code" ? "anthropic" : "openai-responses";
-  if (!format || !(GATEWAY_FORMATS as string[]).includes(format)) throw new HarnessConfigError(`${where}.format must be "${wanted}" for ${HARNESS_NAMES[harness]}`);
-  if (format !== wanted) throw new HarnessConfigError(`${where}.format: ${HARNESS_NAMES[harness]} speaks "${wanted}", not "${format}"`);
+  if (harness === "opencode") {
+    if (!format || !(GATEWAY_FORMATS as string[]).includes(format)) throw new HarnessConfigError(`${where}.format must be one of ${GATEWAY_FORMATS.join(", ")} for OpenCode`);
+  } else {
+    const wanted: GatewayFormat = harness === "claude-code" ? "anthropic" : "openai-responses";
+    if (!format || !(GATEWAY_FORMATS as string[]).includes(format)) throw new HarnessConfigError(`${where}.format must be "${wanted}" for ${HARNESS_NAMES[harness]}`);
+    if (format !== wanted) throw new HarnessConfigError(`${where}.format: ${HARNESS_NAMES[harness]} speaks "${wanted}", not "${format}"`);
+  }
   const baseUrl = parseGatewayBaseUrl(r.baseUrl, `${where}.baseUrl`);
-  if (harness === "claude-code" && /\/v1\/messages$/.test(baseUrl)) {
-    throw new HarnessConfigError(`${where}.baseUrl must be the base URL Claude Code adds /v1/messages to (drop /v1/messages)`);
+  if ((harness === "claude-code" || format === "anthropic") && /\/v1\/messages$/.test(baseUrl)) {
+    throw new HarnessConfigError(`${where}.baseUrl must be the base URL the runtime adds /v1/messages to (drop /v1/messages)`);
+  }
+  if (harness === "opencode" && format !== "anthropic" && /\/(chat\/completions|responses)$/.test(baseUrl)) {
+    throw new HarnessConfigError(`${where}.baseUrl must be the base URL OpenCode adds /chat/completions or /responses to, e.g. https://openrouter.ai/api/v1`);
   }
   if (harness === "codex" && !/\/v1$/.test(baseUrl) && !CLOUDFLARE_OPENAI.test(baseUrl)) {
     throw new HarnessConfigError(`${where}.baseUrl must end in /v1 (Codex calls <base>/responses), e.g. https://openrouter.ai/api/v1`);
@@ -326,7 +404,7 @@ function parseGateway(raw: unknown, auth: "ai-gateway" | "gateway", harness: Har
   if (authScheme === "none" && out.credentialRef) throw new HarnessConfigError(`${where}.credentialRef: authScheme "none" sends no key (put the gateway's auth in a header instead), or choose "x-api-key" / "bearer"`);
   const headers = parseGatewayHeaders(r.headers, `${where}.headers`);
   if (headers) out.headers = headers;
-  const models = parseGatewayModels(r.models, `${where}.models`);
+  const models = parseGatewayModels(r.models, `${where}.models`, harness);
   if (models) out.models = models;
   if (r.nonClaude !== undefined && r.nonClaude !== null) {
     if (typeof r.nonClaude !== "boolean") throw new HarnessConfigError(`${where}.nonClaude must be true or false`);
@@ -335,8 +413,8 @@ function parseGateway(raw: unknown, auth: "ai-gateway" | "gateway", harness: Har
       out.nonClaude = true;
     }
   }
-  if ((out.nonClaude || format === "openai-responses") && !models?.main && !harnessModel) {
-    throw new HarnessConfigError(`${where}.models.main is required ${out.nonClaude ? "for non-Claude models" : "for the OpenAI Responses format"} (the gateway's model id)`);
+  if ((out.nonClaude || format !== "anthropic" || harness === "opencode") && !models?.main && !harnessModel) {
+    throw new HarnessConfigError(`${where}.models.main is required ${out.nonClaude ? "for non-Claude models" : harness === "opencode" ? "for OpenCode" : "for the OpenAI Responses format"} (the gateway's model id)`);
   }
   return out;
 }
@@ -405,10 +483,71 @@ function parseCodex(raw: unknown, where: string): CodexHarnessSettings {
   return out;
 }
 
+/**
+ * An OpenCode model id without the provider prefix ("anthropic/claude-sonnet-4-5" with provider
+ * anthropic → "claude-sonnet-4-5"; ids with slashes of their own, e.g. OpenRouter's, stay whole).
+ */
+export function openCodeModelId(model: string, provider: string): string {
+  return model.startsWith(`${provider}/`) ? model.slice(provider.length + 1) : model;
+}
+
+/** OpenCode's provider id for a setting: the API key's provider, amazon-bedrock, vercel or polpo-gateway. */
+export function openCodeProviderOf(h: Pick<OpenCodeHarnessSettings, "auth" | "provider">): string | undefined {
+  return h.auth === "api-key" ? h.provider : h.auth === "bedrock" ? OPENCODE_BEDROCK_PROVIDER : h.auth === "ai-gateway" ? OPENCODE_AI_GATEWAY_PROVIDER : OPENCODE_GATEWAY_PROVIDER;
+}
+
+function parseOpenCode(raw: unknown, where: string): OpenCodeHarnessSettings {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HarnessConfigError(`${where} must be an object { auth, provider?, credentialRef | gateway, bedrock?, model? }`);
+  const r = raw as Record<string, unknown>;
+  refuseSecrets(r, where);
+  const auth = str(r.auth)?.toLowerCase();
+  if (auth && OPENCODE_SUBSCRIPTION_AUTHS.has(auth)) throw new HarnessConfigError(`${where}.auth "${auth}": ${OPENCODE_SUBSCRIPTION_REFUSAL}`);
+  if (!auth || !(OPENCODE_AUTHS as string[]).includes(auth)) throw new HarnessConfigError(`${where}.auth must be one of ${OPENCODE_AUTHS.join(", ")}`);
+  const model = parseModel(r.model, `${where}.model`);
+  const out: OpenCodeHarnessSettings = { auth: auth as OpenCodeAuth };
+  if (auth === "api-key") {
+    const provider = str(r.provider)?.toLowerCase();
+    if (provider === OPENCODE_BEDROCK_PROVIDER) throw new HarnessConfigError(`${where}.provider: Amazon Bedrock is auth "bedrock" (with bedrock.region)`);
+    if (provider === OPENCODE_AI_GATEWAY_PROVIDER) throw new HarnessConfigError(`${where}.provider: the Vercel AI Gateway is auth "ai-gateway"`);
+    if (provider && ["github-copilot", "opencode", "opencode-go", "gitlab", "poe"].includes(provider)) throw new HarnessConfigError(`${where}.provider "${provider}": ${OPENCODE_SUBSCRIPTION_REFUSAL}`);
+    if (!provider || !(OPENCODE_PROVIDER_IDS as string[]).includes(provider)) {
+      throw new HarnessConfigError(`${where}.provider must be one of ${OPENCODE_PROVIDER_IDS.join(", ")} (any other provider: auth "gateway" with its base URL)`);
+    }
+    out.provider = provider as OpenCodeProviderId;
+  } else if (r.provider !== undefined && r.provider !== null && r.provider !== "") {
+    const expected = openCodeProviderOf({ auth: auth as OpenCodeAuth });
+    if (str(r.provider) !== expected) throw new HarnessConfigError(`${where}.provider is for auth "api-key" (auth "${auth}" uses ${expected})`);
+  }
+  if (auth === "ai-gateway" || auth === "gateway") {
+    out.gateway = parseGateway(r.gateway, auth, "opencode", `${where}.gateway`, model);
+    if (r.credentialRef !== undefined && r.credentialRef !== null) {
+      const ref = parseRef(r.credentialRef, `${where}.credentialRef`);
+      if (!out.gateway.credentialRef && out.gateway.authScheme !== "none") out.gateway.credentialRef = ref;
+    }
+  } else {
+    if (r.gateway !== undefined && r.gateway !== null) throw new HarnessConfigError(`${where}.gateway is only for auth "ai-gateway" or "gateway"`);
+    out.credentialRef = parseRef(r.credentialRef, `${where}.credentialRef`);
+  }
+  if (auth === "bedrock") {
+    const region = str((r.bedrock as Record<string, unknown> | undefined)?.region);
+    if (!region || !REGION.test(region)) throw new HarnessConfigError(`${where}.bedrock.region must be an AWS region, e.g. "us-east-1"`);
+    out.bedrock = { region };
+  } else if (r.bedrock !== undefined && r.bedrock !== null) {
+    throw new HarnessConfigError(`${where}.bedrock is only for auth "bedrock"`);
+  }
+  if (r.vertex !== undefined && r.vertex !== null) throw new HarnessConfigError(`${where}.vertex: OpenCode does not run on Vertex AI here (use a provider API key, Bedrock or a gateway)`);
+  if (model) {
+    const p = openCodeProviderOf(out);
+    // "anthropic/claude-…" with provider anthropic: keep the provider's own id
+    out.model = p ? openCodeModelId(model, p) : model;
+  }
+  return out;
+}
+
 /** settings.harnesses from raw input (config file or API), or an error naming the field. */
 export function parseHarnessesSettings(raw: unknown): HarnessesSettings {
   const where = "settings.harnesses";
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HarnessConfigError(`${where} must be an object { enabled: ["claude-code" | "codex"], "claude-code"?: {...}, codex?: {...} }`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HarnessConfigError(`${where} must be an object { enabled: ["claude-code" | "codex" | "opencode"], "claude-code"?: {...}, codex?: {...}, opencode?: {...} }`);
   const r = raw as Record<string, unknown>;
   const enabledRaw = r.enabled ?? [];
   if (!Array.isArray(enabledRaw) || enabledRaw.some((h) => typeof h !== "string" || !(HARNESS_IDS as string[]).includes(h))) {
@@ -421,8 +560,9 @@ export function parseHarnessesSettings(raw: unknown): HarnessesSettings {
   }
   if (r["claude-code"] !== undefined && r["claude-code"] !== null) out["claude-code"] = parseClaudeCode(r["claude-code"], `${where}["claude-code"]`);
   if (r.codex !== undefined && r.codex !== null) out.codex = parseCodex(r.codex, `${where}.codex`);
+  if (r.opencode !== undefined && r.opencode !== null) out.opencode = parseOpenCode(r.opencode, `${where}.opencode`);
   for (const h of out.enabled) {
-    if (!out[h]) throw new HarnessConfigError(`${where}: ${HARNESS_NAMES[h]} is enabled but has no settings (${where}${h === "codex" ? ".codex" : `["${h}"]`}: { auth, credentialRef })`);
+    if (!out[h]) throw new HarnessConfigError(`${where}: ${HARNESS_NAMES[h]} is enabled but has no settings (${where}${h === "claude-code" ? `["${h}"]` : `.${h}`}: { auth, credentialRef })`);
   }
   return out;
 }
@@ -520,7 +660,7 @@ export function agentEngineProblem(
   }
   if (engine.credentialRef) {
     const s = h[engine.harness];
-    if (s && (s.auth === "bedrock" || s.auth === "vertex")) return `${who}: its own credential (engine.credentialRef) replaces an API key or a gateway key; ${name} uses ${s.auth} here`;
+    if (s && engine.harness !== "opencode" && (s.auth === "bedrock" || s.auth === "vertex")) return `${who}: its own credential (engine.credentialRef) replaces an API key or a gateway key; ${name} uses ${s.auth} here`;
     if (s?.gateway?.authScheme === "none") return `${who}: its own credential (engine.credentialRef) replaces the gateway key, and this gateway sends none (authScheme "none")`;
   }
   const computerId = agent.defaultComputer && agent.defaultComputer !== HOST_COMPUTER_ID ? agent.defaultComputer : undefined;

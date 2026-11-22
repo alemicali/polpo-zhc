@@ -950,8 +950,10 @@ async function execAgentDrive(polpo: Orchestrator, toolName: string, args: Recor
 const agentEngineParam = Type.Optional(Type.Union([
   Type.Literal("polpo"),
   Type.Object({
-    harness: Type.Union([Type.Literal("claude-code"), Type.Literal("codex")], { description: "The official agent runtime: Claude Code or Codex (it must be enabled: harnesses_get / harnesses_update)" }),
-    model: Type.Optional(Type.String({ description: "Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's" })),
+    harness: Type.Union([Type.Literal("claude-code"), Type.Literal("codex"), Type.Literal("opencode")], {
+      description: "The official agent runtime: Claude Code, Codex or OpenCode (any model, open-weight ones included) — it must be enabled: harnesses_get / harnesses_update",
+    }),
+    model: Type.Optional(Type.String({ description: "Model id for the runtime (Bedrock: an inference profile id; OpenCode: the provider's id, e.g. global.moonshotai.kimi-k3.1 on Bedrock); omit for the harness setting's" })),
     permissionMode: Type.Optional(Type.Union([Type.Literal("allow-all"), Type.Literal("allow-edits"), Type.Literal("allow-reads")], { description: "What the runtime may do without asking (default allow-all: it works unattended in its computer)" })),
     effort: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Reasoning effort" })),
     maxBudgetUsd: Type.Optional(Type.Number({ description: "Stop a run when its estimated spend passes this (USD)" })),
@@ -960,7 +962,7 @@ const agentEngineParam = Type.Optional(Type.Union([
     })),
   }),
 ], {
-  description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\", ... }: an official harness that runs the agent's TASKS "
+  description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\" | \"opencode\", ... }: an official harness that runs the agent's TASKS "
     + "inside its computer (a remote Daytona v2 computer set as defaultComputer, unless the harness settings allow this server). Credentials come from the "
     + "harness settings (harnesses_update: an API key, Bedrock or Vertex via a setup link; a Claude subscription is not allowed), never from here.",
 }));
@@ -977,7 +979,7 @@ const agentProgressiveToolsParam = Type.Optional(Type.Union([Type.Literal("auto"
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex / OpenCode harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex / OpenCode harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -1046,7 +1048,7 @@ const agentSandboxParam = Type.Optional(Type.Object({
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex harness), "
+  description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
     + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
     + "Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({

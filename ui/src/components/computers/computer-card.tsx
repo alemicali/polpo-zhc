@@ -29,7 +29,7 @@ export function ComputerCard({
   showAgents?: boolean;
   /** Each agent's engine ("polpo" or { harness }): its mark next to the agent. */
   agentEngines?: Record<string, string | undefined>;
-  /** The agent harness sessions (Claude Code, Codex) bound to this computer. */
+  /** The agent harness sessions (Claude Code, Codex, OpenCode) bound to this computer. */
   harnessSessions?: HarnessSession[];
   /** Trailing buttons after the lifecycle actions (not shown for this server). */
   children?: ReactNode;

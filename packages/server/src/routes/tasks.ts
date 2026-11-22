@@ -70,7 +70,7 @@ const getTaskRoute = createRoute({
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, "
+      description: "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex / opencode, model, auth kind, "
         + "computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its "
         + "labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically "
         + "(model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` "

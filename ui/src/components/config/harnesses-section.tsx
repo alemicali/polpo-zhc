@@ -1,7 +1,9 @@
 /**
- * Settings → Harnesses: the official agent runtimes (Claude Code, Codex) agents may run on, and how
- * they authenticate: an API key, Bedrock, Vertex, the Vercel AI Gateway or a model gateway
- * (presets: Cloudflare, OpenRouter, LiteLLM, Portkey, Kong, custom). Credentials are vault
+ * Settings → Harnesses: the official agent runtimes (Claude Code, Codex, OpenCode) agents may run
+ * on, and how they authenticate: an API key, Bedrock, Vertex, the Vercel AI Gateway or a model
+ * gateway (presets: Cloudflare, OpenRouter, LiteLLM, Portkey, Kong, custom). OpenCode runs any
+ * model: a provider's API key (provider picker), a Bedrock API key (open-weight models on Bedrock),
+ * a gateway; its logins and subscriptions are not offered. Credentials are vault
  * references (the picker; the key itself is added in an agent's Credentials tab). A Claude
  * subscription is not offered (Anthropic's terms). "Test connection" (and every save) sends one
  * tiny model request from the Polpo server and shows the result. Below: the harness sessions.
@@ -16,10 +18,13 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { authBrand, computerBrand } from "@/lib/run-context";
 import {
-  CLAUDE_CODE_AUTH_LABELS, CODEX_AUTH_LABELS, HARNESS_NAMES, cleanHarnessSettings, harnessesApi, isGatewayAuth as isGateway, settingsFromOverview,
+  CLAUDE_CODE_AUTH_LABELS, CODEX_AUTH_LABELS, HARNESS_NAMES, OPENCODE_AUTH_LABELS, OPENCODE_PROVIDERS, cleanHarnessSettings, harnessesApi, isGatewayAuth as isGateway,
+  openCodeModelExample, settingsFromOverview,
   type ClaudeCodeAuth, type CodexAuth, type HarnessesOverview, type HarnessesSettings, type HarnessId, type HarnessSession, type HarnessTestResult,
+  type OpenCodeAuth, type OpenCodeProviderId,
 } from "@/lib/harnesses-api";
 import { HarnessGatewayFields } from "./harness-gateway-fields";
 import { HarnessTestLine } from "./harness-test-line";
@@ -75,6 +80,11 @@ export function HarnessesSection() {
   const cx = form.codex;
   const setCx = (patch: Partial<NonNullable<HarnessesSettings["codex"]>>) =>
     setForm({ ...form, codex: { auth: "api-key", ...(cx ?? {}), ...patch } });
+  const oc = form.opencode;
+  const setOc = (patch: Partial<NonNullable<HarnessesSettings["opencode"]>>) =>
+    setForm({ ...form, opencode: { auth: "api-key", provider: "anthropic", ...(oc ?? {}), ...patch } });
+  const ocAuth: OpenCodeAuth = oc?.auth ?? "api-key";
+  const ocProviderMark = ocAuth === "bedrock" ? "amazon-bedrock" : ocAuth === "ai-gateway" ? "vercel" : ocAuth === "api-key" ? (oc?.provider ?? "anthropic") : undefined;
 
   const save = async () => {
     setSaving(true);
@@ -104,7 +114,7 @@ export function HarnessesSection() {
       ? <p className="flex items-center gap-1.5 text-micro text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 text-success" /> The key stays on the Polpo server: the computer gets a placeholder, Polpo's model relay adds the key.</p>
       : b === "in-vm"
         ? <p className="flex items-center gap-1.5 text-micro text-warning"><AlertTriangle className="h-3.5 w-3.5" /> The key goes into the computer: set POLPO_PUBLIC_URL so Polpo's model relay can keep it on the server.</p>
-        : <p className="text-micro text-muted-foreground">Bedrock and Vertex sign each request in the computer, so their credentials go there; put a gateway in front to keep them out.</p>;
+        : <p className="text-micro text-muted-foreground">Claude Code on Bedrock and Vertex signs each request in the computer, so their credentials go there; put a gateway in front to keep them out.</p>;
   };
 
   const item = (id: HarnessId) => overview.harnesses.find((h) => h.id === id);
@@ -112,7 +122,7 @@ export function HarnessesSection() {
   return (
     <div className="space-y-4" data-testid="harnesses-section">
       <p className="text-sm text-muted-foreground">
-        Agents can run on an official agent runtime instead of Polpo's engine: Claude Code or Codex, inside the agent's computer
+        Agents can run on an official agent runtime instead of Polpo's engine: Claude Code, Codex or OpenCode (any model, open-weight ones included), inside the agent's computer
         (a Daytona v2 VM), with Polpo's tools available to it. Choose it per agent in its Computer tab. Usage is billed by the
         provider of the credential you choose here.
       </p>
@@ -220,6 +230,74 @@ export function HarnessesSection() {
         {brokeringNote("codex")}
         <div className="flex flex-wrap items-center gap-2">{testButton("codex")}<HarnessTestLine result={tests.codex} /></div>
         <p className="text-micro text-muted-foreground">Signing in with ChatGPT is not supported yet.</p>
+      </CardContent></Card>
+
+      {/* OpenCode */}
+      <Card className="gap-0 py-0" data-testid="harness-opencode"><CardContent className="space-y-3 px-4 py-3 text-xs">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={form.enabled.includes("opencode")} onChange={(e) => toggle("opencode", e.target.checked)} aria-label="Enable OpenCode" />
+          <BrandIcon name="opencode" size={18} /> OpenCode
+          {item("opencode")?.agents.length ? <Badge variant="secondary" className="text-micro">{item("opencode")!.agents.join(", ")}</Badge> : null}
+        </label>
+        <p className="text-micro text-muted-foreground">
+          Any model OpenCode supports, open-weight ones included (Kimi, GLM, Qwen, DeepSeek on Bedrock or a gateway). Polpo writes OpenCode's
+          provider settings itself: only the provider and credential chosen here.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="space-y-1">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              Authentication {ocProviderMark && <ProviderIcon name={ocProviderMark} size={14} />}
+            </span>
+            <select className={`${selectClass} w-full`} aria-label="OpenCode authentication" value={ocAuth}
+              onChange={(e) => setOc({ auth: e.target.value as OpenCodeAuth, ...(e.target.value === "gateway" && !oc?.gateway?.format ? { gateway: { preset: "custom", format: "openai-chat", authScheme: "bearer" } } : {}) })}>
+              {(Object.keys(OPENCODE_AUTH_LABELS) as OpenCodeAuth[]).map((a) => <option key={a} value={a}>{OPENCODE_AUTH_LABELS[a]}</option>)}
+            </select>
+          </label>
+          {ocAuth === "api-key" && (
+            <label className="space-y-1">
+              <span className="text-muted-foreground">Provider</span>
+              <select className={`${selectClass} w-full`} aria-label="OpenCode provider" value={oc?.provider ?? "anthropic"}
+                onChange={(e) => setOc({ provider: e.target.value as OpenCodeProviderId })}>
+                {OPENCODE_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+          {!isGateway(ocAuth) && (
+            <label className="space-y-1">
+              <span className="text-muted-foreground">{ocAuth === "bedrock" ? "Bedrock API key (vault entry)" : "API key (vault entry)"}</span>
+              <VaultRefPicker value={oc?.credentialRef} onChange={(ref) => setOc({ credentialRef: ref ?? undefined })}
+                requiredKeys={["apiKey"]} aria-label="OpenCode credential" data-setup-field="opencode-credential" />
+            </label>
+          )}
+          {ocAuth === "bedrock" && (
+            <label className="space-y-1">
+              <span className="text-muted-foreground">AWS region</span>
+              <Input className="h-8 text-xs" placeholder="us-east-1" value={oc?.bedrock?.region ?? ""} onChange={(e) => setOc({ bedrock: { region: e.target.value.trim() } })} aria-label="OpenCode Bedrock region" />
+            </label>
+          )}
+          {ocAuth !== "gateway" && (
+            <label className="space-y-1">
+              <span className="text-muted-foreground">Model</span>
+              <Input className="h-8 text-xs" placeholder={openCodeModelExample(oc)} value={oc?.model ?? ""} onChange={(e) => setOc({ model: e.target.value.trim() || undefined })} aria-label="OpenCode model" />
+            </label>
+          )}
+        </div>
+        {isGateway(ocAuth) && <HarnessGatewayFields harness="opencode" auth={ocAuth as "ai-gateway" | "gateway"} value={oc?.gateway} onChange={(gateway) => setOc({ gateway })} />}
+        {ocAuth === "ai-gateway" && (
+          <label className="block max-w-sm space-y-1">
+            <span className="text-muted-foreground">Model</span>
+            <Input className="h-8 text-xs" placeholder={openCodeModelExample(oc)} value={oc?.model ?? ""} onChange={(e) => setOc({ model: e.target.value.trim() || undefined })} aria-label="OpenCode gateway model" />
+          </label>
+        )}
+        {brokeringNote("opencode")}
+        <div className="flex flex-wrap items-center gap-2">{testButton("opencode")}<HarnessTestLine result={tests.opencode} /></div>
+        {item("opencode")?.credentialRef && item("opencode")?.credentialFound === false && (
+          <p className="flex items-center gap-1.5 text-warning"><AlertTriangle className="h-3.5 w-3.5" /> The vault entry does not exist yet: add it in that agent's Credentials tab.</p>
+        )}
+        <p className="text-micro text-muted-foreground">
+          {ocAuth === "bedrock" ? "Bedrock takes a Bedrock API key (bearer token): AWS access keys sign every request and would have to go into the computer. " : ""}
+          Signing in with a subscription (ChatGPT, GitHub Copilot, OpenCode Zen, a Claude plan…) is not offered: only explicit credentials.
+        </p>
       </CardContent></Card>
 
       <label className="flex items-center gap-2 text-sm">

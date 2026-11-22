@@ -7,8 +7,9 @@
  *   entry exists (never the value), model, region, agents on each.
  * - polpo_harnesses_update (settings toolset, polpo:admin): enable/disable, auth type (API key,
  *   Bedrock, Vertex, Vercel AI Gateway, a custom gateway), credential reference, region, gateway,
- *   model. The secret itself never passes here: when the entry is missing the tool returns
- *   setup_url + setup_id for polpo_setup_wait. A Claude subscription is refused.
+ *   model; OpenCode with a provider API key, a Bedrock API key, a gateway and any model. The secret
+ *   itself never passes here: when the entry is missing the tool returns setup_url + setup_id for
+ *   polpo_setup_wait. A Claude subscription and OpenCode logins are refused.
  * - polpo_harnesses_get { test }: also tests a harness's connection: one tiny model request from
  *   the Polpo server with its auth and model (or an agent's own credential) → ok / latency /
  *   labelled error. (A parameter, not a tool: the default tool set stays within its bound.)
@@ -23,11 +24,11 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
-import { CLAUDE_SUBSCRIPTION_REFUSAL } from "@polpo-ai/core/harnesses";
+import { CLAUDE_SUBSCRIPTION_REFUSAL, OPENCODE_PROVIDER_IDS, OPENCODE_SUBSCRIPTION_REFUSAL } from "@polpo-ai/core/harnesses";
 
 type HarnessItem = {
   id: string; name: string; enabled: boolean; auth?: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean;
-  model?: string; bedrock?: { region: string }; vertex?: { region: string; projectId: string }; agents: string[];
+  model?: string; provider?: string; bedrock?: { region: string }; vertex?: { region: string; projectId: string }; agents: string[];
   gateway?: { preset?: string; format?: string; baseUrl?: string; authScheme?: string; headers?: Array<{ name: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean; value?: string }>; models?: { main: string }; nonClaude?: boolean };
   brokering?: "relay" | "in-vm" | "not-brokered";
 };
@@ -43,9 +44,9 @@ const vaultRef = z.object({ owner: z.string().min(1).describe("The agent whose v
 /** A gateway in the tool's snake_case; mapped to settings' camelCase by gatewaySettings. */
 const gatewayInput = z.object({
   preset: z.enum(["vercel", "cloudflare", "openrouter", "litellm", "portkey", "kong", "custom"]).optional().describe("A label for the dashboard (the URL, scheme and headers are what count)"),
-  format: z.enum(["anthropic", "openai-responses"]).optional().describe("Custom gateways: anthropic (Claude Code) or openai-responses (Codex)"),
+  format: z.enum(["anthropic", "openai-responses", "openai-chat"]).optional().describe("Custom gateways: anthropic (Claude Code), openai-responses (Codex); OpenCode takes any of the three, openai-chat (Chat Completions) for most gateways and open models"),
   base_url: z.string().optional().describe("https base URL: Claude Code adds /v1/messages (e.g. https://openrouter.ai/api, https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic); "
-    + "Codex adds /responses, so it ends in /v1 (Cloudflare: …/openai). AI Gateway: optional (default https://ai-gateway.vercel.sh)"),
+    + "Codex adds /responses, so it ends in /v1 (Cloudflare: …/openai); OpenCode adds /v1/messages (anthropic) or /chat/completions, /responses (e.g. https://openrouter.ai/api/v1). AI Gateway: optional (default https://ai-gateway.vercel.sh)"),
   credential_ref: vaultRef.optional().describe("The vault entry with the gateway key (never the key)"),
   auth_scheme: z.enum(["x-api-key", "bearer", "none"]).optional().describe("How the key is sent (custom gateways; default bearer). none: auth goes in a header"),
   headers: z.array(z.object({
@@ -84,13 +85,13 @@ const sessionItem = z.object({ key: z.string(), agent: z.string(), harness: z.st
 
 /** One harness, in words: the credential is always said to be found or missing in the vault. */
 export const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabled ? "enabled" : "disabled"}`
-  + (h.auth ? `, auth ${h.auth}${h.bedrock ? ` (${h.bedrock.region})` : ""}${h.vertex ? ` (${h.vertex.projectId}, ${h.vertex.region})` : ""}` : ", not configured")
+  + (h.auth ? `, auth ${h.auth}${h.provider ? ` (${h.provider})` : ""}${h.bedrock ? ` (${h.bedrock.region})` : ""}${h.vertex ? ` (${h.vertex.projectId}, ${h.vertex.region})` : ""}` : ", not configured")
   + (h.gateway ? `, gateway ${h.gateway.preset ? `${h.gateway.preset} ` : ""}${h.gateway.baseUrl ?? "(Vercel AI Gateway)"}${h.gateway.authScheme ? ` [${h.gateway.authScheme}]` : ""}`
     + `${h.gateway.headers?.length ? `, headers ${h.gateway.headers.map((x) => `${x.name}${x.credentialRef ? `=${x.credentialRef.owner}/${x.credentialRef.service}${x.credentialFound === false ? " (MISSING)" : ""}` : ""}`).join(", ")}` : ""}`
     + `${h.gateway.nonClaude ? ", non-Claude models" : ""}` : "")
   + (h.credentialRef ? `, credential ${h.credentialRef.owner} / ${h.credentialRef.service} ${h.credentialFound ? "(found in the vault)" : "(MISSING in the vault)"}` : "")
   + (h.model ? `, model ${h.model}` : h.gateway?.models?.main ? `, model ${h.gateway.models.main}` : "")
-  + (h.brokering ? `, key ${h.brokering === "relay" ? "brokered by Polpo's relay (not in the VM)" : h.brokering === "in-vm" ? "in the VM (no POLPO_PUBLIC_URL)" : "in the VM (Bedrock/Vertex sign requests)"}` : "")
+  + (h.brokering ? `, key ${h.brokering === "relay" ? "brokered by Polpo's relay (not in the VM)" : h.brokering === "in-vm" ? "in the VM (no POLPO_PUBLIC_URL)" : "in the VM (Claude Code on Bedrock/Vertex signs requests)"}` : "")
   + (h.agents.length ? ` · agents: ${h.agents.join(", ")}` : "");
 
 const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId} (${s.harness}): ${s.state}${s.live ? " (live)" : ""}`
@@ -101,15 +102,15 @@ const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId}
 export function registerHarnessTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_harnesses_get", {
     title: "Agent harnesses",
-    description: "The official agent harnesses agents may run on (Claude Code, Codex): which are enabled, their auth type (api-key, bedrock, vertex, ai-gateway, gateway), "
+    description: "The official agent harnesses agents may run on (Claude Code, Codex, OpenCode): which are enabled, their auth type (api-key, bedrock, vertex, ai-gateway, gateway; OpenCode's provider), "
       + "credential vault reference and whether that entry exists (never its value), region, default model, the agents using each, and the computers "
       + "that can run them, and whether their key stays on the server (model relay). With test: also checks that harness's connection — one tiny "
       + "streaming model request FROM THE POLPO SERVER (never the computer) with its auth and model (Anthropic Messages with a tool for Claude Code, "
-      + "OpenAI Responses for Codex, Converse for Bedrock, rawPredict for Vertex); with agent, that agent's own key and model. The test says ok and "
+      + "OpenAI Responses for Codex, Converse for Bedrock, rawPredict for Vertex; OpenCode: its provider's format); with agent, that agent's own key and model. The test says ok and "
       + "latency, or a labelled error (auth, model, network, timeout, protocol, config) with what to change: run it after polpo_harnesses_update. "
       + "Set an agent on one with polpo_agent_update engine; change these settings with polpo_harnesses_update.",
     inputSchema: {
-      test: z.enum(["claude-code", "codex"]).optional().describe("Also test this harness's connection (one tiny model request from the Polpo server)"),
+      test: z.enum(["claude-code", "codex", "opencode"]).optional().describe("Also test this harness's connection (one tiny model request from the Polpo server)"),
       agent: z.string().optional().describe("With test: use this agent's engine (its own key and model)"),
     },
     outputSchema: { allowHost: z.boolean(), harnesses: z.array(harnessItem), computers: z.array(z.string()), test: z.record(z.string(), z.unknown()).optional() },
@@ -132,16 +133,18 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
 
   tool("settings", "polpo_harnesses_update", {
     title: "Change agent harness settings",
-    description: "Enable or disable Claude Code and Codex for agents and set how they authenticate: auth type, the vault entry with the credential "
+    description: "Enable or disable Claude Code, Codex and OpenCode for agents and set how they authenticate: auth type, the vault entry with the credential "
       + "(owner + service: a reference, never the key), Bedrock region, Vertex project and region, a model gateway (ai-gateway: the Vercel AI Gateway; "
       + "gateway: Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey, Kong… with format, base_url, auth_scheme, headers from the vault, models), default model. "
       + "Only the fields given change. Gateway keys and secret headers are injected by Polpo's model relay, never put in the computer. "
       + "A Claude subscription (Pro/Max login) is refused by Anthropic's terms: use an Anthropic API key, Bedrock, Vertex or a gateway. Codex takes an OpenAI API key or a gateway. "
+      + "OpenCode runs any model: a provider API key (provider: " + OPENCODE_PROVIDER_IDS.join(", ") + "), a Bedrock API key (open-weight models on Bedrock: Kimi, GLM, Qwen, DeepSeek…), "
+      + "the Vercel AI Gateway or a custom gateway (anthropic, openai-responses or openai-chat); its model is required. OpenCode logins and subscriptions (ChatGPT, Copilot, OpenCode Zen…) are refused. "
       + "Check the result with polpo_harnesses_get { test }. "
       + "When the credential's vault entry does not exist yet, the result gives setup_url: show it to the person (they paste the key there), "
       + "then call polpo_setup_wait with setup_id. Disabling a harness that agents use is refused (move them to engine \"polpo\" first).",
     inputSchema: {
-      enabled: z.array(z.enum(["claude-code", "codex"])).optional().describe("The harnesses agents may use (replaces the list; [] disables all)"),
+      enabled: z.array(z.enum(["claude-code", "codex", "opencode"])).optional().describe("The harnesses agents may use (replaces the list; [] disables all)"),
       allow_host: z.boolean().optional().describe("Agents on this server (no remote computer) may use a harness, with an isolated HOME (default false)"),
       claude_code: z.object({
         // "subscription" is accepted here only to answer with the reason it is refused (Anthropic's terms)
@@ -159,14 +162,25 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
         gateway: gatewayInput.describe("For auth ai-gateway / gateway (null removes it)"),
         model: z.string().nullable().optional().describe("Default model id; null clears it"),
       }).nullable().optional().describe("Codex's settings (null removes them)"),
+      opencode: z.object({
+        // "subscription" is accepted here only to answer with the reason it is refused
+        auth: z.enum(["api-key", "bedrock", "ai-gateway", "gateway", "subscription"]).optional()
+          .describe("api-key: a model provider's API key (with provider); bedrock: an Amazon Bedrock API key; ai-gateway: Vercel AI Gateway; gateway: a custom gateway. \"subscription\" (a login) is always refused"),
+        provider: z.enum(OPENCODE_PROVIDER_IDS as [string, ...string[]]).optional().describe("For auth api-key: the model provider (OpenCode's id)"),
+        credential_ref: vaultRef.optional().describe("The vault entry with the key: api-key → the provider's API key (apiKey); bedrock → a Bedrock API key (apiKey or AWS_BEARER_TOKEN_BEDROCK; AWS access keys are not used)"),
+        bedrock_region: z.string().optional().describe("AWS region for Bedrock, e.g. us-east-1"),
+        gateway: gatewayInput.describe("For auth ai-gateway / gateway (null removes it)"),
+        model: z.string().nullable().optional().describe("Default model, the provider's id (e.g. claude-sonnet-4-5, gpt-5, global.moonshotai.kimi-k3.1 on Bedrock, moonshotai/kimi-k2 on the AI Gateway or OpenRouter); null clears it"),
+      }).nullable().optional().describe("OpenCode's settings (null removes them)"),
     },
     outputSchema: { harnesses: z.array(harnessItem), changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ enabled, allow_host, claude_code, codex }) => {
-    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined) {
-      return fail("Nothing to change: give enabled, allow_host, claude_code or codex.");
+  }, async ({ enabled, allow_host, claude_code, codex, opencode }) => {
+    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined) {
+      return fail("Nothing to change: give enabled, allow_host, claude_code, codex or opencode.");
     }
     if (claude_code?.auth === "subscription") return fail(`${CLAUDE_SUBSCRIPTION_REFUSAL}. Nothing was changed.`);
+    if (opencode?.auth === "subscription") return fail(`${OPENCODE_SUBSCRIPTION_REFUSAL}. Nothing was changed.`);
     const cfg = await apiGet(deps, "/config");
     if (!cfg.ok) return apiError(cfg, "Reading the configuration");
     const cur = ((cfg.data as { settings?: { harnesses?: Record<string, any> } })?.settings?.harnesses ?? { enabled: [] }) as Record<string, any>;
@@ -212,6 +226,28 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       }
       next.codex = c;
     }
+    if (opencode === null) delete next.opencode;
+    else if (opencode) {
+      const c: Record<string, any> = { ...(next.opencode ?? {}) };
+      if (opencode.auth) c.auth = opencode.auth;
+      if (opencode.provider) c.provider = opencode.provider;
+      if (opencode.credential_ref) c.credentialRef = opencode.credential_ref;
+      if (opencode.bedrock_region) c.bedrock = { region: opencode.bedrock_region };
+      if (opencode.model === null) delete c.model; else if (opencode.model) c.model = opencode.model;
+      const g = gatewaySettings(opencode.gateway, c.gateway);
+      if (g) c.gateway = g; else delete c.gateway;
+      if (c.auth !== "bedrock") delete c.bedrock;
+      if (c.auth !== "api-key") delete c.provider;
+      if (c.auth === "ai-gateway" || c.auth === "gateway") {
+        if (c.gateway && !c.gateway.credentialRef && c.credentialRef && c.gateway.authScheme !== "none") c.gateway.credentialRef = c.credentialRef;
+        delete c.credentialRef;
+        if (c.auth === "ai-gateway" && c.gateway) for (const k of Object.keys(c.gateway)) if (!["baseUrl", "credentialRef", "preset"].includes(k)) delete c.gateway[k];
+        if (c.gateway) delete c.gateway.nonClaude;
+      } else {
+        delete c.gateway;
+      }
+      next.opencode = c;
+    }
     const r = await apiSend(deps, "PATCH", "/config/settings", { harnesses: next });
     if (!r.ok) return apiError(r, "Changing the harness settings");
     const changed = [...new Set([...Object.keys(cur), ...Object.keys(next)])].filter((k) => JSON.stringify(cur[k]) !== JSON.stringify(next[k]));
@@ -228,7 +264,7 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
 
   tool("settings", "polpo_harness_sessions_list", {
     title: "Harness sessions",
-    description: "The harness sessions agents run (one per task run or chat on Claude Code / Codex): agent, computer, state (running, idle, detached "
+    description: "The harness sessions agents run (one per task run or chat on Claude Code / Codex / OpenCode): agent, computer, state (running, idle, detached "
       + "while its computer hibernates, stopped, error), whether it is live now, when its runtime was bootstrapped in the computer (and how long it took), "
       + "last detach and resume, turns and cost so far. Filter by agent or computer.",
     inputSchema: {

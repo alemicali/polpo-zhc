@@ -29,7 +29,7 @@ const agentFields = {
   model: z.string().optional().describe("provider:model (polpo_models_list); omit for the default"),
   systemPrompt: z.string().optional().describe("Its instructions: how it works, what it must and must not do"),
   allowedTools: z.array(z.string()).optional().describe("Tools it may use (patterns allowed, e.g. browser_*, artifact_* to make artifacts people open in Polpo, "
-    + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server"),
+    + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex, OpenCode) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server"),
   skills: z.array(z.string()).optional().describe("Names of skills it uses"),
   identity: identity.optional().describe("How it presents itself"),
   reportsTo: z.string().optional().describe("The agent it reports to"),
@@ -43,15 +43,15 @@ const agentFields = {
   engine: z.union([
     z.literal("polpo"),
     z.object({
-      harness: z.enum(["claude-code", "codex"]).describe("The official agent runtime (it must be enabled: polpo_harnesses_get)"),
-      model: z.string().max(200).optional().describe("Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's"),
+      harness: z.enum(["claude-code", "codex", "opencode"]).describe("The official agent runtime (it must be enabled: polpo_harnesses_get). opencode: any model, open-weight ones included (Kimi, GLM, Qwen on Bedrock or a gateway)"),
+      model: z.string().max(200).optional().describe("Model id for the runtime (Bedrock: an inference profile id; OpenCode: the provider's id, e.g. global.moonshotai.kimi-k3.1); omit for the harness setting's"),
       permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional().describe("What the runtime may do without asking (default allow-all: it works unattended in its computer)"),
       effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort"),
       maxBudgetUsd: z.number().positive().max(10000).optional().describe("Stop a run when its estimated spend passes this (USD)"),
       credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional()
         .describe("This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key"),
     }),
-  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex) running inside its computer "
+  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex, OpenCode) running inside its computer "
     + "(a Daytona v2 computer, set with defaultComputer). Credentials come from the harness settings (polpo_harnesses_update), never from here."),
 };
 
@@ -147,7 +147,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex harness). Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. It applies to its next runs.",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),

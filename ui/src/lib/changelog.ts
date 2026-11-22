@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-opencode",
+    date: "2026-11-22",
+    kind: "new",
+    title: "OpenCode: agenti su qualsiasi modello, anche open-weight",
+    summary: "Oltre a Claude Code e Codex, un agente può lavorare con OpenCode nel suo computer: Kimi, GLM, Qwen e DeepSeek su Amazon Bedrock, Gemini, Grok, OpenRouter o un tuo gateway.",
+    body: [
+      "- **Un terzo motore**: in Impostazioni → Harness attivi **OpenCode** e scegli come si autentica: la chiave API di un fornitore (Anthropic, OpenAI, Google, xAI, Mistral, Groq, DeepSeek, OpenRouter, Moonshot, Z.ai), una **chiave API di Amazon Bedrock** con la regione, Vercel AI Gateway o un tuo gateway (Chat Completions, Responses o Anthropic).",
+      "- **Modelli open-weight**: per esempio `global.moonshotai.kimi-k3.1` su Bedrock. Il modello si sceglie nelle impostazioni o per ogni agente (scheda Computer → Motore).",
+      "- **Chiavi fuori dal computer**: come per Claude Code e Codex, nel computer arriva un segnaposto e Polpo aggiunge la chiave vera fuori dalla VM, anche per la chiave di Bedrock.",
+      "- **Solo credenziali esplicite**: gli accessi con abbonamento (ChatGPT, Copilot, OpenCode Zen…) non vengono mai usati.",
+      "- **Prova la connessione** con un pulsante, e **costi**: il costo di ogni passo calcolato da OpenCode finisce nell'esecuzione del task; il logo di OpenCode compare dove compaiono i motori.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le impostazioni", to: "/config?section=harnesses" },
+  },
+  {
     id: "2026-11-22-polpo-fixes",
     date: "2026-11-22",
     kind: "fixed",

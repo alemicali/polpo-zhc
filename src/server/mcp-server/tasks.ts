@@ -25,7 +25,7 @@ export const taskSummary = z.object({
   id: z.string(), title: z.string(), status: z.string(), assignTo: z.string().optional(),
   group: z.string().optional(), missionId: z.string().optional(), createdAt: z.string().optional(), updatedAt: z.string().optional(),
   last_run: z.object({ engine: z.string(), model: z.string().optional(), computerId: z.string(), computerKind: z.string() }).passthrough().optional()
-    .describe("Where and with what its latest run executed: engine (polpo, claude-code, codex), model, computer"),
+    .describe("Where and with what its latest run executed: engine (polpo, claude-code, codex, opencode), model, computer"),
   cost: z.object({ usd: z.number(), tokens: z.number(), runs: z.number(), partial: z.boolean().optional() }).passthrough().optional()
     .describe("What every run of it cost in all (first run, retries, continuations), USD; partial: older runs were dropped"),
   failure: failureShape.optional(),
@@ -72,7 +72,7 @@ export function toolScopeFromArgs(a: { connectors?: string[] | "none"; connector
 const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools. "
   + "A scope never grants: when the agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope.";
 
-const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
+const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 /** A row's total in a list line: " · $1.50 over 2 runs". */
 const costText = (c: TaskCostSummary | undefined) => (c?.runs && c.usd > 0 ? ` · ${usdText(c.usd)}${c.partial ? "+" : ""}${c.runs > 1 ? ` over ${c.runs} runs` : ""}` : "");
@@ -212,7 +212,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       failure: failureShape.optional(),
       dependencies: z.array(z.object({ id: z.string(), title: z.string(), status: z.string() }).passthrough()).optional()
         .describe("The tasks it depends on (their results reach its prompt; it reads them in full with task_result / dependency_results)"),
-      runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"),
+      runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex, opencode), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"),
       cost: looseObject.optional().describe("What every run cost in all (first run, retries, continuations, directions): usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun (each run's usd, tokens, engine, model, duration, status; oldest first), partial (older runs dropped), recoveredUsd"),
       recent_activity: z.array(looseObject).optional() },
     annotations: READ,
@@ -473,7 +473,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
   tool("tasks", "polpo_task_logs", {
     title: "Read a task's activity",
     description: "The activity of a task's runs (what its agent did: messages, tool calls, results, usage), newest last, for Polpo's engine and "
-      + "agent harnesses (Claude Code, Codex: their Polpo tools are marked host: true). Returns the latest entries; page backwards to older ones "
+      + "agent harnesses (Claude Code, Codex, OpenCode: their Polpo tools are marked host: true). Returns the latest entries; page backwards to older ones "
       + "with cursor. `runs` says where and with what each run executed.",
     inputSchema: {
       id: z.string().min(1).describe("The task's id"),

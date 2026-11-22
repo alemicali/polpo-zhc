@@ -116,7 +116,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
 
   registerAppTool(server, "polpo_agent_show", {
     title: "Show an agent",
-    description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex) and computer, the task at hand "
+    description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex, OpenCode) and computer, the task at hand "
       + "(with the engine, model, computer and cost of its latest run, or why it failed), today's results, what it plans next, "
       + "its main goal and the connectors it may use; it opens to its tasks, goals and routine. Use it when the person asks how an agent is doing (polpo_agents_list for names).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name or display name") },

@@ -34,7 +34,7 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
     const taskEvents = (await readTaskTokenEvents(getPolpoDir()))
       .filter((event) => Date.parse(event.timestamp) >= cutoff && (!taskId || event.taskId === taskId));
 
-    // agent harness runs (Claude Code, Codex) record their cost and their token split (input,
+    // agent harness runs (Claude Code, Codex, OpenCode) record their cost and their token split (input,
     // output, cache read/write); their total is counted with the tasks (taskTokens)
     const harness = records.filter((r) => r.source === "agent_harness").reduce((total, r) => ({
       inputTokens: total.inputTokens + (r.inputTokens || 0),

@@ -83,7 +83,8 @@ export interface TaskRunContext {
   engine: RunEngine;
   /** Model id (the agent's for Polpo's engine; the harness model for a harness). */
   model?: string;
-  auth?: { kind: RunAuthKind; region?: string };
+  /** provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
+  auth?: { kind: RunAuthKind; region?: string; provider?: string };
   permissionMode?: string;
   effort?: string;
   computer: RunComputerContext;
@@ -124,10 +125,10 @@ export interface BuildRunContextInput {
 
 /** The agent's harness engine (lenient: the engine was validated when the agent was saved). */
 function harnessOf(engine: unknown): AgentHarnessEngine | undefined {
-  if (engine === "claude-code" || engine === "codex") return { harness: engine };
+  if (engine === "claude-code" || engine === "codex" || engine === "opencode") return { harness: engine };
   if (!engine || typeof engine !== "object") return undefined;
   const e = engine as Record<string, unknown>;
-  if (e.harness !== "claude-code" && e.harness !== "codex") return undefined;
+  if (e.harness !== "claude-code" && e.harness !== "codex" && e.harness !== "opencode") return undefined;
   return {
     harness: e.harness,
     ...(typeof e.model === "string" && e.model ? { model: e.model } : {}),
@@ -138,19 +139,23 @@ function harnessOf(engine: unknown): AgentHarnessEngine | undefined {
 }
 
 /** The harness setting's authentication kind, region and default model (never the credential). */
-function harnessSetting(settings: BuildRunContextInput["settings"], harness: HarnessId): { auth?: RunAuthKind; region?: string; model?: string } | undefined {
+function harnessSetting(settings: BuildRunContextInput["settings"], harness: HarnessId): { auth?: RunAuthKind; region?: string; model?: string; provider?: string } | undefined {
   const all = settings?.harnesses;
   if (!all || typeof all !== "object") return undefined;
   const h = (all as Record<string, unknown>)[harness];
   if (!h || typeof h !== "object") return undefined;
-  const r = h as { auth?: unknown; model?: unknown; bedrock?: { region?: unknown }; vertex?: { region?: unknown }; gateway?: { models?: { main?: unknown } } };
+  const r = h as { auth?: unknown; model?: unknown; provider?: unknown; bedrock?: { region?: unknown }; vertex?: { region?: unknown }; gateway?: { models?: { main?: unknown } } };
   const auth = r.auth === "api-key" || r.auth === "bedrock" || r.auth === "vertex" || r.auth === "ai-gateway" || r.auth === "gateway" ? r.auth : undefined;
   const model = typeof r.gateway?.models?.main === "string" && r.gateway.models.main ? r.gateway.models.main : r.model;
   const region = auth === "bedrock" ? r.bedrock?.region : auth === "vertex" ? r.vertex?.region : undefined;
+  // OpenCode: the model's provider (its logo; the model id is the provider's)
+  const provider = harness !== "opencode" ? undefined
+    : auth === "api-key" ? r.provider : auth === "bedrock" ? "amazon-bedrock" : auth === "ai-gateway" ? "vercel" : auth === "gateway" ? "polpo-gateway" : undefined;
   return {
     ...(auth ? { auth } : {}),
     ...(typeof region === "string" && region ? { region } : {}),
     ...(typeof model === "string" && model ? { model } : {}),
+    ...(typeof provider === "string" && provider ? { provider } : {}),
   };
 }
 
@@ -191,7 +196,7 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     const h = harnessSetting(i.settings, harness.harness);
     const model = harness.model ?? h?.model;
     if (model) ctx.model = model;
-    if (h?.auth) ctx.auth = { kind: h.auth, ...(h.region ? { region: h.region } : {}) };
+    if (h?.auth) ctx.auth = { kind: h.auth, ...(h.region ? { region: h.region } : {}), ...(h.provider ? { provider: h.provider } : {}) };
     ctx.permissionMode = harness.permissionMode ?? "allow-all";
     if (harness.effort) ctx.effort = harness.effort;
     if (harness.maxBudgetUsd) ctx.budgetUsd = harness.maxBudgetUsd;
@@ -276,8 +281,9 @@ function describeScopeShort(scope: TaskToolScope): string {
 
 /** One line describing a run, for text outputs (MCP). */
 export function describeTaskRun(ctx: TaskRunContext): string {
-  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : "Codex";
-  const auth = ctx.auth ? ` via ${ctx.auth.kind === "bedrock" ? "Bedrock" : ctx.auth.kind === "vertex" ? "Vertex" : "API key"}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
+  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode" : "Codex";
+  const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : "API key";
+  const auth = ctx.auth ? ` via ${kind}${ctx.auth.provider && ctx.auth.kind === "api-key" ? ` (${ctx.auth.provider})` : ""}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
   const where = ctx.computer.kind === "host" && ctx.computer.id === "host"
     ? "this server"
     : ctx.computer.kind === "ephemeral"
