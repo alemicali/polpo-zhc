@@ -59,6 +59,20 @@ export class DrizzleSessionStore implements SessionStore {
     return [by(m.ts), by(rank), by(id)];
   }
 
+  /**
+   * Now, or 1 ms after the session's latest message when that is not earlier: messages added one
+   * after the other never share a timestamp, so they keep the order they were added in.
+   */
+  private async nextMessageTs(sessionId: string): Promise<string> {
+    const now = Date.now();
+    const last: any[] = await this.db.select({ ts: this.messages.ts }).from(this.messages)
+      .where(eq(this.messages.sessionId, sessionId))
+      .orderBy(desc(this.messages.ts))
+      .limit(1);
+    const lastMs = last[0] ? Date.parse(last[0].ts) : NaN;
+    return new Date(Number.isFinite(lastMs) && lastMs >= now ? lastMs + 1 : now).toISOString();
+  }
+
   private rowToMessage(row: any): Message {
     return {
       id: row.id,
@@ -86,7 +100,7 @@ export class DrizzleSessionStore implements SessionStore {
 
   async addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message> {
     const id = nanoid();
-    const ts = new Date().toISOString();
+    const ts = await this.nextMessageTs(sessionId);
     const tcValue = toolCalls && toolCalls.length > 0 ? JSON.stringify(toolCalls) : null;
     const segmentsValue = segments && segments.length > 0 ? JSON.stringify(segments) : null;
     const storedContent = this.dialect === "pg" ? pgSafe(content) : content;
