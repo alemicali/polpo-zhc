@@ -29,7 +29,7 @@ function MemoryStats({ content }: { content: string }) {
   const chars = content.length;
 
   return (
-    <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
+    <div className="flex items-center gap-3 text-micro text-muted-foreground font-mono">
       <span>{lines} lines</span>
       <span>&middot;</span>
       <span>{words} words</span>
@@ -99,10 +99,10 @@ export function AgentMemoryTab() {
             <CardTitle className="text-sm">Agent Memory</CardTitle>
             <div className="flex items-center gap-2 mt-0.5">
               {!(memory?.exists) && (
-                <Badge variant="secondary" className="text-[10px]">New</Badge>
+                <Badge variant="secondary" className="text-micro">New</Badge>
               )}
               {dirty && (
-                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
+                <Badge variant="outline" className="text-micro text-warning border-warning/30">
                   Unsaved changes
                 </Badge>
               )}

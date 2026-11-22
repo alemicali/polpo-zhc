@@ -28,7 +28,7 @@ export function AgentHierarchyCard() {
         {/* Manager */}
         {manager && (
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+            <p className="text-label text-muted-foreground mb-1.5">
               <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
               Manager
             </p>
@@ -40,7 +40,7 @@ export function AgentHierarchyCard() {
               <div className="min-w-0">
                 <p className="text-xs font-medium">{manager.identity?.displayName ?? manager.name}</p>
                 {manager.identity?.title && (
-                  <p className="text-[10px] text-muted-foreground truncate">{manager.identity.title}</p>
+                  <p className="text-micro text-muted-foreground truncate">{manager.identity.title}</p>
                 )}
               </div>
               <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto shrink-0" />
@@ -49,7 +49,7 @@ export function AgentHierarchyCard() {
         )}
         {agent.reportsTo && !manager && (
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+            <p className="text-label text-muted-foreground mb-1.5">
               <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
               Manager
             </p>
@@ -63,7 +63,7 @@ export function AgentHierarchyCard() {
         {/* Direct reports */}
         {subordinates.length > 0 && (
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+            <p className="text-label text-muted-foreground mb-1.5">
               <Users className="h-2.5 w-2.5 inline mr-1" />
               Direct reports ({subordinates.length})
             </p>
@@ -78,7 +78,7 @@ export function AgentHierarchyCard() {
                   <div className="min-w-0">
                     <p className="text-xs font-medium">{sub.identity?.displayName ?? sub.name}</p>
                     {sub.identity?.title && (
-                      <p className="text-[10px] text-muted-foreground truncate">{sub.identity.title}</p>
+                      <p className="text-micro text-muted-foreground truncate">{sub.identity.title}</p>
                     )}
                   </div>
                   <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto shrink-0" />

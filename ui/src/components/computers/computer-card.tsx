@@ -47,9 +47,9 @@ export function ComputerCard({
         <StatusBadge computer={computer} />
       </div>
       {computer.lastError && computer.status === "error" && <p className="text-xs text-destructive" role="alert">{computer.lastError}</p>}
-      {computer.notice && <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="computer-notice">{computer.notice}</p>}
+      {computer.notice && <p className="text-xs text-warning" data-testid="computer-notice">{computer.notice}</p>}
       {computer.snapshotState && computer.snapshotState !== "active" && (
-        <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="computer-snapshot">
+        <p className="text-xs text-warning" data-testid="computer-snapshot">
           Snapshot {computer.snapshotState}{computer.snapshotState === "inactive" ? ": it is activated on the next start (a few minutes longer)" : ""}
         </p>
       )}

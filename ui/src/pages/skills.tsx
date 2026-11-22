@@ -51,8 +51,8 @@ function buildAgentTeamMap(teams: Team[]): Map<string, string> {
 
 function SourceIcon({ source, className }: { source: string; className?: string }) {
   return source === "global"
-    ? <Globe className={cn("h-3 w-3 text-sky-400", className)} />
-    : <HardDrive className={cn("h-3 w-3 text-emerald-400/60", className)} />;
+    ? <Globe className={cn("h-3 w-3 text-info", className)} />
+    : <HardDrive className={cn("h-3 w-3 text-success/60", className)} />;
 }
 
 // ── Multi-select filter popover ──
@@ -95,7 +95,7 @@ function MultiFilter({
           <span className="shrink-0">{icon}</span>
           <span className="truncate">{label}</span>
           {count > 0 && (
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground px-1">
+            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-micro font-bold text-primary-foreground px-1">
               {count}
             </span>
           )}
@@ -112,7 +112,7 @@ function MultiFilter({
           {count > 0 && (
             <button
               onClick={() => onChange(new Set())}
-              className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              className="text-micro text-muted-foreground hover:text-foreground transition-colors"
             >
               Clear
             </button>
@@ -178,7 +178,7 @@ function StatChip({
       >
         {value}
       </span>
-      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <span className="text-micro text-muted-foreground">{label}</span>
     </div>
   );
 }
@@ -200,7 +200,7 @@ function SkillRow({
         "group flex items-center gap-4 w-full text-left rounded-lg border border-border/40",
         "bg-card/80 backdrop-blur-sm px-4 py-3",
         "transition-all hover:border-primary/20 hover:bg-accent/5",
-        "hover:shadow-[0_0_20px_oklch(0.7_0.15_200_/_6%)]",
+        "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]",
       )}
       onClick={onClick}
     >
@@ -211,7 +211,7 @@ function SkillRow({
             {skill.name}
           </span>
           {skill.category && (
-            <span className="text-[10px] text-amber-300/80 shrink-0">
+            <span className="text-micro text-chart-4 shrink-0">
               {skill.category}
             </span>
           )}
@@ -220,7 +220,7 @@ function SkillRow({
         {(skill.description || hasTags) && (
           <div className="flex items-center gap-2 mt-0.5 min-w-0">
             {skill.description && (
-              <p className="text-[11px] text-muted-foreground line-clamp-1 min-w-0">
+              <p className="text-caption text-muted-foreground line-clamp-1 min-w-0">
                 {skill.description}
               </p>
             )}
@@ -230,13 +230,13 @@ function SkillRow({
                   <Badge
                     key={tag}
                     variant="outline"
-                    className="text-[9px] py-0 px-1.5 bg-blue-500/10 text-blue-300 border-blue-500/20 shrink-0"
+                    className="text-micro py-0 px-1.5 bg-info/10 text-info border-info/20 shrink-0"
                   >
                     {tag}
                   </Badge>
                 ))}
                 {skill.tags!.length > 2 && (
-                  <span className="text-[9px] text-muted-foreground shrink-0">
+                  <span className="text-micro text-muted-foreground shrink-0">
                     +{skill.tags!.length - 2}
                   </span>
                 )}
@@ -265,7 +265,7 @@ function SkillRow({
           <TooltipTrigger asChild>
             <div className="hidden sm:flex items-center gap-1 shrink-0">
               <Wrench className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[10px] font-mono text-muted-foreground tabular-nums">
+              <span className="text-micro font-mono text-muted-foreground tabular-nums">
                 {skill.allowedTools.length}
               </span>
             </div>
@@ -301,7 +301,7 @@ function SkillCard({
         "group flex flex-col text-left rounded-lg border border-border/40",
         "bg-card/80 backdrop-blur-sm p-4",
         "transition-all hover:border-primary/20 hover:bg-accent/5",
-        "hover:shadow-[0_0_20px_oklch(0.7_0.15_200_/_6%)]",
+        "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]",
         "h-full",
       )}
       onClick={onClick}
@@ -313,14 +313,14 @@ function SkillCard({
             {skill.name}
           </span>
           {skill.category && (
-            <span className="text-[10px] text-amber-300/80 shrink-0">
+            <span className="text-micro text-chart-4 shrink-0">
               {skill.category}
             </span>
           )}
           <SourceIcon source={skill.source} className="ml-auto" />
         </div>
         {skill.description && (
-          <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+          <p className="text-caption text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
             {skill.description}
           </p>
         )}
@@ -338,13 +338,13 @@ function SkillCard({
               <Badge
                 key={tag}
                 variant="outline"
-                className="text-[9px] py-0 px-1.5 bg-blue-500/10 text-blue-300 border-blue-500/20"
+                className="text-micro py-0 px-1.5 bg-info/10 text-info border-info/20"
               >
                 {tag}
               </Badge>
             ))}
             {skill.tags!.length > 3 && (
-              <span className="text-[9px] text-muted-foreground self-center">
+              <span className="text-micro text-muted-foreground self-center">
                 +{skill.tags!.length - 3}
               </span>
             )}
@@ -359,7 +359,7 @@ function SkillCard({
                 <Bot className="h-3 w-3 text-muted-foreground" />
                 <span
                   className={cn(
-                    "text-[11px] font-medium tabular-nums",
+                    "text-caption font-medium tabular-nums",
                     skill.assignedTo.length > 0 ? "text-foreground" : "text-muted-foreground/40",
                   )}
                 >
@@ -379,7 +379,7 @@ function SkillCard({
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1">
                   <Wrench className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[11px] font-mono text-muted-foreground tabular-nums">
+                  <span className="text-caption font-mono text-muted-foreground tabular-nums">
                     {skill.allowedTools.length}
                   </span>
                 </div>
@@ -398,7 +398,7 @@ function SkillCard({
                 <Tooltip key={agent}>
                   <TooltipTrigger asChild>
                     <span className="flex h-5 items-center rounded-full bg-secondary px-1.5">
-                      <span className="text-[9px] font-medium text-secondary-foreground truncate max-w-[60px]">
+                      <span className="text-micro font-medium text-secondary-foreground truncate max-w-[60px]">
                         {agent}
                       </span>
                     </span>
@@ -411,7 +411,7 @@ function SkillCard({
                 </Tooltip>
               ))}
               {skill.assignedTo.length > 3 && (
-                <span className="text-[9px] text-muted-foreground ml-0.5">
+                <span className="text-micro text-muted-foreground ml-0.5">
                   +{skill.assignedTo.length - 3}
                 </span>
               )}
@@ -428,8 +428,8 @@ function SkillCard({
 function EmptyState({ filtered }: { filtered: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 gap-4 text-muted-foreground">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/5 border border-violet-500/10">
-        <Sparkles className="h-8 w-8 text-violet-400/30" />
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 border border-primary/10">
+        <Sparkles className="h-8 w-8 text-primary/30" />
       </div>
       <div className="text-center space-y-1">
         <p className="text-sm font-medium text-foreground/60">
@@ -449,7 +449,7 @@ function EmptyState({ filtered }: { filtered: boolean }) {
 
 function FilterPill({ label, onClear }: { label: string; onClear: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-micro font-medium text-primary">
       {label}
       <button
         onClick={(e) => {
@@ -718,7 +718,7 @@ export function SkillsPage() {
       {/* ── Active filter pills ── */}
       {isFiltered && (
         <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-          <span className="text-[10px] text-muted-foreground mr-1">
+          <span className="text-micro text-muted-foreground mr-1">
             {filtered.length} of {skills.length}
           </span>
           {search.trim() && (
@@ -773,7 +773,7 @@ export function SkillsPage() {
           ))}
           <button
             onClick={clearAllFilters}
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors ml-1"
+            className="text-micro text-muted-foreground hover:text-foreground transition-colors ml-1"
           >
             Clear all
           </button>

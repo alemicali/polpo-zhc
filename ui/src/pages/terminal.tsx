@@ -143,8 +143,8 @@ export function TerminalPage() {
 
   return (
     <TerminalShell>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101418]">
-        <div className="flex h-9 shrink-0 items-center border-b border-white/10 bg-black/20 px-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card text-card-foreground">
+        <div className="flex h-9 shrink-0 items-center border-b border-border bg-muted/40 px-1">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const selected = tab.id === activeId;
@@ -155,7 +155,7 @@ export function TerminalPage() {
                 onClick={() => setActiveId(tab.id)}
                 className={cn(
                   "group inline-flex h-8 max-w-[180px] shrink-0 items-center gap-2 px-2 text-xs transition-colors",
-                  selected ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
+                  selected ? "bg-background text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                 )}
               >
                 <StatusDot state={connections[tab.id] ?? "loading"} />
@@ -175,7 +175,7 @@ export function TerminalPage() {
                     }
                   }}
                   className={cn(
-                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center text-white/45 hover:bg-white/10 hover:text-white",
+                    "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground",
                     tabs.length <= 1 && "pointer-events-none opacity-30",
                   )}
                   aria-label={`Close ${tab.name}`}
@@ -185,11 +185,11 @@ export function TerminalPage() {
               </button>
             );
           })}
-          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-none text-white/60 hover:bg-white/5 hover:text-white" onClick={addTab}>
+          <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-none text-muted-foreground hover:bg-accent/60 hover:text-foreground" onClick={addTab}>
             <Plus className="h-4 w-4" />
           </Button>
           </div>
-          <div className="flex shrink-0 items-center gap-2 pl-2 text-xs text-white/60">
+          <div className="flex shrink-0 items-center gap-2 pl-2 text-xs text-muted-foreground">
             <StatusDot state={activeConnection} />
             <span className="hidden truncate sm:inline">{activeConnection}</span>
             <button
@@ -197,7 +197,7 @@ export function TerminalPage() {
               onClick={restartActive}
               title="Restart terminal"
               aria-label="Restart terminal"
-              className="inline-flex h-8 w-8 items-center justify-center text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+              className="inline-flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
             >
               <RefreshCcw className="h-4 w-4" />
             </button>
@@ -225,7 +225,7 @@ function StatusDot({ state }: { state: ConnectionState }) {
   return (
     <span className={cn(
       "inline-flex h-2 w-2 shrink-0 rounded-full",
-      state === "connected" ? "bg-teal-400" : state === "error" ? "bg-rose-500" : state === "closed" ? "bg-zinc-500" : "bg-amber-400",
+      state === "connected" ? "bg-success" : state === "error" ? "bg-destructive" : state === "closed" ? "bg-muted-foreground" : "bg-warning",
     )} />
   );
 }
@@ -252,11 +252,11 @@ function TerminalNotice({
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/30 p-6">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-background text-muted-foreground shadow-sm">
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-background text-muted-foreground shadow-card">
           {icon}
         </span>
         <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="font-heading text-h3">{title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{detail}</p>
         </div>
         {action}

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -43,49 +44,77 @@ const MIME = new Map([
 const compressed = new Map();
 const compressible = /^(text\/|application\/(javascript|json|manifest\+json))/;
 
-// The instance's default look (settings.appearance), inlined into runtime-config.js so index.html's
-// inline script paints it on the first frame. Read from the API's public route, cached briefly.
-// POLPO_APPEARANCE_URL overrides where it is read (e.g. an internal address when POLPO_API_URL is
-// empty because the API is on the same origin behind a proxy).
+// The instance's default look (settings.appearance) and branding (settings.branding: name, tagline,
+// logos, logo frame), inlined into runtime-config.js so index.html's inline script paints them on the
+// first frame (colours, title, logo preload). Read from the API's public routes, cached briefly.
+// POLPO_APPEARANCE_URL / POLPO_BRANDING_URL override where they are read (e.g. an internal address
+// when POLPO_API_URL is empty because the API is on the same origin behind a proxy); without
+// POLPO_BRANDING_URL, the branding is read next to POLPO_APPEARANCE_URL.
+const apiConfigBase = apiUrl ? `${apiUrl.replace(/\/+$/, "")}/api/v1/config` : "";
 const appearanceUrl = process.env.POLPO_APPEARANCE_URL
-  ?? (apiUrl ? `${apiUrl.replace(/\/+$/, "")}/api/v1/config/appearance` : "");
+  ?? (apiConfigBase ? `${apiConfigBase}/appearance` : "");
+const brandingUrl = process.env.POLPO_BRANDING_URL
+  || (process.env.POLPO_APPEARANCE_URL ? process.env.POLPO_APPEARANCE_URL.replace(/\/appearance\/*$/, "/branding") : "")
+  || (apiConfigBase ? `${apiConfigBase}/branding` : "");
 const APPEARANCE_TTL_MS = Number(process.env.POLPO_APPEARANCE_TTL_MS ?? 30_000);
 const APPEARANCE_TIMEOUT_MS = 1_500;
-const appearanceCache = { checkedAt: 0, value: undefined, pending: null };
 
-/**
- * The instance appearance, asked at most every 30 s: on an error the last one known, else undefined
- * (not inlined: the page uses its cached copy). A slow API never delays the page more than 1.5 s.
- */
-async function instanceAppearance() {
-  if (!appearanceUrl) return undefined;
-  if (Date.now() - appearanceCache.checkedAt < APPEARANCE_TTL_MS) return appearanceCache.value;
-  appearanceCache.pending ??= (async () => {
-    try {
-      const res = await fetch(appearanceUrl, { signal: AbortSignal.timeout(APPEARANCE_TIMEOUT_MS), headers: { accept: "application/json" } });
-      if (!res.ok) {
-        // an API without the route (older): nothing to inline, ask again later
-        if (res.status === 404) appearanceCache.value = null;
-        return;
-      }
-      const body = await res.json();
-      if (body && body.ok && body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
-        appearanceCache.value = body.data;
-      }
-    } catch {
-      // unreachable or slow: keep the last value (the page falls back to its cached copy)
-    } finally {
-      appearanceCache.checkedAt = Date.now();
-      appearanceCache.pending = null;
-    }
-  })();
-  await appearanceCache.pending;
-  return appearanceCache.value;
+/** The branding fields the page may show (public display data only; anything else is left out). */
+const BRANDING_FIELDS = ["productName", "tagline", "logoUrl", "logoDarkUrl", "logoFrame"];
+
+function publicBranding(data) {
+  const out = {};
+  for (const key of BRANDING_FIELDS) {
+    const value = data[key];
+    if (typeof value === "string" && value && value.length <= 2048) out[key] = value;
+  }
+  if (out.logoFrame !== undefined && out.logoFrame !== "box" && out.logoFrame !== "none") delete out.logoFrame;
+  return out;
 }
 
+/**
+ * A public JSON object from the API, asked at most every 30 s: on an error the last one known, else
+ * undefined (not inlined: the page uses its cached copy). A slow API never delays the page more than 1.5 s.
+ */
+function cachedPublic(url, pick = (data) => data) {
+  const cache = { checkedAt: 0, value: undefined, pending: null };
+  return async () => {
+    if (!url) return undefined;
+    if (Date.now() - cache.checkedAt < APPEARANCE_TTL_MS) return cache.value;
+    cache.pending ??= (async () => {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(APPEARANCE_TIMEOUT_MS), headers: { accept: "application/json" } });
+        if (!res.ok) {
+          // an API without the route (older): nothing to inline, ask again later
+          if (res.status === 404) cache.value = null;
+          return;
+        }
+        const body = await res.json();
+        if (body && body.ok && body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
+          cache.value = pick(body.data);
+        }
+      } catch {
+        // unreachable or slow: keep the last value (the page falls back to its cached copy)
+      } finally {
+        cache.checkedAt = Date.now();
+        cache.pending = null;
+      }
+    })();
+    await cache.pending;
+    return cache.value;
+  };
+}
+
+const instanceAppearance = cachedPublic(appearanceUrl);
+const instanceBranding = cachedPublic(brandingUrl, publicBranding);
+
 async function runtimeConfig() {
-  const appearance = await instanceAppearance();
-  const payload = { baseUrl: apiUrl, apiKey, inkHubUrl, ...(appearance !== undefined ? { appearance } : {}) };
+  const [appearance, branding] = await Promise.all([instanceAppearance(), instanceBranding()]);
+  const payload = {
+    baseUrl: apiUrl, apiKey, inkHubUrl,
+    ...(appearance !== undefined ? { appearance } : {}),
+    ...(branding !== undefined ? { branding } : {}),
+  };
   // JSON in a script: never let a value close it
   return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify(payload).replace(/</g, "\\u003c")};`;
 }
@@ -120,8 +149,81 @@ async function compressedBody(path, metadata, encoding) {
   return pending;
 }
 
-async function serveFile(req, res, path, pathname) {
+const escapeHtml = (value) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * index.html with the instance's product name in <title> (and the home-screen name), so even the
+ * tab and a link preview never show the default for a branded instance. Unbranded: the file as is.
+ */
+function brandIndexHtml(html, branding) {
+  const name = branding && typeof branding.productName === "string" ? branding.productName.trim() : "";
+  if (!name) return html;
+  const safe = escapeHtml(name);
+  return html
+    .replace(/<title>[^<]*<\/title>/i, () => `<title>${safe}</title>`)
+    .replace(/(<meta\s+name="apple-mobile-web-app-title"\s+content=")[^"]*(")/i, (_, a, b) => `${a}${safe}${b}`);
+}
+
+const indexCache = new Map();
+
+async function serveIndex(req, res, path) {
   const metadata = await stat(path);
+  const branding = await instanceBranding();
+  const name = branding && typeof branding.productName === "string" ? branding.productName.trim() : "";
+  if (!name) {
+    await serveStatic(req, res, path, "/index.html", metadata);
+    return;
+  }
+  const key = `${path}:${metadata.mtimeMs}:${metadata.size}:${name}`;
+  let entry = indexCache.get(key);
+  if (!entry) {
+    const body = Buffer.from(brandIndexHtml(await readFile(path, "utf8"), branding));
+    const tag = createHash("sha1").update(body).digest("base64url").slice(0, 16);
+    entry = { body, etag: `W/"${tag}"`, br: null, gzip: null };
+    indexCache.clear(); // one at a time: the name changes rarely
+    indexCache.set(key, entry);
+  }
+  const headers = {
+    "Cache-Control": cacheControl("/index.html"),
+    "Content-Type": "text/html; charset=utf-8",
+    ETag: entry.etag,
+    Vary: "Accept-Encoding",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (req.headers["if-none-match"] === entry.etag) {
+    res.writeHead(304, { ETag: entry.etag, "Cache-Control": headers["Cache-Control"] });
+    res.end();
+    return;
+  }
+  if (req.method === "HEAD") {
+    res.writeHead(200, { ...headers, "Content-Length": entry.body.length });
+    res.end();
+    return;
+  }
+  const accepts = req.headers["accept-encoding"] ?? "";
+  const encoding = accepts.includes("br") ? "br" : accepts.includes("gzip") ? "gzip" : null;
+  if (encoding && entry.body.length >= 1024) {
+    entry[encoding] ??= encoding === "br"
+      ? brotli(entry.body, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } })
+      : gzipAsync(entry.body, { level: 6 });
+    const body = await entry[encoding];
+    res.writeHead(200, { ...headers, "Content-Encoding": encoding, "Content-Length": body.length });
+    res.end(body);
+    return;
+  }
+  res.writeHead(200, { ...headers, "Content-Length": entry.body.length });
+  res.end(entry.body);
+}
+
+async function serveFile(req, res, path, pathname) {
+  if (pathname === "/index.html") {
+    await serveIndex(req, res, path);
+    return;
+  }
+  await serveStatic(req, res, path, pathname, await stat(path));
+}
+
+async function serveStatic(req, res, path, pathname, metadata) {
   const contentType = MIME.get(extname(path).toLowerCase()) ?? "application/octet-stream";
   const etag = `W/\"${metadata.size.toString(16)}-${Math.trunc(metadata.mtimeMs).toString(16)}\"`;
   if (req.headers["if-none-match"] === etag) {

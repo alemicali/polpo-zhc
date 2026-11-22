@@ -47,7 +47,7 @@ function GroupRow({ room, active, unread, resolve, onSelect }: {
             ? <ChannelLogo type="telegram" size={12} />
             : <UsersRound className="h-3 w-3 shrink-0 text-primary/80" aria-hidden />}
           <p className={cn(
-            "min-w-0 truncate text-[13px] leading-snug",
+            "min-w-0 truncate text-small leading-snug",
             unread ? "font-semibold" : "font-medium",
             active ? "text-accent-foreground" : "text-foreground",
           )}>
@@ -57,10 +57,10 @@ function GroupRow({ room, active, unread, resolve, onSelect }: {
         </div>
         <div className="mt-1.5 flex min-w-0 items-center gap-2">
           {members.length > 0 && <MemberAvatarStack members={members} max={4} size="xs" />}
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/70">
+          <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground/70">
             {names || "No agents"}
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground/70">{relativeTime(room.updatedAt)}</span>
+          <span className="shrink-0 text-micro text-muted-foreground/70">{relativeTime(room.updatedAt)}</span>
         </div>
       </div>
     </button>
@@ -151,7 +151,7 @@ export function GroupSidebarSection({
     <section className="border-b border-border/30 p-1.5 pb-2" aria-label="Groups">
       <SectionLabel>
         <UsersRound className="h-3 w-3 text-primary" />
-        <span className="flex-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Groups</span>
+        <span className="flex-1 text-label text-muted-foreground">Groups</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -171,9 +171,9 @@ export function GroupSidebarSection({
       {loading && rooms.length === 0 ? (
         <ListSkeleton />
       ) : error && rooms.length === 0 ? (
-        <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 px-3 py-2 text-caption text-muted-foreground">
           <span className="min-w-0 flex-1 truncate" title={error}>Could not load groups</span>
-          <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px]" onClick={onRetry}>
+          <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-caption" onClick={onRetry}>
             <RefreshCw className="h-3 w-3" />
             Retry
           </Button>
@@ -190,8 +190,8 @@ export function GroupSidebarSection({
                 <UsersRound className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[12px] font-medium text-foreground">New group</span>
-                <span className="block text-[10.5px] leading-snug">Talk with several agents at once</span>
+                <span className="block text-small font-medium text-foreground">New group</span>
+                <span className="block text-caption leading-snug">Talk with several agents at once</span>
               </span>
             </button>
           ) : visible.map(row)}
@@ -199,7 +199,7 @@ export function GroupSidebarSection({
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
-              className="w-full rounded-md px-3 py-1 text-left text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
+              className="w-full rounded-md px-3 py-1 text-left text-caption font-medium text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
             >
               {showAll ? "Show less" : `Show ${hidden} more`}
             </button>
@@ -216,12 +216,12 @@ export function GroupSidebarSection({
             >
               <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground/70 transition-transform", telegramOpen && "rotate-90")} />
               <ChannelLogo type="telegram" size={12} />
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Telegram groups</span>
-              <span className="text-[10px] tabular-nums text-muted-foreground/60">{telegramRooms.length}</span>
+              <span className="text-label text-muted-foreground">Telegram groups</span>
+              <span className="text-micro tabular-nums text-muted-foreground/60">{telegramRooms.length}</span>
               {telegramUnread && !telegramOpen && (
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="New messages" />
               )}
-              <span className="ml-auto text-[10px] text-muted-foreground/60">read-only</span>
+              <span className="ml-auto text-micro text-muted-foreground/60">read-only</span>
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-0.5 pt-0.5">

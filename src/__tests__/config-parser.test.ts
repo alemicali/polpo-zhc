@@ -107,6 +107,16 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       });
     });
 
+    it("reads the logo frame (box or none); anything else is the default", async () => {
+      const read = async (logoFrame: unknown) => (await parseConfig(writeConfig({
+        ...minimalConfig(), settings: { ...minimalConfig().settings, branding: { logoFrame } },
+      }))).settings.branding?.logoFrame;
+      expect(await read("none")).toBe("none");
+      expect(await read("box")).toBe("box");
+      expect(await read("circle")).toBeUndefined();
+      expect(await read(1)).toBeUndefined();
+    });
+
     it("ignores teams in polpo.json — returns empty teams", async () => {
       const cfg = {
         ...minimalConfig(),

@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ConnectorIcon } from "./connector-icon";
 import { StateBadge, Switch } from "./connector-bits";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 export interface AgentOption {
   name: string;
@@ -26,12 +27,13 @@ export interface AgentOption {
 export function AccessEditor({
   access, agents, onChange, disabled,
 }: { access: ConnectorAccess; agents: AgentOption[]; onChange: (access: ConnectorAccess) => void; disabled?: boolean }) {
+  const product = productName(useInstanceBranding());
   const all = access.agents === "*";
   const names = agents.map((a) => a.name);
   return (
     <div className="space-y-1">
-      <Row icon={<Plug className="h-4 w-4" />} label="Polpo" hint="The orchestrator chat">
-        <Switch label="Polpo can use it" checked={access.polpo} disabled={disabled} onChange={(polpo) => onChange({ ...access, polpo })} />
+      <Row icon={<Plug className="h-4 w-4" />} label={product} hint="The orchestrator chat">
+        <Switch label={`${product} can use it`} checked={access.polpo} disabled={disabled} onChange={(polpo) => onChange({ ...access, polpo })} />
       </Row>
       <Row icon={<Users className="h-4 w-4" />} label="All agents" hint="Including agents added later">
         <Switch
@@ -70,16 +72,17 @@ function Row({ icon, label, hint, children }: { icon: React.ReactNode; label: st
   );
 }
 
-const POLICIES: Array<{ value: ConnectorToolPolicy; label: string; title: string; soon?: boolean }> = [
+const policies = (product: string): Array<{ value: ConnectorToolPolicy; label: string; title: string; soon?: boolean }> => [
   { value: "allow", label: "Allow", title: "Always allow: the tool runs without asking" },
-  { value: "ask", label: "Ask", title: "Needs approval (coming soon): Polpo cannot pause a tool call for approval yet, so today \"Ask\" would run like Allow. Not selectable until the approval step exists.", soon: true },
-  { value: "off", label: "Off", title: "Blocked: hidden from Polpo and every agent" },
+  { value: "ask", label: "Ask", title: `Needs approval (coming soon): ${product} cannot pause a tool call for approval yet, so today "Ask" would run like Allow. Not selectable until the approval step exists.`, soon: true },
+  { value: "off", label: "Off", title: `Blocked: hidden from ${product} and every agent` },
 ];
 
 export function PolicyControl({ tool, value, onChange, disabled }: { tool: string; value: ConnectorToolPolicy; onChange: (p: ConnectorToolPolicy) => void; disabled?: boolean }) {
+  const product = productName(useInstanceBranding());
   return (
     <div role="radiogroup" aria-label={`Policy for ${tool}`} className="inline-flex shrink-0 rounded-md border bg-muted/30 p-0.5">
-      {POLICIES.map((p) => {
+      {policies(product).map((p) => {
         const active = value === p.value;
         const button = (
           <button
@@ -91,13 +94,13 @@ export function PolicyControl({ tool, value, onChange, disabled }: { tool: strin
             disabled={disabled || (p.soon && !active)}
             onClick={() => { if (!active) onChange(p.value); }}
             className={cn(
-              "rounded px-2 py-0.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed",
+              "rounded px-2 py-0.5 text-caption font-medium transition-colors disabled:cursor-not-allowed",
               active
-                ? p.value === "off" ? "bg-destructive/15 text-destructive" : p.value === "ask" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" : "bg-background text-foreground shadow-sm"
+                ? p.value === "off" ? "bg-destructive/15 text-destructive" : p.value === "ask" ? "bg-warning/15 text-warning" : "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:hover:text-muted-foreground",
             )}
           >
-            {p.label}{p.soon ? <sup className="ml-0.5 text-[8px] uppercase">soon</sup> : null}
+            {p.label}{p.soon ? <sup className="ml-0.5 text-micro uppercase">soon</sup> : null}
           </button>
         );
         return (
@@ -113,6 +116,7 @@ export function PolicyControl({ tool, value, onChange, disabled }: { tool: strin
 
 /** The tools list (loaded when the sheet opens; remounted per connector via `key`). */
 function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onPolicyChange: (tool: string, policy: ConnectorToolPolicy) => Promise<void> }) {
+  const product = productName(useInstanceBranding());
   const state = connectorState(connector);
   const canList = state === "connected" || state === "not_connected" || state === "error";
   const [tools, setTools] = useState<ConnectorTool[] | null>(null);
@@ -135,7 +139,7 @@ function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onP
   return (
     <section className="space-y-2">
       <div className="flex items-center gap-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-semibold"><Wrench className="h-4 w-4" /> Tools {tools ? <span className="font-normal text-muted-foreground">({tools.length})</span> : null}</h3>
+        <h3 className="flex items-center gap-1.5 font-heading text-h3"><Wrench className="h-4 w-4" /> Tools {tools ? <span className="font-normal text-muted-foreground">({tools.length})</span> : null}</h3>
         {canList && (
           <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1 text-xs" disabled={loading} onClick={() => { setLoading(true); setReload((n) => n + 1); }}>
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh
@@ -148,13 +152,13 @@ function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onP
       {tools && tools.length === 0 && <p className="text-sm text-muted-foreground">This server has no tools.</p>}
       {tools && tools.length > 0 && (
         <>
-          <p className="text-xs text-muted-foreground">Off hides a tool from Polpo and every agent.</p>
+          <p className="text-xs text-muted-foreground">Off hides a tool from {product} and every agent.</p>
           <ul className="divide-y rounded-lg border">
             {tools.map((tool) => (
               <li key={tool.name} className="flex items-start gap-3 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <p className={cn("truncate text-sm font-medium", policyOf(tool) === "off" && "text-muted-foreground line-through")}>{toolLabel(tool)}</p>
-                  {toolLabel(tool) !== tool.name && <p className="truncate font-mono text-[11px] text-muted-foreground">{tool.name}</p>}
+                  {toolLabel(tool) !== tool.name && <p className="truncate font-mono text-caption text-muted-foreground">{tool.name}</p>}
                   {tool.description && <p className="line-clamp-2 text-xs text-muted-foreground">{tool.description}</p>}
                 </div>
                 <PolicyControl tool={tool.name} value={policyOf(tool)} onChange={(p) => void onPolicyChange(tool.name, p)} />
@@ -180,6 +184,7 @@ export function ConnectorDetailSheet({
   /** Start sign-in again (a click: opens the sign-in window). */
   onReconnect: (connector: Connector) => void;
 }) {
+  const product = productName(useInstanceBranding());
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   if (!connector) return null;
@@ -234,7 +239,7 @@ export function ConnectorDetailSheet({
 
         <div className="space-y-6 p-4">
           {endpoint && (
-            <p className="flex items-center gap-1.5 break-all font-mono text-[11px] text-muted-foreground">
+            <p className="flex items-center gap-1.5 break-all font-mono text-caption text-muted-foreground">
               {connector.transport.type === "stdio" && <Terminal className="h-3 w-3 shrink-0" />} {endpoint}
             </p>
           )}
@@ -287,7 +292,7 @@ export function ConnectorDetailSheet({
           </div>
 
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold"><Users className="h-4 w-4" /> Who can use it</h3>
+            <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use it</h3>
             <AccessEditor access={connector.access} agents={agents} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
             {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents yet.</p>}
           </section>
@@ -299,7 +304,7 @@ export function ConnectorDetailSheet({
           open={confirmRemove}
           onOpenChange={setConfirmRemove}
           title={`Remove ${connector.name}?`}
-          description="Polpo signs out (revoking the access when the service allows it), deletes the stored credentials and the agents lose its tools."
+          description={`${product} signs out (revoking the access when the service allows it), deletes the stored credentials and the agents lose its tools.`}
           confirmLabel="Remove"
           destructive
           loading={busy === "remove"}

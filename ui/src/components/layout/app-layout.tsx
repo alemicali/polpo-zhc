@@ -8,6 +8,8 @@ import { ChatRoomRouteSync } from "./chat-room-route-sync";
 import { ChatFirstLayout } from "./chat-first-layout";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
+import { useDocumentTitle } from "@/lib/branding";
+import { resolveTitle } from "@/lib/page-titles";
 import { WhatsNewBar } from "@/components/whats-new/whats-new-bar";
 import { WhatsNewDrawer } from "@/components/whats-new/whats-new-drawer";
 
@@ -26,6 +28,8 @@ export function AppLayout() {
   const layoutMode = useLayoutMode();
   const { pathname } = useLocation();
   const noPagePadding = hasNoPagePadding(pathname);
+  // the browser tab: "<product name> · <page>", on every route and branding change
+  useDocumentTitle(resolveTitle(pathname));
 
   // Both branches return a root <div> so React reconciles without remounting.
   // The key ensures each layout mode has a stable identity.

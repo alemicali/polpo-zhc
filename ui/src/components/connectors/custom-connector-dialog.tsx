@@ -14,6 +14,7 @@ import {
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
 import { CopyField, Field } from "./connect-dialog";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 const AUTH_CHOICES: Array<{ value: CustomAuthChoice; label: string; hint: string }> = [
   { value: "oauth", label: "OAuth", hint: "Sign in with the service (most hosted servers)" },
@@ -31,6 +32,7 @@ export function CustomConnectorDialog({
   /** Create the connector and connect it. Called from the submit click (may open a sign-in window). */
   onSubmit: (input: ConnectorInput) => void;
 }) {
+  const product = productName(useInstanceBranding());
   const [form, setForm] = useState<CustomConnectorForm>(EMPTY_CUSTOM_FORM);
   const [showErrors, setShowErrors] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -70,7 +72,7 @@ export function CustomConnectorDialog({
                     <label key={choice.value} className={cn("cursor-pointer rounded-md border px-2.5 py-2 text-sm", form.auth === choice.value ? "border-primary bg-primary/5" : "hover:bg-muted/40")}>
                       <input type="radio" name="auth" className="sr-only" value={choice.value} checked={form.auth === choice.value} onChange={() => set("auth", choice.value)} />
                       <span className="block font-medium">{choice.label}</span>
-                      <span className="block text-[11px] leading-tight text-muted-foreground">{choice.hint}</span>
+                      <span className="block text-caption leading-tight text-muted-foreground">{choice.hint}</span>
                     </label>
                   ))}
                 </div>
@@ -110,7 +112,7 @@ export function CustomConnectorDialog({
                     <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /> Use your own OAuth client (optional)
                   </summary>
                   <div className="mt-3 space-y-3">
-                    <p className="text-xs text-muted-foreground">Leave empty to let Polpo register itself with the server (dynamic registration or its client metadata document).</p>
+                    <p className="text-xs text-muted-foreground">Leave empty to let {product} register itself with the server (dynamic registration or its client metadata document).</p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field label="Client ID" error={visible.clientId}>
                         <Input value={form.clientId} onChange={(e) => set("clientId", e.target.value)} autoComplete="off" spellCheck={false} />
@@ -129,9 +131,9 @@ export function CustomConnectorDialog({
             </>
           ) : (
             <>
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs" role="note">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                <span>A local connector <strong>runs a command on the Polpo server</strong> as the server's user. Only add servers you trust as much as the code you run on that machine.</span>
+              <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs" role="note">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <span>A local connector <strong>runs a command on the {product} server</strong> as the server's user. Only add servers you trust as much as the code you run on that machine.</span>
               </div>
               <Field label="Command" error={visible.command} hint='E.g. npx -y @modelcontextprotocol/server-filesystem /data'>
                 <Input value={form.command} onChange={(e) => set("command", e.target.value)} placeholder="npx" spellCheck={false} className="font-mono" aria-invalid={!!visible.command} />

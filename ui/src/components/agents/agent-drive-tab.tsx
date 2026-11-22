@@ -44,16 +44,16 @@ function PlanRow({ item, depth, busy, onStatus }: { item: PlanItem; depth: numbe
   return (
     <div className="rounded-md border border-border/40 bg-background/40 px-3 py-2 text-xs space-y-1" style={{ marginLeft: depth * 16 }}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={item.horizon ? "default" : "outline"} className="text-[10px]">{item.horizon ? HORIZON[item.horizon] : "Step"}</Badge>
+        <Badge variant={item.horizon ? "default" : "outline"} className="text-micro">{item.horizon ? HORIZON[item.horizon] : "Step"}</Badge>
         <span className={closed ? "line-through text-muted-foreground" : "font-medium"}>{item.title}</span>
         {item.owner && <span className="text-muted-foreground">for {item.owner}</span>}
-        {item.status === "doing" && <Badge variant="secondary" className="text-[10px]">In progress</Badge>}
+        {item.status === "doing" && <Badge variant="secondary" className="text-micro">In progress</Badge>}
         {!closed && (
           <span className="ml-auto flex gap-1">
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={busy} onClick={() => onStatus("done")}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-caption" disabled={busy} onClick={() => onStatus("done")}>
               <Check className="h-3 w-3" /> Done
             </Button>
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={busy} onClick={() => onStatus("dropped")}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-caption" disabled={busy} onClick={() => onStatus("dropped")}>
               <X className="h-3 w-3" /> Drop
             </Button>
           </span>
@@ -90,16 +90,16 @@ function IntentionRow({ intention, busy, onConfirm, onCancel }: { intention: Int
     <div className="rounded-md border border-border/40 bg-background/40 px-3 py-2 text-xs space-y-1">
       <div className="flex flex-wrap items-center gap-2">
         {intention.state === "proposed"
-          ? <Badge className="text-[10px]">Waiting for your yes</Badge>
-          : <Badge variant="outline" className="text-[10px]">{intention.cron || intention.everyMinutes > 0 ? "Routine" : "Planned"}</Badge>}
+          ? <Badge className="text-micro">Waiting for your yes</Badge>
+          : <Badge variant="outline" className="text-micro">{intention.cron || intention.everyMinutes > 0 ? "Routine" : "Planned"}</Badge>}
         <span className="text-muted-foreground">{schedule(intention)} → {intention.target?.name ?? intention.target?.chatId ?? "its chat"}</span>
         <span className="ml-auto flex gap-1">
           {intention.state === "proposed" && (
-            <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" disabled={busy} onClick={onConfirm}>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-caption" disabled={busy} onClick={onConfirm}>
               <Check className="h-3 w-3" /> Approve
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={busy} onClick={onCancel}>
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-caption" disabled={busy} onClick={onCancel}>
             <X className="h-3 w-3" /> {intention.state === "proposed" ? "Reject" : "Cancel"}
           </Button>
         </span>
@@ -249,7 +249,7 @@ export function AgentDriveTab() {
             <CardTitle className="flex items-center gap-2 text-sm">
               <UserRound className="h-4 w-4" /> Who it is
               {selfDraft === null && (
-                <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-[11px]" onClick={() => setSelfDraft(data.self)}>Edit</Button>
+                <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-caption" onClick={() => setSelfDraft(data.self)}>Edit</Button>
               )}
             </CardTitle>
           </CardHeader>

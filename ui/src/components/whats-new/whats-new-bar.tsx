@@ -17,7 +17,7 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
   return (
     <div
       className={cn(
-        "relative isolate flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-primary/20 px-3 text-[13px]",
+        "relative isolate flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-primary/20 px-3 text-small",
         "bg-gradient-to-r from-primary/15 via-primary/[0.07] to-transparent",
         className,
       )}
@@ -33,13 +33,13 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
           <Megaphone className="h-3 w-3" />
           <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-ping" />
         </span>
-        <span className="hidden shrink-0 rounded-full bg-primary px-1.5 py-px text-[10px] font-bold uppercase tracking-wider text-primary-foreground sm:inline">
+        <span className="hidden shrink-0 rounded-full bg-primary px-1.5 py-px text-micro font-bold uppercase tracking-wider text-primary-foreground sm:inline">
           Novità
         </span>
         <span className="truncate font-medium text-foreground">{newest.title}</span>
         <span className="hidden truncate text-muted-foreground md:inline">· {newest.summary}</span>
         {more > 0 && (
-          <span className="shrink-0 rounded-full border border-primary/30 px-1.5 text-[11px] text-primary">+{more}</span>
+          <span className="shrink-0 rounded-full border border-primary/30 px-1.5 text-caption text-primary">+{more}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary group-hover:underline">
           Scopri

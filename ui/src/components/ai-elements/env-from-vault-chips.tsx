@@ -15,7 +15,7 @@ export function EnvFromVaultChips({ refs, className }: { refs: EnvFromVaultRef[]
       {refs.map((r) => (
         <span
           key={r.name}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/50 bg-muted/30 px-1.5 py-0 font-mono text-[10px] leading-4 text-muted-foreground"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/50 bg-muted/30 px-1.5 py-0 font-mono text-micro leading-4 text-muted-foreground"
         >
           <KeyRound className="h-2.5 w-2.5" />
           {r.name} ← {r.ref}

@@ -1,4 +1,4 @@
-import type { InstanceBranding } from "@/hooks/use-polpo";
+import type { InstanceBranding } from "@/lib/branding";
 import { apiUrl } from "@/lib/config";
 
 function resolveBrandLogoUrl(logoUrl?: string): string | null {

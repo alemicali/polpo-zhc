@@ -13,7 +13,7 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
     environment: "jsdom",
-    include: ["ui/tests/**/*.test.tsx"],
+    include: ["ui/tests/**/*.test.{ts,tsx}"],
     poolOptions: { forks: { execArgv }, threads: { execArgv } },
   },
 });

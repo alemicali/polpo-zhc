@@ -76,17 +76,17 @@ export function WhatsAppPreviewCard({
   };
 
   return (
-    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03]">
+    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-chart-3/25 bg-card">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-emerald-500/10 bg-emerald-500/[0.02] px-3 py-2 sm:px-4 sm:py-3">
-        <MessageCircle className="h-4 w-4 shrink-0 text-emerald-600" />
+      <div className="flex items-center gap-2 border-b border-border/60 bg-chart-3/[0.06] px-3 py-2 sm:px-4 sm:py-3">
+        <MessageCircle className="h-4 w-4 shrink-0 text-chart-3" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">WhatsApp to {recipientLabel}</p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {isFile ? `Attachment · ${preview.fileName ?? preview.path}` : "Text message"}
           </p>
         </div>
-        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex border-emerald-500/30 text-emerald-700">
+        <Badge variant="outline" className="hidden shrink-0 text-micro sm:inline-flex border-primary/30 text-primary">
           Awaiting confirmation
         </Badge>
       </div>
@@ -95,7 +95,7 @@ export function WhatsAppPreviewCard({
       <div className="px-3 py-3 sm:px-4 sm:py-4 space-y-3">
         {/* Recipient pill */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">To</span>
+          <span className="text-label text-muted-foreground">To</span>
           <code className="rounded bg-background/60 px-1.5 py-0.5 text-xs font-mono">{recipientLabel}</code>
         </div>
 
@@ -113,19 +113,19 @@ export function WhatsAppPreviewCard({
               <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
               <code className="font-mono">{preview.path}</code>
             </div>
-            <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-              <Badge variant="secondary" className="gap-1 text-[10px]">
+            <div className="flex flex-wrap gap-1.5 text-caption text-muted-foreground">
+              <Badge variant="secondary" className="gap-1 text-micro">
                 {mediaIcon(preview.mediaKind)}
                 {preview.mediaKind ?? "auto"}
               </Badge>
               {preview.mimeType && (
-                <Badge variant="secondary" className="text-[10px]">{preview.mimeType}</Badge>
+                <Badge variant="secondary" className="text-micro">{preview.mimeType}</Badge>
               )}
               {preview.fileName && preview.fileName !== preview.path && (
-                <Badge variant="secondary" className="text-[10px]">as {preview.fileName}</Badge>
+                <Badge variant="secondary" className="text-micro">as {preview.fileName}</Badge>
               )}
               {preview.viewOnce && (
-                <Badge variant="secondary" className="text-[10px]">view-once</Badge>
+                <Badge variant="secondary" className="text-micro">view-once</Badge>
               )}
             </div>
             {preview.caption && (
@@ -137,7 +137,7 @@ export function WhatsAppPreviewCard({
 
       {/* Refine input */}
       {refineMode && (
-        <div className="border-t border-emerald-500/10 px-3 pb-3 sm:px-4">
+        <div className="border-t border-border/60 px-3 pb-3 sm:px-4">
           <p className="text-xs text-muted-foreground mt-2 mb-1.5">What would you like to change?</p>
           <Textarea
             placeholder="e.g., Make it more concise, change the recipient..."
@@ -160,7 +160,7 @@ export function WhatsAppPreviewCard({
 
       {/* Actions */}
       {!refineMode && (
-        <div className="grid grid-cols-2 gap-2 border-t border-emerald-500/10 bg-emerald-500/[0.02] px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
+        <div className="grid grid-cols-2 gap-2 border-t border-border/60 bg-muted/30 px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
           <Button variant="ghost" size="sm" disabled={disabled || submitting} onClick={() => handle("cancel")}
             className="w-full gap-1.5 text-muted-foreground hover:text-destructive sm:w-auto">
             <Ban className="h-3.5 w-3.5" />
@@ -173,7 +173,7 @@ export function WhatsAppPreviewCard({
             Refine
           </Button>
           <Button size="sm" disabled={disabled || submitting} onClick={() => handle("send")}
-            className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700 sm:w-auto">
+            className="w-full gap-1.5 sm:w-auto">
             {submitting ? (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
             ) : (
@@ -219,46 +219,46 @@ export function EmailPreviewCard({
   };
 
   return (
-    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-sky-500/20 bg-sky-500/[0.03]">
+    <div className="mobile-no-x mt-3 overflow-hidden rounded-xl border border-chart-1/25 bg-card">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-sky-500/10 bg-sky-500/[0.02] px-3 py-2 sm:px-4 sm:py-3">
-        <Mail className="h-4 w-4 shrink-0 text-sky-600" />
+      <div className="flex items-center gap-2 border-b border-border/60 bg-chart-1/[0.06] px-3 py-2 sm:px-4 sm:py-3">
+        <Mail className="h-4 w-4 shrink-0 text-chart-1" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{preview.subject || "(no subject)"}</p>
-          <p className="text-[11px] text-muted-foreground truncate">to {toLabel}</p>
+          <p className="text-caption text-muted-foreground truncate">to {toLabel}</p>
         </div>
-        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex border-sky-500/30 text-sky-700">
+        <Badge variant="outline" className="hidden shrink-0 text-micro sm:inline-flex border-primary/30 text-primary">
           Awaiting confirmation
         </Badge>
       </div>
 
       {/* Header pills */}
-      <div className="px-3 py-3 sm:px-4 space-y-1.5 border-b border-sky-500/10">
+      <div className="px-3 py-3 sm:px-4 space-y-1.5 border-b border-border/60">
         <div className="flex flex-wrap items-baseline gap-2 text-xs">
-          <span className="w-12 text-right text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">To</span>
+          <span className="w-12 text-right text-label text-muted-foreground shrink-0">To</span>
           <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{toLabel}</code>
         </div>
         {ccLabel && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
-            <span className="w-12 text-right text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">Cc</span>
+            <span className="w-12 text-right text-label text-muted-foreground shrink-0">Cc</span>
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{ccLabel}</code>
           </div>
         )}
         {bccLabel && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
-            <span className="w-12 text-right text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">Bcc</span>
+            <span className="w-12 text-right text-label text-muted-foreground shrink-0">Bcc</span>
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{bccLabel}</code>
           </div>
         )}
         {preview.from && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
-            <span className="w-12 text-right text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">From</span>
+            <span className="w-12 text-right text-label text-muted-foreground shrink-0">From</span>
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.from}</code>
           </div>
         )}
         {preview.reply_to && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
-            <span className="w-12 text-right text-[11px] uppercase tracking-wide text-muted-foreground shrink-0">Reply</span>
+            <span className="w-12 text-right text-label text-muted-foreground shrink-0">Reply</span>
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.reply_to}</code>
           </div>
         )}
@@ -279,14 +279,14 @@ export function EmailPreviewCard({
         </div>
         {preview.attachments && preview.attachments.length > 0 && (
           <div className="mt-3 space-y-1">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Attachments</p>
+            <p className="text-label text-muted-foreground">Attachments</p>
             <ul className="space-y-1">
               {preview.attachments.map((att, i) => (
                 <li key={i} className="flex items-center gap-2 text-xs">
                   <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
                   <code className="font-mono">{att.filename ?? att.path}</code>
                   {att.filename && att.filename !== att.path && (
-                    <span className="text-[11px] text-muted-foreground">({att.path})</span>
+                    <span className="text-caption text-muted-foreground">({att.path})</span>
                   )}
                 </li>
               ))}
@@ -297,7 +297,7 @@ export function EmailPreviewCard({
 
       {/* Refine */}
       {refineMode && (
-        <div className="border-t border-sky-500/10 px-3 pb-3 sm:px-4">
+        <div className="border-t border-border/60 px-3 pb-3 sm:px-4">
           <p className="text-xs text-muted-foreground mt-2 mb-1.5">What would you like to change?</p>
           <Textarea
             placeholder="e.g., Make the tone more formal, add a sign-off..."
@@ -320,7 +320,7 @@ export function EmailPreviewCard({
 
       {/* Actions */}
       {!refineMode && (
-        <div className="grid grid-cols-2 gap-2 border-t border-sky-500/10 bg-sky-500/[0.02] px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
+        <div className="grid grid-cols-2 gap-2 border-t border-border/60 bg-muted/30 px-3 py-2.5 sm:flex sm:items-center sm:px-4 sm:py-3">
           <Button variant="ghost" size="sm" disabled={disabled || submitting} onClick={() => handle("cancel")}
             className="w-full gap-1.5 text-muted-foreground hover:text-destructive sm:w-auto">
             <Ban className="h-3.5 w-3.5" />
@@ -333,7 +333,7 @@ export function EmailPreviewCard({
             Refine
           </Button>
           <Button size="sm" disabled={disabled || submitting} onClick={() => handle("send")}
-            className="w-full gap-1.5 bg-sky-600 hover:bg-sky-700 sm:w-auto">
+            className="w-full gap-1.5 sm:w-auto">
             {submitting ? (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
             ) : (

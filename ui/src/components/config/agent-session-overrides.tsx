@@ -40,10 +40,10 @@ export function AgentSessionOverrides({ api, value, onChange }: {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium">Per-agent conversations</span>
+        <span className="text-caption font-medium">Per-agent conversations</span>
         {available.length > 0 && (
           <Select value="" onValueChange={(agent) => update(agent, { sessionMode: "shared" })}>
-            <SelectTrigger className="h-7 w-auto text-[11px] gap-1"><Plus className="h-3 w-3" /><SelectValue placeholder="Add agent" /></SelectTrigger>
+            <SelectTrigger className="h-7 w-auto text-caption gap-1"><Plus className="h-3 w-3" /><SelectValue placeholder="Add agent" /></SelectTrigger>
             <SelectContent>
               {available.map((a) => <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>)}
             </SelectContent>
@@ -51,15 +51,15 @@ export function AgentSessionOverrides({ api, value, onChange }: {
         )}
       </div>
       {Object.keys(overrides).length === 0 && (
-        <p className="text-[10px] leading-relaxed text-muted-foreground">All agents use the channel settings above. Add an agent to give it its own behaviour.</p>
+        <p className="text-micro leading-relaxed text-muted-foreground">All agents use the channel settings above. Add an agent to give it its own behaviour.</p>
       )}
       {Object.entries(overrides).map(([agent, settings]) => {
         const idle = settings.sessionIdleMinutes;
         return (
           <div key={agent} className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-1.5">
-            <code className="font-mono text-[11px] truncate">{agent}</code>
+            <code className="font-mono text-caption truncate">{agent}</code>
             <Select value={settings.sessionMode ?? INHERIT} onValueChange={(v) => update(agent, { sessionMode: v === INHERIT ? undefined : v as SessionMode })}>
-              <SelectTrigger className="h-7 text-[11px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-7 text-caption"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={INHERIT} className="text-xs">Channel default</SelectItem>
                 <SelectItem value="per-peer" className="text-xs">Separate</SelectItem>
@@ -71,7 +71,7 @@ export function AgentSessionOverrides({ api, value, onChange }: {
                 value={idle === undefined ? INHERIT : idle === 0 ? NEVER : "custom"}
                 onValueChange={(v) => update(agent, { sessionIdleMinutes: v === INHERIT ? undefined : v === NEVER ? 0 : (idle || 60) })}
               >
-                <SelectTrigger className="h-7 text-[11px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-7 text-caption"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={INHERIT} className="text-xs">Default timeout</SelectItem>
                   <SelectItem value={NEVER} className="text-xs">Never expires</SelectItem>
@@ -79,7 +79,7 @@ export function AgentSessionOverrides({ api, value, onChange }: {
                 </SelectContent>
               </Select>
               {idle !== undefined && idle > 0 && (
-                <Input className="h-7 w-16 text-[11px] font-mono" type="number" min={1} value={idle}
+                <Input className="h-7 w-16 text-caption font-mono" type="number" min={1} value={idle}
                   onChange={(e) => update(agent, { sessionIdleMinutes: Math.max(1, Number(e.target.value) || 1) })} />
               )}
             </div>

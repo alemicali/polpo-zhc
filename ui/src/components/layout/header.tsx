@@ -26,40 +26,9 @@ import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
 import { BrandMark } from "@/components/shared/brand-mark";
+import { resolveTitle } from "@/lib/page-titles";
 import { NewChatMenu } from "@/components/groups/new-chat-menu";
 import { requestNewGroup, setActiveChatRoom, useActiveChatRoom, useActiveChatRoomTitle } from "@/hooks/use-chat-room";
-
-const titles: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/missions": "Missions",
-  "/tasks": "Tasks",
-  "/agents": "Agents",
-  "/connectors": "Connectors",
-  "/agent-talk": "Agent conversations",
-  "/skills": "Skills",
-  "/events": "Events",
-  "/chat": "Chat",
-  "/memory": "Memory",
-  "/notifications": "Notifications",
-  "/approvals": "Approvals",
-  "/playbooks": "Playbooks",
-  "/files": "Files",
-  "/config": "Configuration",
-  "/apps": "Apps",
-  "/data": "Data",
-  "/artifacts": "Artifacts",
-  "/brain": "Company Brain",
-  "/changelog": "Novità",
-};
-
-function resolveTitle(pathname: string): string {
-  if (titles[pathname]) return titles[pathname];
-  if (pathname.startsWith("/missions/")) return "Mission Detail";
-  if (pathname.startsWith("/tasks/")) return "Task Detail";
-  if (pathname.startsWith("/agents/")) return "Agent Detail";
-  if (pathname.startsWith("/skills/")) return "Skill Detail";
-  return "";
-}
 
 function ChatHeaderCenter() {
   const sessionsOpen = useChatPageSessionsOpen();
@@ -134,7 +103,7 @@ function ChatHeaderCenter() {
 
       <div className="flex shrink-0 items-center justify-end gap-1">
         {!inGroup && messages.length > 0 && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground">
             {messages.length}
           </span>
         )}
@@ -187,15 +156,15 @@ export function Header() {
             <Menu className="h-5 w-5" />
           </Button>
         </MobileNavSheet>
-        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
+        <BrandMark className="h-7 w-7 rounded-md text-sm" />
         <span className="truncate text-sm font-bold tracking-tight">{title}</span>
       </div>
 
       {/* Desktop: page title */}
       <div className="hidden shrink-0 lg:flex items-center gap-3">
-        <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+        <h2 className="font-heading text-h2">{title}</h2>
         <div className="h-4 w-px bg-border/60" />
-        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/60">
+        <span className="text-micro font-mono uppercase tracking-widest text-muted-foreground/60">
           {info?.project ?? "Polpo"}
         </span>
       </div>
@@ -252,7 +221,7 @@ export function Header() {
             align="end"
             className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50"
           >
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70">
               Mode
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
@@ -268,7 +237,7 @@ export function Header() {
               {theme === "system" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1.5">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
               <PaletteIcon className="h-3 w-3" /> Palette
             </DropdownMenuLabel>
             {PALETTES.map((p) => {
@@ -287,7 +256,7 @@ export function Header() {
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block leading-tight">{p.name}</span>
-                    <span className="block text-[10px] text-muted-foreground/70 leading-tight">{p.blurb}</span>
+                    <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
                   </span>
                   {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
                 </DropdownMenuItem>

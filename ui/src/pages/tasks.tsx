@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   CheckCircle2,
-  Clock,
   AlertTriangle,
   Loader2,
   RotateCcw,
@@ -40,8 +39,6 @@ import {
   Bot,
   GitBranch,
   Wrench,
-  HelpCircle,
-  Hammer,
   Zap,
   FileEdit,
   LayoutList,
@@ -63,6 +60,7 @@ import {
 import type { Task, TaskStatus, AgentProcess, AgentConfig } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import {
@@ -125,9 +123,9 @@ const TaskRow = memo(function TaskRow({
     <div
       className={cn(
         "group flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer",
-        "hover:shadow-[0_1px_6px_oklch(0_0_0/0.1)] hover:border-primary/25",
+        "hover:shadow-card hover:border-primary/25",
         "bg-card/80 backdrop-blur-sm",
-        isBlocked ? "border-amber-500/40 bg-amber-500/[0.03]" : "border-border/40",
+        isBlocked ? "border-warning/40 bg-warning/[0.03]" : "border-border/40",
       )}
       onClick={() => click(task.id)}
     >
@@ -145,7 +143,7 @@ const TaskRow = memo(function TaskRow({
       {/* Phase badge */}
       {fields.phase && phase && (
         <span className={cn(
-          "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-[9px] font-medium leading-none shrink-0",
+          "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-micro font-medium leading-none shrink-0",
           phase.color, "bg-current/10",
         )}>
           <phase.icon className="h-2.5 w-2.5" />
@@ -157,7 +155,7 @@ const TaskRow = memo(function TaskRow({
       {fields.deps && isBlocked && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex items-center gap-0.5 rounded-sm bg-amber-500/15 text-amber-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none shrink-0">
+            <span className="inline-flex items-center gap-0.5 rounded-sm bg-warning/15 text-warning px-1.5 py-0.5 text-micro font-semibold leading-none shrink-0">
               <AlertTriangle className="h-2.5 w-2.5" />
               Blocked
             </span>
@@ -173,7 +171,7 @@ const TaskRow = memo(function TaskRow({
 
       {/* Mission */}
       {fields.mission && task.group && (
-        <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium leading-none truncate max-w-[100px] shrink-0">
+        <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-micro font-medium leading-none truncate max-w-[100px] shrink-0">
           {task.group}
         </span>
       )}
@@ -191,7 +189,7 @@ const TaskRow = memo(function TaskRow({
               }
             </div>
           )}
-          <span className="text-[10px] text-muted-foreground truncate">
+          <span className="text-micro text-muted-foreground truncate">
             {fields.identityName && identity?.displayName ? identity.displayName : task.assignTo}
           </span>
         </div>
@@ -203,10 +201,10 @@ const TaskRow = memo(function TaskRow({
           <TooltipTrigger asChild>
             <div className={cn(
               "flex items-center gap-0.5 rounded-sm px-1 py-0.5 shrink-0",
-              assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+              assessment.passed ? "bg-success/10" : "bg-destructive/10"
             )}>
-              <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
-              <span className={cn("text-[10px] font-bold tabular-nums", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+              <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-success" : "text-destructive")} />
+              <span className={cn("text-micro font-bold tabular-nums", assessment.passed ? "text-success" : "text-destructive")}>
                 {assessment.globalScore.toFixed(1)}
               </span>
             </div>
@@ -219,14 +217,14 @@ const TaskRow = memo(function TaskRow({
 
       {/* Dependencies count */}
       {fields.deps && task.dependsOn.length > 0 && !isBlocked && (
-        <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground/50 shrink-0">
+        <span className="inline-flex items-center gap-0.5 text-micro text-muted-foreground/50 shrink-0">
           <GitBranch className="h-2.5 w-2.5" />{task.dependsOn.length}
         </span>
       )}
 
       {/* Retries */}
       {fields.retries && task.retries > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
+        <span className="inline-flex items-center gap-0.5 text-micro text-muted-foreground shrink-0">
           <RotateCcw className="h-2.5 w-2.5" />{task.retries}
         </span>
       )}
@@ -236,10 +234,10 @@ const TaskRow = memo(function TaskRow({
         <div className="flex items-center gap-1.5 shrink-0 min-w-0 max-w-[150px]">
           <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
           {process.activity.lastTool && (
-            <span className="text-[9px] font-mono text-primary truncate">{process.activity.lastTool}</span>
+            <span className="text-micro font-mono text-primary truncate">{process.activity.lastTool}</span>
           )}
           {process.activity.toolCalls > 0 && (
-            <span className="text-[9px] text-muted-foreground/50 flex items-center gap-0.5 shrink-0">
+            <span className="text-micro text-muted-foreground/50 flex items-center gap-0.5 shrink-0">
               <Zap className="h-2 w-2" />{process.activity.toolCalls}
             </span>
           )}
@@ -248,7 +246,7 @@ const TaskRow = memo(function TaskRow({
 
       {/* Time */}
       {fields.time && (
-        <span className="text-[10px] text-muted-foreground/40 shrink-0 tabular-nums w-[70px] text-right">
+        <span className="text-micro text-muted-foreground/40 shrink-0 tabular-nums w-[70px] text-right">
           {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
         </span>
       )}
@@ -256,17 +254,17 @@ const TaskRow = memo(function TaskRow({
       {/* Actions */}
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         {task.status === "draft" && (
-          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-info" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
             <Zap className="h-3 w-3" />
           </Button>
         )}
         {task.status === "failed" && (
-          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-warning" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
             <RotateCcw className="h-3 w-3" />
           </Button>
         )}
         {(task.status === "in_progress" || task.status === "assigned") && (
-          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
             <XCircle className="h-3 w-3" />
           </Button>
         )}
@@ -277,26 +275,8 @@ const TaskRow = memo(function TaskRow({
 
 // ── Status config ──
 
-const statusConfig: Record<
-  TaskStatus,
-  { icon: React.ElementType; color: string; bg: string; label: string }
-> = {
-  draft: { icon: FileEdit, color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Draft" },
-  pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
-  awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
-  assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
-  in_progress: { icon: Loader2, color: "text-blue-400", bg: "bg-blue-500/10", label: "Running" },
-  review: { icon: Eye, color: "text-amber-400", bg: "bg-amber-500/10", label: "Review" },
-  done: { icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Done" },
-  failed: { icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10", label: "Failed" },
-};
-
-const phaseConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  execution: { icon: Loader2, label: "Executing", color: "text-blue-400" },
-  review: { icon: Eye, label: "Reviewing", color: "text-amber-400" },
-  fix: { icon: Hammer, label: "Fixing", color: "text-orange-400" },
-  clarification: { icon: HelpCircle, label: "Clarifying", color: "text-purple-400" },
-};
+const statusConfig = taskStatusStyles;
+const phaseConfig = taskPhaseStyles;
 
 // ── Kanban columns (ordering) ──
 
@@ -434,11 +414,11 @@ const TaskCard = memo(function TaskCard({
       onDragStart={handleDragStart}
       className={cn(
         "group rounded-lg border bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
-        "hover:shadow-[0_2px_8px_oklch(0_0_0/0.12)] hover:border-primary/25",
+        "hover:shadow-card hover:border-primary/25",
         "w-full max-w-full overflow-hidden box-border",
         canDragToQueued && "cursor-grab active:cursor-grabbing",
         isBlocked
-          ? "border-amber-500/40 bg-amber-500/[0.03]"
+          ? "border-warning/40 bg-warning/[0.03]"
           : "border-border/40",
         compact ? "p-2" : "p-2.5",
       )}
@@ -451,7 +431,7 @@ const TaskCard = memo(function TaskCard({
           <div className="flex items-center gap-1 flex-wrap mb-1">
             {fields.phase && phase && (
               <span className={cn(
-                "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-[9px] font-medium leading-none",
+                "inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 text-micro font-medium leading-none",
                 phase.color, "bg-current/10",
               )}>
                 <phase.icon className="h-2.5 w-2.5" />
@@ -459,14 +439,14 @@ const TaskCard = memo(function TaskCard({
               </span>
             )}
             {fields.mission && task.group && (
-              <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium leading-none truncate max-w-[120px]">
+              <span className="inline-block rounded-sm bg-primary/10 text-primary px-1.5 py-0.5 text-micro font-medium leading-none truncate max-w-[120px]">
                 {task.group}
               </span>
             )}
             {fields.deps && isBlocked && unresolvedDeps.map((depId) => {
               const dep = allTasks?.find(t => t.id === depId);
               return (
-                <span key={depId} className="inline-flex items-center gap-0.5 rounded-sm bg-amber-500/15 text-amber-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none truncate max-w-[200px]">
+                <span key={depId} className="inline-flex items-center gap-0.5 rounded-sm bg-warning/15 text-warning px-1.5 py-0.5 text-micro font-semibold leading-none truncate max-w-[200px]">
                   <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
                   Blocked by {dep ? dep.title : depId.slice(0, 8)}
                 </span>
@@ -505,12 +485,12 @@ const TaskCard = memo(function TaskCard({
               )}
               <div className="flex flex-col min-w-0">
                 {fields.identityName && identity?.displayName && (
-                  <span className="text-[10px] font-medium text-foreground/70 truncate leading-tight">
+                  <span className="text-micro font-medium text-foreground/70 truncate leading-tight">
                     {identity.displayName}
                   </span>
                 )}
                 {fields.agentId && (
-                  <span className="text-[10px] text-muted-foreground truncate leading-tight">
+                  <span className="text-micro text-muted-foreground truncate leading-tight">
                     {fields.identityName && identity?.displayName ? `@${task.assignTo}` : task.assignTo}
                   </span>
                 )}
@@ -525,10 +505,10 @@ const TaskCard = memo(function TaskCard({
                 <TooltipTrigger asChild>
                   <div className={cn(
                     "flex items-center gap-0.5 rounded-sm px-1 py-0.5",
-                    assessment.passed ? "bg-emerald-500/10" : "bg-red-500/10"
+                    assessment.passed ? "bg-success/10" : "bg-destructive/10"
                   )}>
-                    <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-emerald-500" : "text-red-500")} />
-                    <span className={cn("text-[10px] font-bold tabular-nums", assessment.passed ? "text-emerald-500" : "text-red-500")}>
+                    <Star className={cn("h-2.5 w-2.5", assessment.passed ? "text-success" : "text-destructive")} />
+                    <span className={cn("text-micro font-bold tabular-nums", assessment.passed ? "text-success" : "text-destructive")}>
                       {assessment.globalScore.toFixed(1)}
                     </span>
                   </div>
@@ -543,8 +523,8 @@ const TaskCard = memo(function TaskCard({
               const done = dep?.status === "done";
               return (
                 <span key={depId} className={cn(
-                  "inline-flex items-center gap-0.5 text-[10px] truncate max-w-[180px]",
-                  done ? "text-muted-foreground/50 line-through" : isBlocked ? "text-amber-500 font-medium" : "text-muted-foreground",
+                  "inline-flex items-center gap-0.5 text-micro truncate max-w-[180px]",
+                  done ? "text-muted-foreground/50 line-through" : isBlocked ? "text-warning font-medium" : "text-muted-foreground",
                 )}>
                   <GitBranch className="h-2.5 w-2.5 shrink-0" />
                   {dep ? dep.title : depId.slice(0, 8)}
@@ -552,12 +532,12 @@ const TaskCard = memo(function TaskCard({
               );
             })}
             {fields.retries && task.retries > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-0.5 text-micro text-muted-foreground">
                 <RotateCcw className="h-2.5 w-2.5" />{task.retries}
               </span>
             )}
             {fields.expectations && task.expectations.length > 0 && !assessment && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-0.5 text-micro text-muted-foreground">
                 <Wrench className="h-2.5 w-2.5" />{task.expectations.length}
               </span>
             )}
@@ -569,23 +549,23 @@ const TaskCard = memo(function TaskCard({
               <div className="flex items-center gap-1.5 min-w-0">
                 <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
                 {process.activity.lastTool && (
-                  <span className="text-[9px] font-mono text-primary truncate">{process.activity.lastTool}</span>
+                  <span className="text-micro font-mono text-primary truncate">{process.activity.lastTool}</span>
                 )}
                 <div className="flex items-center gap-1.5 ml-auto shrink-0">
                   {process.activity.toolCalls > 0 && (
-                    <span className="text-[9px] text-muted-foreground/60 flex items-center gap-0.5">
+                    <span className="text-micro text-muted-foreground/60 flex items-center gap-0.5">
                       <Zap className="h-2 w-2" />{process.activity.toolCalls}
                     </span>
                   )}
                   {(process.activity.filesCreated.length + process.activity.filesEdited.length) > 0 && (
-                    <span className="text-[9px] text-muted-foreground/60 flex items-center gap-0.5">
+                    <span className="text-micro text-muted-foreground/60 flex items-center gap-0.5">
                       <FileEdit className="h-2 w-2" />{process.activity.filesCreated.length + process.activity.filesEdited.length}
                     </span>
                   )}
                 </div>
               </div>
               {process.activity.lastFile && (
-                <p className="text-[9px] font-mono text-muted-foreground/50 truncate pl-3">
+                <p className="text-micro font-mono text-muted-foreground/50 truncate pl-3">
                   {process.activity.lastFile}
                 </p>
               )}
@@ -595,17 +575,17 @@ const TaskCard = memo(function TaskCard({
           {/* Hover actions */}
           <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {task.status === "draft" && (
-              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-blue-400" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-info" onClick={(e) => { e.stopPropagation(); queue(task.id); }}>
                 <Zap className="h-2.5 w-2.5 mr-0.5" /> Queue
               </Button>
             )}
             {task.status === "failed" && (
-              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-amber-400" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-warning" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
                 <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
               </Button>
             )}
             {(task.status === "in_progress" || task.status === "assigned") && (
-              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-red-400" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
                 <XCircle className="h-2.5 w-2.5 mr-0.5" /> Kill
               </Button>
             )}
@@ -613,7 +593,7 @@ const TaskCard = memo(function TaskCard({
 
           {/* Time — last row */}
           {fields.time && (
-            <span className="block text-[10px] text-muted-foreground/40 mt-1 text-right">
+            <span className="block text-micro text-muted-foreground/40 mt-1 text-right">
               {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
             </span>
           )}
@@ -715,7 +695,7 @@ function GroupBlock({
         <button
           className={cn(
             "w-full max-w-full rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer overflow-hidden box-border",
-            "hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)]",
+            "hover:border-primary/20 hover:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_8%,transparent)]",
             "p-2.5 text-left",
           )}
         >
@@ -727,22 +707,22 @@ function GroupBlock({
             )}
             <GroupIcon className="h-3 w-3 text-primary/70 shrink-0" />
             <span className="text-xs font-medium truncate min-w-0 flex-1">{label}</span>
-            <Badge variant="secondary" className="text-[9px] shrink-0">{tasks.length}</Badge>
+            <Badge variant="secondary" className="text-micro shrink-0">{tasks.length}</Badge>
           </div>
           {/* Mini status summary */}
           <div className="flex items-center gap-2 mt-1 pl-5">
             {running > 0 && (
-              <span className="text-[9px] text-blue-400 flex items-center gap-0.5">
+              <span className="text-micro text-info flex items-center gap-0.5">
                 <Loader2 className="h-2 w-2 animate-spin" />{running}
               </span>
             )}
             {done > 0 && (
-              <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
+              <span className="text-micro text-success flex items-center gap-0.5">
                 <CheckCircle2 className="h-2 w-2" />{done}
               </span>
             )}
             {failed > 0 && (
-              <span className="text-[9px] text-red-400 flex items-center gap-0.5">
+              <span className="text-micro text-destructive flex items-center gap-0.5">
                 <AlertTriangle className="h-2 w-2" />{failed}
               </span>
             )}
@@ -836,7 +816,7 @@ function KanbanColumn({
     <div
       className={cn(
         "flex flex-col w-[260px] min-w-[260px] max-w-[260px] shrink-0 overflow-hidden rounded-lg border border-dashed border-transparent transition-colors",
-        acceptsStatusDrop && "data-[drop=true]:border-blue-400/60 data-[drop=true]:bg-blue-500/[0.06]",
+        acceptsStatusDrop && "data-[drop=true]:border-info/60 data-[drop=true]:bg-info/[0.06]",
       )}
       data-drop={isDragOver ? "true" : undefined}
       onDragOver={handleDragOver}
@@ -846,14 +826,12 @@ function KanbanColumn({
       {/* Column header */}
       <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2 min-w-0">
         {colCfg ? (
-          <div className={cn("h-2 w-2 rounded-full shrink-0", colCfg.bg.replace("bg-", "bg-").replace("/10", ""))} style={{
-            backgroundColor: `hsl(var(--${colCfg.color.replace("text-", "").replace("-400", "")}))`,
-          }} />
+          <div className={cn("h-2 w-2 rounded-full shrink-0", colCfg.dot)} />
         ) : (
           <div className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0" />
         )}
         <span className="text-xs font-medium truncate">{col.label}</span>
-        <Badge variant="secondary" className="text-[9px] ml-auto shrink-0">{colTasks.length}</Badge>
+        <Badge variant="secondary" className="text-micro ml-auto shrink-0">{colTasks.length}</Badge>
       </div>
 
       {/* Column body — [&>div>div]:!block overrides Radix ScrollArea viewport's display:table that causes width overflow */}
@@ -861,7 +839,7 @@ function KanbanColumn({
         <div className="space-y-1.5 px-1 pb-1">
           {colTasks.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground/60">
-              <p className="text-[10px]">No tasks</p>
+              <p className="text-micro">No tasks</p>
             </div>
           ) : groups ? (
             Object.entries(groups).map(([groupName, groupTasks]) => (
@@ -1009,7 +987,7 @@ function ListView({
             onClick={() => setTab(t.value)}
           >
             {t.label}
-            <Badge variant="secondary" className="text-[9px]">{t.count}</Badge>
+            <Badge variant="secondary" className="text-micro">{t.count}</Badge>
           </Button>
         ))}
       </div>
@@ -1106,7 +1084,7 @@ function CardFieldSettings({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-52 p-2" align="end">
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 px-1">
+        <p className="text-label text-muted-foreground mb-2 px-1">
           Visible fields
         </p>
         <div className="space-y-0.5">
@@ -1219,7 +1197,7 @@ export function TasksPage() {
                   <Badge
                     key={`m-${name}`}
                     variant="secondary"
-                    className="text-[10px] gap-0.5 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20 py-0 h-5"
+                    className="text-micro gap-0.5 cursor-pointer bg-primary/10 text-primary hover:bg-destructive/20 py-0 h-5"
                     onClick={() => toggleMission(name)}
                   >
                     {name}
@@ -1230,7 +1208,7 @@ export function TasksPage() {
                   <Badge
                     key={`t-${name}`}
                     variant="secondary"
-                    className="text-[10px] gap-0.5 cursor-pointer bg-violet-500/10 text-violet-400 hover:bg-destructive/20 py-0 h-5"
+                    className="text-micro gap-0.5 cursor-pointer bg-status-assigned/10 text-status-assigned hover:bg-destructive/20 py-0 h-5"
                     onClick={() => toggleTeam(name)}
                   >
                     {name}
@@ -1240,21 +1218,21 @@ export function TasksPage() {
                 {timeFilter && (
                   <Badge
                     variant="secondary"
-                    className="text-[10px] gap-0.5 cursor-pointer bg-blue-500/10 text-blue-400 hover:bg-destructive/20 py-0 h-5"
+                    className="text-micro gap-0.5 cursor-pointer bg-info/10 text-info hover:bg-destructive/20 py-0 h-5"
                     onClick={() => setTimeFilter(null)}
                   >
                     {getTimeRangeLabel(timeFilter.range)}
                     <XCircle className="h-2.5 w-2.5" />
                   </Badge>
                 )}
-                <button className="text-[10px] text-muted-foreground/50 hover:text-foreground ml-0.5" onClick={clearAllFilters}>
+                <button className="text-micro text-muted-foreground/50 hover:text-foreground ml-0.5" onClick={clearAllFilters}>
                   Clear
                 </button>
               </div>
             </>
           )}
           <div className="flex items-center justify-between gap-2 sm:ml-auto">
-            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">
+            <span className="shrink-0 text-caption tabular-nums text-muted-foreground/50">
               {search
                 ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""}`
                 : `${filtered.length}${hasActiveFilters ? `/${tasks.length}` : ""}${hasMore ? "+" : ""} task${filtered.length !== 1 ? "s" : ""}`}
@@ -1393,7 +1371,7 @@ export function TasksPage() {
               <p className="text-xs mt-1 text-center max-w-xs">
                 Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
               </p>
-              <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
+              <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
                 polpo mission &lt;prompt&gt;
               </kbd>
             </CardContent>

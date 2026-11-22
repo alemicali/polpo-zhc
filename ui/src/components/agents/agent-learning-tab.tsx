@@ -30,15 +30,15 @@ function ChangeRow({ change, onRevert, reverting }: { change: LearningChange; on
   return (
     <details className="group rounded-md border border-border/40 bg-background/40 px-3 py-2 text-xs">
       <summary className="flex cursor-pointer list-none items-center gap-2">
-        <Badge variant="outline" className="text-[10px]">{KIND_LABEL[change.kind]}</Badge>
+        <Badge variant="outline" className="text-micro">{KIND_LABEL[change.kind]}</Badge>
         {change.kind !== "memory" && <span className="font-mono">{change.target}</span>}
         <span className="text-muted-foreground">{change.source === "review" ? "while reviewing" : "in a chat"} · {when(change.at)}</span>
         <span className="ml-auto flex items-center gap-2">
           {change.revertedAt
-            ? <Badge variant="secondary" className="text-[10px]">Reverted</Badge>
+            ? <Badge variant="secondary" className="text-micro">Reverted</Badge>
             : (
               <Button
-                size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={reverting}
+                size="sm" variant="ghost" className="h-6 px-2 text-caption" disabled={reverting}
                 onClick={(e) => { e.preventDefault(); onRevert(); }}
               >
                 {reverting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
@@ -49,12 +49,12 @@ function ChangeRow({ change, onRevert, reverting }: { change: LearningChange; on
       </summary>
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Before</div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px]">{change.before || "(empty)"}</pre>
+          <div className="mb-1 text-label text-muted-foreground">Before</div>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-caption">{change.before || "(empty)"}</pre>
         </div>
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">After</div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px]">{change.after || "(empty)"}</pre>
+          <div className="mb-1 text-label text-muted-foreground">After</div>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-caption">{change.after || "(empty)"}</pre>
         </div>
       </div>
     </details>

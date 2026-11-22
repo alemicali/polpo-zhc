@@ -104,11 +104,11 @@ function getStateIcon(state: ToolState) {
     case "calling":
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
     case "completed":
-      return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+      return <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
     case "error":
       return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
     case "interrupted":
-      return <AlertCircle className="h-3.5 w-3.5 text-amber-500" />;
+      return <AlertCircle className="h-3.5 w-3.5 text-warning" />;
   }
 }
 
@@ -116,31 +116,31 @@ function getStateBadge(state: ToolState) {
   switch (state) {
     case "preparing":
       return (
-        <Badge variant="outline" className="text-[9px] font-normal border-muted-foreground/30 text-muted-foreground">
+        <Badge variant="outline" className="text-micro font-normal border-muted-foreground/30 text-muted-foreground">
           Preparing
         </Badge>
       );
     case "calling":
       return (
-        <Badge variant="outline" className="text-[9px] font-normal border-primary/30 text-primary">
+        <Badge variant="outline" className="text-micro font-normal border-primary/30 text-primary">
           Running
         </Badge>
       );
     case "completed":
       return (
-        <Badge variant="outline" className="text-[9px] font-normal border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+        <Badge variant="outline" className="text-micro font-normal border-success/30 text-success">
           Done
         </Badge>
       );
     case "error":
       return (
-        <Badge variant="outline" className="text-[9px] font-normal border-destructive/30 text-destructive">
+        <Badge variant="outline" className="text-micro font-normal border-destructive/30 text-destructive">
           Error
         </Badge>
       );
     case "interrupted":
       return (
-        <Badge variant="outline" className="text-[9px] font-normal border-amber-500/30 text-amber-600 dark:text-amber-400">
+        <Badge variant="outline" className="text-micro font-normal border-warning/30 text-warning">
           Waiting
         </Badge>
       );
@@ -160,7 +160,7 @@ function SandboxBadge({ toolName }: { toolName: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-teal-500/30 bg-teal-500/10 px-1.5 py-0 text-[10px] leading-4 text-teal-400">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-chart-1/30 bg-chart-1/10 px-1.5 py-0 text-micro leading-4 text-chart-1">
           <Box className="h-2.5 w-2.5" />{label}
         </span>
       </TooltipTrigger>
@@ -273,7 +273,7 @@ export function ToolInvocation({
               {formatToolName(tool.name)}
             </span>
             {tool.state === "calling" && tool.progress && (
-              <span className="text-[11px] text-muted-foreground truncate" title={tool.progress.message}>
+              <span className="text-caption text-muted-foreground truncate" title={tool.progress.message}>
                 {formatProgress(tool.progress)}
               </span>
             )}
@@ -282,7 +282,7 @@ export function ToolInvocation({
               <button
                 onClick={handleFileClick}
                 className={cn(
-                  "flex items-center gap-1 text-[11px] truncate max-w-[50%]",
+                  "flex items-center gap-1 text-caption truncate max-w-[50%]",
                   tool.state === "completed"
                     ? "text-primary hover:text-primary/80 hover:underline cursor-pointer"
                     : "text-muted-foreground cursor-default",
@@ -325,7 +325,7 @@ export function ToolInvocation({
               {/* Input arguments */}
               {tool.arguments && Object.keys(tool.arguments).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-label text-muted-foreground mb-1">
                     Input
                   </p>
                   <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
@@ -336,7 +336,7 @@ export function ToolInvocation({
 
               {!tool.arguments && tool.argumentsText && (
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-label text-muted-foreground mb-1">
                     Input draft
                   </p>
                   <pre
@@ -351,7 +351,7 @@ export function ToolInvocation({
               {/* Result */}
               {tool.result && (
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-label text-muted-foreground mb-1">
                     {tool.state === "error" ? "Error" : "Result"}
                   </p>
                   <div
@@ -426,7 +426,7 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
     ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
     : hasError
       ? <AlertCircle className="h-3.5 w-3.5 text-destructive" />
-      : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+      : <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
 
   const names = cardTools.map((t) => formatToolName(t.name));
   // Show first 2 names + "and N more" if > 2
@@ -458,7 +458,7 @@ export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps
               <span className="text-xs text-muted-foreground">
                 {isCalling ? `Working on ${cardTools.length} tools` : `Used ${cardTools.length} tools`}
               </span>
-              <span className="text-[10px] text-muted-foreground/60 truncate flex-1">
+              <span className="text-micro text-muted-foreground/60 truncate flex-1">
                 {preview}
               </span>
               {summaryIcon}

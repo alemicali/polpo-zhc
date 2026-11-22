@@ -185,7 +185,7 @@ export function ModelPicker({
                     <Badge
                       variant="secondary"
                       className={cn(
-                        "text-[9px] px-1 py-0 ml-0.5",
+                        "text-micro px-1 py-0 ml-0.5",
                         providerFilter === prov ? "bg-primary-foreground/20 text-primary-foreground" : "",
                       )}
                     >
@@ -233,17 +233,17 @@ export function ModelPicker({
                     <span className="font-medium truncate">{m.name}</span>
                     <span className="text-xs text-muted-foreground shrink-0">{m.provider}</span>
                     {m.custom && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">custom</Badge>
+                      <Badge variant="outline" className="text-micro px-1.5 py-0 shrink-0">custom</Badge>
                     )}
                     {m.reasoning && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                      <Badge variant="secondary" className="text-micro px-1.5 py-0 shrink-0">
                         <Zap className="h-2.5 w-2.5 mr-0.5" />reasoning
                       </Badge>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground shrink-0 ml-2">
                     {m.cost.input === 0 && m.cost.output === 0
-                      ? <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-emerald-600">free</Badge>
+                      ? <Badge variant="secondary" className="text-micro px-1.5 py-0 text-success">free</Badge>
                       : `${fmtCost(m.cost.input)} / ${fmtCost(m.cost.output)}`}
                   </span>
                 </button>

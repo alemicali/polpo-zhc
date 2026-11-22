@@ -25,16 +25,16 @@ export function LiveActivity({ process }: { process: AgentProcess }) {
     <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={cn("h-2.5 w-2.5 rounded-full", process.alive ? "bg-primary animate-pulse" : "bg-zinc-500")} />
-          <span className="text-xs font-semibold text-primary uppercase tracking-wider">
+          <div className={cn("h-2.5 w-2.5 rounded-full", process.alive ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+          <span className="text-label text-primary">
             {process.alive ? "Active" : "Finished"}
           </span>
-          <Badge variant="secondary" className="text-[10px]">PID {process.pid}</Badge>
+          <Badge variant="secondary" className="text-micro">PID {process.pid}</Badge>
           {act.sessionId && (
-            <span className="text-[10px] font-mono text-muted-foreground">session:{act.sessionId.slice(0, 8)}</span>
+            <span className="text-micro font-mono text-muted-foreground">session:{act.sessionId.slice(0, 8)}</span>
           )}
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-3 text-micro text-muted-foreground">
           {act.lastUpdate && (
             <span>updated {formatDistanceToNow(new Date(act.lastUpdate), { addSuffix: true })}</span>
           )}
@@ -84,30 +84,30 @@ export function LiveActivity({ process }: { process: AgentProcess }) {
       {/* File lists */}
       {act.filesCreated && act.filesCreated.length > 0 && (
         <div>
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1 mb-1.5">
-            <FilePlus className="h-3 w-3 text-emerald-400" /> Created ({act.filesCreated.length})
+          <p className="text-micro text-muted-foreground flex items-center gap-1 mb-1.5">
+            <FilePlus className="h-3 w-3 text-success" /> Created ({act.filesCreated.length})
           </p>
           <div className="flex flex-wrap gap-1">
             {act.filesCreated.slice(0, 12).map((f) => (
-              <Badge key={f} variant="secondary" className="text-[10px] font-mono max-w-[250px] truncate">{f}</Badge>
+              <Badge key={f} variant="secondary" className="text-micro font-mono max-w-[250px] truncate">{f}</Badge>
             ))}
             {act.filesCreated.length > 12 && (
-              <Badge variant="secondary" className="text-[10px]">+{act.filesCreated.length - 12}</Badge>
+              <Badge variant="secondary" className="text-micro">+{act.filesCreated.length - 12}</Badge>
             )}
           </div>
         </div>
       )}
       {act.filesEdited && act.filesEdited.length > 0 && (
         <div>
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1 mb-1.5">
-            <FileEdit className="h-3 w-3 text-amber-400" /> Edited ({act.filesEdited.length})
+          <p className="text-micro text-muted-foreground flex items-center gap-1 mb-1.5">
+            <FileEdit className="h-3 w-3 text-warning" /> Edited ({act.filesEdited.length})
           </p>
           <div className="flex flex-wrap gap-1">
             {act.filesEdited.slice(0, 12).map((f) => (
-              <Badge key={f} variant="outline" className="text-[10px] font-mono max-w-[250px] truncate">{f}</Badge>
+              <Badge key={f} variant="outline" className="text-micro font-mono max-w-[250px] truncate">{f}</Badge>
             ))}
             {act.filesEdited.length > 12 && (
-              <Badge variant="outline" className="text-[10px]">+{act.filesEdited.length - 12}</Badge>
+              <Badge variant="outline" className="text-micro">+{act.filesEdited.length - 12}</Badge>
             )}
           </div>
         </div>

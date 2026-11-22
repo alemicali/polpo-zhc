@@ -401,7 +401,7 @@ export function configRoutes(getDeps: () => {
       if (body.branding !== undefined) {
         // only the fields given change; an empty string restores the default
         const branding: Record<string, string | undefined> = { ...(settings.branding ?? {}) };
-        for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl"] as const) {
+        for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl", "logoFrame"] as const) {
           const value = body.branding[key];
           if (value === undefined) continue;
           if (value === "") delete branding[key];

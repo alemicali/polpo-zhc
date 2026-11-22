@@ -47,7 +47,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
-import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/mission-status";
+import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/status-tokens";
 import {
   TimeRangeFilter,
 } from "@/components/shared/time-range-filter";
@@ -159,7 +159,7 @@ function DeadlineBadge({ deadline }: { deadline: string }) {
   const now = useNow();
   const isOverdue = deadlineDate.getTime() < now;
   return (
-    <Badge variant="outline" className={cn("text-[10px] gap-1", isOverdue ? "text-red-400 border-red-500/30" : "text-amber-400")}>
+    <Badge variant="outline" className={cn("text-micro gap-1", isOverdue ? "text-destructive border-destructive/30" : "text-warning")}>
       <Timer className="h-2.5 w-2.5" />
       {isOverdue ? "Overdue" : `due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`}
     </Badge>
@@ -200,7 +200,7 @@ function MissionRow({
         "bg-card/80 backdrop-blur-sm border border-border/40",
         "transition-all duration-200 hover:border-primary/20 cursor-pointer",
         isActive && "border-l-2 border-l-primary/60 glow-cyan",
-        mission.status === "paused" && "border-l-2 border-l-amber-400/60 glow-amber",
+        mission.status === "paused" && "border-l-2 border-l-warning/60 glow-amber",
       )}
       onClick={onClick}
     >
@@ -213,7 +213,7 @@ function MissionRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{mission.name}</span>
-          <Badge variant="outline" className={cn("text-[10px] capitalize shrink-0", style.color)}>
+          <Badge variant="outline" className={cn("text-micro capitalize shrink-0", style.color)}>
             {style.label}
           </Badge>
         </div>
@@ -228,25 +228,25 @@ function MissionRow({
         {(mission.schedule || mission.deadline || mission.qualityThreshold != null) && (
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             {mission.schedule && (
-              <Badge variant="outline" className="text-[10px] gap-1 text-blue-400">
+              <Badge variant="outline" className="text-micro gap-1 text-info">
                 <Calendar className="h-2.5 w-2.5" />
                 {cronToHuman(mission.schedule)}
                 {mission.status === "recurring" ? (
-                  <span className="flex items-center gap-0.5 ml-0.5 text-violet-400"><Repeat className="h-2 w-2" />Recurring</span>
+                  <span className="flex items-center gap-0.5 ml-0.5 text-chart-5"><Repeat className="h-2 w-2" />Recurring</span>
                 ) : (
                   <span className="ml-0.5 text-muted-foreground">One-shot</span>
                 )}
               </Badge>
             )}
             {mission.endDate && (
-              <Badge variant="outline" className="text-[10px] gap-1 text-muted-foreground">
+              <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
                 <Calendar className="h-2.5 w-2.5" />
                 until {new Date(mission.endDate).toLocaleDateString()}
               </Badge>
             )}
             {mission.deadline && <DeadlineBadge deadline={mission.deadline} />}
             {mission.qualityThreshold != null && (
-              <Badge variant="outline" className="text-[10px] gap-1 text-amber-400">
+              <Badge variant="outline" className="text-micro gap-1 text-warning">
                 <Star className="h-2.5 w-2.5" />
                 {mission.qualityThreshold}
               </Badge>
@@ -259,20 +259,20 @@ function MissionRow({
       {isActive && stats.total > 0 && (
         <div className="flex items-center gap-2 shrink-0">
           <Progress value={progress} className="h-1.5 w-20 [&>div]:bg-primary" />
-          <span className="text-[10px] text-muted-foreground font-mono">{stats.done}/{stats.total}</span>
+          <span className="text-micro text-muted-foreground font-mono">{stats.done}/{stats.total}</span>
         </div>
       )}
 
       {/* Status badges */}
       <div className="flex items-center gap-1.5 shrink-0">
         {stats.running > 0 && (
-          <Badge variant="secondary" className="text-[10px]">{stats.running} running</Badge>
+          <Badge variant="secondary" className="text-micro">{stats.running} running</Badge>
         )}
         {stats.failed > 0 && (
-          <Badge variant="destructive" className="text-[10px]">{stats.failed} failed</Badge>
+          <Badge variant="destructive" className="text-micro">{stats.failed} failed</Badge>
         )}
         {mission.status === "completed" && stats.done > 0 && (
-          <Badge variant="secondary" className="text-[10px]">{stats.done} done</Badge>
+          <Badge variant="secondary" className="text-micro">{stats.done} done</Badge>
         )}
       </div>
 
@@ -335,7 +335,7 @@ function StatusFilter({
           <Filter className="h-3.5 w-3.5" />
           Status
           {hasFilter && (
-            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
+            <Badge variant="secondary" className="text-micro ml-1">{selected.size}</Badge>
           )}
         </Button>
       </PopoverTrigger>
@@ -397,7 +397,7 @@ function TeamFilter({
           <Users className="h-3.5 w-3.5" />
           Team
           {hasFilter && (
-            <Badge variant="secondary" className="text-[9px] ml-1">{selected.size}</Badge>
+            <Badge variant="secondary" className="text-micro ml-1">{selected.size}</Badge>
           )}
         </Button>
       </PopoverTrigger>
@@ -611,7 +611,7 @@ export function MissionsPage() {
             <span className="font-mono">{filtered.length}</span>{hasFilters ? ` of ${missions.length}` : ""} mission{filtered.length !== 1 ? "s" : ""}
           </span>
           {active.length > 0 && (
-            <Badge variant="default" className="text-[10px] font-mono">
+            <Badge variant="default" className="text-micro font-mono">
               {active.length} running
             </Badge>
           )}
@@ -624,13 +624,13 @@ export function MissionsPage() {
       {/* Active filter indicators */}
       {(selectedStatuses.size > 0 || selectedTeams.size > 0 || scheduleType !== "all" || timeFilter) && (
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <span className="text-[10px] text-muted-foreground">Filtering by:</span>
+          <span className="text-micro text-muted-foreground">Filtering by:</span>
           {scheduleType !== "all" && (
             <Badge
               variant="secondary"
               className={cn(
-                "text-[10px] gap-1 cursor-pointer hover:bg-destructive/20",
-                scheduleType === "recurring" ? "text-violet-400" : "text-blue-400"
+                "text-micro gap-1 cursor-pointer hover:bg-destructive/20",
+                scheduleType === "recurring" ? "text-chart-5" : "text-info"
               )}
               onClick={() => setScheduleType("all")}
             >
@@ -642,7 +642,7 @@ export function MissionsPage() {
           {timeFilter && (
             <Badge
               variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer hover:bg-destructive/20 text-blue-400"
+              className="text-micro gap-1 cursor-pointer hover:bg-destructive/20 text-info"
               onClick={() => setTimeFilter(null)}
             >
               <Calendar className="h-2.5 w-2.5" />
@@ -656,7 +656,7 @@ export function MissionsPage() {
               <Badge
                 key={status}
                 variant="secondary"
-                className={cn("text-[10px] gap-1 cursor-pointer hover:bg-destructive/20", opt?.color)}
+                className={cn("text-micro gap-1 cursor-pointer hover:bg-destructive/20", opt?.color)}
                 onClick={() => toggleStatus(status)}
               >
                 {opt?.label ?? status}
@@ -668,7 +668,7 @@ export function MissionsPage() {
             <Badge
               key={`team-${team}`}
               variant="secondary"
-              className="text-[10px] gap-1 cursor-pointer hover:bg-destructive/20 text-blue-400"
+              className="text-micro gap-1 cursor-pointer hover:bg-destructive/20 text-info"
               onClick={() => toggleTeam(team)}
             >
               <Users className="h-2.5 w-2.5" />
@@ -679,7 +679,7 @@ export function MissionsPage() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground"
+            className="h-5 px-1.5 text-micro text-muted-foreground"
             onClick={() => { setSelectedStatuses(new Set()); setSelectedTeams(new Set()); setScheduleType("all"); setTimeFilter(null); }}
           >
             Clear all
@@ -695,7 +695,7 @@ export function MissionsPage() {
             <p className="text-xs mt-1 text-center max-w-xs">
               Missions are created when you give the orchestrator a prompt via the CLI or Chat.
             </p>
-            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
+            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
               polpo mission &lt;prompt&gt;
             </kbd>
           </CardContent>
@@ -706,7 +706,7 @@ export function MissionsPage() {
             {sections.map(({ label, missions: sectionMissions }) => (
               <section key={label}>
                 <div className="mb-3">
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                  <h3 className="text-label text-muted-foreground">
                     {label} ({sectionMissions.length})
                   </h3>
                   <div className="mt-1.5 h-px bg-border/40" />

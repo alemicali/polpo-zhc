@@ -45,15 +45,15 @@ const SCOPE_META: Record<RuleScope, { label: string; icon: typeof Layers; tone: 
   task: {
     label: "Task scope",
     icon: Target,
-    tone: "border-emerald-500/30 bg-emerald-500/5",
-    chip: "text-emerald-600 border-emerald-500/30",
+    tone: "border-success/30 bg-success/5",
+    chip: "text-success border-success/30",
     winsOver: "wins over mission + global",
   },
   mission: {
     label: "Mission scope",
     icon: Layers,
-    tone: "border-sky-500/30 bg-sky-500/5",
-    chip: "text-sky-600 border-sky-500/30",
+    tone: "border-info/30 bg-info/5",
+    chip: "text-info border-info/30",
     winsOver: "wins over global",
   },
   global: {
@@ -87,7 +87,7 @@ export function AppliedRulesPanel(props: AppliedRulesPanelProps) {
         <p className="text-sm text-muted-foreground">
           No notification rules would fire for {props.variant === "mission" ? "this mission" : "this task"}.
         </p>
-        <p className="text-[11px] text-muted-foreground/70 mt-1">
+        <p className="text-caption text-muted-foreground/70 mt-1">
           Configure rules in{" "}
           <Link to="/config" className="text-primary hover:underline inline-flex items-center gap-0.5">
             Config → Rules <ExternalLink className="h-2.5 w-2.5" />
@@ -119,11 +119,11 @@ export function AppliedRulesPanel(props: AppliedRulesPanelProps) {
             <header className="flex items-center gap-2 mb-2">
               <Icon className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-xs font-semibold">{meta.label}</span>
-              <Badge variant="outline" className={cn("text-[10px] h-4 px-1.5", meta.chip)}>
+              <Badge variant="outline" className={cn("text-micro h-4 px-1.5", meta.chip)}>
                 {items.length} {items.length === 1 ? "rule" : "rules"}
               </Badge>
               {meta.winsOver && (
-                <span className="text-[10px] text-muted-foreground ml-auto">{meta.winsOver}</span>
+                <span className="text-micro text-muted-foreground ml-auto">{meta.winsOver}</span>
               )}
             </header>
             <ul className="space-y-2">
@@ -141,34 +141,34 @@ export function AppliedRulesPanel(props: AppliedRulesPanelProps) {
                     {a.rule.severity && a.rule.severity !== "info" && (
                       <Badge
                         variant={a.rule.severity === "critical" ? "destructive" : "secondary"}
-                        className="text-[9px] h-4 px-1.5"
+                        className="text-micro h-4 px-1.5"
                       >
                         {a.rule.severity}
                       </Badge>
                     )}
                     {a.shadowed && (
-                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 text-muted-foreground">
+                      <Badge variant="outline" className="text-micro h-4 px-1.5 text-muted-foreground">
                         shadowed
                       </Badge>
                     )}
                   </div>
-                  <p className="text-[11px] leading-relaxed text-muted-foreground mb-1.5 pl-5">
+                  <p className="text-caption leading-relaxed text-muted-foreground mb-1.5 pl-5">
                     {summarizeRule(a.rule)}
                   </p>
                   <div className="flex flex-wrap items-center gap-1 pl-5">
                     {a.matchedEvents.map(ev => (
                       <code
                         key={ev}
-                        className="text-[10px] font-mono px-1 py-0.5 rounded bg-muted/40 border border-border/20"
+                        className="text-micro font-mono px-1 py-0.5 rounded bg-muted/40 border border-border/20"
                       >
                         {ev}
                       </code>
                     ))}
                     {(a.rule.channels?.length ?? 0) > 0 && (
                       <>
-                        <span className="text-muted-foreground text-[10px] mx-0.5">→</span>
+                        <span className="text-muted-foreground text-micro mx-0.5">→</span>
                         {a.rule.channels!.map(ch => (
-                          <Badge key={ch} variant="outline" className="text-[10px] h-4">
+                          <Badge key={ch} variant="outline" className="text-micro h-4">
                             {ch}
                           </Badge>
                         ))}

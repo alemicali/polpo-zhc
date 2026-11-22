@@ -61,7 +61,7 @@ function notify(): void {
 /** Resolve the three layers and put the result on the page. */
 export function refreshAppearance(): ResolvedAppearance {
   const resolved = kit.resolve(kit.read(win(), config.baseUrl, currentScope));
-  kit.apply(window.document as unknown as Parameters<typeof kit.apply>[0], resolved);
+  kit.apply(window.document as unknown as Parameters<typeof kit.apply>[0], resolved, import.meta.env.BASE_URL || "/");
   return resolved;
 }
 

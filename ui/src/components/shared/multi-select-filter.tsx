@@ -69,7 +69,7 @@ export function MultiSelectFilter({
           {icon ?? <Filter className="h-3.5 w-3.5" />}
           {label}
           {count > 0 && (
-            <Badge variant="secondary" className="text-[9px] ml-1">
+            <Badge variant="secondary" className="text-micro ml-1">
               {count}
             </Badge>
           )}

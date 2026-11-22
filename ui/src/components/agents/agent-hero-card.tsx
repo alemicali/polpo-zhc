@@ -43,7 +43,7 @@ export function AgentHeroCard() {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight leading-tight truncate">
+              <h1 className="font-heading text-h2 truncate">
                 {identity?.displayName ?? agent.name}
               </h1>
               {process && (
@@ -51,7 +51,7 @@ export function AgentHeroCard() {
               )}
             </div>
             {identity?.displayName && identity.displayName !== agent.name && (
-              <p className="text-[10px] font-mono text-muted-foreground">@{agent.name}</p>
+              <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
             )}
           </div>
         </div>
@@ -60,12 +60,12 @@ export function AgentHeroCard() {
         {(agent.volatile || agent.missionGroup) && (
           <div className="flex flex-wrap gap-1.5">
             {agent.volatile && (
-              <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+              <Badge variant="outline" className="text-micro text-warning border-warning/30">
                 <Zap className="h-2.5 w-2.5 mr-0.5" /> Volatile
               </Badge>
             )}
             {agent.missionGroup && (
-              <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+              <Badge variant="outline" className="text-micro text-warning border-warning/30">
                 mission: {agent.missionGroup}
               </Badge>
             )}
@@ -73,7 +73,7 @@ export function AgentHeroCard() {
         )}
 
         {/* Identity fields */}
-        <div className="divide-y divide-border/20 text-[11px]">
+        <div className="divide-y divide-border/20 text-caption">
           <div className="flex items-center gap-2 py-1.5">
             <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground/60 shrink-0">Title</span>
@@ -103,7 +103,7 @@ export function AgentHeroCard() {
             <Brain className="h-3 w-3 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground/60 shrink-0">Reasoning</span>
             {agent.reasoning && agent.reasoning !== "off" ? (
-              <Badge variant="outline" className={cn("text-[9px] ml-auto", reasoningMeta[agent.reasoning]?.color)}>
+              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[agent.reasoning]?.color)}>
                 {reasoningMeta[agent.reasoning]?.label ?? agent.reasoning}
               </Badge>
             ) : (

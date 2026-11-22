@@ -53,10 +53,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { cn } from "@/lib/utils";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 import type { ApiFetch } from "@/hooks/use-custom-providers";
+import { SectionHeader } from "@/components/shared/section-header";
 
 interface TestResult {
   ok: boolean;
@@ -242,9 +244,9 @@ function toSecretsPayload(d: Draft) {
   return secrets;
 }
 
-const SECTION = "text-[10px] uppercase tracking-wider text-muted-foreground font-semibold";
+const SECTION = "text-label text-muted-foreground";
 const LABEL = "text-xs font-medium text-foreground";
-const HELP = "text-[11px] text-muted-foreground";
+const HELP = "text-caption text-muted-foreground";
 
 function Field({ label, help, children }: { label: string; help?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -270,12 +272,12 @@ function Toggle({ checked, onChange, label, help }: { checked: boolean; onChange
 
 function Callout({ tone, children }: { tone: "warn" | "info" | "error" | "ok"; children: React.ReactNode }) {
   const styles = {
-    warn: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    warn: "border-warning/30 bg-warning/10 text-warning",
     info: "border-border bg-muted/30 text-muted-foreground",
     error: "border-destructive/30 bg-destructive/10 text-destructive",
-    ok: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    ok: "border-success/30 bg-success/10 text-success",
   } as const;
-  return <div className={cn("rounded-md border px-3 py-2 text-[11px] leading-relaxed", styles[tone])}>{children}</div>;
+  return <div className={cn("rounded-md border px-3 py-2 text-caption leading-relaxed", styles[tone])}>{children}</div>;
 }
 
 // ── Wizard ─────────────────────────────────────────────────────────
@@ -300,6 +302,7 @@ export function CustomProviderWizard({
   onSaved: (p: CustomProviderInfo) => void;
   onCancel: () => void;
 }) {
+  const product = productName(useInstanceBranding());
   const editing = !!existing;
   const [step, setStep] = useState<1 | 2 | 3>(editing ? 2 : 1);
   const [draft, setDraft] = useState<Draft | null>(existing ? draftFromProvider(existing) : null);
@@ -460,7 +463,7 @@ export function CustomProviderWizard({
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{p.label}</div>
-                    <div className="text-[11px] text-muted-foreground leading-snug">{p.description}</div>
+                    <div className="text-caption text-muted-foreground leading-snug">{p.description}</div>
                   </div>
                 </button>
               ))}
@@ -481,7 +484,7 @@ export function CustomProviderWizard({
   return (
     <div className="space-y-4">
       {/* Stepper */}
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-caption">
         {!editing && (
           <button type="button" className="text-muted-foreground hover:text-foreground flex items-center gap-1" onClick={() => setStep(1)}>
             <ArrowLeft className="h-3 w-3" /> Presets
@@ -490,7 +493,7 @@ export function CustomProviderWizard({
         <span className={cn("px-2 py-0.5 rounded-full", step === 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>1 · Connection</span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className={cn("px-2 py-0.5 rounded-full", step === 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>2 · Test & models</span>
-        {preset && <Badge variant="outline" className="ml-auto text-[10px]">{preset.label}</Badge>}
+        {preset && <Badge variant="outline" className="ml-auto text-micro">{preset.label}</Badge>}
       </div>
 
       {step === 2 && (
@@ -510,7 +513,7 @@ export function CustomProviderWizard({
                 onChange={(e) => { setIdTouched(true); update({ id: e.target.value.toLowerCase() }); }}
                 className={cn("font-mono", idError && "border-destructive")}
               />
-              {idError && <span className="text-[11px] text-destructive">{idError}</span>}
+              {idError && <span className="text-caption text-destructive">{idError}</span>}
             </Field>
           </div>
 
@@ -615,14 +618,14 @@ export function CustomProviderWizard({
                 )}
                 {editing && existing?.hasKey && draft.keyAction !== "replace" && !secretTargetChanged ? (
                   <div className="flex items-center gap-2 text-xs">
-                    <Lock className="h-3.5 w-3.5 text-emerald-500" />
+                    <Lock className="h-3.5 w-3.5 text-success" />
                     {draft.keyAction === "keep"
                       ? <span>Key stored in the vault{existing.keyHint ? <> (…{existing.keyHint})</> : null}</span>
                       : <span className="text-destructive">Key will be removed on save</span>}
-                    <Button type="button" variant="outline" size="sm" className="h-6 text-[11px] ml-auto" onClick={() => update({ keyAction: "replace" })}>Replace</Button>
+                    <Button type="button" variant="outline" size="sm" className="h-6 text-caption ml-auto" onClick={() => update({ keyAction: "replace" })}>Replace</Button>
                     {draft.keyAction === "keep"
-                      ? <Button type="button" variant="ghost" size="sm" className="h-6 text-[11px] text-destructive" onClick={() => update({ keyAction: "remove" })}>Remove</Button>
-                      : <Button type="button" variant="ghost" size="sm" className="h-6 text-[11px]" onClick={() => update({ keyAction: "keep" })}>Undo</Button>}
+                      ? <Button type="button" variant="ghost" size="sm" className="h-6 text-caption text-destructive" onClick={() => update({ keyAction: "remove" })}>Remove</Button>
+                      : <Button type="button" variant="ghost" size="sm" className="h-6 text-caption" onClick={() => update({ keyAction: "keep" })}>Undo</Button>}
                   </div>
                 ) : (
                   <Field
@@ -664,12 +667,12 @@ export function CustomProviderWizard({
 
           {/* Private network */}
           {(looksLocal || draft.allowPrivateNetwork) && (
-            <div className="rounded-lg border border-amber-500/30 p-3 space-y-2">
+            <div className="rounded-lg border border-warning/30 p-3 space-y-2">
               <Toggle
                 checked={draft.allowPrivateNetwork}
                 onChange={(v) => update({ allowPrivateNetwork: v })}
                 label="Allow private network"
-                help="Lets Polpo call localhost, LAN (10/8, 172.16/12, 192.168/16), Tailscale (100.64/10) and IPv6 ULA addresses for this provider. Cloud metadata addresses are always blocked."
+                help={`Lets ${product} call localhost, LAN (10/8, 172.16/12, 192.168/16), Tailscale (100.64/10) and IPv6 ULA addresses for this provider. Cloud metadata addresses are always blocked.`}
               />
               {looksLocal && !draft.allowPrivateNetwork && (
                 <Callout tone="warn"><AlertTriangle className="inline h-3 w-3 mr-1" />{host} looks like a private address — requests will be blocked unless you allow private network access.</Callout>
@@ -731,7 +734,7 @@ export function CustomProviderWizard({
             <div className="flex items-center gap-2">
               <Zap className="h-3.5 w-3.5 text-muted-foreground" />
               <span className={SECTION}>Connection</span>
-              <code className="text-[10px] font-mono text-muted-foreground truncate">{urlCheck.url ?? baseUrl}</code>
+              <code className="text-micro font-mono text-muted-foreground truncate">{urlCheck.url ?? baseUrl}</code>
               <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" disabled={testing} onClick={runTest}>
                 {testing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plug className="h-3 w-3 mr-1" />} Test connection
               </Button>
@@ -752,7 +755,7 @@ export function CustomProviderWizard({
               <Callout tone="warn">
                 <div className="mb-1">The endpoint rejected some OpenAI-only fields. These compatibility settings fix it:</div>
                 {testResult.suggestions?.map((s) => <div key={s.flag}>• <code className="font-mono">{s.flag} = {String(s.value)}</code> — {s.reason}</div>)}
-                <Button size="sm" variant="outline" className="h-6 text-[11px] mt-2" onClick={() => { update({ compat: { ...draft.compat, ...testResult.suggestedCompat } }); setShowCompat(true); toast.success("Compatibility settings applied"); }}>
+                <Button size="sm" variant="outline" className="h-6 text-caption mt-2" onClick={() => { update({ compat: { ...draft.compat, ...testResult.suggestedCompat } }); setShowCompat(true); toast.success("Compatibility settings applied"); }}>
                   Apply
                 </Button>
               </Callout>
@@ -763,7 +766,7 @@ export function CustomProviderWizard({
           <div className="rounded-lg border border-border/60 p-3 space-y-3">
             <div className="flex items-center gap-2">
               <span className={SECTION}>Models</span>
-              <Badge variant="secondary" className="text-[10px]">{draft.models.length} selected</Badge>
+              <Badge variant="secondary" className="text-micro">{draft.models.length} selected</Badge>
               <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" disabled={discovering} onClick={runDiscover}>
                 {discovering ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />} Discover
               </Button>
@@ -779,7 +782,7 @@ export function CustomProviderWizard({
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 text-[11px]"
+                    className="h-7 text-caption"
                     onClick={() => {
                       const toAdd = filteredDiscovered.filter((m) => !selectedIds.has(m.id)).slice(0, 200).map(({ configured: _c, ...m }) => ({ ...m, name: m.name || m.id }));
                       update({ models: [...draft.models, ...toAdd] });
@@ -793,9 +796,9 @@ export function CustomProviderWizard({
                     <label key={m.id} className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/40 cursor-pointer">
                       <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={selectedIds.has(m.id)} onChange={() => toggleModel(m)} />
                       <code className="font-mono truncate">{m.id}</code>
-                      {m.contextWindow ? <span className="text-[10px] text-muted-foreground">{Math.round(m.contextWindow / 1000)}k ctx</span> : null}
-                      {m.input?.includes("image") && <Badge variant="outline" className="text-[9px] h-4">vision</Badge>}
-                      {m.reasoning && <Badge variant="outline" className="text-[9px] h-4">reasoning</Badge>}
+                      {m.contextWindow ? <span className="text-micro text-muted-foreground">{Math.round(m.contextWindow / 1000)}k ctx</span> : null}
+                      {m.input?.includes("image") && <Badge variant="outline" className="text-micro h-4">vision</Badge>}
+                      {m.reasoning && <Badge variant="outline" className="text-micro h-4">reasoning</Badge>}
                     </label>
                   ))}
                 </div>
@@ -823,7 +826,7 @@ export function CustomProviderWizard({
                         {expandedModel === m.id ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                       </button>
                       <code className="text-xs font-mono truncate flex-1">{m.id}</code>
-                      <span className="text-[10px] text-muted-foreground">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : "default ctx"}</span>
+                      <span className="text-micro text-muted-foreground">{m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : "default ctx"}</span>
                       <button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => update({ models: draft.models.filter((x) => x.id !== m.id) })}>
                         <X className="h-3 w-3" />
                       </button>
@@ -860,7 +863,7 @@ export function CustomProviderWizard({
           {/* Compatibility */}
           <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowCompat((v) => !v)}>
             {showCompat ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />} Compatibility settings
-            {Object.keys(draft.compat).length > 0 && <Badge variant="secondary" className="text-[9px] h-4 ml-1">{Object.keys(draft.compat).length}</Badge>}
+            {Object.keys(draft.compat).length > 0 && <Badge variant="secondary" className="text-micro h-4 ml-1">{Object.keys(draft.compat).length}</Badge>}
           </button>
           {showCompat && (
             <div className="rounded-lg border border-border/60 p-3 space-y-2">
@@ -871,8 +874,8 @@ export function CustomProviderWizard({
                 return (
                   <div key={flag} className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <code className="text-[11px] font-mono">{flag}</code>
-                      <div className="text-[10px] text-muted-foreground truncate">{COMPAT_FLAG_HELP[flag]}</div>
+                      <code className="text-caption font-mono">{flag}</code>
+                      <div className="text-micro text-muted-foreground truncate">{COMPAT_FLAG_HELP[flag]}</div>
                     </div>
                     <Select
                       value={value === undefined ? "auto" : String(value)}
@@ -926,7 +929,7 @@ function HeaderEditor({ title, help, rows, onChange, secret }: {
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <span className={LABEL}>{title}</span>
-        <Button type="button" variant="ghost" size="sm" className="h-6 text-[11px] ml-auto" onClick={() => onChange([...rows, { name: "", value: "" }])}>
+        <Button type="button" variant="ghost" size="sm" className="h-6 text-caption ml-auto" onClick={() => onChange([...rows, { name: "", value: "" }])}>
           <Plus className="h-3 w-3 mr-1" /> Add
         </Button>
       </div>
@@ -1011,9 +1014,7 @@ export function CustomProvidersSection({
   return (
     <section>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-          <Plug className="h-3.5 w-3.5" /> Custom endpoints & gateways
-        </h3>
+        <SectionHeader icon={Plug} title="Custom endpoints & gateways" className="mb-0" />
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={onAdd}>
           <Plus className="h-3 w-3" /> Add endpoint
         </Button>
@@ -1032,18 +1033,18 @@ export function CustomProvidersSection({
             return (
               <div key={p.id} className="rounded-lg border border-border/40 bg-card/60 p-4 space-y-3">
                 <div className="flex items-center gap-2.5">
-                  <div className={cn("relative flex h-9 w-9 items-center justify-center rounded-lg shrink-0 border bg-card", p.configured ? "border-emerald-500/30" : "border-border")}>
+                  <div className={cn("relative flex h-9 w-9 items-center justify-center rounded-lg shrink-0 border bg-card", p.configured ? "border-success/30" : "border-border")}>
                     <ProviderIcon name={p.preset && p.preset !== "openai-compatible" && p.preset !== "anthropic-compatible" ? p.preset : p.proxyFor ?? p.id} size={20} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold truncate">{p.label ?? p.id}</span>
-                      <code className="text-[10px] font-mono text-muted-foreground">{p.id}</code>
-                      <Badge variant="secondary" className="text-[9px] h-4">Custom</Badge>
+                      <code className="text-micro font-mono text-muted-foreground">{p.id}</code>
+                      <Badge variant="secondary" className="text-micro h-4">Custom</Badge>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[11px]">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap text-caption">
                       <span className="flex items-center gap-1.5">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", p.configured ? "bg-emerald-500" : "bg-zinc-500")} />
+                        <span className={cn("h-1.5 w-1.5 rounded-full", p.configured ? "bg-success" : "bg-muted-foreground")} />
                         <span className={p.configured ? "text-foreground" : "text-muted-foreground"}>
                           {p.keySource === "none" ? "No key needed"
                             : p.keySource === "vault" ? `Key in vault${p.keyHint ? ` (…${p.keyHint})` : ""}`
@@ -1051,12 +1052,12 @@ export function CustomProvidersSection({
                             : "Key missing"}
                         </span>
                       </span>
-                      {p.api && <Badge variant="outline" className="text-[9px] font-mono h-4">{PROVIDER_API_LABELS[p.api as ProviderApi] ?? p.api}</Badge>}
-                      {p.allowPrivateNetwork && <Badge variant="outline" className="text-[9px] h-4">private network</Badge>}
+                      {p.api && <Badge variant="outline" className="text-micro font-mono h-4">{PROVIDER_API_LABELS[p.api as ProviderApi] ?? p.api}</Badge>}
+                      {p.allowPrivateNetwork && <Badge variant="outline" className="text-micro h-4">private network</Badge>}
                     </div>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px]" disabled={busy === `test:${p.id}`} onClick={() => test(p)}>
+                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-caption" disabled={busy === `test:${p.id}`} onClick={() => test(p)}>
                       {busy === `test:${p.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : "Test"}
                     </Button>
                     <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditing(p)} title="Edit">
@@ -1070,7 +1071,7 @@ export function CustomProvidersSection({
                 {p.baseUrl && (
                   <div className="flex items-center gap-1.5 bg-muted/20 rounded-md px-2.5 py-1.5">
                     <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
-                    <code className="text-[11px] font-mono text-muted-foreground truncate">{p.baseUrl}</code>
+                    <code className="text-caption font-mono text-muted-foreground truncate">{p.baseUrl}</code>
                   </div>
                 )}
                 {result && (result.ok
@@ -1078,14 +1079,14 @@ export function CustomProvidersSection({
                   : <Callout tone="error"><div>{result.error}</div>{result.hints.map((h) => <div key={h}>• {h}</div>)}</Callout>)}
                 {(p.models?.length ?? 0) > 0 ? (
                   <div className="flex flex-wrap gap-1">
-                    {p.models!.slice(0, 12).map((m) => <Badge key={m.id} variant="outline" className="text-[10px] font-mono">{m.id}</Badge>)}
-                    {p.models!.length > 12 && <Badge variant="outline" className="text-[10px]">+{p.models!.length - 12}</Badge>}
+                    {p.models!.slice(0, 12).map((m) => <Badge key={m.id} variant="outline" className="text-micro font-mono">{m.id}</Badge>)}
+                    {p.models!.length > 12 && <Badge variant="outline" className="text-micro">+{p.models!.length - 12}</Badge>}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-muted-foreground">No models yet — Edit → Discover to add some.</p>
+                  <p className="text-caption text-muted-foreground">No models yet — Edit → Discover to add some.</p>
                 )}
                 {usage.length > 0 && (
-                  <div className="pt-2 border-t border-border/20 text-[10px] text-muted-foreground">Used by {usage.length} agent{usage.length > 1 ? "s" : ""}</div>
+                  <div className="pt-2 border-t border-border/20 text-micro text-muted-foreground">Used by {usage.length} agent{usage.length > 1 ? "s" : ""}</div>
                 )}
               </div>
             );
