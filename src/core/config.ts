@@ -6,7 +6,7 @@ import { getPolpoDir } from "./constants.js";
 import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -447,6 +447,8 @@ function parseSettings(raw: any): PolpoSettings {
   if (compaction) settings.compaction = compaction;
   const tools = normalizeToolsSettings(raw?.tools);
   if (tools) settings.tools = tools;
+  const dependencyResults = normalizeDependencyResultsSettings(raw?.dependencyResults);
+  if (dependencyResults) settings.dependencyResults = dependencyResults;
   // Daytona's API version and its options (v2 takes no API URL): refused with a clear message
   const daytonaErrors = daytonaProviderErrors(raw?.sandbox?.providers?.daytona);
   if (daytonaErrors.length) throw new Error(daytonaErrors.join("; "));

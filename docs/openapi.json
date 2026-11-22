@@ -9868,6 +9868,23 @@
                     },
                     "additionalProperties": false
                   },
+                  "dependencyResults": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "perTaskChars": {
+                        "type": "integer",
+                        "minimum": 240,
+                        "maximum": 200000
+                      },
+                      "totalChars": {
+                        "type": "integer",
+                        "minimum": 480,
+                        "maximum": 1000000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "orchestratorModel": {
                     "anyOf": [
                       {

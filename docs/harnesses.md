@@ -115,6 +115,10 @@ creates a Daytona v2 computer and the agent.
    `alwaysLoad` tool hint alone is not honored by the pinned Claude Code), and `auto` above that
    (deferred only when the tool definitions take a large share of the context). `register_outcome`
    is always among them, whatever the agent's `allowedTools`.
+   A task that depends on other tasks (or belongs to a mission) also gets `task_result` as a Polpo
+   tool, and its prompt carries its dependencies' results (see [Results between tasks](missions.md#results-between-tasks)).
+   Only `task_result` is offered to the runtime (not `dependency_results`: the results are already in
+   the prompt), to keep the Polpo tools within the 40 that load with the first request.
 4. The turn streams into the run's transcript (text, reasoning, every tool call and result, the
    runtime's own tools and Polpo's) and its activity (tool calls, files written or edited). Secrets
    are scrubbed from everything written.

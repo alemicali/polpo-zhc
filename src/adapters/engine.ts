@@ -59,6 +59,9 @@ import { createArtifactAgentTools } from "../tools/artifact-tools.js";
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
+import { databaseStoresFor } from "../core/storage.js";
+import { FileTaskStore } from "../stores/file-task-store.js";
 import { inkRegistry } from "../core/ink-config.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { connectorsPromptSection } from "../mcp/runtime.js";
@@ -816,7 +819,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     try {
       const toolset = await buildAgentToolset({
         agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, sandboxProvider,
-        browserProfileDir, hasExtendedTools, log: (line) => handle.onTranscript?.({ type: "log", message: line }),
+        browserProfileDir, hasExtendedTools, log: (line) => handle.onTranscript?.({ type: "log", message: line }), task,
       });
       const { vault, connectorNote } = toolset;
       const allTools = toolset.tools;
@@ -938,6 +941,11 @@ export interface AgentToolset {
   browserNetwork?: BrowserNetworkGuard;
 }
 
+/** The project's task store in this process: the database's, else the JSON files (read fresh each time). */
+function taskStoreFor(polpoDir: string): { getAllTasks(): Promise<Task[]> } {
+  return databaseStoresFor(polpoDir)?.taskStore ?? new FileTaskStore(polpoDir);
+}
+
 /**
  * The agent's resolved tools for a run: system tools with its vault, extended tools named in
  * allowedTools, Ink, data, artifacts, company brain, storage, and its connectors (a connector that
@@ -956,6 +964,8 @@ export async function buildAgentToolset(o: {
   browserProfileDir: string;
   hasExtendedTools: boolean;
   log?: (line: string) => void;
+  /** The task of this run: with dependencies or a mission, it gets task_result / dependency_results. */
+  task?: Task;
 }): Promise<AgentToolset> {
   const { agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, browserProfileDir } = o;
   const sandboxProvider = o.sandboxProvider as any;
@@ -1002,6 +1012,11 @@ export async function buildAgentToolset(o: {
     allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
     allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
+    // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
+    if (wantsTaskResultTools(o.task)) {
+      const taskPolpoDir = ctx.polpoDir;
+      allTools.push(...createTaskResultTools(o.task!, () => taskStoreFor(taskPolpoDir).getAllTasks()));
+    }
   }
   // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
   // skipped with a note in the prompt, never failing the run.

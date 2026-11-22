@@ -28,7 +28,7 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | Tool | What it does | Annotations |
 |---|---|---|
 | `polpo_tasks_list` | Tasks by status, agent, mission, group or words; paged. | read-only |
-| `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies, where and with what each run executed (`runs`: engine, model, computer, egress, session, cost) and its latest activity. | read-only |
+| `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies, where and with what each run executed (`runs`: engine, model, computer, egress, session, cost) and its latest activity. The text shows the first 1500 characters of the result; the structured content has the whole task (`result.stdout`, every outcome). | read-only |
 | `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). `dependsOn` takes ids of existing tasks: an unknown id is refused (it would keep the task pending for ever). | write |
 | `polpo_task_update` | Change the description, agent, retries or side-effects flag, or start a draft; returns what changed. | write, idempotent |
 | `polpo_task_retry` | Run a failed task again. | write |

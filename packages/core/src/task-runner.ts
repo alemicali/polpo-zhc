@@ -5,6 +5,7 @@ import { agentMemoryScope } from "./memory-store.js";
 import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
+import { normalizeDependencyResultsSettings, renderDependencyResults, resolveDependencies } from "./dependency-results.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
 
@@ -616,6 +617,17 @@ export class TaskRunner {
           contextParts.push(`<mission-context>\n${missionParts.join("\n")}\n</mission-context>`);
         }
       } catch { /* best effort — mission may have been deleted */ }
+    }
+
+    // 3. The results of the tasks this one depends on (missions and standalone tasks, every
+    // engine, every run: first, retry, fix, continuation), within the configured budget
+    if (task.dependsOn?.length) {
+      try {
+        const { tasks: deps, missing } = resolveDependencies(task, await this.ctx.registry.getAllTasks());
+        const budget = normalizeDependencyResultsSettings(this.ctx.config.settings.dependencyResults);
+        const section = renderDependencyResults(deps, { ...budget, missing });
+        if (section) contextParts.push(section);
+      } catch { /* best effort: the task still runs */ }
     }
 
     if (contextParts.length > 0) {
