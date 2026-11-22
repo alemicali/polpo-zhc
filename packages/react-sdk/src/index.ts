@@ -14,6 +14,10 @@ export { useTask } from "./hooks/use-task.js";
 export { useMissions } from "./hooks/use-missions.js";
 export type { UseMissionsReturn } from "./hooks/use-missions.js";
 export { useMission } from "./hooks/use-mission.js";
+export { useMissionCost } from "./hooks/use-mission-cost.js";
+export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
+export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
+export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
 export { useAgent } from "./hooks/use-agent.js";
@@ -146,6 +150,12 @@ export type {
   TaskRunContext,
   TaskRunEngine,
   TaskRunSummary,
+  TaskFailure,
+  TaskFailureKind,
+  Connector,
+  ConnectorStatus,
+  ConnectorTool,
+  ConnectorToolPolicy,
   MissionCost,
   MissionCostBucket,
   MissionCostSummary,

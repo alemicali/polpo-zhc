@@ -2,7 +2,8 @@
  * Tasks: list, read, create, update, retry, kill, direct, wait for and read the activity of.
  */
 import { z } from "zod";
-import { describeTaskRun, type TaskRunContext } from "@polpo-ai/core/run-context";
+import { describeTaskRun, summarizeTaskRun, type TaskRunContext, type TaskRunSummary } from "@polpo-ai/core/run-context";
+import { describeTaskFailure, taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
   encodeCursor, enc, fail, limitParam, looseObject, ok, pageOutput, progress, qs, short, sleep,
@@ -14,12 +15,21 @@ type TaskStatus = (typeof TASK_STATUSES)[number];
 /** Where a task waits for someone or is finished: what polpo_task_wait waits for by default. */
 const SETTLED: TaskStatus[] = ["done", "failed", "review", "awaiting_approval"];
 
+const failureShape = z.object({ reason: z.string(), retryable: z.boolean(), kind: z.string() }).passthrough()
+  .describe("Why it failed: the labelled reason of its last run; retryable false: not retried automatically (a re-run would fail the same way); kind: model_access, auth, budget, killed, assessment, error");
+
 export const taskSummary = z.object({
   id: z.string(), title: z.string(), status: z.string(), assignTo: z.string().optional(),
   group: z.string().optional(), missionId: z.string().optional(), updatedAt: z.string().optional(),
+  last_run: z.object({ engine: z.string(), model: z.string().optional(), computerId: z.string(), computerKind: z.string() }).passthrough().optional()
+    .describe("Where and with what its latest run executed: engine (polpo, claude-code, codex), model, computer"),
+  failure: failureShape.optional(),
 }).passthrough();
 
-type TaskRow = { id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string; phase?: string };
+type TaskRow = {
+  id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string; phase?: string;
+  lastRun?: TaskRunSummary; failure?: TaskFailure;
+};
 type FullTask = TaskRow & {
   description?: string; dependsOn?: string[]; retries?: number; maxRetries?: number; createdAt?: string;
   result?: { exitCode?: number; duration?: number; stdout?: string; stderr?: string; assessment?: { passed?: boolean; globalScore?: number; feedback?: string } };
@@ -29,14 +39,27 @@ type FullTask = TaskRow & {
   runs?: TaskRunContext[];
 };
 
-export const taskLine = (t: TaskRow) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`;
+const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
 
-const summarize = (t: TaskRow) => ({
-  id: t.id, title: t.title, status: t.status,
-  ...(t.assignTo ? { assignTo: t.assignTo } : {}), ...(t.group ? { group: t.group } : {}),
-  ...(t.missionId ? { missionId: t.missionId } : {}), ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
-  ...(t.phase ? { phase: t.phase } : {}),
-});
+export const taskLine = (t: TaskRow) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
+  + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${ENGINE_NAMES[t.lastRun.engine] ?? t.lastRun.engine}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
+  + `${t.failure ? ` · failed: ${short(t.failure.reason, 160)}${t.failure.retryable ? "" : " (not retried)"}` : ""}`;
+
+/** A row's failure: the API's (slim lists, GET /tasks/:id), else from its result. */
+const failureOf = (t: TaskRow & { result?: unknown }) => t.failure ?? taskFailure(t as Parameters<typeof taskFailure>[0]);
+
+const summarize = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) => {
+  const last = t.lastRun ?? summarizeTaskRun(t.runs?.at(-1));
+  const failure = failureOf(t);
+  return {
+    id: t.id, title: t.title, status: t.status,
+    ...(t.assignTo ? { assignTo: t.assignTo } : {}), ...(t.group ? { group: t.group } : {}),
+    ...(t.missionId ? { missionId: t.missionId } : {}), ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
+    ...(t.phase ? { phase: t.phase } : {}),
+    ...(last ? { last_run: last } : {}),
+    ...(failure ? { failure } : {}),
+  };
+};
 
 /** One activity entry of a run log as a line (Polpo's engine and agent harnesses alike). */
 export function activityLine(e: Record<string, unknown>): string {
@@ -110,25 +133,31 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       const start = c.o ?? 0;
       const items = all.slice(start, start + n).map(summarize);
       const next = start + n < all.length ? encodeCursor({ o: start + n }) : null;
-      return ok(`${items.map(taskLine).join("\n") || `No tasks for mission ${mission_id}.`}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
+      return ok(`${all.slice(start, start + n).map(taskLine).join("\n") || `No tasks for mission ${mission_id}.`}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
     }
     const r = await apiGet(deps, `/tasks${qs({ slim: "true", status, assignTo: agent, group, limit: n, ...(text ? { q: text } : { cursor: c.u }) })}`);
     if (!r.ok) return apiError(r, "Listing tasks");
     const data = r.data as { tasks?: TaskRow[]; nextCursor?: string | null; hasMore?: boolean };
     const items = (data.tasks ?? []).map(summarize);
     const next = !text && data.hasMore && data.nextCursor ? encodeCursor({ u: data.nextCursor }) : null;
-    return ok(`${items.map(taskLine).join("\n") || "No tasks match."}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next });
+    return ok(`${(data.tasks ?? []).map(taskLine).join("\n") || "No tasks match."}${next ? `\n(more: cursor ${next})` : ""}`, { items, next_cursor: next });
   });
 
   tool("tasks", "polpo_task_get", {
     title: "Get a task",
-    description: "One task in full: description, status, agent, dependencies, retries, result (exit code, duration, assessment), outcomes, "
-      + "timestamps and the last entries of its activity. Use polpo_task_logs for more activity.",
+    description: "One task in full: description, status, agent, why it failed (the labelled reason; whether it was retried), the tasks it depends on "
+      + "with their status, retries, result (exit code, duration, assessment), outcomes, where and with what each run executed, timestamps and the "
+      + "last entries of its activity. Use polpo_task_logs for more activity; polpo_task_show for its card.",
     inputSchema: {
       id: z.string().min(1).describe("The task's id (polpo_tasks_list)"),
       activity: z.number().int().min(0).max(50).optional().describe("How many recent activity entries to include (default 10, 0 for none)"),
     },
-    outputSchema: { task: looseObject, runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"), recent_activity: z.array(looseObject).optional() },
+    outputSchema: {
+      task: looseObject,
+      failure: failureShape.optional(),
+      dependencies: z.array(z.object({ id: z.string(), title: z.string(), status: z.string() }).passthrough()).optional()
+        .describe("The tasks it depends on (their results reach its prompt; it reads them in full with task_result / dependency_results)"),
+      runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"), recent_activity: z.array(looseObject).optional() },
     annotations: READ,
   }, async ({ id, activity }) => {
     const loaded = await loadTask(deps, id);
@@ -141,10 +170,22 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       if (a.ok && Array.isArray(a.data)) recent = (a.data as Array<Record<string, unknown>>).slice(-n);
     }
     const res = t.result;
+    const failure = failureOf(t);
+    let dependencies: Array<{ id: string; title: string; status: string; failure?: TaskFailure }> = [];
+    if (t.dependsOn?.length) {
+      const all = await apiGet(deps, "/tasks?slim=true");
+      const rows = all.ok && Array.isArray(all.data) ? (all.data as TaskRow[]) : [];
+      dependencies = t.dependsOn.map((d) => {
+        const found = rows.find((x) => x.id === d) ?? rows.find((x) => x.title === d && (t.missionId ? x.missionId === t.missionId : x.group === t.group));
+        return found ? { id: found.id, title: found.title, status: found.status, ...(found.failure ? { failure: found.failure } : {}) } : { id: d, title: d, status: "missing" };
+      });
+    }
     const lines = [
       `${t.id} [${t.status}${t.phase ? `/${t.phase}` : ""}] ${t.title}`,
       `agent: ${t.assignTo ?? "-"}${t.group ? ` · group: ${t.group}` : ""}${t.missionId ? ` · mission: ${t.missionId}` : ""}`,
-      `retries: ${t.retries ?? 0}/${t.maxRetries ?? "-"}${t.dependsOn?.length ? ` · depends on: ${t.dependsOn.join(", ")}` : ""}${t.sideEffects ? " · side effects" : ""}`,
+      `retries: ${t.retries ?? 0}/${t.maxRetries ?? "-"}${t.sideEffects ? " · side effects" : ""}`,
+      ...(dependencies.length ? [`depends on: ${dependencies.map((d) => `${d.id} [${d.status}] ${short(d.title, 60)}`).join(", ")}`] : []),
+      ...(failure ? [`failed: ${describeTaskFailure(failure)}`] : []),
       `created ${t.createdAt ?? "?"} · updated ${t.updatedAt ?? "?"}`,
       "",
       short(t.description, 2000),
@@ -158,6 +199,8 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     ];
     return ok(lines.join("\n"), {
       task: t as Record<string, unknown>,
+      ...(failure ? { failure } : {}),
+      ...(dependencies.length ? { dependencies } : {}),
       runs: (t.runs ?? []) as unknown as Array<Record<string, unknown>>,
       ...(n > 0 ? { recent_activity: recent } : {}),
     });

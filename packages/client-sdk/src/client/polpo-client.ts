@@ -1,5 +1,7 @@
 import { PolpoApiError } from "./errors.js";
 import type {
+  Connector,
+  ConnectorTool,
   AuthStatusResponse,
   VaultEntryMeta,
   Task,
@@ -648,6 +650,22 @@ export class PolpoClient {
 
   getSchedules(): Promise<ScheduleEntry[]> {
     return this.get<ScheduleEntry[]>("/schedules");
+  }
+
+  // ── Connectors ───────────────────────────────────────────
+
+  /** The connectors (external apps over MCP), with their status, account and who may use them. */
+  getConnectors(): Promise<Connector[]> {
+    return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  getConnector(id: string): Promise<Connector> {
+    return this.get<Connector>(`/connectors/${encodeURIComponent(id)}`);
+  }
+
+  /** A connector's tools (names as agent.connectorTools lists them) and their policy. */
+  getConnectorTools(id: string): Promise<ConnectorTool[]> {
+    return this.get<{ tools: ConnectorTool[] }>(`/connectors/${encodeURIComponent(id)}/tools`).then((d) => d.tools);
   }
 
   // ── Agents ───────────────────────────────────────────────

@@ -41,6 +41,9 @@ import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
+import { describeTaskRun } from "@polpo-ai/core/run-context";
+import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
+import { resolveDependencies } from "@polpo-ai/core";
 import { createCliStores } from "../cli/stores.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
@@ -257,7 +260,8 @@ const listTasksTool: Tool = {
 
 const getTaskTool: Tool = {
   name: "get_task",
-  description: "Get full details of a task by ID or title (partial match).",
+  description: "Get full details of a task by ID or title (partial match), then a summary: why it failed (the labelled reason, and whether it was retried), "
+    + "the tasks it depends on with their status, and where and with what each run executed (engine, model, auth, computer, egress, session, cost).",
   parameters: Type.Object({
     id: Type.Optional(Type.String({ description: "Task ID" })),
     title: Type.Optional(Type.String({ description: "Task title (partial match)" })),
@@ -946,7 +950,7 @@ const agentProgressiveToolsParam = Type.Optional(Type.Union([Type.Literal("auto"
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -3723,9 +3727,11 @@ async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>)
   if (args.group) tasks = tasks.filter(t => t.group === args.group);
   if (args.assignTo) tasks = tasks.filter(t => t.assignTo === args.assignTo);
   if (tasks.length === 0) return "No tasks found.";
-  const lines = tasks.map(t =>
-    `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
-  );
+  const lines = tasks.map(t => {
+    const failure = taskFailure(t);
+    return `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
+      + (failure ? ` — ${failure.reason.slice(0, 160)}${failure.retryable ? "" : " (not retried)"}` : "");
+  });
   return `${tasks.length} task(s):\n${lines.join("\n")}`;
 }
 
@@ -3738,7 +3744,15 @@ async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): 
     task = (await store.getAllTasks()).find(t => t.title.toLowerCase().includes(needle));
   }
   if (!task) return "Task not found.";
-  return JSON.stringify(task, null, 2);
+  const summary: string[] = [];
+  const failure = taskFailure(task);
+  if (failure) summary.push(`Failed: ${describeTaskFailure(failure)}`);
+  if (task.dependsOn?.length) {
+    const { tasks: deps, missing } = resolveDependencies(task, await store.getAllTasks());
+    summary.push(`Depends on: ${[...deps.map((d) => `${d.title} [${d.status}] (${d.id})`), ...missing.map((m) => `${m} [missing]`)].join(", ")}`);
+  }
+  if (task.runs?.length) summary.push("Runs (where and with what, newest last):", ...task.runs.map((r) => `- ${describeTaskRun(r)}`));
+  return `${JSON.stringify(task, null, 2)}${summary.length ? `\n\n${summary.join("\n")}` : ""}`;
 }
 
 async function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

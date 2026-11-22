@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
 import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 import { summarizeTaskRun } from "@polpo-ai/core/run-context";
+import { taskFailure } from "@polpo-ai/core/task-failure";
 
 // ── Route definitions ─────────────────────────────────────────────────
 
@@ -16,13 +17,13 @@ const listTasksRoute = createRoute({
       group: z.string().optional(),
       assignTo: z.string().optional(),
       summary: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
-        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+        description: "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
       }),
       // `slim` is an alias for `summary` — the web UI uses `slim=true`
       // by convention (matches `/agents?slim=true`). Either flag triggers
       // the same projection; kept distinct so docs can keep both names.
       slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
-        description: "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+        description: "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, failure).",
       }),
       // Cursor pagination. Activating `limit` or `cursor` switches the
       // response envelope from `{ tasks: Task[] }` to
@@ -60,7 +61,11 @@ const getTaskRoute = createRoute({
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Task details",
+      description: "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, "
+        + "computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its "
+        + "labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically "
+        + "(model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` "
+        + "(kind: model_access, auth, budget, killed, assessment, error).",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -333,7 +338,15 @@ function projectSlim(t: any): any {
     ...(slimAssessment ? { result: { assessment: slimAssessment } } : {}),
     // where and with what the latest run executed (engine, model, computer): list badges
     ...(Array.isArray(t.runs) && t.runs.length ? { lastRun: summarizeTaskRun(t.runs[t.runs.length - 1]) } : {}),
+    // why it failed, in a line (the labelled harness error, the assessment's verdict…)
+    ...withFailure(t),
   };
+}
+
+/** `{ failure }` for a failed task: its reason in a line, whether it is retryable, its kind. */
+export function withFailure(t: any): { failure?: NonNullable<ReturnType<typeof taskFailure>> } {
+  const f = t && typeof t === "object" ? taskFailure(t) : undefined;
+  return f ? { failure: f } : {};
 }
 
 /**
@@ -450,7 +463,7 @@ export function taskRoutes(getDeps: () => {
     if (!task) {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: task }, 200);
+    return c.json({ ok: true, data: { ...task, ...withFailure(task) } }, 200);
   });
 
   // POST /tasks — create task

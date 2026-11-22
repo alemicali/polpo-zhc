@@ -20,6 +20,7 @@ import { registerAgentTools, registerApprovalTools, registerArtifactTools, regis
 import { registerDataTools } from "./mcp-server/data.js";
 import { registerTaskTools } from "./mcp-server/tasks.js";
 import { registerMissionTools } from "./mcp-server/missions.js";
+import { registerWorkCards } from "./mcp-server/cards.js";
 import { registerAdminTools } from "./mcp-server/admin.js";
 import { registerConfigTools } from "./mcp-server/config.js";
 import { registerTeamTools } from "./mcp-server/team.js";
@@ -43,6 +44,7 @@ export {
   SCOPES, ALL_SCOPES, DEFAULT_SCOPES, AREA_SCOPES, UMBRELLA_SCOPE, normalizeScopes,
 } from "./mcp-server/kit.js";
 export { MAX_INLINE_FILE_BYTES, AGENT_CARD_URI } from "./mcp-server/core-tools.js";
+export { WORK_CARD_URI } from "./mcp-server/cards.js";
 export { matchesOperationPath, isBlockedGet } from "./mcp-server/admin.js";
 
 const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, artifacts, data, approvals, files, rooms, chats, "
@@ -66,6 +68,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerApprovalTools(tool, deps);
   registerTaskTools(tool, deps);
   registerMissionTools(tool, deps);
+  registerWorkCards(server, deps, enabled, principal, catalog);
   registerArtifactTools(tool, deps);
   registerDataTools(tool, deps);
   registerFileTools(tool, deps);
