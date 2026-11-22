@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-22 — Connectors, computers, and Polpo fully on MCP
+
 ### Added
 - **Computer tab on each agent**: where the agent works now, its computers with live status and Start/Stop/Restart/Reset, make default, remove, and add an existing or new computer for it. The default-computer picker moved here from the Sandbox tab; the agent page keeps the open tab in `?tab=`.
 - **Remote computers go out through the home proxy, with Tailscale inside their VM.** A Daytona or E2B computer may now have `egress: "<proxy>"` (until now host computers only): its VM joins the tailnet as a tagged, ephemeral node and its browser goes out through the same residential proxy as the server's browsers (e.g. `home` = `socks5://100.101.55.7:1080` on ahp0).
