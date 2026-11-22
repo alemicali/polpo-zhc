@@ -7,13 +7,15 @@ import { useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CHANGELOG } from "@/lib/changelog";
-import { markAllChangelogSeen } from "@/hooks/use-whats-new";
+import { markAllChangelogSeen, useChangelogUnreadSnapshot } from "@/hooks/use-whats-new";
 import { closeWhatsNew, setWhatsNewOpen, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 import { ChangelogTimeline } from "./changelog-timeline";
 
 export function WhatsNewDrawer() {
   const open = useWhatsNewOpen();
   const navigate = useNavigate();
+  // what arrived since the last visit, read before opening marks it all as seen
+  const unreadIds = useChangelogUnreadSnapshot(open);
 
   useEffect(() => {
     if (open) markAllChangelogSeen(CHANGELOG);
@@ -38,6 +40,7 @@ export function WhatsNewDrawer() {
           <ChangelogTimeline
             compact
             entries={CHANGELOG}
+            unreadIds={unreadIds}
             onAction={(to) => {
               closeWhatsNew();
               navigate(to);

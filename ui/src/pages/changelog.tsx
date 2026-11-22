@@ -7,12 +7,13 @@ import { useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ChangelogTimeline } from "@/components/whats-new/changelog-timeline";
-import { markAllChangelogSeen } from "@/hooks/use-whats-new";
+import { markAllChangelogSeen, useChangelogUnreadSnapshot } from "@/hooks/use-whats-new";
 import { CHANGELOG } from "@/lib/changelog";
-
 
 export function ChangelogPage() {
   const navigate = useNavigate();
+  // what arrived since the last visit, read before opening the page marks it all as seen
+  const unreadIds = useChangelogUnreadSnapshot(true);
 
   useEffect(() => {
     markAllChangelogSeen(CHANGELOG);
@@ -33,7 +34,7 @@ export function ChangelogPage() {
           </div>
         </header>
 
-        <ChangelogTimeline entries={CHANGELOG} onAction={(to) => navigate(to)} />
+        <ChangelogTimeline entries={CHANGELOG} unreadIds={unreadIds} onAction={(to) => navigate(to)} />
       </div>
     </div>
   );

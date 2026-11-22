@@ -5,21 +5,35 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { ChangelogKindBadge } from "@/components/whats-new/changelog-kind";
-import { formatChangelogDate, groupChangelogByDate, type ChangelogEntry } from "@/lib/changelog";
+import { changelogPublishedAtMap } from "@/hooks/use-whats-new";
+import {
+  changelogPublishedAt,
+  formatChangelogDate,
+  formatChangelogDateTime,
+  groupChangelogByDate,
+  type ChangelogEntry,
+  type ChangelogPublishedAt,
+} from "@/lib/changelog";
 import { cn } from "@/lib/utils";
 
 export function ChangelogTimeline({
   entries,
   onAction,
   compact = false,
+  publishedAt = changelogPublishedAtMap(),
+  unreadIds,
 }: {
   entries: ChangelogEntry[];
   /** An entry's button was pressed: go where it leads. */
   onAction: (to: string) => void;
   /** Tighter spacing, for the drawer. */
   compact?: boolean;
+  /** When each entry went online on this instance (from runtime-config.js by default). */
+  publishedAt?: ChangelogPublishedAt;
+  /** Entries that arrived since the person's last visit: marked "Non letta". */
+  unreadIds?: ReadonlySet<string>;
 }) {
-  const DAYS = groupChangelogByDate(entries);
+  const DAYS = groupChangelogByDate(entries, publishedAt);
   const navigate = onAction;
   return (
     <ol className={cn("relative pb-8", compact ? "space-y-7" : "space-y-10")}>
@@ -47,17 +61,35 @@ export function ChangelogTimeline({
           </h2>
 
           <div className="space-y-3">
-            {day.entries.map((entry) => (
+            {day.entries.map((entry) => {
+              const online = changelogPublishedAt(entry, publishedAt);
+              const unread = unreadIds?.has(entry.id) ?? false;
+              return (
               <article
                 key={entry.id}
                 id={entry.id}
                 className={cn(
                   compact ? "rounded-card border bg-card/80 p-3.5 shadow-card" : "rounded-card border bg-card/80 p-4 shadow-card backdrop-blur-sm sm:p-5",
-                  entry.highlight ? "border-primary/25" : "border-border/60",
+                  entry.highlight || unread ? "border-primary/25" : "border-border/60",
                 )}
               >
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <ChangelogKindBadge kind={entry.kind} />
+                  {unread && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-px text-micro font-semibold text-primary">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />
+                      Non letta
+                    </span>
+                  )}
+                  {online && (
+                    <time
+                      dateTime={online.toISOString()}
+                      title="Quando è andata online su questa istanza"
+                      className="ml-auto text-caption tabular-nums text-muted-foreground"
+                    >
+                      {formatChangelogDateTime(online)}
+                    </time>
+                  )}
                 </div>
                 <h3 className="text-base font-semibold leading-snug tracking-tight">{entry.title}</h3>
                 <div className="mt-2 text-sm leading-relaxed text-foreground/90">
@@ -75,7 +107,8 @@ export function ChangelogTimeline({
                   </Button>
                 )}
               </article>
-            ))}
+              );
+            })}
           </div>
         </li>
       ))}
