@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { PALETTES, type Palette } from "@/lib/palette";
 import {
@@ -60,19 +61,13 @@ function toHex(color: string | undefined): string | null {
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: Array<{ value: T; label: string; icon?: typeof Sun }>; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
+    <SegmentedControl size="sm" value={value} onValueChange={onChange}>
       {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={cn("inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
-            value === o.value ? "bg-background text-foreground shadow-card" : "text-muted-foreground hover:text-foreground")}
-        >
-          {o.icon && <o.icon className="h-3.5 w-3.5" />}{o.label}
-        </button>
+        <ToggleGroupItem key={o.value} value={o.value}>
+          {o.icon && <o.icon className="h-4 w-4" />}{o.label}
+        </ToggleGroupItem>
       ))}
-    </div>
+    </SegmentedControl>
   );
 }
 

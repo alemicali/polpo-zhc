@@ -1000,10 +1000,10 @@ export function TaskDetailPage() {
       {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
       <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0 w-fit">
-          {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
-          <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
-          <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
-          <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
+          {showAssessmentTab && <TabsTrigger value="assessment"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
+          <TabsTrigger value="detail"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
+          <TabsTrigger value="activity"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
+          <TabsTrigger value="rules"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
         {/* ── Assessment tab (conditional) ── */}
@@ -1013,7 +1013,7 @@ export function TaskDetailPage() {
 
               {/* Live assessment progress feed (shown while reviewing) */}
               {isReviewing && assessmentProgress.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-info py-0 gap-0 mb-4">
+                <Card className="border-l-2 border-l-info py-0 gap-0 mb-4">
                   <CardContent className="pt-4 pb-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin text-info" />
@@ -1059,7 +1059,7 @@ export function TaskDetailPage() {
 
               {/* Review in progress but no progress events yet */}
               {isReviewing && assessmentProgress.length === 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-info py-0 gap-0 mb-4">
+                <Card className="border-l-2 border-l-info py-0 gap-0 mb-4">
                   <CardContent className="flex items-center gap-3 py-6 justify-center">
                     <Loader2 className="h-5 w-5 animate-spin text-info" />
                     <p className="text-sm text-muted-foreground">Waiting for assessment to start...</p>
@@ -1122,7 +1122,7 @@ export function TaskDetailPage() {
 
                   {/* Score Breakdown — dimension tiles */}
                   {assessment.scores && assessment.scores.some(s => s.reasoning || (s.evidence && s.evidence.length > 0)) && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
                         <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Scale className="h-3 w-3" /> Score Breakdown
@@ -1189,7 +1189,7 @@ export function TaskDetailPage() {
                     if (!reviewers || reviewers.length === 0) return null;
                     const medianScore = llmCheck?.globalScore ?? 3;
                     return (
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                      <Card className="py-0 gap-0">
                         <CardContent className="pt-4 pb-4 space-y-3">
                           <p className="text-label text-muted-foreground flex items-center gap-1.5">
                             <Star className="h-3 w-3" /> Judge Votes ({reviewers.length})
@@ -1253,26 +1253,26 @@ export function TaskDetailPage() {
                                         {/* Exploration tabs */}
                                         {(hasExploration || hasRetries) && (
                                           <Tabs defaultValue={hasExploration ? "analysis" : "retries"} className="w-full">
-                                            <TabsList className="h-7 w-full justify-start bg-muted/30 p-0.5 gap-0">
+                                            <TabsList className="w-full justify-start">
                                               {hasExploration && (
-                                                <TabsTrigger value="analysis" className="text-micro h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="analysis" className="flex-none text-small">
                                                   <Search className="h-3 w-3" /> Analysis
                                                 </TabsTrigger>
                                               )}
                                               {hasMessages && (
-                                                <TabsTrigger value="conversation" className="text-micro h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="conversation" className="flex-none text-small">
                                                   <MessageSquare className="h-3 w-3" /> Conversation
                                                   <span className="text-micro text-muted-foreground">({r.exploration!.messages.length})</span>
                                                 </TabsTrigger>
                                               )}
                                               {hasFiles && (
-                                                <TabsTrigger value="files" className="text-micro h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="files" className="flex-none text-small">
                                                   <FolderOpen className="h-3 w-3" /> Files
                                                   <span className="text-micro text-muted-foreground">({r.exploration!.filesRead.length})</span>
                                                 </TabsTrigger>
                                               )}
                                               {hasRetries && (
-                                                <TabsTrigger value="retries" className="text-micro h-6 px-2 gap-1 text-warning/70 data-[state=active]:bg-background data-[state=active]:text-warning">
+                                                <TabsTrigger value="retries" className="flex-none text-small text-warning/70 data-[state=active]:text-warning">
                                                   <AlertCircle className="h-3 w-3" /> Retries
                                                   <span className="text-micro">({r.scoringAttemptErrors!.length})</span>
                                                 </TabsTrigger>
@@ -1431,7 +1431,7 @@ export function TaskDetailPage() {
 
                   {/* Metrics */}
                   {assessment.metrics && assessment.metrics.length > 0 && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
                         <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Activity className="h-3 w-3" /> Metrics ({assessment.metrics.length})
@@ -1454,7 +1454,7 @@ export function TaskDetailPage() {
 
                   {/* Assessment History */}
                   {task.result?.assessmentHistory && task.result.assessmentHistory.length > 0 && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
                         <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Clock className="h-3 w-3" /> Previous Assessments ({task.result.assessmentHistory.length})
@@ -1517,7 +1517,7 @@ export function TaskDetailPage() {
                 const hasLarge = stdoutLen > LARGE_TEXT_THRESHOLD || stderrLen > LARGE_TEXT_THRESHOLD;
                 return (
                 <Collapsible defaultOpen={!hasLarge}>
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                  <Card className="py-0 gap-0">
                     <CardContent className="pt-4 space-y-3">
                       <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
                         <Terminal className="h-3 w-3" /> Output
@@ -1574,7 +1574,7 @@ export function TaskDetailPage() {
 
               {/* ── Description (collapsible, open by default) ── */}
               <Collapsible defaultOpen>
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+              <Card className="py-0 gap-0">
                 <CardContent className="pt-4 space-y-4">
                   <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
                     <FileText className="h-3 w-3" /> Description
@@ -1611,7 +1611,7 @@ export function TaskDetailPage() {
 
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 ">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
                     <p className="text-label text-muted-foreground mb-3 flex items-center gap-1">
                       <Wrench className="h-3 w-3" /> Expectations ({task.expectations.length})
@@ -1727,7 +1727,7 @@ export function TaskDetailPage() {
               {/* ── Outcomes (produced artifacts — collapsible, open by default) ── */}
               {(task.outcomes?.length ?? 0) > 0 && (
                 <Collapsible defaultOpen>
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
                     <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full mb-3">
                       <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
@@ -1914,7 +1914,7 @@ export function TaskDetailPage() {
 
               {/* ── Expected Outcomes (declared, not yet produced) ── */}
               {(task.expectedOutcomes?.length ?? 0) > 0 && !(task.outcomes?.length) && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
                     <p className="text-label text-muted-foreground mb-3 flex items-center gap-1">
                       <Package className="h-3 w-3" /> Expected Outcomes ({task.expectedOutcomes!.length})
@@ -1938,7 +1938,7 @@ export function TaskDetailPage() {
 
               {/* ── Metrics ── */}
               {task.metrics.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
                     <p className="text-label text-muted-foreground mb-3">
                       Metrics ({task.metrics.length})
@@ -1957,7 +1957,7 @@ export function TaskDetailPage() {
               )}
 
               {/* ── Details / metadata ── */}
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+              <Card className="py-0 gap-0">
                 <CardContent className="pt-4 pb-4">
                   <p className="text-label text-muted-foreground mb-3">
                     Details

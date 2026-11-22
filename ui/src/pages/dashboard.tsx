@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Tooltip,
   TooltipContent,
@@ -114,26 +115,17 @@ function dashboardRangeLabel(range: TokenUsageRange): string {
 
 function DashboardRangeControl({ range, onChange }: { range: TokenUsageRange; onChange: (range: TokenUsageRange) => void }) {
   return (
-    <div className="flex h-8 shrink-0 items-center border border-border/70 bg-background/60 p-0.5" role="group" aria-label="Dashboard period">
-      <span className="hidden items-center gap-1.5 px-2 text-micro font-medium text-muted-foreground sm:flex">
-        <CalendarDays className="h-3.5 w-3.5" /> Period
+    <div className="flex shrink-0 items-center gap-2">
+      <span className="hidden items-center gap-1.5 text-small font-medium text-muted-foreground sm:flex">
+        <CalendarDays className="h-4 w-4" /> Period
       </span>
-      {DASHBOARD_RANGES.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          title={option.label}
-          className={cn(
-            "h-7 min-w-10 px-2 text-caption font-medium transition-colors",
-            range === option.value
-              ? "bg-foreground text-background"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {option.shortLabel}
-        </button>
-      ))}
+      <SegmentedControl size="sm" aria-label="Dashboard period" value={range} onValueChange={onChange}>
+        {DASHBOARD_RANGES.map((option) => (
+          <ToggleGroupItem key={option.value} value={option.value} title={option.label}>
+            {option.shortLabel}
+          </ToggleGroupItem>
+        ))}
+      </SegmentedControl>
     </div>
   );
 }
@@ -211,7 +203,7 @@ const StatCard = memo(function StatCard({
   tone?: StatTone;
 }) {
   return (
-    <Card className="relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/50 transition-shadow hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]">
+    <Card className="relative overflow-hidden transition-shadow hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]">
       <CardContent>
         <StatValue label={title} value={value} hint={description} icon={icon} tone={tone} />
       </CardContent>
@@ -270,7 +262,7 @@ const TaskProgress = memo(function TaskProgress({ tasks, range, now }: { tasks: 
   }
 
   return (
-    <Card className="lg:col-span-7 bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="lg:col-span-7">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div>
@@ -560,7 +552,7 @@ function formatShortDuration(ms: number): string {
 const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
   if (processes.length === 0) {
     return (
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
         </CardHeader>
@@ -576,7 +568,7 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
   }
 
   return (
-    <Card className={cn("bg-card/80 backdrop-blur-sm border-border/50", processes.length > 0 && "glow-cyan")}>
+    <Card className={cn(processes.length > 0 && "glow-cyan")}>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
         <CardDescription>{processes.length} agent{processes.length !== 1 ? "s" : ""} working</CardDescription>
@@ -631,7 +623,7 @@ const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
     .slice(0, 6);
 
   return (
-    <Card className="lg:col-span-5 bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="lg:col-span-5">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>

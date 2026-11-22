@@ -125,7 +125,7 @@ export function AgentLearningTab() {
   return (
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <GraduationCap className="h-4 w-4" /> Learning from conversations
@@ -179,7 +179,7 @@ export function AgentLearningTab() {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Brain className="h-4 w-4" /> What it learned

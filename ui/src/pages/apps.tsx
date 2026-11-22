@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -88,24 +89,24 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
               {selectedTags.size > 0 && <><DropdownMenuSeparator /><DropdownMenuItem className="text-xs" onSelect={() => setSelectedTags(new Set())}>Clear category filters</DropdownMenuItem></>}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="flex shrink-0 items-center rounded-md border border-border/70 bg-muted/20 p-0.5">
+          <SegmentedControl size="sm" aria-label="Apps view" value={view} onValueChange={setView}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant={view === "cards" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none" aria-label="Card view" aria-pressed={view === "cards"} onClick={() => setView("cards")}>
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                </Button>
+                <ToggleGroupItem value="cards" aria-label="Card view">
+                  <LayoutGrid className="h-4 w-4" />
+                </ToggleGroupItem>
               </TooltipTrigger>
               <TooltipContent>Card view</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant={view === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none" aria-label="List view" aria-pressed={view === "list"} onClick={() => setView("list")}>
-                  <LayoutList className="h-3.5 w-3.5" />
-                </Button>
+                <ToggleGroupItem value="list" aria-label="List view">
+                  <LayoutList className="h-4 w-4" />
+                </ToggleGroupItem>
               </TooltipTrigger>
               <TooltipContent>List view</TooltipContent>
             </Tooltip>
-          </div>
+          </SegmentedControl>
           <AppEditor mode="create" onSave={async (input) => { const app = await api.create(input); navigate(`/apps/${app.id}`); }} />
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void api.refetch()} aria-label="Refresh apps"><RefreshCw className="h-3.5 w-3.5" /></Button>
         </div>
@@ -263,11 +264,11 @@ function AppDetail({ appId, api }: { appId: string; api: ReturnType<typeof useAp
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 px-4">
           <div className="min-w-0 flex-1 overflow-x-auto scrollbar-none">
             <TabsList className="h-8 w-max shrink-0 justify-start">
-              <TabsTrigger className="h-6 flex-none px-2 text-caption" value="overview">Overview</TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-caption" value="services">Services <Count value={app.services.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-caption" value="deployments">Deployments <Count value={app.deployments.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-caption" value="domains">Domains <Count value={app.domains.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-caption" value="settings">Settings</TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="overview">Overview</TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="services">Services <Count value={app.services.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="deployments">Deployments <Count value={app.deployments.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="domains">Domains <Count value={app.domains.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="settings">Settings</TabsTrigger>
             </TabsList>
           </div>
         </div>

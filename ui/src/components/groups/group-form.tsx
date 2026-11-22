@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { RoomReplyMode, RoomReplyOrder, RoomSettings } from "@/lib/rooms-api";
@@ -26,25 +27,13 @@ function Segmented<T extends string>({ value, options, onChange, disabled }: {
   disabled?: boolean;
 }) {
   return (
-    <div className={cn("inline-flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5", disabled && "opacity-50")}>
+    <SegmentedControl size="sm" value={value} onValueChange={onChange} disabled={disabled}>
       {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          disabled={disabled}
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "flex h-7 items-center justify-center rounded px-2.5 text-caption font-medium transition-colors",
-            value === option.value
-              ? "bg-background text-foreground shadow-card"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
+        <ToggleGroupItem key={option.value} value={option.value}>
           {option.label}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </SegmentedControl>
   );
 }
 

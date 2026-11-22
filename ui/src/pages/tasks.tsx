@@ -123,9 +123,9 @@ const TaskRow = memo(function TaskRow({
     <div
       className={cn(
         "group flex items-center gap-3 px-3 py-2 rounded-lg border transition-all cursor-pointer",
-        "hover:shadow-card hover:border-primary/25",
-        "bg-card/80 backdrop-blur-sm",
-        isBlocked ? "border-warning/40 bg-warning/[0.03]" : "border-border/40",
+        "hover:shadow-raised hover:border-primary/25",
+        "bg-card shadow-card",
+        isBlocked ? "border-warning/40 bg-warning/[0.03]" : "border-border",
       )}
       onClick={() => click(task.id)}
     >
@@ -413,13 +413,13 @@ const TaskCard = memo(function TaskCard({
       draggable={canDragToQueued}
       onDragStart={handleDragStart}
       className={cn(
-        "group rounded-lg border bg-card/80 backdrop-blur-sm transition-all cursor-pointer",
-        "hover:shadow-card hover:border-primary/25",
+        "group rounded-lg border bg-card shadow-card transition-all cursor-pointer",
+        "hover:shadow-raised hover:border-primary/25",
         "w-full max-w-full overflow-hidden box-border",
         canDragToQueued && "cursor-grab active:cursor-grabbing",
         isBlocked
           ? "border-warning/40 bg-warning/[0.03]"
-          : "border-border/40",
+          : "border-border",
         compact ? "p-2" : "p-2.5",
       )}
       onClick={() => click(task.id)}
@@ -694,7 +694,7 @@ function GroupBlock({
       <CollapsibleTrigger asChild>
         <button
           className={cn(
-            "w-full max-w-full rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm transition-all cursor-pointer overflow-hidden box-border",
+            "w-full max-w-full rounded-lg border border-border bg-card shadow-card transition-all cursor-pointer overflow-hidden box-border",
             "hover:border-primary/20 hover:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_8%,transparent)]",
             "p-2.5 text-left",
           )}
@@ -997,7 +997,7 @@ function ListView({
           tax. `endReached` fires when the user scrolls within `overscan`
           px of the bottom; we use it as the cursor-pagination trigger. */}
       {filtered.length === 0 ? (
-        <Card className="bg-card/60 backdrop-blur-sm">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <ListChecks className="h-10 w-10 mb-3 opacity-40" />
             <p className="text-sm font-medium">
@@ -1159,7 +1159,7 @@ export function TasksPage() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
             <Input
               placeholder="Search..."
-              className="pl-8 h-8 text-sm bg-input/50 border-border/40 focus:border-primary/50"
+              className="pl-8 h-8 text-sm"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -1364,7 +1364,7 @@ export function TasksPage() {
 
         {/* Content */}
         {tasks.length === 0 ? (
-          <Card className="bg-card/60 backdrop-blur-sm">
+          <Card>
             <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <ListChecks className="h-12 w-12 mb-4 opacity-40" />
               <p className="text-sm font-medium">No tasks yet</p>

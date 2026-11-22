@@ -94,7 +94,7 @@ export function AgentTasksTab() {
 
         {/* Task list */}
         {sortedTasks.length > 0 ? (
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="pt-2 pb-2 divide-y divide-border/20">
               {sortedTasks.map((task) => (
                 <TaskRow key={task.id} task={task} />
