@@ -13,6 +13,7 @@ import type { ConnectorManager } from "../mcp/manager.js";
 import { allowPrivateNetwork } from "../mcp/net.js";
 import { applyConnectorPatch } from "../mcp/validate.js";
 import { mcpToolName } from "../mcp/tools.js";
+import { connectorLabel } from "../mcp/view.js";
 
 const Agents = Type.Union([Type.Array(Type.String()), Type.Literal("*")], { description: "Agent names, or \"*\" for every agent" });
 
@@ -20,7 +21,8 @@ export const CONNECTOR_TOOLS: Tool[] = [
   {
     name: "connectors_list",
     description: "List the connectors (external apps over MCP: Linear, Notion, Gmail, GitHub, custom servers): status (connected, needs (re)authorization, error), "
-      + "tool count, who may use them (agents, Polpo). With catalog: true, also the catalog of apps that can be added with connector_add.",
+      + "tool count, who may use them (agents, Polpo). Several accounts of one app have their own ids (gmail, gmail-2…) and names. "
+      + "With catalog: true, also the catalog of apps that can be added with connector_add (again, with a name, for another account).",
     parameters: Type.Object({
       catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps (ids and names)" })),
       search: Type.Optional(Type.String({ description: "Search the catalog (e.g. \"crm\", \"google\", \"jira\"), with descriptions" })),
@@ -68,7 +70,7 @@ function describe(c: ConnectorConfig): string {
   const who = [c.access.agents === "*" ? "every agent" : c.access.agents.length ? `agents: ${c.access.agents.join(", ")}` : "no agent", c.access.polpo ? "Polpo" : ""].filter(Boolean).join(" + ");
   const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.url;
   const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
-  return `- ${c.name} [${c.id}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
+  return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
     + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*`;
 }
 

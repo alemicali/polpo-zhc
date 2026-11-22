@@ -164,16 +164,20 @@ function secretValues(input: ConnectorSecretsInput | undefined): { values: Recor
 export async function buildConnector(input: ConnectorInput, ctx: ValidateContext): Promise<{ connector: ConnectorConfig; secrets: Record<string, string | undefined> }> {
   const entry = input.catalogId ? catalogEntry(input.catalogId) : undefined;
   if (input.catalogId && !entry) throw new ConnectorInputError(`Unknown catalog entry "${input.catalogId}"`);
-  const name = (input.name ?? entry?.name ?? "").trim();
+  let name = (input.name ?? entry?.name ?? "").trim();
   if (!name) throw new ConnectorInputError("name is required");
   let id = (input.id ?? "").trim();
   if (id) {
     if (!CONNECTOR_ID_PATTERN.test(id)) throw new ConnectorInputError("id: use lowercase letters, digits and - (max 40)");
     if (ctx.existingIds.includes(id)) throw new ConnectorInputError(`A connector "${id}" already exists`);
   } else {
+    // another account of an app already added: gmail-2, gmail-3… with its own tokens and name
     const base = entry?.id ?? connectorSlug(name);
     id = base;
-    for (let n = 2; ctx.existingIds.includes(id); n++) id = `${base.slice(0, 36)}-${n}`;
+    let n = 1;
+    while (ctx.existingIds.includes(id)) id = `${base.slice(0, 36)}-${++n}`;
+    // no name given: "Gmail 2", so the two accounts never share one
+    if (n > 1 && !input.name?.trim()) name = `${name} ${n}`;
   }
   const transport = await normalizeTransport({
     ...(entry ? { type: entry.transport, url: entry.url } : {}),

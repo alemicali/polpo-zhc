@@ -40,6 +40,8 @@ export interface ConnectorOAuthSettings {
 export interface Connector {
   id: string;
   name: string;
+  /** The signed-in account (e.g. an email), when the sign-in revealed it (an OpenID id_token). */
+  account?: string;
   kind: "mcp";
   description?: string;
   transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string; args?: string[]; env?: Record<string, string>; headers?: Record<string, string> };
@@ -219,7 +221,7 @@ export function filterConnectors(connectors: Connector[], query: string): Connec
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return connectors;
   return connectors.filter((c) => {
-    const hay = fold(`${c.name} ${c.id} ${c.description ?? ""} ${c.transport.url ?? c.transport.command ?? ""}`);
+    const hay = fold(`${c.name} ${c.id} ${c.account ?? ""} ${c.description ?? ""} ${c.transport.url ?? c.transport.command ?? ""}`);
     return words.every((w) => hay.includes(w));
   });
 }
@@ -258,14 +260,66 @@ export function connectorState(connector: Connector): Exclude<ConnectorCardState
   }
 }
 
-export function catalogCardState(entry: CatalogEntry, connectors: Connector[], apps: OAuthApp[]): { state: ConnectorCardState; connector?: Connector } {
-  const connector = connectors.find((c) => c.catalogId === entry.id);
+export function catalogCardState(entry: CatalogEntry, connectors: Connector[], apps: OAuthApp[]): { state: ConnectorCardState; connector?: Connector; accounts: Connector[] } {
+  const accounts = catalogAccounts(entry.id, connectors);
+  const connector = accounts[0];
   if (connector) {
     const state = connectorState(connector);
     return { state: (state === "needs_auth" || state === "needs_reauth" || state === "error")
-      && missingOAuthApp(entry, apps, connector) ? "needs_setup" : state, connector };
+      && missingOAuthApp(entry, apps, connector) ? "needs_setup" : state, connector, accounts };
   }
-  return { state: missingOAuthApp(entry, apps) ? "needs_setup" : "connect" };
+  return { state: missingOAuthApp(entry, apps) ? "needs_setup" : "connect", accounts };
+}
+
+// ── Several accounts of one catalog app (gmail, gmail-2…) ────────────────────
+
+/** The connectors added from one catalog entry: its accounts, in list order. */
+export function catalogAccounts(entryId: string, connectors: Connector[]): Connector[] {
+  return connectors.filter((c) => c.catalogId === entryId);
+}
+
+/** A free default name for another account of `entry`: "Gmail 2", "Gmail 3"… */
+export function nextAccountName(entry: { id: string; name: string }, connectors: Connector[]): string {
+  const taken = new Set(connectors.map((c) => c.name.trim().toLowerCase()));
+  let n = catalogAccounts(entry.id, connectors).length + 1;
+  while (taken.has(`${entry.name} ${n}`.toLowerCase())) n++;
+  return `${entry.name} ${n}`;
+}
+
+/**
+ * What tells this connector apart from the other accounts of the same app: the signed-in account
+ * when its name does not say it already, else its id when there are other accounts.
+ */
+export function accountLabel(connector: Connector, connectors: Connector[]): string | undefined {
+  const account = connector.account?.trim();
+  if (account && !connector.name.toLowerCase().includes(account.toLowerCase())) return account;
+  if (connector.catalogId && catalogAccounts(connector.catalogId, connectors).length > 1) return connector.id;
+  return undefined;
+}
+
+/** After sign-in revealed the account: a name that says it ("Gmail – info@acme.com"), if the name does not yet. */
+export function suggestedAccountName(connector: Connector, entryName?: string): string | undefined {
+  const account = connector.account?.trim();
+  if (!account || connector.name.toLowerCase().includes(account.toLowerCase())) return undefined;
+  const base = entryName ?? connector.name.replace(/\s+\d+$/, "");
+  return `${base} – ${account}`;
+}
+
+/**
+ * The Connected list: connectors in order, accounts of the same app kept together under one group
+ * ("Gmail · 2 accounts") when there are several.
+ */
+export function groupConnectors(connectors: Connector[]): Array<{ key: string; catalogId?: string; connectors: Connector[] }> {
+  const groups: Array<{ key: string; catalogId?: string; connectors: Connector[] }> = [];
+  const byApp = new Map<string, { key: string; catalogId?: string; connectors: Connector[] }>();
+  for (const c of connectors) {
+    const existing = c.catalogId ? byApp.get(c.catalogId) : undefined;
+    if (existing) { existing.connectors.push(c); continue; }
+    const group = { key: c.catalogId ? `app:${c.catalogId}` : `id:${c.id}`, ...(c.catalogId ? { catalogId: c.catalogId } : {}), connectors: [c] };
+    if (c.catalogId) byApp.set(c.catalogId, group);
+    groups.push(group);
+  }
+  return groups;
 }
 
 export const STATE_LABEL: Record<ConnectorCardState, string> = {
