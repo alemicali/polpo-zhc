@@ -13,7 +13,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { Button } from "@/components/ui/button";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  agentHasAccess, allowedToolsCoverConnector, connectorState, connectorToolsEntry, connectorsApi, toggleAgentAccess,
+  accountLabel, agentHasAccess, allowedToolsCoverConnector, connectorState, connectorToolsEntry, connectorsApi, toggleAgentAccess,
   type AgentConnectorTools as Selection, type Connector,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -72,12 +72,17 @@ export function AgentConnectorsSection({
             const blockedByAllowlist = on && !allowedToolsCoverConnector(allowedTools, connector.id);
             const entry = connectorToolsEntry(current, connector.id);
             const open = on && expanded === connector.id;
+            const account = accountLabel(connector, connectors);
             return (
               <div key={connector.id} className="rounded-lg border border-border/40 bg-card/60">
                 <div data-testid={`agent-connector-${connector.id}`} className="flex items-center gap-3 px-3 py-2">
                   <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{connector.name}</p>
+                    <p className="flex min-w-0 items-baseline gap-1.5">
+                      <span className="truncate text-sm font-medium">{connector.name}</span>
+                      {/* several accounts of one app: which one this is */}
+                      {account && <span className="min-w-0 truncate text-caption text-muted-foreground">{account}</span>}
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {connector.access.agents === "*" ? "Open to every agent" : on ? "This agent can use its tools" : "Not granted"}
                       {on && entry !== "*" ? ` · ${entry.length} selected tool${entry.length === 1 ? "" : "s"}` : connector.toolCount !== undefined ? ` · ${connector.toolCount} tools` : ""}

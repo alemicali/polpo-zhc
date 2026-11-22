@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAgents } from "@polpo-ai/react";
 import { toast } from "sonner";
-import { BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Settings2, X } from "lucide-react";
+import { BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Settings2, UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,8 @@ import { OAuthAppsDialog } from "@/components/connectors/oauth-apps-dialog";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  authLabel, catalogCardState, catalogCategories, connectorState, connectorsApi, filterCatalog, filterConnectors,
+  accountLabel, authLabel, catalogCardState, catalogCategories, connectorState, connectorsApi, filterCatalog, filterConnectors,
+  groupConnectors, nextAccountName,
   type CatalogEntry, type Connector, type ConnectorCardState,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -54,8 +55,13 @@ function actionLabel(state: ConnectorCardState): string {
 }
 
 function CatalogCard({
-  entry, state, connector, onConnect, onManage,
-}: { entry: CatalogEntry; state: ConnectorCardState; connector?: Connector; onConnect: () => void; onManage: () => void }) {
+  entry, state, connector, accounts, onConnect, onManage, onAddAccount,
+}: {
+  entry: CatalogEntry; state: ConnectorCardState; connector?: Connector; accounts: number;
+  onConnect: () => void; onManage: () => void;
+  /** Connect another account of this app (a second inbox, one per agent…). */
+  onAddAccount: () => void;
+}) {
   const primary = state === "connect" || state === "needs_setup" || state === "needs_auth" || state === "needs_reauth";
   // an added connector waiting for sign-in (or setup) can also be managed: sign in, or remove it
   const manageToo = primary && !!connector;
@@ -65,7 +71,7 @@ function CatalogCard({
         <ConnectorIcon catalogId={entry.id} name={entry.name} color={entry.icon?.color} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium leading-tight">{entry.name}</p>
-          <p className="truncate text-xs text-muted-foreground">{entry.category}</p>
+          <p className="truncate text-xs text-muted-foreground">{entry.category}{accounts > 1 ? ` · ${accounts} accounts` : ""}</p>
         </div>
         {state !== "connect" && <StateBadge state={state} />}
       </div>
@@ -77,15 +83,23 @@ function CatalogCard({
             <BadgeCheck className="h-3 w-3" /> In Claude directory
           </Badge>
         )}
+        {connector && (
+          <Button
+            size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs"
+            onClick={onAddAccount} aria-label={`Add another ${entry.name} account`} title={`Connect another ${entry.name} account`}
+          >
+            <UserPlus className="h-3.5 w-3.5" /> Account
+          </Button>
+        )}
         {manageToo && (
-          <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs" onClick={onManage} aria-label={`Manage ${entry.name}`}>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onManage} aria-label={`Manage ${entry.name}`}>
             Manage
           </Button>
         )}
         <Button
           size="sm"
           variant={primary ? "default" : "outline"}
-          className={cn("h-7 px-3 text-xs", !manageToo && "ml-auto")}
+          className={cn("h-7 px-3 text-xs", !connector && "ml-auto")}
           onClick={primary ? onConnect : onManage}
           aria-label={`${actionLabel(state)} ${entry.name}`}
         >
@@ -97,8 +111,13 @@ function CatalogCard({
 }
 
 function ConnectorRow({
-  connector, agentLabel, onManage, onReconnect,
-}: { connector: Connector; agentLabel: (name: string) => string; onManage: () => void; onReconnect: () => void }) {
+  connector, account, agentLabel, onManage, onReconnect,
+}: {
+  connector: Connector;
+  /** What tells it apart from the other accounts of the same app (signed-in account, or id). */
+  account?: string;
+  agentLabel: (name: string) => string; onManage: () => void; onReconnect: () => void;
+}) {
   const product = productName(useInstanceBranding());
   const state = connectorState(connector);
   const needsSignIn = state === "needs_auth" || state === "needs_reauth";
@@ -108,6 +127,7 @@ function ConnectorRow({
       <button type="button" onClick={onManage} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{connector.name}</span>
+          {account && <span className="min-w-0 truncate text-xs text-muted-foreground" data-testid={`connector-account-${connector.id}`}>{account}</span>}
           {!connector.catalogId && <Badge variant="secondary" className="text-micro font-normal">Custom</Badge>}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
@@ -166,6 +186,11 @@ export function ConnectorsPage() {
   const oauthApps = catalog?.oauthApps ?? [];
 
   const manage = (connector: Connector) => { flow.close(); setSelectedId(connector.id); };
+  /** Another account of a catalog app (a click: may open the sign-in window after the name step). */
+  const addAccount = (entry: CatalogEntry) => {
+    setSelectedId(null);
+    flow.open({ entry, another: true, name: nextAccountName(entry, connectors) });
+  };
   /** Keep the tab the person is on (the default tab follows whether anything is connected). */
   const stay = () => setTab((t) => t ?? activeTab);
 
@@ -232,9 +257,32 @@ export function ConnectorsPage() {
           ) : visibleConnectors.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No connected app matches “{query}”.</p>
           ) : (
-            visibleConnectors.map((c) => (
-              <ConnectorRow key={c.id} connector={c} agentLabel={agentLabel} onManage={() => manage(c)} onReconnect={() => flow.open({ connector: c, entry: entries.find((e) => e.id === c.catalogId) })} />
-            ))
+            groupConnectors(visibleConnectors).map((group) => {
+              const rows = group.connectors.map((c) => (
+                <ConnectorRow
+                  key={c.id} connector={c} account={accountLabel(c, connectors)} agentLabel={agentLabel}
+                  onManage={() => manage(c)} onReconnect={() => flow.open({ connector: c, entry: entries.find((e) => e.id === c.catalogId) })}
+                />
+              ));
+              const groupEntry = group.catalogId ? entries.find((e) => e.id === group.catalogId) : undefined;
+              if (group.connectors.length < 2) return rows;
+              // several accounts of one app: kept together under its name
+              return (
+                <section key={group.key} data-testid={`connector-group-${group.catalogId}`} className="space-y-2 rounded-card border border-dashed p-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {groupEntry?.name ?? group.connectors[0]!.name} · {group.connectors.length} accounts
+                    </p>
+                    {groupEntry && (
+                      <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs" onClick={() => addAccount(groupEntry)} aria-label={`Add another ${groupEntry.name} account`}>
+                        <UserPlus className="h-3.5 w-3.5" /> Add account
+                      </Button>
+                    )}
+                  </div>
+                  {rows}
+                </section>
+              );
+            })
           )}
         </TabsContent>
 
@@ -255,13 +303,15 @@ export function ConnectorsPage() {
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {visibleEntries.map((entry) => {
-                const { state, connector } = catalogCardState(entry, connectors, oauthApps);
+                const { state, connector, accounts } = catalogCardState(entry, connectors, oauthApps);
                 return (
                   <CatalogCard
                     key={entry.id}
                     entry={entry}
                     state={state}
                     connector={connector}
+                    accounts={accounts.length}
+                    onAddAccount={() => { stay(); addAccount(entry); }}
                     onConnect={() => { stay(); flow.open({ entry, ...(connector ? { connector } : {}) }); }}
                     onManage={() => connector && manage(connector)}
                   />
@@ -282,6 +332,15 @@ export function ConnectorsPage() {
         onClose={flow.close}
         onManage={manage}
         onRetry={() => { if (flow.state.target) flow.open(flow.state.target); }}
+        onRename={async (c, name) => {
+          try {
+            upsert(await connectorsApi.update(c.id, { name }));
+            toast.success(`Renamed to ${name}`);
+          } catch (reason) {
+            toast.error(reason instanceof Error ? reason.message : String(reason));
+            throw reason;
+          }
+        }}
         onRemove={async (c) => {
           flow.close();
           try {
@@ -318,6 +377,8 @@ export function ConnectorsPage() {
         onChanged={upsert}
         onRemoved={(id) => { drop(id); setSelectedId(null); }}
         onReconnect={(c) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry }); }}
+        accountCount={selectedEntry ? catalogCardState(selectedEntry, connectors, oauthApps).accounts.length : 0}
+        onAddAccount={selectedEntry ? () => addAccount(selectedEntry) : undefined}
       />
     </div>
   );

@@ -14,7 +14,7 @@ import { setupHandoff } from "./setup.js";
 import { unknownAgents } from "./tasks.js";
 
 type Connector = {
-  id: string; name: string; description?: string; transport: { type: string; url?: string }; auth: { type: string; oauth?: { app?: string } };
+  id: string; name: string; account?: string; description?: string; transport: { type: string; url?: string }; auth: { type: string; oauth?: { app?: string } };
   access: { agents: string[] | "*"; polpo: boolean }; enabled: boolean; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
   lastConnectedAt?: string; toolPolicy?: Record<string, string>;
   secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean } };
@@ -25,7 +25,7 @@ type CatalogEntry = {
 };
 
 const connectorItem = z.object({
-  id: z.string(), name: z.string(), status: z.string(), enabled: z.boolean(), url: z.string().optional(), auth: z.string(),
+  id: z.string(), name: z.string(), account: z.string().optional().describe("The signed-in account, when known"), status: z.string(), enabled: z.boolean(), url: z.string().optional(), auth: z.string(),
   agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean(), tool_count: z.number().int().optional(),
   authorized: z.boolean().optional(), credentials_set: z.boolean().optional(), last_error: z.string().optional(), catalog_id: z.string().optional(),
   tool_policy: z.record(z.string(), z.string()).optional(),
@@ -47,7 +47,7 @@ function safeUrl(url: string): string {
 
 /** What a connector is, without secrets (only whether they are set). */
 const view = (c: Connector) => ({
-  id: c.id, name: c.name, status: c.enabled ? c.status ?? "disconnected" : "disabled", enabled: c.enabled,
+  id: c.id, name: c.name, ...(c.account ? { account: c.account } : {}), status: c.enabled ? c.status ?? "disconnected" : "disabled", enabled: c.enabled,
   ...(c.transport.url ? { url: safeUrl(c.transport.url) } : {}), auth: c.auth.type, agents: c.access.agents, polpo: c.access.polpo,
   ...(c.toolCount !== undefined ? { tool_count: c.toolCount } : {}),
   ...(c.auth.type === "oauth" ? { authorized: !!c.secrets?.oauth.authorized } : {}),
@@ -55,7 +55,7 @@ const view = (c: Connector) => ({
   ...(c.lastError ? { last_error: c.lastError } : {}), ...(c.catalogId ? { catalog_id: c.catalogId } : {}),
   ...(c.toolPolicy && Object.keys(c.toolPolicy).length ? { tool_policy: c.toolPolicy } : {}),
 });
-const line = (c: ReturnType<typeof view>) => `- ${c.id} "${c.name}" [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
+const line = (c: ReturnType<typeof view>) => `- ${c.id} "${c.name}"${c.account && !c.name.includes(c.account) ? ` (${c.account})` : ""}${c.catalog_id && c.catalog_id !== c.id ? ` (another ${c.catalog_id} account)` : ""} [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
   + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
 
 async function loadConnector(deps: McpDeps, id: string) {
@@ -170,11 +170,13 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     title: "Add a connector",
     description: "Add a connector from the catalog (catalog_id) or a remote MCP server (url, https). For OAuth ones it returns authorization_url: "
       + "give it to the person to open and sign in. Servers that need a token or an OAuth app's secret are added but finished in the dashboard (setup_url): "
-      + "secrets never go through this connector. Agents get its tools only when listed in agents; Polpo by default.",
+      + "secrets never go through this connector. Agents get its tools only when listed in agents; Polpo by default. "
+      + "Another account of an app already added (a second Gmail inbox, one per agent): the same catalog_id again with a name that says which "
+      + "account (\"Gmail – info@acme.com\"); it gets its own id (gmail-2, gmail-3…), sign-in and tools (mcp__gmail-2__…).",
     inputSchema: {
       catalog_id: z.string().optional().describe("A catalog id (polpo_connector_catalog)"),
       url: z.string().url().optional().describe("A remote MCP server's URL, or your account's URL for catalog entries with a url_template"),
-      name: z.string().max(80).optional().describe("Display name (default: the catalog's name, or the host)"),
+      name: z.string().max(80).optional().describe("Display name (default: the catalog's name, or the host). For another account of the same app, say which: \"Gmail – info@acme.com\""),
       id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "lowercase letters, digits and -").optional().describe("Slug used in tool names mcp__<id>__<tool>"),
       transport: z.enum(["http", "sse"]).optional().describe("http (default: streamable HTTP, falls back to SSE) or sse"),
       auth: z.enum(["none", "oauth"]).optional().describe("For a custom URL: none (default) or oauth. Token-based servers are set up in the dashboard"),

@@ -31,6 +31,7 @@ import { ConnectorSecrets, OAUTH_KEYS, resolveSecretRefs, SECRET_KEYS } from "./
 import { ConnectorStore } from "./store.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
 import { clientMetadataUrlFor } from "./paths.js";
+import { accountFromIdToken, connectorLabel } from "./view.js";
 
 const VERSION = "1.0.0";
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -409,7 +410,7 @@ export class ConnectorManager {
         const policy = connector.toolPolicy?.[tool.name] ?? "allow";
         if (policy === "off") continue;
         // TODO(connectors): "ask" should pause for the person's approval in chat; treated as "allow" until an approval hook exists.
-        const bridged = bridgeMcpTool(connector.id, connector.name, tool, (name, args, signal) => this.callTool(connector.id, name, args, signal));
+        const bridged = bridgeMcpTool(connector.id, connectorLabel(connector), tool, (name, args, signal) => this.callTool(connector.id, name, args, signal));
         if (agent !== undefined && !connectorToolSelected(connectorTools, connector.id, tool.name)) continue;
         if (agent !== undefined && !connectorToolAllowed(allowedTools, bridged.name)) continue;
         if (seen.has(bridged.name)) continue;
@@ -515,6 +516,9 @@ export class ConnectorManager {
     } finally {
       await this.secrets.unset(connector.id, [SECRET_KEYS.verifier]);
     }
+    // which account signed in, when the token response says so at no extra cost (an OpenID id_token)
+    const account = accountFromIdToken((await provider?.tokens().catch(() => undefined))?.id_token);
+    if (account && account !== connector.account) this.store.update(connector.id, { account });
     await this.close(connector.id);
     const result = await this.test(connector.id);
     this.log(`oauth callback ${connector.id}: authorized${result.error ? `, but the first connection failed: ${result.error}` : result.tools ? `, ${result.tools.length} tools` : ""}`);
@@ -529,6 +533,8 @@ export class ConnectorManager {
     if (connector.auth.type === "oauth") {
       await this.revoke(connector).catch((err) => this.log(`${id}: revoke failed: ${errorMessage(err)}`));
       await this.secrets.unset(id, OAUTH_KEYS.filter((k) => k !== SECRET_KEYS.clientInfo && k !== SECRET_KEYS.discovery));
+      // the next sign-in may be another account
+      if (connector.account) this.store.update(id, { account: undefined });
       this.setStatus(id, "needs_auth", { action: "updated" });
     } else {
       this.setStatus(id, "disconnected", { action: "updated" });

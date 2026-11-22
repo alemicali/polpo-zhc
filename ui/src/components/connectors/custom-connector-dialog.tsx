@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronDown, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   EMPTY_CUSTOM_FORM, customConnectorInput, validateCustomConnector,
@@ -49,11 +49,12 @@ export function CustomConnectorDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) reset(); onOpenChange(next); }}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <DialogTitle>Add custom connector</DialogTitle>
           <DialogDescription>Connect any MCP server. Credentials are stored in the vault and never shown again.</DialogDescription>
         </DialogHeader>
+        <DialogBody>
         <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
           <Field label="Name" error={visible.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Internal tools" aria-invalid={!!visible.name} />
@@ -156,11 +157,12 @@ export function CustomConnectorDialog({
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter sticky>
             <Button type="button" variant="outline" onClick={() => { reset(); onOpenChange(false); }}>Cancel</Button>
             <Button type="submit">{form.kind === "remote" && form.auth === "oauth" ? "Add and sign in" : "Add"}</Button>
           </DialogFooter>
         </form>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

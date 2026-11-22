@@ -65,6 +65,7 @@ import { FileTaskStore } from "../stores/file-task-store.js";
 import { inkRegistry } from "../core/ink-config.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { connectorsPromptSection } from "../mcp/runtime.js";
+import { connectorLabel } from "../mcp/view.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -834,7 +835,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         threshold: ctx?.polpoDir ? loadPolpoConfig(ctx.polpoDir)?.settings?.tools?.progressiveThreshold : undefined,
         groups: AGENT_TOOL_GROUPS,
         connectorNames: connectorManager
-          ? Object.fromEntries(connectorManager.store.list().map((connector) => [connector.id, connector.name]))
+          ? Object.fromEntries(connectorManager.store.list().map((connector) => [connector.id, connectorLabel(connector)]))
           : undefined,
         // a resumed run keeps what its transcript already declares
         loaded: declaredTools(ctx?.resumeMessages ?? []).keys(),
