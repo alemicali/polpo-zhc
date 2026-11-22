@@ -1,0 +1,14 @@
+/* Brand marks (widgets/shared/brand.ts): inline, aligned with the text. */
+.mark { display: inline-block; flex: none; vertical-align: -3px; }
+.mark-mono { fill: currentColor; }
+.mark-img { border-radius: 3px; object-fit: contain; }
+.mark-glyph { display: inline-grid; place-items: center; line-height: 1; color: var(--fg3); }
+.mark-pair { display: inline-flex; }
+.mark-pair .mark-dark { display: none; }
+[data-theme="dark"] .mark-pair .mark-light { display: none; }
+[data-theme="dark"] .mark-pair .mark-dark { display: inline-block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mark-pair .mark-light { display: none; }
+  :root:not([data-theme="light"]) .mark-pair .mark-dark { display: inline-block; }
+}
+.marks { display: inline-flex; align-items: center; gap: 4px; }

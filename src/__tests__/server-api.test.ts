@@ -297,6 +297,20 @@ describe("Tasks API", () => {
     const row = slim.data.find((t: any) => t.id === id);
     expect(row.runs).toBeUndefined();
     expect(row.lastRun).toEqual({ engine: "claude-code", model: "us.anthropic.claude-haiku-4-5", computerId: "coder-box", computerName: "Coder box", computerKind: "daytona", provider: "daytona", status: "completed" });
+    expect(row.failure).toBeUndefined();
+  });
+
+  test("a failed task's reason (labelled, not retryable) as `failure`: on GET /tasks/:id and in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Failure task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const stderr = "Bedrock: model \"us.anthropic.claude-sonnet-4-5\" not enabled for this account — pick another model\nClaude Code: API Error: 403";
+    await orchestrator.getStore().updateTask(id, { status: "failed", result: { exitCode: 1, stdout: "", stderr, duration: 5, retryable: false } });
+    const failure = { reason: stderr.split("\n")[0], retryable: false, kind: "model_access" };
+    const full = await (await app.request(api(`/tasks/${id}`))).json();
+    expect(full.data.failure).toEqual(failure);
+    expect(full.data.result.retryable).toBe(false);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    expect(slim.data.find((t: any) => t.id === id).failure).toEqual(failure);
   });
 
   test("GET /tasks returns 200 with task array", async () => {

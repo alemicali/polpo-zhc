@@ -62,6 +62,10 @@
       "types": "./dist/mission-cost.d.ts",
       "import": "./dist/mission-cost.js"
     },
+    "./task-failure": {
+      "types": "./dist/task-failure.d.ts",
+      "import": "./dist/task-failure.js"
+    },
     "./task-control-store": {
       "types": "./dist/task-control-store.d.ts",
       "import": "./dist/task-control-store.js"

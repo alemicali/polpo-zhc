@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "isolatedModules": true
   },
-  "include": ["*/main.ts"]
+  "include": ["*/main.ts", "shared/*.d.ts"]
 }

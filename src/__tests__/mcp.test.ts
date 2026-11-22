@@ -120,6 +120,7 @@ describe("Polpo MCP server", () => {
       "polpo_approvals_list", "polpo_approval_resolve",
       "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_delete", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
       "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run",
+      "polpo_task_show", "polpo_mission_show",
       "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create",
       "polpo_data_sources_list", "polpo_data_query", "polpo_data_source_get", "polpo_data_source_save", "polpo_data_source_test", "polpo_data_source_delete",
       "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate", "polpo_data_views_list", "polpo_data_view_get", "polpo_data_view_save", "polpo_data_view_delete",
@@ -313,7 +314,7 @@ describe("toolsets and scopes", () => {
 
   it("offers only the configured toolsets", async () => {
     const { api } = fakeApi();
-    expect(await toolNames({ api, version: "x", toolsets: ["missions"] })).toEqual(["polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run"]);
+    expect(await toolNames({ api, version: "x", toolsets: ["missions"] })).toEqual(["polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run", "polpo_mission_show"]);
     const withAdmin = await toolNames({ api, version: "x", toolsets: ["core", "admin"] });
     expect(withAdmin).toContain("polpo_api_get");
     expect(withAdmin).toContain("polpo_agent_show");
