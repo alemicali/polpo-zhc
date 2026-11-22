@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
-import { HarnessTestLine } from "@/components/config/harnesses-section";
+import { HarnessTestLine } from "@/components/config/harness-test-line";
 import { authBrand, AUTH_LABELS, engineBrand, engineLabel } from "@/lib/run-context";
 import {
   HARNESS_NAMES, harnessesApi,

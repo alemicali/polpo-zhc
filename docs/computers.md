@@ -113,13 +113,7 @@ When an agent runs on a harness (Claude Code, Codex: [harnesses.md](harnesses.md
 should not enter the VM. Brokering is implemented once in the shared harness sandbox session, for
 every provider:
 
-- A provider that can rewrite its VMs' outbound HTTPS requests itself declares the optional
-  capability `RemoteDriver.requestTransformations(rules, { replace })` (`src/sandbox/remote-adapters.ts`):
-  Polpo passes it the AI SDK's request transformations (match on host / path / method / query /
-  headers; set headers, `""` removes one; credential headers the VM sent are dropped), and the VM
-  calls the model directly with a placeholder. A provider with a native egress transformer (e.g.
-  Vercel Sandbox network policies) implements this and nothing else changes.
-- Providers without it (Daytona v2, Daytona v0, E2B, and any new provider by default) are brokered by
+- Every provider today (Daytona v2, Daytona v0, E2B, and any new provider by default) is brokered by
   **Polpo's model relay**: the VM's base URL becomes `<POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>`
   and Polpo applies the same rules outside the VM (see harnesses.md → Credential brokering, and the
   Funnel path to expose).

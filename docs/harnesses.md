@@ -96,7 +96,7 @@ key; only enabled harnesses are offered; the connection is tested after a save).
 
 MCP (see [mcp.md](mcp.md)): `polpo_harnesses_get`, `polpo_harnesses_update` (admin; a missing
 credential entry comes back as `setup_url` + `setup_id` for `polpo_setup_wait`; `gateway` for
-`ai-gateway` / `gateway`), `polpo_harnesses_test` (read), `polpo_harness_sessions_list`,
+`ai-gateway` / `gateway`), `polpo_harnesses_get { test, agent? }` (the connection test), `polpo_harness_sessions_list`,
 `polpo_harness_session_control` (work), and `engine` on `polpo_agent_create` / `polpo_agent_update`.
 
 REST: `GET /api/v1/harnesses` (with `relay` and each harness's `brokering`),
@@ -168,13 +168,12 @@ random placeholder (`aisdkhc_…`) in the VM instead of the key and registers re
 applies **outside** the VM. Polpo's sandbox session implements them once, for **every computer
 provider** (`src/harness/sandbox-session.ts`):
 
-- **Native**: a provider that can rewrite its VMs' outbound requests itself (e.g. a sandbox network
-  policy that injects headers) implements the optional `RemoteDriver.requestTransformations(rules,
-  { replace })` capability; the rules go to the provider and the VM calls the upstream directly.
-- **Polpo's model relay** (any provider without it: Daytona v2, Daytona v0, E2B…): the VM's base URL
+- **Polpo's model relay**, for every provider (Daytona v2, Daytona v0, E2B): the VM's base URL
   becomes `<POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>`, and the rules are applied by Polpo.
+- The session layer also has a small optional hook, `RemoteDriver.requestTransformations(rules,
+  { replace })`, for a provider that could apply the rules itself; no provider implements it today.
 
-Both get the same rules with the same semantics: the SDK's credential rules (presented as the
+The rules: the SDK's credential rules (presented as the
 gateway's `authScheme` wants: `x-api-key`, a Bearer token, or removed) and Polpo's own rules for the
 gateway headers (host = the upstream's). Credential headers the VM sends (`authorization`,
 `x-api-key`, `cookie`) are always dropped; only rule headers reach the upstream; in Polpo's rules a
@@ -235,8 +234,8 @@ runs next to Polpo's files (isolated HOME).
 
 ## Connection test
 
-`POST /api/v1/harnesses/test { harness, settings?, agent? }` (MCP `polpo_harnesses_test`, Polpo
-`harnesses_test`, the **Test connection** button; run after every save in the dashboard) sends one
+`POST /api/v1/harnesses/test { harness, settings?, agent? }` (MCP `polpo_harnesses_get { test }`, Polpo
+`harnesses_get { test }`, the **Test connection** button; run after every save in the dashboard) sends one
 tiny request **from the Polpo server, never the VM**, with the configured authentication and model
 (the saved settings, the ones being edited in `settings`, or `agent`'s own key and model):
 

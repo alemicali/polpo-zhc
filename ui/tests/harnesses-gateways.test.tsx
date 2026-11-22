@@ -15,11 +15,12 @@ vi.mock("@/hooks/use-vault-catalog", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { HarnessesSection, cleanHarnessSettings } from "../src/components/config/harnesses-section";
-import { GATEWAY_PRESET_INFO, cloudflareIds, settingsFromOverview, type HarnessesOverview } from "../src/lib/harnesses-api";
+import { HarnessesSection } from "../src/components/config/harnesses-section";
+import { GATEWAY_PRESET_INFO, cleanHarnessSettings, cloudflareIds, settingsFromOverview, type HarnessesOverview } from "../src/lib/harnesses-api";
 
 let root: Root;
 let container: HTMLDivElement;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON request bodies, read in assertions
 let calls: Array<{ method: string; path: string; body?: any }>;
 let overview: HarnessesOverview;
 

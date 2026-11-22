@@ -236,3 +236,40 @@ export function cloudflareIds(baseUrl: string | undefined): { account?: string; 
 export const TEST_ERROR_LABELS: Record<NonNullable<HarnessTestResult["errorKind"]>, string> = {
   config: "Configuration", auth: "Authentication", model: "Model", network: "Network", timeout: "Timeout", protocol: "Protocol", upstream: "Upstream",
 };
+
+// ── The form as the server takes it ─────────────────────────────────────
+
+export const isGatewayAuth = (auth: string | undefined): auth is "ai-gateway" | "gateway" => auth === "ai-gateway" || auth === "gateway";
+
+/** A gateway as the server takes it: empty headers and model slots dropped; the AI Gateway keeps its two fields. */
+function cleanGateway(auth: "ai-gateway" | "gateway", g: HarnessGateway | undefined): HarnessGateway | undefined {
+  if (!g) return undefined;
+  if (auth === "ai-gateway") return { ...(g.baseUrl ? { baseUrl: g.baseUrl } : {}), ...(g.credentialRef ? { credentialRef: g.credentialRef } : {}) };
+  const out: HarnessGateway = { ...g };
+  const headers = (g.headers ?? []).filter((h) => h.name).map(({ credentialFound: _f, ...h }) => h);
+  if (headers.length) out.headers = headers; else delete out.headers;
+  if (g.models) {
+    const m = Object.fromEntries(Object.entries(g.models).filter(([, v]) => !!v)) as NonNullable<HarnessGateway["models"]>;
+    if (m.main) out.models = m; else delete out.models;
+  }
+  if (out.authScheme === "none") delete out.credentialRef;
+  return out;
+}
+
+/** The form as the server takes it (incomplete harness settings left out). */
+export function cleanHarnessSettings(form: HarnessesSettings): HarnessesSettings {
+  const out: HarnessesSettings = { ...form };
+  const cc = out["claude-code"] ? { ...out["claude-code"] } : undefined;
+  if (cc) {
+    if (isGatewayAuth(cc.auth)) { cc.gateway = cleanGateway(cc.auth, cc.gateway); delete cc.credentialRef; } else delete cc.gateway;
+    if (cc.auth !== "bedrock") delete cc.bedrock;
+    if (cc.auth !== "vertex") delete cc.vertex;
+    if (isGatewayAuth(cc.auth) ? !cc.gateway : !cc.credentialRef) delete out["claude-code"]; else out["claude-code"] = cc;
+  }
+  const cx = out.codex ? { ...out.codex } : undefined;
+  if (cx) {
+    if (isGatewayAuth(cx.auth)) { cx.gateway = cleanGateway(cx.auth, cx.gateway); delete cx.credentialRef; } else delete cx.gateway;
+    if (isGatewayAuth(cx.auth) ? !cx.gateway : !cx.credentialRef) delete out.codex; else out.codex = cx;
+  }
+  return out;
+}

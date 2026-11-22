@@ -9,8 +9,9 @@
  *   Bedrock, Vertex, Vercel AI Gateway, a custom gateway), credential reference, region, gateway,
  *   model. The secret itself never passes here: when the entry is missing the tool returns
  *   setup_url + setup_id for polpo_setup_wait. A Claude subscription is refused.
- * - polpo_harnesses_test (read): one tiny model request from the Polpo server with a harness's
- *   auth and model (saved settings, or an agent's own credential) → ok / latency / labelled error.
+ * - polpo_harnesses_get { test }: also tests a harness's connection: one tiny model request from
+ *   the Polpo server with its auth and model (or an agent's own credential) → ok / latency /
+ *   labelled error. (A parameter, not a tool: the default tool set stays within its bound.)
  * - polpo_harness_sessions_list (read): per agent and computer — bootstrapped, live, last
  *   detach/resume, turns, cost so far.
  * - polpo_harness_session_control (polpo:work): stop (the conversation stays resumable) or reset
@@ -102,17 +103,31 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
     title: "Agent harnesses",
     description: "The official agent harnesses agents may run on (Claude Code, Codex): which are enabled, their auth type (api-key, bedrock, vertex, ai-gateway, gateway), "
       + "credential vault reference and whether that entry exists (never its value), region, default model, the agents using each, and the computers "
-      + "that can run them. Set an agent on one with polpo_agent_update engine; change these settings with polpo_harnesses_update.",
-    inputSchema: {},
-    outputSchema: { allowHost: z.boolean(), harnesses: z.array(harnessItem), computers: z.array(z.string()) },
-    annotations: READ,
-  }, async () => {
+      + "that can run them, and whether their key stays on the server (model relay). With test: also checks that harness's connection — one tiny "
+      + "streaming model request FROM THE POLPO SERVER (never the computer) with its auth and model (Anthropic Messages with a tool for Claude Code, "
+      + "OpenAI Responses for Codex, Converse for Bedrock, rawPredict for Vertex); with agent, that agent's own key and model. The test says ok and "
+      + "latency, or a labelled error (auth, model, network, timeout, protocol, config) with what to change: run it after polpo_harnesses_update. "
+      + "Set an agent on one with polpo_agent_update engine; change these settings with polpo_harnesses_update.",
+    inputSchema: {
+      test: z.enum(["claude-code", "codex"]).optional().describe("Also test this harness's connection (one tiny model request from the Polpo server)"),
+      agent: z.string().optional().describe("With test: use this agent's engine (its own key and model)"),
+    },
+    outputSchema: { allowHost: z.boolean(), harnesses: z.array(harnessItem), computers: z.array(z.string()), test: z.record(z.string(), z.unknown()).optional() },
+    annotations: { ...READ, openWorldHint: true },
+  }, async ({ test, agent }) => {
     const r = await apiGet(deps, "/harnesses");
     if (!r.ok) return apiError(r, "Reading the harnesses");
     const o = r.data as Overview;
+    let t: TestResult | undefined;
+    if (test) {
+      const tr = await apiSend(deps, "POST", "/harnesses/test", { harness: test, ...(agent ? { agent } : {}) });
+      if (!tr.ok) return apiError(tr, `Testing ${test}`);
+      t = tr.data as TestResult;
+    }
     return ok([...o.harnesses.map(harnessLine), `Agents on this server may use a harness: ${o.allowHost ? "yes (isolated HOME)" : "no"}`,
       `Computers that can run one: ${o.computers.join(", ") || "none (create a Daytona v2 computer)"}`,
-      ...(o.relay ? [o.relay.available ? `Model relay: ${o.relay.url}` : `Model relay: off — ${o.relay.warning}`] : [])].join("\n"), o as unknown as Record<string, unknown>);
+      ...(o.relay ? [o.relay.available ? `Model relay: ${o.relay.url}` : `Model relay: off — ${o.relay.warning}`] : []),
+      ...(t ? [`Connection test: ${testLine(t)}`] : [])].join("\n"), { ...(o as unknown as Record<string, unknown>), ...(t ? { test: t } : {}) });
   });
 
   tool("settings", "polpo_harnesses_update", {
@@ -122,7 +137,7 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       + "gateway: Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey, Kong… with format, base_url, auth_scheme, headers from the vault, models), default model. "
       + "Only the fields given change. Gateway keys and secret headers are injected by Polpo's model relay, never put in the computer. "
       + "A Claude subscription (Pro/Max login) is refused by Anthropic's terms: use an Anthropic API key, Bedrock, Vertex or a gateway. Codex takes an OpenAI API key or a gateway. "
-      + "Check the result with polpo_harnesses_test. "
+      + "Check the result with polpo_harnesses_get { test }. "
       + "When the credential's vault entry does not exist yet, the result gives setup_url: show it to the person (they paste the key there), "
       + "then call polpo_setup_wait with setup_id. Disabling a harness that agents use is refused (move them to engine \"polpo\" first).",
     inputSchema: {
@@ -209,25 +224,6 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       : undefined;
     return ok([`Harness settings changed: ${changed.join(", ") || "nothing (same values)"}.`, ...o.harnesses.map(harnessLine), ...(handoff ? ["", handoff.next_step] : [])].join("\n"),
       { harnesses: o.harnesses, changed, ...(handoff ?? {}) });
-  });
-
-  tool("settings", "polpo_harnesses_test", {
-    title: "Test a harness's connection",
-    description: "Check that a harness can reach its model: one tiny streaming model request FROM THE POLPO SERVER (never the computer) with the "
-      + "configured authentication and model (Anthropic Messages with a tool for Claude Code, OpenAI Responses for Codex, a Converse call for Bedrock, "
-      + "rawPredict for Vertex). With agent: that agent's own credential and model. Returns ok, latency, and a labelled error "
-      + "(auth, model, network, timeout, protocol, config) saying what to change. Run it after polpo_harnesses_update.",
-    inputSchema: {
-      harness: z.enum(["claude-code", "codex"]).describe("The harness to test"),
-      agent: z.string().optional().describe("Test with this agent's engine (its own credential and model)"),
-    },
-    outputSchema: { ok: z.boolean(), harness: z.string(), latencyMs: z.number(), errorKind: z.string().optional(), error: z.string().optional() },
-    annotations: { ...READ, openWorldHint: true },
-  }, async ({ harness, agent }) => {
-    const r = await apiSend(deps, "POST", "/harnesses/test", { harness, ...(agent ? { agent } : {}) });
-    if (!r.ok) return apiError(r, `Testing ${harness}`);
-    const t = r.data as TestResult;
-    return ok(testLine(t), t as unknown as Record<string, unknown>);
   });
 
   tool("settings", "polpo_harness_sessions_list", {

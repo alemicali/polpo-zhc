@@ -1468,7 +1468,7 @@ export async function buildChatSystemPrompt(
     `inside its remote computer: a Daytona v2 computer as defaultComputer (this server only if the harness settings allow it). The harness`,
     `must be enabled with its credential (harnesses_get / harnesses_update): Claude Code with an Anthropic API key, Amazon Bedrock,`,
     `Google Vertex or a model gateway (the Vercel AI Gateway, or a custom one: Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey…);`,
-    `Codex with an OpenAI API key or a gateway. Check it with harnesses_test. A Claude subscription (Pro/Max login) is not allowed. Sessions: harness_sessions_list,`,
+    `Codex with an OpenAI API key or a gateway. Check it with harnesses_get { test }. A Claude subscription (Pro/Max login) is not allowed. Sessions: harness_sessions_list,`,
     `harness_session_control (stop, or reset with confirm). "Create an agent on Claude Code with a computer" = harnesses_get (enable or`,
     `set the credential if needed) → computer_save (kind daytona) → add_agent with engine and defaultComputer.`,
     ``,

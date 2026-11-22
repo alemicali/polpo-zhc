@@ -138,7 +138,7 @@ describe("the bridged tools on a real instance", () => {
     expect(await run("harnesses_get")).toMatch(/MISSING in the vault/);
   });
 
-  it("harnesses_update: a custom gateway (Cloudflare) with a secret header from the vault; secrets never as literals; harnesses_test runs", async () => {
+  it("harnesses_update: a custom gateway (Cloudflare) with a secret header from the vault; secrets never as literals; harnesses_get { test } runs", async () => {
     await polpo.getVaultStore()!.set("agent-1", "cf", { type: "api_key", credentials: { token: "cf-token" } } as any);
     await polpo.getVaultStore()!.set("agent-1", "openai", { type: "api_key", credentials: { apiKey: "sk-test" } } as any);
     const cf = {
@@ -161,8 +161,8 @@ describe("the bridged tools on a real instance", () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any, init?: any) =>
       String(input).startsWith("https://ai-gateway.vercel.sh/") ? new Response('{"error":{"message":"Invalid API key"}}', { status: 401 }) : realFetch(input, init));
     try {
-      const t = await run("harnesses_test", { harness: "codex" });
-      expect(t).toMatch(/^codex: FAILED \(auth\) after \d+ ms — Vercel AI Gateway: authentication failed/);
+      const t = await run("harnesses_get", { test: "codex" });
+      expect(t).toMatch(/Connection test: codex: FAILED \(auth\) after \d+ ms — Vercel AI Gateway: authentication failed/);
       expect(spy.mock.calls.some(([u]) => String(u) === "https://ai-gateway.vercel.sh/v1/responses")).toBe(true);
     } finally {
       spy.mockRestore();

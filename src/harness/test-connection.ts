@@ -1,6 +1,6 @@
 /**
  * "Test" for a harness setting (Settings → Harnesses, POST /api/v1/harnesses/test, MCP
- * polpo_harnesses_test): one tiny model request FROM THIS SERVER (never the VM), with the
+ * polpo_harnesses_get { test }): one tiny model request FROM THIS SERVER (never the VM), with the
  * configured authentication and model, in the format the runtime will use:
  *
  * - Anthropic format (API key, Vercel AI Gateway, custom gateways for Claude Code):

@@ -7,7 +7,7 @@
  * tiny model request from the Polpo server and shows the result. Below: the harness sessions.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,62 +18,11 @@ import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { authBrand, computerBrand } from "@/lib/run-context";
 import {
-  CLAUDE_CODE_AUTH_LABELS, CODEX_AUTH_LABELS, HARNESS_NAMES, harnessesApi, settingsFromOverview, TEST_ERROR_LABELS,
-  type ClaudeCodeAuth, type CodexAuth, type HarnessGateway, type HarnessesOverview, type HarnessesSettings, type HarnessId, type HarnessSession, type HarnessTestResult,
+  CLAUDE_CODE_AUTH_LABELS, CODEX_AUTH_LABELS, HARNESS_NAMES, cleanHarnessSettings, harnessesApi, isGatewayAuth as isGateway, settingsFromOverview,
+  type ClaudeCodeAuth, type CodexAuth, type HarnessesOverview, type HarnessesSettings, type HarnessId, type HarnessSession, type HarnessTestResult,
 } from "@/lib/harnesses-api";
 import { HarnessGatewayFields } from "./harness-gateway-fields";
-
-const isGateway = (auth: string | undefined): auth is "ai-gateway" | "gateway" => auth === "ai-gateway" || auth === "gateway";
-
-/** A gateway as the server takes it: empty headers and model slots dropped; the AI Gateway keeps its two fields. */
-function cleanGateway(auth: "ai-gateway" | "gateway", g: HarnessGateway | undefined): HarnessGateway | undefined {
-  if (!g) return undefined;
-  if (auth === "ai-gateway") return { ...(g.baseUrl ? { baseUrl: g.baseUrl } : {}), ...(g.credentialRef ? { credentialRef: g.credentialRef } : {}) };
-  const out: HarnessGateway = { ...g };
-  const headers = (g.headers ?? []).filter((h) => h.name).map(({ credentialFound: _f, ...h }) => h);
-  if (headers.length) out.headers = headers; else delete out.headers;
-  if (g.models) {
-    const m = Object.fromEntries(Object.entries(g.models).filter(([, v]) => !!v)) as NonNullable<HarnessGateway["models"]>;
-    if (m.main) out.models = m; else delete out.models;
-  }
-  if (out.authScheme === "none") delete out.credentialRef;
-  return out;
-}
-
-/** The form as the server takes it (incomplete harness settings left out). */
-export function cleanHarnessSettings(form: HarnessesSettings): HarnessesSettings {
-  const out: HarnessesSettings = { ...form };
-  const cc = out["claude-code"] ? { ...out["claude-code"] } : undefined;
-  if (cc) {
-    if (isGateway(cc.auth)) { cc.gateway = cleanGateway(cc.auth, cc.gateway); delete cc.credentialRef; } else delete cc.gateway;
-    if (cc.auth !== "bedrock") delete cc.bedrock;
-    if (cc.auth !== "vertex") delete cc.vertex;
-    if (isGateway(cc.auth) ? !cc.gateway : !cc.credentialRef) delete out["claude-code"]; else out["claude-code"] = cc;
-  }
-  const cx = out.codex ? { ...out.codex } : undefined;
-  if (cx) {
-    if (isGateway(cx.auth)) { cx.gateway = cleanGateway(cx.auth, cx.gateway); delete cx.credentialRef; } else delete cx.gateway;
-    if (isGateway(cx.auth) ? !cx.gateway : !cx.credentialRef) delete out.codex; else out.codex = cx;
-  }
-  return out;
-}
-
-/** A connection test's result, in one line. */
-export function HarnessTestLine({ result }: { result: HarnessTestResult | "running" | undefined }) {
-  if (!result) return null;
-  if (result === "running") return <p className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Testing the connection from the Polpo server…</p>;
-  return result.ok ? (
-    <p className="flex items-start gap-1.5 text-success" data-testid={`harness-test-${result.harness}`}>
-      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>Connected in {result.latencyMs} ms{result.model ? ` · ${result.model}` : ""}{result.endpoint ? ` · ${result.endpoint}` : ""}{result.note ? ` · ${result.note}` : ""}</span>
-    </p>
-  ) : (
-    <p className="flex items-start gap-1.5 text-destructive" data-testid={`harness-test-${result.harness}`} role="alert">
-      <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{result.errorKind ? `${TEST_ERROR_LABELS[result.errorKind]}: ` : ""}{result.error ?? "The test failed"}</span>
-    </p>
-  );
-}
+import { HarnessTestLine } from "./harness-test-line";
 
 const selectClass = "h-8 rounded-md border bg-transparent px-2 text-xs";
 
