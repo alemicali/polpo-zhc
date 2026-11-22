@@ -29,8 +29,8 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 |---|---|---|
 | `polpo_tasks_list` | Tasks by status, agent, mission, group or words; paged. | read-only |
 | `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies, where and with what each run executed (`runs`: engine, model, computer, egress, session, cost) and its latest activity. The text shows the first 1500 characters of the result; the structured content has the whole task (`result.stdout`, every outcome). | read-only |
-| `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). `dependsOn` takes ids of existing tasks: an unknown id is refused (it would keep the task pending for ever). | write |
-| `polpo_task_update` | Change the description, agent, retries or side-effects flag, or start a draft; returns what changed. | write, idempotent |
+| `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft, and an optional tool scope: `connectors`, `connector_tools`, `allowed_tools`, which only narrow what the agent has). `dependsOn` takes ids of existing tasks: an unknown id is refused (it would keep the task pending for ever). | write |
+| `polpo_task_update` | Change the description, agent, retries, side-effects flag or tool scope (`connectors`, `connector_tools`, `allowed_tools` replace it; `inherit_tools: true` drops it), or start a draft; returns what changed. | write, idempotent |
 | `polpo_task_retry` | Run a failed task again. | write |
 | `polpo_task_kill` | Stop a running or waiting task (`confirm: true`). | destructive |
 | `polpo_task_delete` | Delete a task and its result for good (`confirm: true`); a running task is stopped first with `polpo_task_kill`. | destructive |

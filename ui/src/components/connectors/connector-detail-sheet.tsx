@@ -4,8 +4,9 @@
  */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Bot, ExternalLink, Loader2, Plug, RefreshCw, RotateCw, Terminal, Trash2, Unplug, Users, Wrench } from "lucide-react";
+import { AlertTriangle, Bot, Check, ExternalLink, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -111,6 +112,48 @@ export function PolicyControl({ tool, value, onChange, disabled }: { tool: strin
   );
 }
 
+/** The display name, renamed in place (PATCH name): how people and the agents tell accounts apart. */
+function NameEditor({ connector, disabled, onRename }: { connector: Connector; disabled?: boolean; onRename: (name: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(connector.name);
+  const [saving, setSaving] = useState(false);
+  if (!editing) {
+    return (
+      <div className="flex min-w-0 items-center gap-1">
+        <SheetTitle className="truncate">{connector.name}</SheetTitle>
+        <Button
+          size="icon" variant="ghost" className="h-7 w-7 shrink-0 text-muted-foreground" aria-label={`Rename ${connector.name}`} disabled={disabled}
+          onClick={() => { setValue(connector.name); setEditing(true); }}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+  const save = async () => {
+    const name = value.trim();
+    if (!name || name === connector.name) { setEditing(false); return; }
+    setSaving(true);
+    try { await onRename(name); setEditing(false); } finally { setSaving(false); }
+  };
+  return (
+    <form className="flex min-w-0 items-center gap-1" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      <SheetTitle className="sr-only">{connector.name}</SheetTitle>
+      <Input
+        value={value} onChange={(e) => setValue(e.target.value)} aria-label="Connector name" maxLength={80} autoFocus
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(false); } }}
+        className="h-8 min-w-0 flex-1"
+      />
+      <Button type="submit" size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Save name" disabled={saving || !value.trim()}>
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+      </Button>
+      <Button type="button" size="icon" variant="ghost" className="h-8 w-8 shrink-0" aria-label="Cancel rename" onClick={() => setEditing(false)}>
+        <X className="h-4 w-4" />
+      </Button>
+    </form>
+  );
+}
+
 /** The tools list (loaded when the sheet opens; remounted per connector via `key`). */
 function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onPolicyChange: (tool: string, policy: ConnectorToolPolicy) => Promise<void> }) {
   const product = productName(useInstanceBranding());
@@ -169,7 +212,7 @@ function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onP
 }
 
 export function ConnectorDetailSheet({
-  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect,
+  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, accountCount = 0, onAddAccount,
 }: {
   connector: Connector | null;
   entry?: CatalogEntry;
@@ -180,6 +223,10 @@ export function ConnectorDetailSheet({
   onRemoved: (id: string) => void;
   /** Start sign-in again (a click: opens the sign-in window). */
   onReconnect: (connector: Connector) => void;
+  /** How many accounts of this catalog app are connected (this one included). */
+  accountCount?: number;
+  /** Connect another account of the same catalog app. */
+  onAddAccount?: () => void;
 }) {
   const product = productName(useInstanceBranding());
   const [busy, setBusy] = useState<string | null>(null);
@@ -218,8 +265,19 @@ export function ConnectorDetailSheet({
         <SheetHeader className="border-b">
           <div className="flex items-center gap-3 pr-6">
             <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} size="lg" />
-            <div className="min-w-0">
-              <SheetTitle className="truncate">{connector.name}</SheetTitle>
+            <div className="min-w-0 flex-1">
+              <NameEditor
+                key={connector.id} connector={connector} disabled={!!busy}
+                onRename={async (name) => {
+                  try {
+                    onChanged(await connectorsApi.update(connector.id, { name }));
+                    toast.success(`Renamed to ${name}`);
+                  } catch (reason) {
+                    toast.error(reason instanceof Error ? reason.message : String(reason));
+                    throw reason;
+                  }
+                }}
+              />
               <SheetDescription className="line-clamp-2">{connector.description ?? entry?.description ?? "Custom MCP server"}</SheetDescription>
             </div>
           </div>
@@ -235,6 +293,18 @@ export function ConnectorDetailSheet({
         </SheetHeader>
 
         <div className="space-y-6 p-4">
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs" data-testid="connector-identity">
+            {connector.account && (<>
+              <dt className="text-muted-foreground">Signed in as</dt>
+              <dd className="truncate font-medium">{connector.account}</dd>
+            </>)}
+            <dt className="text-muted-foreground">Id</dt>
+            <dd className="truncate font-mono" title={`Agents see its tools as mcp__${connector.id}__…`}>{connector.id} <span className="text-muted-foreground">· tools mcp__{connector.id}__…</span></dd>
+            {entry && accountCount > 1 && (<>
+              <dt className="text-muted-foreground">Accounts</dt>
+              <dd>{accountCount} {entry.name} accounts connected; each has its own sign-in and access.</dd>
+            </>)}
+          </dl>
           {endpoint && (
             <p className="flex items-center gap-1.5 break-all font-mono text-caption text-muted-foreground">
               {connector.transport.type === "stdio" && <Terminal className="h-3 w-3 shrink-0" />} {endpoint}
@@ -275,6 +345,11 @@ export function ConnectorDetailSheet({
                 {busy === "disconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />} Disconnect
               </Button>
             )}
+            {entry && onAddAccount && (
+              <Button size="sm" variant="outline" disabled={!!busy} onClick={onAddAccount} aria-label={`Add another ${entry.name} account`}>
+                <UserPlus className="h-4 w-4" /> Add another account
+              </Button>
+            )}
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={!!busy} onClick={() => setConfirmRemove(true)}>
               <Trash2 className="h-4 w-4" /> Remove
             </Button>
@@ -289,7 +364,7 @@ export function ConnectorDetailSheet({
           </div>
 
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use it</h3>
+            <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use {accountCount > 1 ? "this account" : "it"}</h3>
             <AccessEditor access={connector.access} agents={agents} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
             {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents yet.</p>}
           </section>

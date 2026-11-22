@@ -150,6 +150,24 @@ has both; an agent harness (Claude Code, Codex) gets `task_result` as a Polpo to
 
 Polpo (its `get_task` tool) and MCP clients (`polpo_task_get`) read any task's full result.
 
+# Tools of a mission task
+
+A mission task may carry the same optional `toolScope` as any task (see `connectors.md` → "Restricting one task's tools"): the connectors (and accounts) its run may use, optionally only some of their tools, and optionally only some built-in tools. Without it the task inherits everything from its agent.
+
+```json
+{
+  "tasks": [
+    { "title": "Draft the recap", "assignTo": "writer", "description": "…" },
+    { "title": "Send the recap", "assignTo": "writer", "dependsOn": ["Draft the recap"], "description": "…",
+      "toolScope": { "connectors": ["gmail-2"], "connectorTools": { "gmail-2": ["send_email"] }, "allowedTools": [] } }
+  ]
+}
+```
+
+- The shape is checked with the document; when the mission is saved or updated (and when one task is added or changed with `POST` / `PATCH /api/v1/missions/:id/tasks`), each scope is checked against its task's agent and a grant is refused (`400 INVALID_TOOL_SCOPE`). An agent the instance does not know yet (a mission's volatile team) gets the shape check only; at run time a scope can only narrow anyway.
+- When the mission runs, each task is created with its `toolScope`; recurring and scheduled runs create their tasks from the same document, so the scope applies to every run.
+- MCP: `connectors`, `connector_tools`, `allowed_tools` on a task of `polpo_mission_create` / `polpo_mission_update` become its `toolScope`. Polpo: `toolScope` on the plan's tasks, `add_mission_task` and `update_mission_task` (`null` clears it).
+
 # Checkpoints
 
 A checkpoint pauses a mission when its `afterTasks` are all finished (done or failed) and holds

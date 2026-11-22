@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `tool_scope` text;

@@ -91,6 +91,7 @@ import {
   CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
 } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
+import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
 import { orchestratorName } from "../core/orchestrator-name.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
@@ -327,7 +328,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getSessionStore: () => o.getSessionStore(),
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
-    connectorNames: () => Object.fromEntries(connectorManagerFor(o).store.list().map((connector) => [connector.id, connector.name])),
+    connectorNames: () => Object.fromEntries(connectorManagerFor(o).store.list().map((connector) => [connector.id, connectorLabel(connector)])),
     recordTokenUsage: async (usage) => {
       await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
@@ -1269,6 +1270,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateTaskDescription: (id: string, desc: string) => o.updateTaskDescription(id, desc),
     updateTaskAssignment: (id: string, agent: string) => o.updateTaskAssignment(id, agent),
     updateTaskExpectations: (id: string, exp: any) => o.updateTaskExpectations(id, exp),
+    updateTaskToolScope: (id: string, scope: unknown) => o.updateTaskToolScope(id, scope),
+    taskToolScopeStale: (task: any) => o.taskToolScopeStale(task),
   })));
 
   authed.route("/missions", missionRoutes(() => ({

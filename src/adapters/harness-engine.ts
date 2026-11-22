@@ -31,6 +31,7 @@ import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import { loadAgentSkills } from "../llm/skills.js";
 import { buildAgentToolset, buildPrompt, collectOutcome, createActivity } from "./engine.js";
 import { brokeredHarnessAuth, resolveHarnessAuth, scrubSecrets, type HarnessBrokering, type ResolvedHarnessAuth } from "../harness/credentials.js";
+import { classifyHarnessError, harnessTurnFailure, type HarnessFailure, type HarnessTurnOutcome } from "../harness/errors.js";
 import { harnessRelayPublicUrl, openRelayLease, type HarnessRelayLease, type RelayLeaseOptions } from "../harness/relay.js";
 import { toHarnessHostTools } from "../harness/host-tools.js";
 import { liveHarnessSessions, type HarnessSuspendMode } from "../harness/live-sessions.js";
@@ -221,6 +222,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
     let lease: HarnessRelayLease | undefined;
     let toolsetCleanup: Array<() => Promise<unknown>> = [];
     let lastText = "";
+    let harnessName = "The harness";
+    let auth: ResolvedHarnessAuth | undefined;
+    /** What the current turn produced (errors, output after them, usage): see harness/errors.ts. */
+    let turnOutcome: HarnessTurnOutcome = { errors: [], outputAfterError: false, output: false, totalTokens: 0 };
+    const label = (raw: string): HarnessFailure =>
+      classifyHarnessError(raw, { harnessName, ...(auth ? { provider: auth.provider } : {}), ...(auth?.model ? { model: auth.model } : {}) });
     try {
       const settings = deps.settings ? deps.settings() : loadPolpoConfig(polpoDir)?.settings;
       const engine = agentHarness(agentConfig);
@@ -229,6 +236,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       const problem = agentEngineProblem(agentConfig, settings as any, { daytonaApi });
       if (problem) throw new Error(problem);
       const name = HARNESS_NAMES[engine.harness];
+      harnessName = name;
 
       // ── where it runs, and the agent's Polpo tools (run here) ──
       const outputDir = ctx.outputDir;
@@ -298,7 +306,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           transcript({ type: "log", message: warning });
         }
       }
-      const auth: ResolvedHarnessAuth = brokeredHarnessAuth(resolved, brokering, lease?.baseUrl);
+      auth = brokeredHarnessAuth(resolved, brokering, lease?.baseUrl);
+      const creds = auth;
       const broker: HarnessCredentialBroker | undefined = brokering === "none" ? undefined : {
         ...(lease ? { lease } : {}),
         ...(resolved.route?.scheme ? { scheme: resolved.route.scheme } : {}),
@@ -310,20 +319,20 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       if (resolved.route) transcript({ type: "log", message: `${name}: model credential ${brokering === "none" ? "in the computer (not brokered)" : brokering === "relay" ? "brokered by Polpo's model relay (placeholders only in the computer)" : "brokered by the computer's provider (placeholders only in the computer)"}` });
       // where and with what this run executes (the task's run context; no secrets)
       activity.runContext = {
-        ...(auth.model ? { model: auth.model } : {}),
+        ...(creds.model ? { model: creds.model } : {}),
         ...(opened.remoteId?.() ? { remoteId: opened.remoteId!() } : {}),
       };
 
       // ── the machine: pnpm for the bootstrap, credential files ──
       const pnpm = await machine.exec(ENSURE_PNPM, {});
       if (pnpm.exitCode !== 0) throw new Error(`${name} needs pnpm ${HARNESS_PNPM_VERSION} in the computer (corepack could not activate it): ${scrub(pnpm.stderr || pnpm.stdout).slice(0, 300)}`);
-      if (auth.files.length) {
+      if (creds.files.length) {
         const homeDir = opened.home ?? (await machine.exec("printf %s \"$HOME\"", {})).stdout.trim();
-        for (const f of auth.files) {
+        for (const f of creds.files) {
           const path = `${homeDir}/.config/polpo-harness/${f.name}`;
           await machine.writeFile(path, new TextEncoder().encode(f.content));
           await machine.exec(`chmod 600 '${path}'`, {});
-          auth.env[f.envVar] = path;
+          creds.env[f.envVar] = path;
         }
       }
 
@@ -338,7 +347,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       const runtime = await (deps.runtimeFactory ?? defaultRuntimeFactory)({
         harness: engine.harness,
         id: agentConfig.name,
-        model: auth.model,
+        model: creds.model,
         instructions,
         tools: hostTools,
         skills,
@@ -346,7 +355,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         ...(engine.effort ? { effort: engine.effort } : {}),
         ...(engine.maxBudgetUsd ? { maxBudgetUsd: engine.maxBudgetUsd } : {}),
         maxTurns: agentConfig.maxTurns ?? 150,
-        auth,
+        auth: creds,
         onDebug: (e) => { if (/fail|error|reconnect/i.test(e.type)) transcript({ type: "log", message: `[${name}] ${e.type}` }); },
       });
 
@@ -433,6 +442,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         const s = await ensureSession();
         const release = opened!.hold?.();
         turnRunning = true;
+        turnOutcome = { errors: [], outputAfterError: false, output: false, totalTokens: 0 };
         await status({ state: "running", pid: process.pid });
         try {
           return await s.turn(prompt, {
@@ -450,6 +460,13 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       };
 
       const onEvent = (e: HarnessEvent) => {
+        if (e.type === "text" || e.type === "tool-call") {
+          turnOutcome.output = true;
+          if (turnOutcome.errors.length) turnOutcome.outputAfterError = true;
+        } else if (e.type === "error") {
+          turnOutcome.errors.push(scrub(e.message));
+          turnOutcome.outputAfterError = false;
+        }
         switch (e.type) {
           case "text":
             lastText = e.text;
@@ -490,7 +507,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         const gateway = lease ? lease.costUsd - leaseCostSeen : 0;
         if (lease) leaseCostSeen = lease.costUsd;
         if (gateway > 0) return { usd: gateway, source: "gateway" };
-        if (auth.nonClaude || (resolved.route && resolved.route.mode !== "direct" && engine.harness === "codex")) return { source: "tokens-only" };
+        if (creds.nonClaude || (resolved.route && resolved.route.mode !== "direct" && engine.harness === "codex")) return { source: "tokens-only" };
         if (r.costUsd === undefined) return { source: "tokens-only" };
         return { usd: r.costUsd, source: resolved.route && resolved.route.mode !== "direct" ? "runtime-estimate" : "runtime" };
       };
@@ -519,7 +536,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           },
         });
         await (deps.recordUsage ?? ((x) => defaultRecordUsage(polpoDir, x)))({
-          timestamp: now(), source: "agent_harness", provider: engine.harness, model: auth.model, sessionId: task.id,
+          timestamp: now(), source: "agent_harness", provider: engine.harness, model: creds.model, sessionId: task.id,
           inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, cacheReadTokens: r.usage.cacheReadTokens,
           cacheWriteTokens: r.usage.cacheWriteTokens, totalTokens: r.usage.totalTokens, cost: r.costUsd ?? 0,
         }).catch(() => undefined);
@@ -534,11 +551,15 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       let prompt: string | undefined = first;
       let lastResult: HarnessTurnResult | undefined;
       let retriedAfterRotation = false;
+      let failure: HarnessFailure | undefined;
       while (prompt !== undefined && !abort.signal.aborted) {
         const vmAtStart = opened.remoteId?.();
         try {
           lastResult = await runTurn(prompt);
           await account(lastResult);
+          // an API error, a refused model, no model call: the run fails with the reason (not "done")
+          const why = harnessTurnFailure({ ...turnOutcome, finishReason: lastResult.finishReason, totalTokens: lastResult.usage.totalTokens, text: lastResult.text }, name);
+          if (why && !abort.signal.aborted) { failure = label(scrub(why)); break; }
         } catch (err) {
           if (abort.signal.aborted) break;
           // the VM was replaced under the turn (a forced rotation, here or by the server process):
@@ -571,19 +592,23 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       if (abort.signal.aborted) {
         return { exitCode: 1, stdout: scrub(lastText), stderr: "Killed", duration: Date.now() - start };
       }
-      const failed = lastResult && /error|length|budget/i.test(lastResult.finishReason) && lastResult.finishReason !== "stop";
-      if (failed) {
-        const message = `${name} ended the turn with "${lastResult!.finishReason}"`;
-        transcript({ type: "error", message });
-        return { exitCode: 1, stdout: scrub(lastText), stderr: message, duration: Date.now() - start };
+      if (failure) {
+        transcript({ type: "error", message: failure.message });
+        const lastError = failure.message;
+        await store.update(key, (cur) => (cur ? { ...cur, lastError } : null)).catch(() => undefined);
+        return { exitCode: 1, stdout: scrub(lastText), stderr: failure.message, duration: Date.now() - start, ...(failure.retryable ? {} : { retryable: false }) };
       }
       return { exitCode: 0, stdout: scrub(lastText || lastResult?.text || ""), stderr: "", duration: Date.now() - start };
     } catch (err) {
       alive = false;
-      const msg = scrub(err instanceof Error ? err.message : String(err));
+      const raw = scrub(err instanceof Error ? err.message : String(err));
+      // the stream's own error events say why the runtime broke (a crash after an API error)
+      const text = [...turnOutcome.errors.filter((e) => !raw.includes(e)), raw].join("\n");
+      const labelled = (err as Error)?.name !== "HarnessCredentialError" ? label(text) : undefined;
+      const msg = labelled && !labelled.retryable ? labelled.message : text;
       transcript({ type: "error", message: msg });
       await store.update(key, (cur) => (cur ? { ...cur, state: "error", lastError: msg, pid: undefined } : null)).catch(() => undefined);
-      return { exitCode: 1, stdout: scrub(lastText), stderr: msg, duration: Date.now() - start };
+      return { exitCode: 1, stdout: scrub(lastText), stderr: msg, duration: Date.now() - start, ...(labelled && !labelled.retryable ? { retryable: false } : {}) };
     } finally {
       unregister?.();
       // end of the run: the runtime stops (its bridge exits); the conversation stays resumable

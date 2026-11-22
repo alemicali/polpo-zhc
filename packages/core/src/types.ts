@@ -171,6 +171,11 @@ export interface Task {
    * session, cost), newest last, at most MAX_TASK_RUNS. See run-context.ts.
    */
   runs?: import("./run-context.js").TaskRunContext[];
+  /**
+   * Optional narrowing of the tools this task's runs may use (connectors, their tools, built-in
+   * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
+   */
+  toolScope?: import("./task-tool-scope.js").TaskToolScope;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,6 +185,12 @@ export interface TaskResult {
   stdout: string;
   stderr: string;
   duration: number;
+  /**
+   * false: the run failed for a reason a re-run of the same agent cannot fix (the model is not
+   * enabled for the account, the credentials are refused): no automatic retry; the task fails
+   * (escalation still applies). Omitted: retryable.
+   */
+  retryable?: boolean;
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];

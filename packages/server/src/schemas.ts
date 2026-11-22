@@ -36,6 +36,19 @@ const ScopedNotificationRulesSchema = z.object({
 
 // ── Task schemas ──────────────────────────────────────────────────────
 
+/**
+ * Optional narrowing of the tools a task's runs may use; absent = everything its agent has. It
+ * only narrows: a connector or tool the agent does not have is rejected (400 INVALID_TOOL_SCOPE).
+ */
+export const TaskToolScopeSchema = z.object({
+  connectors: z.union([z.literal("none"), z.array(z.string().min(1))]).optional()
+    .openapi({ description: "Connector ids the run may use (each account of an app is its own connector, e.g. gmail-2), or \"none\". Absent: every connector the agent has." }),
+  connectorTools: z.record(z.string(), z.union([z.literal("*"), z.array(z.string().min(1))])).optional()
+    .openapi({ description: "Per connector id: \"*\" or the server's raw tool names. Narrows the agent's own connectorTools." }),
+  allowedTools: z.array(z.string().min(1)).optional()
+    .openapi({ description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools (or its default tools)." }),
+}).strict().openapi("TaskToolScope");
+
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
@@ -59,6 +72,8 @@ export const CreateTaskSchema = z.object({
   notifications: ScopedNotificationRulesSchema.optional(),
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects: z.boolean().optional(),
+  /** Narrowing of the run's tools (connectors, their tools, built-in tools); absent: the agent's. */
+  toolScope: TaskToolScopeSchema.optional(),
 });
 
 export const UpdateTaskSchema = z.object({
@@ -70,6 +85,8 @@ export const UpdateTaskSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects: z.boolean().optional(),
+  /** Narrowing of the run's tools; null clears it (back to everything the agent has). */
+  toolScope: TaskToolScopeSchema.nullable().optional(),
 });
 
 // ── Mission schemas ──────────────────────────────────────────────────
@@ -116,6 +133,7 @@ export const AddMissionTaskSchema = z.object({
   }).optional(),
   notifications: z.any().optional(),
   sideEffects: z.boolean().optional(),
+  toolScope: TaskToolScopeSchema.optional(),
 });
 
 export const UpdateMissionTaskSchema = z.object({
@@ -132,6 +150,8 @@ export const UpdateMissionTaskSchema = z.object({
   }).optional(),
   notifications: z.any().optional(),
   sideEffects: z.boolean().optional(),
+  /** null clears it. */
+  toolScope: TaskToolScopeSchema.nullable().optional(),
 });
 
 export const ReorderMissionTasksSchema = z.object({

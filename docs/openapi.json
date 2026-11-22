@@ -25,6 +25,59 @@
       }
     },
     "schemas": {
+      "TaskToolScope": {
+        "type": "object",
+        "properties": {
+          "connectors": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Connector ids the run may use (each account of an app is its own connector, e.g. gmail-2), or \"none\". Absent: every connector the agent has."
+          },
+          "connectorTools": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "*"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
+            },
+            "description": "Per connector id: \"*\" or the server's raw tool names. Narrows the agent's own connectorTools."
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools (or its default tools)."
+          }
+        },
+        "additionalProperties": false
+      },
       "PipelineStep": {
         "anyOf": [
           {
@@ -1167,6 +1220,9 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "$ref": "#/components/schemas/TaskToolScope"
                   }
                 },
                 "required": [
@@ -1201,7 +1257,7 @@
             }
           },
           "400": {
-            "description": "dependsOn names a task that does not exist",
+            "description": "dependsOn names a task that does not exist (UNKNOWN_DEPENDENCY), or toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1469,6 +1525,16 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TaskToolScope"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   }
                 }
               }
@@ -1492,6 +1558,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -2334,7 +2426,8 @@
                   },
                   "budgetUsd": {
                     "type": "number",
-                    "exclusiveMinimum": 0,
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
                     "description": "Spending limit in USD for the whole mission (all its tasks' runs). When reached, no new task starts (running ones finish) and the mission pauses until the budget is raised or cleared."
                   }
                 },
@@ -2362,6 +2455,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -2590,7 +2709,8 @@
                   "budgetUsd": {
                     "type": "number",
                     "nullable": true,
-                    "exclusiveMinimum": 0,
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
                     "description": "Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on."
                   }
                 }
@@ -2615,6 +2735,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -3029,6 +3175,9 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "$ref": "#/components/schemas/TaskToolScope"
                   }
                 },
                 "required": [
@@ -3194,6 +3343,16 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TaskToolScope"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   }
                 }
               }

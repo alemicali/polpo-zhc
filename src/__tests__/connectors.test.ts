@@ -6,7 +6,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -14,7 +14,10 @@ import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CONNECTORS_VAULT_OWNER } from "@polpo-ai/core";
+import { CONNECTORS_VAULT_OWNER, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+import { buildAgentToolset } from "../adapters/engine.js";
+import { toHarnessHostTools } from "../harness/host-tools.js";
+import { scopedAgentForRun } from "../core/task-tool-scope.js";
 import { ProgressiveToolSet } from "@polpo-ai/core/progressive-tools";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { ConnectorManager } from "../mcp/manager.js";
@@ -24,7 +27,8 @@ import { connectorToolAllowed, convertToolResult, mcpToolName, MAX_RESULT_TEXT, 
 import { connectorRoutes, connectorOAuthCallback, CONNECTOR_OAUTH_CALLBACK_PATH } from "../server/routes/connectors.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { clientMetadataDocument, clientMetadataUrlFor } from "../mcp/paths.js";
-import { connectorDashboardBase, connectorPublicBase } from "../mcp/runtime.js";
+import { connectorDashboardBase, connectorPublicBase, connectorsPromptSection } from "../mcp/runtime.js";
+import { accountFromIdToken, connectorLabel } from "../mcp/view.js";
 import { executeConnectorTool } from "../tools/connector-tools.js";
 
 // ── a fake MCP server + authorization server ──
@@ -38,6 +42,8 @@ interface FakeAuth {
   lastAuthorize?: URLSearchParams;
   n: number;
   cimd?: boolean;
+  /** Return an OpenID id_token naming this email with the tokens. */
+  idTokenEmail?: string;
   oauthFailure?: { path: string; status: number; body: string | Record<string, string> };
 }
 
@@ -137,7 +143,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const refresh_token = `rt-${++fake.n}`;
       fake.access.add(access_token);
       fake.refresh.add(refresh_token);
-      return json(res, 200, { access_token, refresh_token, token_type: "Bearer", expires_in: 3600 });
+      const id_token = fake.idTokenEmail
+        ? `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub: "1", email: fake.idTokenEmail })).toString("base64url")}.`
+        : undefined;
+      return json(res, 200, { access_token, refresh_token, token_type: "Bearer", expires_in: 3600, ...(id_token ? { id_token } : {}) });
     };
     if (form.get("grant_type") === "authorization_code") {
       const entry = fake.codes.get(form.get("code") ?? "");
@@ -194,6 +203,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   fake.oauthFailure = undefined;
+  fake.idTokenEmail = undefined;
   await Promise.all(managers.splice(0).map((m) => m.closeAll()));
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
 });
@@ -381,6 +391,46 @@ describe("connection manager", () => {
     expect(set.search("lin").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
     expect(set.search("very large text").map((h) => h.name)).not.toContain("mcp__lin__big");
     expect(set.load(["mcp__lin__big", "mcp__lin"])).toEqual({ loaded: ["mcp__lin__echo"], already: [], unknown: ["mcp__lin__big"] });
+  });
+
+  it("a task's tool scope narrows the run's tools: Polpo's engine, progressive discovery and harness host tools", async () => {
+    const { manager, polpoDir } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: false } });
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "t", team: { name: "t", agents: [{ name: "alice" }] }, settings: { connectors: { allowPrivateNetwork: true } } }));
+    const agent = { name: "alice" } as AgentConfig;
+    const run = async (toolScope?: TaskToolScope) => {
+      const task = { id: "t2", title: "T", description: "d", assignTo: "alice", dependsOn: ["t1"], status: "pending", expectations: [], metrics: [], retries: 0, maxRetries: 1, createdAt: "", updatedAt: "", ...(toolScope ? { toolScope } : {}) } as Task;
+      const agentConfig = scopedAgentForRun({ agent, task, polpoDir });
+      const toolset = await buildAgentToolset({ agentConfig, cwd: polpoDir, ctx: { polpoDir }, sandboxProvider: "local", browserProfileDir: join(polpoDir, "bp"), hasExtendedTools: false, task });
+      await toolset.connectorManager?.closeAll();
+      return { names: toolset.tools.map((t) => t.name), tools: toolset.tools, note: toolset.connectorNote };
+    };
+    // no scope: everything the agent has (unchanged behaviour)
+    const all = await run();
+    expect(all.names.filter((n) => n.startsWith("mcp__")).length).toBe(10);
+    expect(all.names).toEqual(expect.arrayContaining(["read", "bash", "write", "task_result", "register_outcome"]));
+    // scoped: one connector, one tool of it, one built-in tool
+    const scoped = await run({ connectors: ["lin"], connectorTools: { lin: ["echo"] }, allowedTools: ["read"] });
+    expect(scoped.names.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(scoped.names).toContain("read");
+    expect(scoped.names).not.toContain("bash");
+    expect(scoped.names).not.toContain("write");
+    // the dependency results and outcome tools are not affected
+    expect(scoped.names).toEqual(expect.arrayContaining(["task_result", "dependency_results", "register_outcome"]));
+    // the prompt's Connectors section leaves out the connector the scope excludes
+    expect(scoped.note).toContain("mcp__lin__*");
+    expect(scoped.note).not.toContain("mcp__other__*");
+    // progressive tools_search / tools_load see only the scoped set
+    const set = new ProgressiveToolSet({ tools: scoped.tools, mode: "always", connectorNames: { lin: "Lin", other: "Other" } });
+    expect(set.search("echo").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
+    expect(set.load(["mcp__other__echo", "mcp__lin__big"]).unknown).toEqual(["mcp__other__echo", "mcp__lin__big"]);
+    // harness host tools (Claude Code, Codex) get the same set
+    const host = toHarnessHostTools(scoped.tools).map((t) => t.name);
+    expect(host.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(host).toContain("task_result");
+    // "none": no connector tool at all
+    expect((await run({ connectors: "none" })).names.some((n) => n.startsWith("mcp__"))).toBe(false);
   });
 
   it("skips a connector that cannot connect, with a note, without failing", async () => {
@@ -686,6 +736,70 @@ describe("Polpo's connector tools", () => {
     const out = await executeConnectorTool("connector_connect", { id: "oa" }, ctx);
     expect(out).toMatch(/must open this link/);
     expect(out).toContain(`${base}/authorize?`);
+  });
+});
+
+describe("several accounts of the same app", () => {
+  it("a catalog id added again gets gmail-2, gmail-3… and a name of its own", async () => {
+    const ctx = { allowStdio: false, existingIds: ["gmail"], resolve: async () => ["142.250.1.1"] };
+    const second = (await buildConnector({ catalogId: "gmail" }, ctx)).connector;
+    expect(second).toMatchObject({ id: "gmail-2", name: "Gmail 2", catalogId: "gmail", status: "needs_auth" });
+    const named = (await buildConnector({ catalogId: "gmail", name: "Gmail – info@acme.com" }, { ...ctx, existingIds: ["gmail", "gmail-2"] })).connector;
+    expect(named).toMatchObject({ id: "gmail-3", name: "Gmail – info@acme.com", catalogId: "gmail" });
+    // the first one keeps the catalog's id and name
+    expect((await buildConnector({ catalogId: "gmail" }, { ...ctx, existingIds: [] })).connector).toMatchObject({ id: "gmail", name: "Gmail" });
+  });
+
+  it("names each account to the model: tool descriptions, connector names and the prompt section", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "mail", name: "Mail", url: `${base}/mcp`, access: { agents: ["alice"], polpo: true } });
+    await add(manager, { id: "mail-2", name: "Mail 2", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    manager.store.update("mail", { catalogId: "mail" });
+    manager.store.update("mail-2", { catalogId: "mail", account: "info@acme.com" });
+    const { tools } = await manager.toolsFor("alice");
+    expect(tools.find((t) => t.name === "mcp__mail__echo")!.description).toMatch(/^\[Mail\] Echo/);
+    expect(tools.find((t) => t.name === "mcp__mail-2__echo")!.description).toMatch(/^\[Mail 2 – info@acme\.com\] Echo/);
+    expect(tools.find((t) => t.name === "mcp__mail-2__echo")!.label).toBe("Mail 2 – info@acme.com: echo");
+    const section = connectorsPromptSection(manager.store.list(), "alice");
+    expect(section).toContain("- Mail 2 – info@acme.com (mcp__mail-2__*)");
+    expect(section).toContain("2 accounts of the same app: mail = Mail; mail-2 = Mail 2 – info@acme.com");
+    // Polpo has one of them only: no "accounts" line
+    expect(connectorsPromptSection(manager.store.list(), undefined)).not.toContain("accounts of the same app");
+    const ctx = { manager, settings: allowLocal(), agentNames: async () => ["alice"] };
+    expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/- Mail 2 – info@acme\.com \[mail-2, another mail account\]/);
+  });
+
+  it("labels: the account joins the name unless the name already says it; id_token email", () => {
+    expect(connectorLabel({ name: "Gmail 2", account: "info@acme.com" })).toBe("Gmail 2 – info@acme.com");
+    expect(connectorLabel({ name: "Gmail – info@acme.com", account: "info@acme.com" })).toBe("Gmail – info@acme.com");
+    expect(connectorLabel({ name: "Gmail" })).toBe("Gmail");
+    const jwt = (claims: object) => `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+    expect(accountFromIdToken(jwt({ email: "a@b.co", preferred_username: "x" }))).toBe("a@b.co");
+    expect(accountFromIdToken(jwt({ preferred_username: "marco" }))).toBe("marco");
+    expect(accountFromIdToken(jwt({ sub: "1" }))).toBeUndefined();
+    expect(accountFromIdToken("not-a-jwt")).toBeUndefined();
+    expect(accountFromIdToken(undefined)).toBeUndefined();
+  });
+
+  it("learns the signed-in account from an OpenID id_token at sign-in, and forgets it on disconnect", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    fake.idTokenEmail = "info@acme.com";
+    await add(manager, { id: "who", name: "Who", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/who/oauth/start", { method: "POST" })).json();
+    const redirect = await fetch(new URL(start.data.authorizationUrl), { redirect: "manual" });
+    const back = new URL(redirect.headers.get("location")!);
+    expect((await app.request(`${CONNECTOR_OAUTH_CALLBACK_PATH}${back.search}`)).status).toBe(200);
+    expect(manager.store.get("who")).toMatchObject({ account: "info@acme.com", status: "connected" });
+    expect((await (await app.request("/api/v1/connectors/who")).json()).data.account).toBe("info@acme.com");
+    // renaming keeps it; the label then does not repeat it
+    const renamed = await app.request("/api/v1/connectors/who", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Who – info@acme.com" }),
+    });
+    expect((await renamed.json()).data).toMatchObject({ name: "Who – info@acme.com", account: "info@acme.com" });
+    expect(connectorLabel(manager.store.get("who")!)).toBe("Who – info@acme.com");
+    await manager.disconnect("who");
+    expect(manager.store.get("who")!.account).toBeUndefined();
   });
 });
 

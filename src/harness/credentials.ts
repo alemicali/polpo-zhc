@@ -54,6 +54,8 @@ export interface ResolvedHarnessAuth extends HarnessAuth {
   nonClaude?: boolean;
   /** Bedrock / Vertex details for the connection test. */
   cloud?: { kind: "bedrock"; region: string; bearer?: string; accessKeyId?: string; secretAccessKey?: string; sessionToken?: string } | { kind: "vertex"; region: string; projectId: string; serviceAccountJson: string };
+  /** Where the model runs (error messages name it; gateways: the harness's provider format). */
+  provider: "anthropic" | "bedrock" | "vertex" | "openai";
 }
 
 /** Claude subscription OAuth tokens (Pro/Max): refused by policy. */
@@ -160,13 +162,13 @@ export async function resolveHarnessAuth(
       ...(h.auth === "gateway" ? { scheme } : {}), ...(key ? { key } : {}), headers, baseUrlEnv, ...(g?.nonClaude ? { nonClaude: true } : {}),
     };
     const env = engine.harness === "claude-code" ? { ...CLAUDE_CODE_BASE_ENV, ...claudeModelEnv(model, g) } : {};
-    return { auth, env, secrets, files: [], route, ...(model ? { model } : {}), ...(g?.nonClaude ? { nonClaude: true } : {}) };
+    return { auth, env, secrets, files: [], route, provider: engine.harness === "codex" ? "openai" : "anthropic", ...(model ? { model } : {}), ...(g?.nonClaude ? { nonClaude: true } : {}) };
   }
 
   if (engine.harness === "codex") {
     const key = await keyFrom(mainRef, vault, ["OPENAI_API_KEY", "openaiApiKey", "CODEX_API_KEY", ...CREDENTIAL_NAMES.apiKey], `Codex (${refWhere})`);
     return {
-      auth: { OPENAI_API_KEY: key }, env: {}, secrets: [key], files: [], ...(model ? { model } : {}),
+      auth: { OPENAI_API_KEY: key }, env: {}, secrets: [key], files: [], provider: "openai", ...(model ? { model } : {}),
       route: { format: "openai-responses", mode: "direct", upstream: "https://api.openai.com/v1", key, headers: {}, baseUrlEnv: "OPENAI_BASE_URL" },
     };
   }
@@ -178,7 +180,7 @@ export async function resolveHarnessAuth(
     return {
       auth: { ANTHROPIC_API_KEY: key },
       env: { ...CLAUDE_CODE_BASE_ENV, ...(model ? { ANTHROPIC_MODEL: model } : {}) },
-      secrets: [key], files: [], ...(model ? { model } : {}),
+      secrets: [key], files: [], provider: "anthropic", ...(model ? { model } : {}),
       route: { format: "anthropic", mode: "direct", upstream: "https://api.anthropic.com", key, headers: {}, baseUrlEnv: "ANTHROPIC_BASE_URL" },
     };
   }
@@ -214,7 +216,7 @@ export async function resolveHarnessAuth(
       if (/haiku/i.test(model)) { env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model; env.ANTHROPIC_SMALL_FAST_MODEL = model; }
     }
     // auth {} = an explicit, empty authentication environment: no lookup on this server
-    return { auth: {}, env, secrets, files: [], cloud, ...(model ? { model } : {}) };
+    return { auth: {}, env, secrets, files: [], provider: "bedrock", cloud, ...(model ? { model } : {}) };
   }
 
   // vertex
@@ -232,6 +234,7 @@ export async function resolveHarnessAuth(
     auth: {}, env, secrets: [json, ...(privateKey ? [privateKey] : [])],
     files: [{ envVar: "GOOGLE_APPLICATION_CREDENTIALS", name: "vertex-service-account.json", content: json }],
     cloud: { kind: "vertex", region: v.region, projectId: v.projectId, serviceAccountJson: json },
+    provider: "vertex",
     ...(model ? { model } : {}),
   };
 }

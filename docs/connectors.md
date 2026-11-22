@@ -56,6 +56,28 @@ Catalog entries with a per-account URL (`urlTemplate`, e.g. `https://mcp.dev.azu
 
 `connectors_list` (status, tools, who may use them; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL; for OAuth it returns the link the person opens; a token or an OAuth app's secret is entered by the person from a setup link, never in chat, and Polpo waits with `setup_wait`), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed); on demand (group `connectors`): `connector_catalog`, `connector_update` (name, on/off, tool policy), `connector_test`, `connector_disconnect`. Which tools of a connector an agent gets: `add_agent` / `update_agent` `connectorTools`. Polpo cannot add local (stdio) connectors.
 
+## Several accounts of the same service
+
+One catalog app can be connected more than once: two Gmail inboxes, one inbox per agent, a staging and a production Linear workspace. Each account is a separate connector with its own id, OAuth tokens (or key), name, access and tool policy.
+
+- **Ids.** The first one takes the catalog id (`gmail`); adding the same `catalogId` again gives the next free one: `gmail-2`, `gmail-3`… Its tools are `mcp__gmail-2__<tool>`, so `allowedTools` and `connectorTools` can target one account (`mcp__gmail-2__*`).
+- **Names.** Give each account a name that says which it is ("Gmail – info@lumea.dev"). Without a `name`, a second account is called "Gmail 2" (never the same name as the first). Rename any connector from its sheet (pencil next to the name), with `PATCH /api/v1/connectors/:id { "name": "…" }`, `polpo_connector_update { id, name }` or Polpo's `connector_update`.
+- **Account.** When the sign-in's token response includes an OpenID `id_token` (no extra scope is requested for it), its email (or `preferred_username`) is stored as the connector's `account`; the dashboard then offers it as the name. Google Workspace MCP servers only grant their product scopes, so for them the name is what tells accounts apart. Disconnecting clears `account`.
+
+**Dashboard.** On a connected app's card in **Browse**, **Account** adds another one; so does **Add another account** in a connector's sheet and **Add account** on a group in **Connected**. It asks the display name (prefilled "Gmail 2"), then runs the normal connect flow (sign-in window, or key / URL first). The Connected tab keeps an app's accounts together ("Gmail · 2 accounts"); every row, and every connector on the agent page (Tools & Skills → Connectors), shows its name and what tells it apart (the signed-in account, else its id). "Who can use it" is set per account in its sheet.
+
+**API / MCP / Polpo.**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/connectors -H 'Content-Type: application/json' \
+  -d '{"catalogId": "gmail", "name": "Gmail – info@lumea.dev", "access": {"agents": ["support"]}}'
+# → {"data": {"id": "gmail-2", "name": "Gmail – info@lumea.dev", "catalogId": "gmail", "status": "needs_auth", …}}
+```
+
+`polpo_connector_add { catalog_id: "gmail", name: "Gmail – info@lumea.dev" }` (and Polpo's `connector_add`) does the same and returns the sign-in link. `polpo_connectors_list` / `connectors_list` show each one's id, name, account and "another gmail account".
+
+**How agents tell them apart.** A connector tool's description starts with the connector's name and account (`[Gmail 2 – info@lumea.dev] Search threads…`), on Polpo's engine, in progressive discovery (`tools_search` groups) and as harness host tools (Claude Code, Codex). The prompt's Connectors section lists each granted connector by name with its `mcp__<id>__*` prefix and, when an agent has several accounts of one app, adds a line such as `2 accounts of the same app: gmail = Gmail; gmail-2 = Gmail – info@lumea.dev`, telling it to use the account the request is about and to ask when that is unclear.
+
 ## OAuth
 
 Polpo uses the MCP SDK's OAuth client: protected resource metadata (RFC 9728) and authorization server discovery (RFC 8414), PKCE (S256), the `resource` indicator, and refresh on `401`. How the client is identified:
@@ -135,6 +157,31 @@ Connector access is per connector: an agent granted Linear gets every Linear too
 
 Set it from the dashboard (agent page → **Tools & Skills** → Connectors → **Tools** on a granted connector: "All tools" or "Only selected", with search and select all / none), with `PATCH /api/v1/agents/:name { "connectorTools": … }` (the whole map; `null` clears it; `"*"` entries are dropped and lists deduplicated), or over MCP with `connector_tools` on `polpo_agent_create` / `polpo_agent_update`. `polpo_connectors_list { agent }` shows what an agent gets.
 
+## Restricting one task's tools
+
+By default a task inherits every connector and tool its agent has. For a run that must be deterministic (send only from the Gmail 2 account, only create Linear issues, no shell), give the task an optional `toolScope`:
+
+```json
+{
+  "title": "Send the weekly recap",
+  "assignTo": "pm",
+  "toolScope": {
+    "connectors": ["gmail-2", "linear"],
+    "connectorTools": { "linear": ["create_issue"] },
+    "allowedTools": ["read", "grep"]
+  }
+}
+```
+
+- `connectors`: the connector ids the run may use (each account of an app is its own connector: `gmail`, `gmail-2`), or `"none"`. Absent: every connector the agent has.
+- `connectorTools`: per connector, `"*"` or the server's tool names (as in the agent's `connectorTools`). Absent or `"*"`: what the agent gets of that connector.
+- `allowedTools`: built-in tools or patterns (`read`, `bash`, `browser_*`). Absent: the agent's own. Connector tools are chosen with the two fields above, not here (`mcp__…` is refused).
+- **Opt-in, narrow only.** No `toolScope` (or `null`): no change at all. A scope never grants: a connector the agent is not granted, a tool its `connectorTools` does not select, a tool turned `"off"`, a tool the connector does not list (checked when it can be listed), or a built-in tool the agent does not have (its `allowedTools`, or the default tools for an agent without them) is refused when the task is created or updated: `400 INVALID_TOOL_SCOPE` with one line per problem. If the agent later loses something the scope names (connector removed, access revoked, tool renamed), the run simply does not get it, and `GET /api/v1/tasks/:id` lists it in `toolScopeStale` (also shown on the task page and by `polpo_task_get`).
+- **Enforced everywhere the run's tools are resolved.** The runner applies the scope to the agent config the run gets (`applyTaskToolScope` in `@polpo-ai/core`): Polpo's engine, progressive `tools_search` / `tools_load` (they only see the scoped set), the prompt's Connectors section (a left-out connector is not listed) and harness host tools for Claude Code and Codex all resolve from it. `register_outcome`, `task_result` and `dependency_results` are not affected.
+- **Recorded.** Each run records the scope it had (`Task.runs[].toolScope`; `polpo_task_get` / `polpo_task_logs` print "tools restricted (…)").
+
+Where to set it: the task page → **Tools for this task** ("Inherit from agent" or "Restrict": the agent's connectors and accounts, optionally only some of their tools with search and select all / none, optionally only some built-in tools); `POST /api/v1/tasks` and `PATCH /api/v1/tasks/:id` (`toolScope`, `null` clears it); a mission task's `toolScope` (see `missions.md`); MCP `polpo_task_create` / `polpo_task_update` with `connectors`, `connector_tools`, `allowed_tools` (`inherit_tools: true` clears it; any of the three replaces the whole scope) and the same fields on `polpo_mission_create` / `polpo_mission_update` tasks; Polpo's `create_task` / `update_task` / `add_mission_task` / `update_mission_task` (`toolScope`). Scheduled and recurring missions create their tasks from the mission document, so a mission task's scope applies to every run.
+
 ## Progressive tool discovery
 
 A few connectors easily add a hundred tools to every request. When a run (a task, a chat turn of an agent or of Polpo) has more tools than `settings.tools.progressiveThreshold` (default 30), it starts with its essential tools plus two meta tools, and the rest is loaded on demand:
@@ -143,7 +190,7 @@ A few connectors easily add a hundred tools to every request. When a run (a task
 - The prompt lists the deferred groups with their size (`Connector Linear (mcp__linear__*): 12 tools`). `tools_search { query, limit }` ranks the deferred tools by name, description and connector; `tools_load { names }` loads tools by name, or a whole group by its name (`mcp__linear`, `Linear`, `browser`).
 - A loaded tool is declared to the model before its next step as a pi-ai system message with `toolsAdded`. Where the provider supports changing tools mid-conversation it goes inline and the cached prompt prefix survives: Anthropic (inline `tool_addition` blocks on recent Claude models), OpenAI Responses (`additional_tools` / tool search on GPT-5.6+ and Codex), Kimi (K3). Every other model gets the current tool list at the top of the request.
 - Loaded tools stay for the rest of the conversation: in a chat, the next turns start with the tools loaded (or used) in earlier turns; in a task, for the run. After a compaction, loaded tools are declared again.
-- Search and load only see the tools the run was given: `allowedTools`, connector access, `toolPolicy` and the agent's `connectorTools` are applied first. In a chat, calling a deferred tool by name without loading it loads it (in a task the call fails as an unknown tool until it is loaded).
+- Search and load only see the tools the run was given: `allowedTools`, connector access, `toolPolicy`, the agent's `connectorTools` and the task's `toolScope` are applied first. In a chat, calling a deferred tool by name without loading it loads it (in a task the call fails as an unknown tool until it is loaded).
 
 | Setting | Default | |
 |---|---|---|

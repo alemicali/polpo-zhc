@@ -25,11 +25,19 @@ export interface ConnectTarget {
   create?: ConnectorInput;
   /** Shared app selected after a registration was refused. */
   oauthApp?: string;
+  /**
+   * Add another account of `entry` (a second Gmail inbox…): a new connector (gmail-2…) even though
+   * one exists, after asking its display name (`name` is the suggested one).
+   */
+  another?: boolean;
+  name?: string;
 }
 
 export interface ConnectDetails {
   url?: string;
   bearerToken?: string;
+  /** Display name of another account. */
+  name?: string;
 }
 
 export interface ConnectState {
@@ -90,11 +98,15 @@ export function useConnectFlow({
       }));
     };
     try {
-      let connector = target.connector ?? (target.entry ? connectors.find((c) => c.catalogId === target.entry!.id) : undefined);
+      let connector = target.connector
+        ?? (target.entry && !target.another ? connectors.find((c) => c.catalogId === target.entry!.id) : undefined);
       const secrets = details.bearerToken ? { bearerToken: details.bearerToken.trim() } : undefined;
+      const name = (details.name ?? target.name)?.trim();
       if (!connector) {
-        const input: ConnectorInput = target.create
-          ?? { catalogId: target.entry!.id, ...(details.url ? { url: details.url } : {}), ...(secrets ? { secrets } : {}) };
+        // another account: the server gives it the next free id (gmail-2…) and its own sign-in
+        const input: ConnectorInput = target.create ?? {
+          catalogId: target.entry!.id, ...(name ? { name } : {}), ...(details.url ? { url: details.url } : {}), ...(secrets ? { secrets } : {}),
+        };
         connector = await connectorsApi.create(input);
       } else {
         // Older catalog connectors may predate the shared app requirement.
@@ -164,7 +176,8 @@ export function useConnectFlow({
       setState({ phase: "setup", target: { ...target, oauthApp: missingApp } });
       return;
     }
-    if (needsDetails(target.entry, target.connector)) {
+    // another account first asks its name (with the other details, if any)
+    if ((target.another && !target.connector) || needsDetails(target.entry, target.connector)) {
       setState({ phase: "details", target });
       return;
     }

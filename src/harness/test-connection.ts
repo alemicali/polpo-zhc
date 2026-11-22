@@ -17,6 +17,7 @@
 import { createHash, createHmac, createSign } from "node:crypto";
 import { HARNESS_NAMES, type AgentHarnessEngine, type HarnessesSettings, type HarnessId, type VaultStore } from "@polpo-ai/core";
 import { resolveHarnessAuth, scrubSecrets, type ResolvedHarnessAuth } from "./credentials.js";
+import { classifyHarnessError, type HarnessProvider } from "./errors.js";
 
 export type HarnessTestErrorKind = "config" | "auth" | "model" | "network" | "timeout" | "protocol" | "upstream";
 
@@ -54,17 +55,24 @@ function bedrockDefaultModel(region: string): string {
 const MODEL_ACCESS = /not available for this account|(?:do not|don't) have access to (?:the )?model|model access|not (?:been )?enabled for|model[^\n]{0,80}(?:not found|does not exist|is not supported|unavailable)|(?:invalid|unknown) model|model identifier is invalid|not_found_error|model_not_found|on-demand throughput/i;
 const AUTH = /authentication|invalid (?:x-)?api[ -]?key|incorrect api key|unauthori[sz]ed|forbidden|permission|security token|ExpiredToken|UnrecognizedClient|InvalidSignature|invalid_grant|credentials/i;
 
-/** A failed model request, labelled with what to change. */
-export function labelHarnessTestError(o: { provider: string; status?: number; text: string; model?: string }): { kind: HarnessTestErrorKind; message: string } {
+/**
+ * A failed model request, labelled with what to change. With a known provider (Anthropic, OpenAI,
+ * Bedrock, Vertex) the words are the ones a failed run gets (src/harness/errors.ts); gateways get
+ * their own (model ids, auth scheme, headers).
+ */
+export function labelHarnessTestError(o: { provider: string; providerId?: HarnessProvider; status?: number; text: string; model?: string }): { kind: HarnessTestErrorKind; message: string } {
   const text = o.text.trim().slice(0, 600) || "no details";
   const m = o.model ? ` "${o.model}"` : "";
-  if (MODEL_ACCESS.test(text) || o.status === 404) {
-    return { kind: "model", message: `${o.provider}: model${m} not available — check the model id (gateways often want provider/model ids) or enable it for the account (${o.status ?? "?"}: ${text})` };
+  const kind: HarnessTestErrorKind = MODEL_ACCESS.test(text) || o.status === 404 ? "model"
+    : o.status === 401 || o.status === 403 || AUTH.test(text) ? "auth" : "upstream";
+  if (o.providerId && kind !== "upstream") {
+    // the run's classifier knows the provider's own fixes (Bedrock quotas, Vertex Model Garden…)
+    const c = classifyHarnessError(`API Error: ${o.status ?? "?"} ${text}`, { harnessName: "Connection test", provider: o.providerId, ...(o.model ? { model: o.model } : {}) });
+    if (!c.retryable) return { kind, message: c.message };
   }
-  if (o.status === 401 || o.status === 403 || AUTH.test(text)) {
-    return { kind: "auth", message: `${o.provider}: authentication failed — check the credential's vault entry (and the gateway's auth scheme and headers) in Settings → Harnesses (${o.status ?? "?"}: ${text})` };
-  }
-  return { kind: "upstream", message: `${o.provider}: the model request failed (${o.status ?? "?"}: ${text})` };
+  if (kind === "model") return { kind, message: `${o.provider}: model${m} not available — check the model id (gateways often want provider/model ids) or enable it for the account (${o.status ?? "?"}: ${text})` };
+  if (kind === "auth") return { kind, message: `${o.provider}: authentication failed — check the credential's vault entry (and the gateway's auth scheme and headers) in Settings → Harnesses (${o.status ?? "?"}: ${text})` };
+  return { kind, message: `${o.provider}: the model request failed (${o.status ?? "?"}: ${text})` };
 }
 
 /** Server-sent events of a response body: [event, data] pairs, read to the end (bounded). */
@@ -119,6 +127,7 @@ async function testAnthropic(a: ResolvedHarnessAuth, model: string, f: typeof fe
   const r = a.route!;
   const url = `${r.upstream.replace(/\/+$/, "")}/v1/messages`;
   const provider = r.mode === "direct" ? "Anthropic" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`;
+  const providerId: HarnessProvider | undefined = r.mode === "direct" ? "anthropic" : undefined;
   const res = await f(url, {
     method: "POST", signal,
     headers: {
@@ -134,14 +143,14 @@ async function testAnthropic(a: ResolvedHarnessAuth, model: string, f: typeof fe
   });
   const endpoint = endpointOf(url);
   if (!res.ok) {
-    const l = labelHarnessTestError({ provider, status: res.status, text: await res.text().catch(() => ""), model });
+    const l = labelHarnessTestError({ provider, providerId, status: res.status, text: await res.text().catch(() => ""), model });
     return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
   }
   const events = await readSse(res, (e) => e === "message_stop" || e === "error", signal);
   const seq = { start: false, tool: false, stop: false };
   for (const e of events) {
     if (e.event === "error") {
-      const l = labelHarnessTestError({ provider, status: res.status, text: JSON.stringify(e.data), model });
+      const l = labelHarnessTestError({ provider, providerId, status: res.status, text: JSON.stringify(e.data), model });
       return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
     }
     if (e.event === "message_start") seq.start = true;
@@ -162,6 +171,7 @@ async function testResponses(a: ResolvedHarnessAuth, model: string, f: typeof fe
   // Codex adds /v1 to the AI Gateway's base URL
   const url = `${r.mode === "ai-gateway" && !/\/v1$/.test(base) ? `${base}/v1` : base}/responses`;
   const provider = r.mode === "direct" ? "OpenAI" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`;
+  const providerId: HarnessProvider | undefined = r.mode === "direct" ? "openai" : undefined;
   const res = await f(url, {
     method: "POST", signal,
     headers: { "content-type": "application/json", accept: "text/event-stream", ...authHeaders(r.scheme, r.key, "bearer"), ...r.headers },
@@ -172,7 +182,7 @@ async function testResponses(a: ResolvedHarnessAuth, model: string, f: typeof fe
   });
   const endpoint = endpointOf(url);
   if (!res.ok) {
-    const l = labelHarnessTestError({ provider, status: res.status, text: await res.text().catch(() => ""), model });
+    const l = labelHarnessTestError({ provider, providerId, status: res.status, text: await res.text().catch(() => ""), model });
     return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
   }
   const events = await readSse(res, (e) => e === "response.completed" || e === "response.incomplete" || e === "response.failed" || e === "error", signal);
@@ -182,7 +192,7 @@ async function testResponses(a: ResolvedHarnessAuth, model: string, f: typeof fe
     return { ok: true, status: res.status, endpoint, model, note: "the model stopped at the 16-token limit of the test (it answered)" };
   }
   if (last && (last.event === "error" || last.event === "response.failed")) {
-    const l = labelHarnessTestError({ provider, status: res.status, text: JSON.stringify(last.data), model });
+    const l = labelHarnessTestError({ provider, providerId, status: res.status, text: JSON.stringify(last.data), model });
     return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
   }
   return {
@@ -229,7 +239,7 @@ async function testBedrock(a: ResolvedHarnessAuth, f: typeof fetch, signal: Abor
   const endpoint = endpointOf(url.toString());
   const text = await res.text().catch(() => "");
   if (!res.ok) {
-    const l = labelHarnessTestError({ provider: "Bedrock", status: res.status, text, model });
+    const l = labelHarnessTestError({ provider: "Bedrock", providerId: "bedrock", status: res.status, text, model });
     return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
   }
   return { ok: true, status: res.status, endpoint, model };
@@ -258,7 +268,7 @@ async function testVertex(a: ResolvedHarnessAuth, f: typeof fetch, signal: Abort
   const model = a.model ?? DEFAULT_MODELS.vertex;
   let token: string;
   try { token = await vertexToken(c.serviceAccountJson, f, signal); } catch (err) {
-    const l = labelHarnessTestError({ provider: "Vertex AI", status: (err as { status?: number }).status ?? 401, text: (err as Error).message, model });
+    const l = labelHarnessTestError({ provider: "Vertex AI", providerId: "vertex", status: (err as { status?: number }).status ?? 401, text: (err as Error).message, model });
     return { ok: false, model, errorKind: l.kind === "upstream" ? "auth" : l.kind, error: l.message };
   }
   const host = c.region === "global" ? "aiplatform.googleapis.com" : `${c.region}-aiplatform.googleapis.com`;
@@ -269,7 +279,7 @@ async function testVertex(a: ResolvedHarnessAuth, f: typeof fetch, signal: Abort
   });
   const text = await res.text().catch(() => "");
   if (!res.ok) {
-    const l = labelHarnessTestError({ provider: "Vertex AI", status: res.status, text, model });
+    const l = labelHarnessTestError({ provider: "Vertex AI", providerId: "vertex", status: res.status, text, model });
     return { ok: false, status: res.status, endpoint: endpointOf(url), model, errorKind: l.kind, error: l.message };
   }
   return { ok: true, status: res.status, endpoint: endpointOf(url), model };

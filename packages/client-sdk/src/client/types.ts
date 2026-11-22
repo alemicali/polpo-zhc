@@ -127,8 +127,25 @@ export interface Task {
   sideEffects?: boolean;
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
+  /** Optional narrowing of the run's tools; absent: everything the agent has. */
+  toolScope?: TaskToolScope;
+  /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
+  toolScopeStale?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Optional narrowing of the tools a task's runs may use. It only narrows what the agent has
+ * (never grants); absent fields inherit from the agent.
+ */
+export interface TaskToolScope {
+  /** Connector ids (each account of an app is its own connector), or "none". */
+  connectors?: string[] | "none";
+  /** Per connector id: "*" or the server's raw tool names. */
+  connectorTools?: Record<string, "*" | string[]>;
+  /** Built-in tools or patterns (read, bash, browser_*); not connector tools. */
+  allowedTools?: string[];
 }
 
 /** The engine a run used: Polpo's own, or an agent harness. */
@@ -1101,6 +1118,9 @@ export interface CreateTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  /** Narrow the run's tools (rejected with INVALID_TOOL_SCOPE if it asks for more than the agent has). */
+  toolScope?: TaskToolScope;
 }
 
 export interface UpdateTaskRequest {
@@ -1108,6 +1128,9 @@ export interface UpdateTaskRequest {
   assignTo?: string;
   status?: TaskStatus;
   expectations?: TaskExpectation[];
+  sideEffects?: boolean;
+  /** Narrow the run's tools; null clears it (everything the agent has). */
+  toolScope?: TaskToolScope | null;
 }
 
 export type TaskDirectionMode = "steer" | "follow_up" | "continue";
@@ -1168,6 +1191,8 @@ export interface AddMissionTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  toolScope?: TaskToolScope;
 }
 
 export interface UpdateMissionTaskRequest {
@@ -1180,6 +1205,8 @@ export interface UpdateMissionTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  toolScope?: TaskToolScope | null;
 }
 
 export interface ReorderMissionTasksRequest {

@@ -116,6 +116,7 @@ export class DrizzleTaskStore implements TaskStore {
       sideEffects: row.sideEffects ? Boolean(row.sideEffects) : undefined,
       revisionCount: row.revisionCount ?? undefined,
       ...(row.runs != null ? { runs: deserializeJson(row.runs, undefined, d) } : {}),
+      ...(row.toolScope != null ? { toolScope: deserializeJson(row.toolScope, undefined, d) } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -152,6 +153,8 @@ export class DrizzleTaskStore implements TaskStore {
     if (task.sideEffects !== undefined) v.sideEffects = task.sideEffects ? 1 : 0;
     if (task.revisionCount !== undefined) v.revisionCount = task.revisionCount;
     if (task.runs !== undefined) v.runs = serializeJson(task.runs, d);
+    // present with undefined/null: cleared (back to inheriting the agent's tools)
+    if ("toolScope" in task) v.toolScope = task.toolScope ? serializeJson(task.toolScope, d) : null;
     if (task.createdAt !== undefined) v.createdAt = task.createdAt;
     if (task.updatedAt !== undefined) v.updatedAt = task.updatedAt;
     return v;
@@ -487,6 +490,7 @@ export class DrizzleTaskStore implements TaskStore {
       sideEffects: r.side_effects,
       revisionCount: r.revision_count,
       runs: r.runs,
+      toolScope: r.tool_scope,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
