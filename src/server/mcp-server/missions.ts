@@ -14,6 +14,9 @@ import { taskLine, taskSummary, unknownAgents } from "./tasks.js";
 export const MISSION_STATUSES = ["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"] as const;
 /** A mission that is over, or waits for a person: what polpo_mission_wait waits for. */
 const MISSION_SETTLED = ["completed", "failed", "cancelled", "paused"];
+/** Statuses of a scheduled or recurring mission between runs: it never "completes", each run finishes. */
+const BETWEEN_RUNS = ["recurring", "scheduled"];
+const TASK_FINISHED = ["done", "failed"];
 const EXECUTABLE = ["draft", "scheduled", "recurring", "failed", "cancelled"];
 /** Statuses where the plan may still change. */
 const EDITABLE = ["draft", "scheduled", "recurring", "paused", "failed", "cancelled"];
@@ -22,8 +25,23 @@ const missionSummary = z.object({
   id: z.string(), name: z.string(), status: z.string(), taskCount: z.number().optional(), updatedAt: z.string().optional(),
 }).passthrough();
 
-type Mission = { id: string; name: string; status: string; data?: string; prompt?: string; updatedAt?: string; createdAt?: string; taskCount?: number; executionCount?: number };
+type Mission = { id: string; name: string; status: string; data?: string; prompt?: string; updatedAt?: string; createdAt?: string; taskCount?: number; executionCount?: number; schedule?: string };
 type TaskRow = { id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string };
+
+/**
+ * The latest run of a scheduled or recurring mission: its run number and its tasks (a run's task
+ * group is the mission's name, then "<name> #N" from the second run on), and whether it finished
+ * (every task done or failed). undefined: it never ran.
+ */
+function latestRun(m: Mission, tasks: TaskRow[]): { number: number; tasks: TaskRow[]; finished: boolean } | undefined {
+  const n = m.executionCount ?? 0;
+  if (n < 1) return undefined;
+  const group = n > 1 ? `${m.name} #${n}` : m.name;
+  const own = tasks.filter((t) => t.group === group);
+  // no task of that run yet (it is starting): not finished; tasks without groups (older data): all of them
+  const run = own.length ? own : tasks.some((t) => t.group) ? [] : tasks;
+  return { number: n, tasks: run, finished: run.length > 0 && run.every((t) => TASK_FINISHED.includes(t.status)) };
+}
 
 // ── The plan, as the mission executor validates it ──
 
@@ -259,15 +277,44 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     return ok(`Aborted mission ${id}: ${n} task(s) stopped.`, { id, aborted_tasks: n });
   });
 
+  tool("missions", "polpo_mission_delete", {
+    title: "Delete a mission",
+    description: "Delete a mission: its plan, its schedule and its tasks. A running mission must be aborted first (polpo_mission_abort). "
+      + "It cannot be undone. Needs confirm: true after the person agreed.",
+    inputSchema: {
+      id: z.string().min(1).describe("The mission's id"),
+      confirm: confirmParam("delete the mission"),
+    },
+    outputSchema: { deleted: z.string() },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, confirm }) => {
+    const m = await loadMission(deps, id);
+    if (!m.ok) return m.status === 404 ? notFound(id) : apiError(m, `Reading mission ${id}`);
+    if (m.mission.status === "active") return fail(`Mission ${id} is running: abort it first with polpo_mission_abort (confirm: true), then delete it.`);
+    if (confirm !== true) {
+      const tasks = await missionTasks(deps, id);
+      return fail(`Deleting "${m.mission.name}" (${m.mission.status}${tasks.length ? `, ${tasks.length} tasks` : ""}) removes it for good: ask the person, then call again with confirm: true.`);
+    }
+    const r = await apiSend(deps, "DELETE", `/missions/${enc(id)}`);
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Deleting mission ${id}`);
+    return ok(`Deleted mission ${id} ("${m.mission.name}").`, { deleted: id });
+  });
+
   tool("missions", "polpo_mission_wait", {
     title: "Wait for a mission",
     description: `Wait until a mission is completed, failed, cancelled or paused (a checkpoint waits for a person), or the timeout passes `
-      + `(at most ${MAX_WAIT_SECONDS} s); returns its status and its tasks' progress. If it timed out, call again. Sends progress notifications when the client asks.`,
+      + `(at most ${MAX_WAIT_SECONDS} s); returns its status and its tasks' progress. If it timed out, call again. A scheduled or recurring `
+      + `mission never completes: it is reached when its current (or latest) run has finished, and run says how that run went `
+      + `(completed: every task done; failed: some failed); one that never ran waits for its first run. Sends progress notifications when the client asks.`,
     inputSchema: {
       id: z.string().min(1).describe("The mission's id"),
       timeout_seconds: z.number().int().min(1).max(MAX_WAIT_SECONDS).optional().describe(`How long to wait at most (default 30, max ${MAX_WAIT_SECONDS})`),
     },
-    outputSchema: { mission: missionSummary, task_counts: z.record(z.string(), z.number()), reached: z.boolean(), timed_out: z.boolean(), waited_seconds: z.number() },
+    outputSchema: {
+      mission: missionSummary, task_counts: z.record(z.string(), z.number()), reached: z.boolean(), timed_out: z.boolean(), waited_seconds: z.number(),
+      run: z.object({ number: z.number(), outcome: z.enum(["completed", "failed"]), task_counts: z.record(z.string(), z.number()) }).passthrough().optional()
+        .describe("A scheduled or recurring mission: its latest run, finished"),
+    },
     annotations: READ,
   }, async ({ id, timeout_seconds }, extra) => {
     const timeout = (timeout_seconds ?? 30) * 1000;
@@ -283,12 +330,24 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       const waited = Math.round((Date.now() - started) / 100) / 10;
       const state = `${m.mission.status} ${JSON.stringify(c)}`;
       if (state !== last) { await progress(extra, done, tasks.length || undefined, `${m.mission.name}: ${m.mission.status}, ${countText(c)}`); last = state; }
-      const reached = MISSION_SETTLED.includes(m.mission.status);
+      // a scheduled or recurring mission between runs: its latest run finished is what is waited for
+      const run = BETWEEN_RUNS.includes(m.mission.status) ? latestRun(m.mission, tasks) : undefined;
+      const runDone = !!run?.finished;
+      const reached = MISSION_SETTLED.includes(m.mission.status) || runDone;
       if (reached || Date.now() - started >= timeout || extra.signal.aborted) {
         const summary = { id: m.mission.id, name: m.mission.name, status: m.mission.status, taskCount: tasks.length, ...(m.mission.updatedAt ? { updatedAt: m.mission.updatedAt } : {}) };
+        if (runDone) {
+          const rc = counts(run!.tasks);
+          const outcome = (rc.failed ?? 0) > 0 ? "failed" as const : "completed" as const;
+          return ok(`Mission ${id} (${m.mission.status}): its run #${run!.number} ${outcome === "completed" ? "completed" : "failed"} (${countText(rc)}). `
+            + `It runs again on its schedule${m.mission.schedule ? ` (${m.mission.schedule})` : ""}; read the results with polpo_mission_get.`,
+            { mission: summary, task_counts: c, reached: true, timed_out: false, waited_seconds: waited, run: { number: run!.number, outcome, task_counts: rc } });
+        }
+        const between = BETWEEN_RUNS.includes(m.mission.status)
+          ? ` It has ${run ? "a run in progress" : "not run yet: it runs on its schedule, or now with polpo_schedule_run"}.` : "";
         return ok(reached
           ? `Mission ${id} is ${m.mission.status} (${countText(c)}).${m.mission.status === "paused" ? " It waits at a checkpoint or for a person: polpo_approvals_list, then polpo_mission_run to resume." : ""}`
-          : `Mission ${id} is still ${m.mission.status} after ${waited} s (${countText(c)}): call polpo_mission_wait again to keep waiting.`,
+          : `Mission ${id} is still ${m.mission.status} after ${waited} s (${countText(c)}).${between} Call polpo_mission_wait again to keep waiting.`,
           { mission: summary, task_counts: c, reached, timed_out: !reached, waited_seconds: waited });
       }
       await sleep(Math.min(interval, Math.max(0, timeout - (Date.now() - started))), extra.signal);

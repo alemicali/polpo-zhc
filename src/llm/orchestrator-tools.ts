@@ -66,7 +66,7 @@ import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
 import { ASK_AGENT_DESCRIPTION, AskAgentSchema, execAskAgent, execMessageAgent, MESSAGE_AGENT_DESCRIPTION, MessageAgentSchema } from "../tools/agent-talk-tools.js";
 import { proxyReachable } from "../tools/browser-egress.js";
-import { CHECK_NOTHING_TO_REPORT } from "@polpo-ai/core";
+import { CHECK_NOTHING_TO_REPORT, scheduleExpressionProblem } from "@polpo-ai/core";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -3821,11 +3821,16 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
   const resolved = resolveAgentName(agents, args.assignTo as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  const dependsOn = args.dependsOn as string[] | undefined;
+  // a dependency that does not exist would keep the task pending for ever
+  const missing: string[] = [];
+  for (const id of new Set(dependsOn ?? [])) if (!(await polpo.getStore().getTask(id))) missing.push(id);
+  if (missing.length) return `Error: dependsOn: there is no task ${missing.map((id) => `"${id}"`).join(", ")} (give the ids of existing tasks: list_tasks).`;
   const task = await polpo.addTask({
     title: args.title as string,
     description: args.description as string,
     assignTo: agentName,
-    dependsOn: args.dependsOn as string[] | undefined,
+    dependsOn,
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
@@ -4381,6 +4386,8 @@ async function execCreateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!mission) return `Error: Mission "${missionId}" not found.`;
 
   const isRecurring = (args.recurring as boolean) ?? false;
+  const problem = scheduleExpressionProblem(String(args.expression ?? ""), { recurring: isRecurring });
+  if (problem) return `Error: ${problem}`;
   // Set schedule expression and transition status to scheduled/recurring
   const newStatus = isRecurring ? "recurring" : "scheduled";
   const missionUpdate: Record<string, unknown> = {
@@ -4431,6 +4438,10 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!existing) return `Error: No schedule found for mission "${missionId}".`;
 
   const changes: string[] = [];
+  if (args.expression !== undefined) {
+    const problem = scheduleExpressionProblem(String(args.expression), { recurring: (args.recurring as boolean | undefined) ?? existing.recurring });
+    if (problem) return `Error: ${problem}`;
+  }
   if (args.expression !== undefined) {
     // Re-register with new expression
     const mission = await polpo.getMission(missionId);
