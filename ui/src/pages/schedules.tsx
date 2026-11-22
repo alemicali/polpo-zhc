@@ -20,11 +20,11 @@ import { useSchedules, useMissions } from "@polpo-ai/react";
 import type { ScheduleEntry, Mission } from "@polpo-ai/react";
 
 const OUTCOME_CLASS: Record<NonNullable<ScheduleEntry["lastOutcome"]>, string> = {
-  started: "text-blue-400",
-  completed: "text-emerald-400",
-  failed: "text-red-400",
-  skipped: "text-amber-400",
-  missed: "text-amber-400",
+  started: "text-info",
+  completed: "text-success",
+  failed: "text-destructive",
+  skipped: "text-warning",
+  missed: "text-warning",
   expired: "text-muted-foreground",
 };
 import { useAsyncAction } from "@/hooks/use-polpo";
@@ -51,9 +51,9 @@ function ScheduleRow({
     <div
       className={cn(
         "group relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg",
-        "bg-card/80 backdrop-blur-sm border border-border/40",
+        "bg-card border border-border shadow-card",
         "transition-all duration-200 hover:border-primary/20 cursor-pointer",
-        entry.enabled && "border-l-2 border-l-blue-400/60",
+        entry.enabled && "border-l-2 border-l-info/60",
         !entry.enabled && "opacity-60",
       )}
       onClick={onClick}
@@ -61,9 +61,9 @@ function ScheduleRow({
       {/* Icon */}
       <div className={cn(
         "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-        entry.enabled ? "bg-blue-500/10" : "bg-zinc-500/10",
+        entry.enabled ? "bg-info/10" : "bg-muted-foreground/10",
       )}>
-        <Calendar className={cn("h-4 w-4", entry.enabled ? "text-blue-400" : "text-zinc-500")} />
+        <Calendar className={cn("h-4 w-4", entry.enabled ? "text-info" : "text-muted-foreground")} />
       </div>
 
       {/* Main info */}
@@ -72,15 +72,15 @@ function ScheduleRow({
           <span className="text-sm font-medium truncate">
             {mission?.name ?? entry.missionId}
           </span>
-          <Badge variant="outline" className={cn("text-[10px] shrink-0", entry.enabled ? "text-emerald-400" : "text-amber-400")}>
+          <Badge variant="outline" className={cn("text-micro shrink-0", entry.enabled ? "text-success" : "text-warning")}>
             {entry.enabled ? "Enabled" : entry.nextRunAt ? "Paused" : "Done"}
           </Badge>
           {entry.recurring ? (
-            <Badge variant="outline" className="text-[10px] gap-0.5 text-violet-400 shrink-0">
+            <Badge variant="outline" className="text-micro gap-0.5 text-chart-5 shrink-0">
               <Repeat className="h-2.5 w-2.5" />Recurring
             </Badge>
           ) : (
-            <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">One-shot</Badge>
+            <Badge variant="outline" className="text-micro text-muted-foreground shrink-0">One-shot</Badge>
           )}
         </div>
 
@@ -90,13 +90,13 @@ function ScheduleRow({
             <Timer className="h-3 w-3" />
             {cronToHuman(entry.expression)}
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground/60">{entry.expression}</span>
+          <span className="font-mono text-micro text-muted-foreground/60">{entry.expression}</span>
         </div>
 
         {/* Next/Last run */}
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
           {entry.nextRunAt && (
-            <span className={cn("flex items-center gap-1", isOverdue && "text-red-400")}>
+            <span className={cn("flex items-center gap-1", isOverdue && "text-destructive")}>
               <Clock className="h-3 w-3" />
               Next: {isOverdue ? "overdue" : formatDistanceToNow(new Date(entry.nextRunAt), { addSuffix: true })}
             </span>
@@ -119,7 +119,7 @@ function ScheduleRow({
               </span>
             )}
             {(entry.missedRuns ?? 0) > 0 && (
-              <span className="text-amber-400" title={entry.lastMissedAt ? `Latest missed: ${format(new Date(entry.lastMissedAt), "MMM d, HH:mm")}` : undefined}>
+              <span className="text-warning" title={entry.lastMissedAt ? `Latest missed: ${format(new Date(entry.lastMissedAt), "MMM d, HH:mm")}` : undefined}>
                 {entry.missedRuns} missed while the server was down
               </span>
             )}
@@ -130,9 +130,9 @@ function ScheduleRow({
       {/* Enabled indicator */}
       <div className="flex items-center shrink-0">
         {entry.enabled ? (
-          <Power className="h-4 w-4 text-emerald-400" />
+          <Power className="h-4 w-4 text-success" />
         ) : (
-          <PowerOff className="h-4 w-4 text-zinc-500" />
+          <PowerOff className="h-4 w-4 text-muted-foreground" />
         )}
       </div>
     </div>
@@ -197,7 +197,7 @@ export function SchedulesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search schedules..."
-            className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
+            className="pl-8 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -210,7 +210,7 @@ export function SchedulesPage() {
             <span className="font-mono">{filtered.length}</span>{search ? ` of ${schedules.length}` : ""} schedule{filtered.length !== 1 ? "s" : ""}
           </span>
           {enabled.length > 0 && (
-            <Badge variant="default" className="text-[10px] font-mono">
+            <Badge variant="default" className="text-micro font-mono">
               {enabled.length} active
             </Badge>
           )}
@@ -221,14 +221,14 @@ export function SchedulesPage() {
       </div>
 
       {schedules.length === 0 ? (
-        <Card className="bg-card/60 backdrop-blur-sm border-border/40">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <Calendar className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">No schedules</p>
             <p className="text-xs mt-1 text-center max-w-xs">
               Schedules are created when you add a <code className="bg-muted px-1 rounded">schedule</code> field to a mission definition.
             </p>
-            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-[10px]">
+            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
               {"{ \"schedule\": \"0 9 * * 1\", \"recurring\": true }"}
             </kbd>
           </CardContent>
@@ -239,7 +239,7 @@ export function SchedulesPage() {
             {sections.map(({ label, schedules: sectionSchedules }) => (
               <section key={label}>
                 <div className="mb-3">
-                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                  <h3 className="text-label text-muted-foreground">
                     {label} ({sectionSchedules.length})
                   </h3>
                   <div className="mt-1.5 h-px bg-border/40" />

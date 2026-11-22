@@ -11,7 +11,7 @@ import type { GroupMember } from "./use-member-directory";
 type AvatarSize = "xs" | "sm" | "md";
 
 const ORCHESTRATOR_SIZE: Record<AvatarSize, string> = {
-  xs: "h-5 w-5 text-[10px]",
+  xs: "h-5 w-5 text-micro",
   sm: "h-6 w-6 text-xs",
   md: "h-8 w-8 text-base",
 };
@@ -57,7 +57,7 @@ export function MemberAvatarStack({ members, max = 4, size = "xs", className }: 
       {hidden > 0 && (
         <div className={cn(
           "flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-muted-foreground ring-2 ring-background tabular-nums",
-          size === "xs" ? "h-5 min-w-5 px-1 text-[8px]" : size === "sm" ? "h-6 min-w-6 px-1 text-[9px]" : "h-8 min-w-8 px-1 text-[10px]",
+          size === "xs" ? "h-5 min-w-5 px-1 text-micro" : size === "sm" ? "h-6 min-w-6 px-1 text-micro" : "h-8 min-w-8 px-1 text-micro",
         )}>
           +{hidden}
         </div>

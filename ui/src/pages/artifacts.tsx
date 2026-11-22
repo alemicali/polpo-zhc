@@ -20,6 +20,7 @@ import {
   artifactDownload, artifactLabel, artifactsApi,
   type Artifact, type ArtifactSummary, type ArtifactType,
 } from "@/lib/artifacts-api";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 const FILTERS: { value: "all" | ArtifactType; label: string }[] = [
   { value: "all", label: "All" },
@@ -45,10 +46,10 @@ function when(iso: string): string {
 }
 
 function LegacyBadge() {
-  return <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700 dark:text-amber-300">Legacy</Badge>;
+  return <Badge variant="outline" className="border-warning/40 text-micro text-warning">Legacy</Badge>;
 }
 
-const author = (by: string) => (by.startsWith("person:") ? by.slice("person:".length) : by === "polpo" ? "Polpo" : by);
+const author = (by: string, product: string) => (by.startsWith("person:") ? by.slice("person:".length) : by === "polpo" ? product : by);
 
 export function ArtifactsPage() {
   const { artifactId } = useParams();
@@ -56,6 +57,7 @@ export function ArtifactsPage() {
 }
 
 function ArtifactGallery() {
+  const product = productName(useInstanceBranding());
   const [params, setParams] = useSearchParams();
   const filter = (params.get("type") as ArtifactType | null) ?? "all";
   // the former views have no tab of their own: they show in All (marked Legacy), or with ?type=view
@@ -90,7 +92,7 @@ function ArtifactGallery() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Sparkles className="h-6 w-6" />
           <p>No artifacts yet.</p>
-          <p className="max-w-sm text-xs">Ask Polpo or an agent for a dashboard on your data, a document, a design or a diagram: it appears here.</p>
+          <p className="max-w-sm text-xs">Ask {product} or an agent for a dashboard on your data, a document, a design or a diagram: it appears here.</p>
         </div>
       ) : (
         <div className="grid gap-3 overflow-auto pb-bottom-nav sm:grid-cols-2 xl:grid-cols-3">
@@ -101,13 +103,13 @@ function ArtifactGallery() {
                 <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={a} /></span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-sm">{a.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{artifactLabel(a)} · {author(a.createdBy)}</p>
+                  <p className="text-caption text-muted-foreground">{artifactLabel(a)} · {author(a.createdBy, product)}</p>
                 </div>
                 {a.type === "view" && <LegacyBadge />}
-                {a.pinned && <Badge variant="secondary" className="text-[10px]">Pinned</Badge>}
+                {a.pinned && <Badge variant="secondary" className="text-micro">Pinned</Badge>}
               </div>
               {a.description && <p className="line-clamp-2 text-xs text-muted-foreground">{a.description}</p>}
-              <p className="mt-auto text-[11px] text-muted-foreground">
+              <p className="mt-auto text-caption text-muted-foreground">
                 {a.type === "view" ? "" : `v${a.version} · `}{when(a.updatedAt)}
                 {a.sources?.length ? ` · ${a.sources.length} source${a.sources.length === 1 ? "" : "s"}` : ""}
               </p>
@@ -120,6 +122,7 @@ function ArtifactGallery() {
 }
 
 function ArtifactDetail({ id }: { id: string }) {
+  const product = productName(useInstanceBranding());
   const navigate = useNavigate();
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -183,9 +186,9 @@ function ArtifactDetail({ id }: { id: string }) {
         <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate("/artifacts")} aria-label="Back to artifacts"><ArrowLeft className="h-4 w-4" /></Button>
         <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} className="h-3.5 w-3.5" /></span>
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 truncate text-sm font-semibold">{artifact.title}{legacyView && <LegacyBadge />}</h1>
-          <p className="text-[11px] text-muted-foreground">
-            {artifactLabel(artifact)} · by {author(artifact.createdBy)}{legacyView ? "" : ` · v${artifact.version}`} · {when(artifact.updatedAt)}
+          <h1 className="flex items-center gap-2 truncate font-heading text-h3">{artifact.title}{legacyView && <LegacyBadge />}</h1>
+          <p className="text-caption text-muted-foreground">
+            {artifactLabel(artifact)} · by {author(artifact.createdBy, product)}{legacyView ? "" : ` · v${artifact.version}`} · {when(artifact.updatedAt)}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1">
@@ -216,13 +219,13 @@ function ArtifactDetail({ id }: { id: string }) {
         </div>
       </div>
       {legacyView && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-          A legacy view, from before artifacts. It still works, but it can no longer be edited here: ask Polpo or an agent to remake it as an html dashboard.
+        <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+          A legacy view, from before artifacts. It still works, but it can no longer be edited here: ask {product} or an agent to remake it as an html dashboard.
         </p>
       )}
       {(artifact.description || artifact.sources?.length || shownVersion) && (
         <p className="text-xs text-muted-foreground">
-          {shownVersion ? `Showing v${shownVersion.version}${shownVersion.author ? ` by ${author(shownVersion.author)}` : ""}. ` : ""}
+          {shownVersion ? `Showing v${shownVersion.version}${shownVersion.author ? ` by ${author(shownVersion.author, product)}` : ""}. ` : ""}
           {artifact.description}
           {artifact.sources?.length ? ` Reads: ${artifact.sources.join(", ")}.` : ""}
         </p>

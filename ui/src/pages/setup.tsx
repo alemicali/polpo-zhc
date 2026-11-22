@@ -37,6 +37,7 @@ import { AuthStep } from "@/components/shared/provider-auth";
 import type { Provider } from "@/components/shared/provider-auth";
 import { ModelPicker } from "@/components/shared/model-picker";
 import { LocalModelStep, NoToolsBadge, type LocalProviderChoice } from "@/components/setup/local-model-step";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 // ── Types ──
 
@@ -292,7 +293,7 @@ function DirectoryPickerDialog({
                 autoFocus
               />
               <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCreateFolder}>
-                <Check className="h-3.5 w-3.5 text-emerald-500" />
+                <Check className="h-3.5 w-3.5 text-success" />
               </Button>
               <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setCreatingFolder(false)}>
                 <X className="h-3.5 w-3.5 text-muted-foreground" />
@@ -304,7 +305,7 @@ function DirectoryPickerDialog({
             <div key={dir.path} className="group flex items-center gap-3 px-5 py-2.5 hover:bg-accent/40 transition-colors">
               {renamingDir === dir.path ? (
                 <>
-                  <Folder className="h-4 w-4 text-sky-400 shrink-0" />
+                  <Folder className="h-4 w-4 text-info shrink-0" />
                   <Input
                     ref={renameRef}
                     value={renameValue}
@@ -317,7 +318,7 @@ function DirectoryPickerDialog({
                     autoFocus
                   />
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleRename(dir)}>
-                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                    <Check className="h-3.5 w-3.5 text-success" />
                   </Button>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setRenamingDir(null)}>
                     <X className="h-3.5 w-3.5 text-muted-foreground" />
@@ -330,10 +331,10 @@ function DirectoryPickerDialog({
                     onClick={() => browse(dir.path)}
                     className="flex items-center gap-3 flex-1 min-w-0 text-left"
                   >
-                    <Folder className="h-4 w-4 text-sky-400 shrink-0" />
+                    <Folder className="h-4 w-4 text-info shrink-0" />
                     <span className="text-sm truncate">{dir.name}</span>
                     {dir.hasPolpoConfig && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                      <Badge variant="secondary" className="text-micro px-1.5 py-0 shrink-0">
                         polpo
                       </Badge>
                     )}
@@ -389,20 +390,21 @@ function ProjectStep({
   onChangeDir: (v: string) => void;
   onChangeOrg: (v: string) => void;
 }) {
+  const product = productName(useInstanceBranding());
   const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">Your project</h2>
+        <h2 className="font-heading text-h2">Your project</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Where should Polpo store its configuration and data?
+          Where should {product} store its configuration and data?
         </p>
       </div>
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <label className="text-label text-muted-foreground">
             Working directory
           </label>
           <div className="flex gap-2">
@@ -434,7 +436,7 @@ function ProjectStep({
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <label className="text-label text-muted-foreground">
             Organization name
           </label>
           <Input
@@ -462,17 +464,18 @@ function AccessStep({
   adminEmail: string;
   onChangeEmail: (v: string) => void;
 }) {
+  const product = productName(useInstanceBranding());
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">Admin access</h2>
+        <h2 className="font-heading text-h2">Admin access</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          This email will receive magic links for this Polpo instance.
+          This email will receive magic links for this {product} instance.
         </p>
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <label className="text-label text-muted-foreground">
           Admin email
         </label>
         <Input
@@ -511,13 +514,13 @@ function ModelStep({
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Choose your model</h2>
+          <h2 className="font-heading text-h2">Choose your model</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Models served by {localProvider.label}. This model powers the orchestrator and your first agent.
             Pick one that supports tool calling.
           </p>
           {localProvider.models.some((m) => m.tools === false) && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+            <p className="text-xs text-warning mt-2">
               Models marked “no tools” can chat but cannot run agent tasks.
             </p>
           )}
@@ -535,7 +538,7 @@ function ModelStep({
                 <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="truncate font-mono text-sm">{m.id}</span>
                 {m.tools === false && <NoToolsBadge />}
-                {m.contextWindow && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{Math.round(m.contextWindow / 1000)}k context</span>}
+                {m.contextWindow && <span className="ml-auto shrink-0 text-caption text-muted-foreground">{Math.round(m.contextWindow / 1000)}k context</span>}
                 {selected === spec && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
               </button>
             );
@@ -581,7 +584,7 @@ function AgentStep({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">Name your first agent</h2>
+        <h2 className="font-heading text-h2">Name your first agent</h2>
         <p className="text-sm text-muted-foreground mt-1">
           This is the first AI coding agent in your team. You can add more later.
         </p>
@@ -589,7 +592,7 @@ function AgentStep({
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <label className="text-label text-muted-foreground">
             Agent name
           </label>
           <Input
@@ -600,7 +603,7 @@ function AgentStep({
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <label className="text-label text-muted-foreground">
             Role
           </label>
           <Input
@@ -620,6 +623,7 @@ function AgentStep({
 // ── Main setup wizard ──
 
 export function SetupPage() {
+  const product = productName(useInstanceBranding());
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -776,12 +780,12 @@ export function SetupPage() {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 pb-6 px-6 text-center space-y-4">
-            <div className="h-12 w-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+            <div className="h-12 w-12 rounded-full bg-success/15 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="h-6 w-6 text-success" />
             </div>
-            <h2 className="text-xl font-semibold">Already configured</h2>
+            <h2 className="font-heading text-h2">Already configured</h2>
             <p className="text-sm text-muted-foreground">
-              Polpo is already set up and running.
+              {product} is already set up and running.
             </p>
             <Button onClick={() => navigate("/chat", { replace: true })} className="gap-1.5">
               Let's go <ArrowRight className="h-4 w-4" />
@@ -801,9 +805,9 @@ export function SetupPage() {
         <div className="w-full max-w-lg space-y-8">
           {/* Logo */}
           <div className="text-center space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight">
+            <h1 className="font-heading text-display">
               <span className="bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                Polpo
+                {product}
               </span>
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -817,7 +821,7 @@ export function SetupPage() {
           </div>
 
           {/* Card */}
-          <Card className="border-border/60 shadow-lg shadow-black/[0.03]">
+          <Card className="border-border/60 shadow-raised">
             <CardContent className="pt-6 pb-6 px-6 min-h-[320px] flex flex-col">
               <div className="flex-1">
                 {currentStep === "project" && (
@@ -852,9 +856,9 @@ export function SetupPage() {
                       <button
                         type="button"
                         onClick={() => setProviderMode("local")}
-                        className="mb-4 flex w-full items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 text-left text-sm"
+                        className="mb-4 flex w-full items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2.5 text-left text-sm"
                       >
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                         <span className="font-medium">{localProvider.label}</span>
                         <span className="text-xs text-muted-foreground">local · {localProvider.models.length} models</span>
                         <span className="ml-auto text-xs text-primary">Change</span>

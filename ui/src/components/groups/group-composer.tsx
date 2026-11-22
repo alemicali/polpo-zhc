@@ -194,7 +194,7 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
         side="top"
         align="start"
         sideOffset={6}
-        className="flex max-h-80 w-[min(22rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-[0_18px_60px_-30px_rgba(0,0,0,0.35)]"
+        className="flex max-h-80 w-[min(22rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-raised"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => {
@@ -206,7 +206,7 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
           <div className="flex h-7 min-w-7 items-center justify-center rounded-md border border-border bg-background font-mono text-sm font-bold">@</div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">Mention an agent</p>
-            <p className="truncate text-[11px] text-muted-foreground">Mentioned agents always reply.</p>
+            <p className="truncate text-caption text-muted-foreground">Mentioned agents always reply.</p>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto py-1" role="listbox" aria-label="Group agents">
@@ -229,20 +229,20 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
               <MemberAvatar member={member} size="sm" />
               <div className="min-w-0 flex-1 leading-tight">
                 <div className="flex items-baseline gap-2">
-                  <span className="truncate text-[13px] font-semibold">{member.name}</span>
-                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">@{mentionHandle(member)}</span>
+                  <span className="truncate text-small font-semibold">{member.name}</span>
+                  <span className="shrink-0 font-mono text-micro text-muted-foreground">@{mentionHandle(member)}</span>
                 </div>
-                {member.role && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{member.role}</p>}
+                {member.role && <p className="mt-0.5 truncate text-caption text-muted-foreground">{member.role}</p>}
               </div>
             </button>
           ))}
         </div>
-        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em]">↑↓</span>
+        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/30 px-3 py-1.5 text-caption text-muted-foreground">
+          <span className="font-mono text-micro uppercase tracking-[0.12em]">↑↓</span>
           <span>move</span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em]">Enter</span>
+          <span className="font-mono text-micro uppercase tracking-[0.12em]">Enter</span>
           <span>insert</span>
-          <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.12em]">Esc</span>
+          <span className="ml-auto font-mono text-micro uppercase tracking-[0.12em]">Esc</span>
         </div>
       </PopoverContent>
     </Popover>

@@ -279,7 +279,7 @@ export function GateFormDialog({
                     <Users className="h-3.5 w-3.5" />
                     <span className="text-xs font-semibold">human</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-micro text-muted-foreground">
                     Pause for human approval (notifies channels)
                   </p>
                 </button>
@@ -297,7 +297,7 @@ export function GateFormDialog({
                     <Bot className="h-3.5 w-3.5" />
                     <span className="text-xs font-semibold">auto</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-micro text-muted-foreground">
                     Decide automatically based on condition
                   </p>
                 </button>
@@ -322,7 +322,7 @@ export function GateFormDialog({
                 </SelectContent>
               </Select>
               {selectedHook && (
-                <p className="text-[10px] text-muted-foreground">{selectedHook.description}</p>
+                <p className="text-micro text-muted-foreground">{selectedHook.description}</p>
               )}
             </Section>
 
@@ -346,7 +346,7 @@ export function GateFormDialog({
             {draft.handler === "human" && (
               <Section title="Notify channels">
                 {channels.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground italic">
+                  <p className="text-caption text-muted-foreground italic">
                     No channels configured. Add one in the Channels tab first.
                   </p>
                 ) : (
@@ -374,7 +374,7 @@ export function GateFormDialog({
                             )}
                           >
                             {selected && (
-                              <span className="text-[8px] text-primary-foreground">✓</span>
+                              <span className="text-micro text-primary-foreground">✓</span>
                             )}
                           </div>
                           <span className="truncate font-mono">{c}</span>
@@ -476,7 +476,7 @@ export function GateFormDialog({
             </Section>
 
             {saveError && (
-              <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
+              <div className="text-caption text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
                 {saveError}
               </div>
             )}
@@ -506,7 +506,7 @@ export function GateFormDialog({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h4 className="text-label text-muted-foreground">
         {title}
       </h4>
       <div className="space-y-2.5">{children}</div>
@@ -529,15 +529,15 @@ function Field({
 }) {
   return (
     <div className="space-y-1">
-      <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+      <label className="text-caption font-medium text-muted-foreground flex items-center gap-1">
         {label}
         {required && <span className="text-destructive">*</span>}
       </label>
       {children}
       {description && !error && (
-        <p className="text-[10px] text-muted-foreground">{description}</p>
+        <p className="text-micro text-muted-foreground">{description}</p>
       )}
-      {error && <p className="text-[11px] text-destructive">{error}</p>}
+      {error && <p className="text-caption text-destructive">{error}</p>}
     </div>
   );
 }

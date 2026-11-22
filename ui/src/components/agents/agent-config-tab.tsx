@@ -21,9 +21,9 @@ export function AgentConfigTab() {
   return (
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
+        <Card className="py-0 gap-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-            <span className="text-[10px] text-muted-foreground font-mono">polpo.json &mdash; agent configuration</span>
+            <span className="text-micro text-muted-foreground font-mono">polpo.json &mdash; agent configuration</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { KEY_SOURCE_LABEL, mcpAccessApi, scopeLabel, visibleScopes, type McpAccess, type McpGrant } from "@/lib/mcp-access-api";
+import { SectionHeader } from "@/components/shared/section-header";
 
 function formatWhen(iso: string | undefined): string {
   if (!iso) return "never";
@@ -25,7 +26,7 @@ function ScopeBadges({ scopes, all }: { scopes: string[]; all: McpAccess["scopes
         <Badge
           key={s}
           variant={s === "polpo:admin" ? "destructive" : "secondary"}
-          className="text-[10px] font-normal"
+          className="text-micro font-normal"
           title={all.find((x) => x.id === s)?.description}
         >
           {scopeLabel(s, all)}
@@ -68,14 +69,12 @@ export function McpAccessSection() {
   return (
     <div className="space-y-6 max-w-3xl">
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Plug className="h-3.5 w-3.5" /> Connected apps
-        </h3>
+        <SectionHeader icon={Plug} title="Connected apps" className="mb-1.5" />
         <p className="text-xs text-muted-foreground mb-2">
           Apps (Claude, ChatGPT, Claude Code…) allowed on the consent page to use this instance through its MCP connector, with the scopes they were given.
           Revoking one disconnects it at once; it can connect again, asking you anew.
         </p>
-        <Card className="bg-card/80 border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="p-0">
             {access.grants.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">No app is connected.</p>
@@ -90,11 +89,11 @@ export function McpAccessSection() {
                       </div>
                       <ScopeBadges scopes={g.scopes} all={access.scopes} />
                       {g.legacy && (
-                        <p className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                        <p className="flex items-center gap-1 text-caption text-warning">
                           <AlertTriangle className="h-3 w-3" /> Connected before scopes: it has every scope. Revoke it and connect again to choose fewer.
                         </p>
                       )}
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-caption text-muted-foreground">
                         Connected {formatWhen(g.created_at)} · last used {formatWhen(g.last_used_at)}
                       </p>
                     </div>
@@ -116,14 +115,12 @@ export function McpAccessSection() {
       </section>
 
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <KeyRound className="h-3.5 w-3.5" /> Keys
-        </h3>
+        <SectionHeader icon={KeyRound} title="Keys" className="mb-1.5" />
         <p className="text-xs text-muted-foreground mb-2">
           Keys that open the connector directly. Their values are never shown here. Narrow <code className="font-mono">POLPO_MCP_KEY</code> with{" "}
           <code className="font-mono">POLPO_MCP_KEY_SCOPES</code>, or add named keys in <code className="font-mono">settings.mcp.keys</code> (values in the vault).
         </p>
-        <Card className="bg-card/80 border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="p-0">
             {access.keys.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">No key: only signed-in people and connected apps use the connector.</p>
@@ -138,11 +135,11 @@ export function McpAccessSection() {
                       </div>
                       <ScopeBadges scopes={k.scopes} all={access.scopes} />
                       {k.source === "env" && !k.explicit && (
-                        <p className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                        <p className="flex items-center gap-1 text-caption text-warning">
                           <AlertTriangle className="h-3 w-3" /> Every scope, as before scopes existed. Set POLPO_MCP_KEY_SCOPES to give it only what it needs.
                         </p>
                       )}
-                      {k.problem && <p className="text-[11px] text-destructive">{k.problem}</p>}
+                      {k.problem && <p className="text-caption text-destructive">{k.problem}</p>}
                     </div>
                   </div>
                 ))}
@@ -153,7 +150,7 @@ export function McpAccessSection() {
       </section>
 
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Scopes</h3>
+        <h3 className="text-label text-muted-foreground mb-1.5">Scopes</h3>
         <div className="grid gap-1.5">
           {access.scopes.map((s) => (
             <div key={s.id} className="text-xs">

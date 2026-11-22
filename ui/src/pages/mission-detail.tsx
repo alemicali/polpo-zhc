@@ -26,8 +26,6 @@ import {
   Wrench,
   Star,
   Eye,
-  Hammer,
-  HelpCircle,
   Copy,
   Check,
   BarChart3,
@@ -64,7 +62,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
-import { missionStatusStyles } from "@/lib/mission-status";
+import { missionStatusStyles, taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { JsonBlock } from "@/components/json-block";
 import { Calendar, Repeat, Bell } from "lucide-react";
 import { useConfig } from "@/hooks/use-polpo";
@@ -90,10 +88,10 @@ function CopyableId({ id, label }: { id: string; label?: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      className="inline-flex items-center gap-1 text-micro font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       title={`Copy ${label ?? "ID"}: ${id}`}
     >
-      {copied ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
+      {copied ? <Check className="h-2.5 w-2.5 text-success" /> : <Copy className="h-2.5 w-2.5" />}
       {id.slice(0, 12)}...
     </button>
   );
@@ -114,7 +112,7 @@ function CopyButton({ text }: { text: string }) {
         setTimeout(() => setCopied(false), 1500);
       }}
     >
-      {copied ? <Check className="h-3 w-3 mr-1 text-emerald-500" /> : <Copy className="h-3 w-3 mr-1" />}
+      {copied ? <Check className="h-3 w-3 mr-1 text-success" /> : <Copy className="h-3 w-3 mr-1" />}
       {copied ? "Copied" : "Copy"}
     </Button>
   );
@@ -134,21 +132,38 @@ function filesLinkForPath(filePath: string): string | null {
 
 
 
-const taskStatusConfig: Record<TaskStatus, { icon: React.ElementType; color: string; label: string; nodeColor: string }> = {
-  draft: { icon: Clock, color: "text-zinc-500", label: "Draft", nodeColor: "border-zinc-500/40" },
-  pending: { icon: Clock, color: "text-zinc-400", label: "Queued", nodeColor: "border-zinc-400/40" },
-  awaiting_approval: { icon: Clock, color: "text-amber-400", label: "Awaiting", nodeColor: "border-amber-400/40" },
-  assigned: { icon: Clock, color: "text-violet-400", label: "Assigned", nodeColor: "border-violet-400/40" },
-  in_progress: { icon: Loader2, color: "text-blue-400", label: "Running", nodeColor: "border-blue-400/60" },
-  review: { icon: Eye, color: "text-amber-400", label: "Review", nodeColor: "border-amber-400/60" },
-  done: { icon: CheckCircle2, color: "text-emerald-400", label: "Done", nodeColor: "border-emerald-400/60" },
-  failed: { icon: AlertTriangle, color: "text-red-400", label: "Failed", nodeColor: "border-red-400/60" },
+type TaskNodeStatusStyle = { icon: React.ElementType; color: string; label: string; nodeColor: string };
+
+function nodeStatus(status: TaskStatus, strong = false, icon?: React.ElementType): TaskNodeStatusStyle {
+  const v = taskStatusStyles[status];
+  // Settled / active states get a stronger node border than idle ones.
+  return { icon: icon ?? v.icon, color: v.color, label: v.short, nodeColor: strong ? v.border.replace("/40", "/60") : v.border };
+}
+
+const taskStatusConfig: Record<TaskStatus, TaskNodeStatusStyle> = {
+  draft: nodeStatus("draft", false, Clock),
+  pending: nodeStatus("pending"),
+  awaiting_approval: nodeStatus("awaiting_approval"),
+  assigned: nodeStatus("assigned"),
+  in_progress: nodeStatus("in_progress", true),
+  review: nodeStatus("review", true),
+  done: nodeStatus("done", true),
+  failed: nodeStatus("failed", true),
 };
 
 const phaseIcons: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  fix: { icon: Hammer, color: "text-orange-400", label: "Fix" },
-  clarification: { icon: HelpCircle, color: "text-purple-400", label: "Clarifying" },
-  review: { icon: Eye, color: "text-amber-400", label: "Review" },
+  fix: { icon: taskPhaseStyles.fix.icon, color: taskPhaseStyles.fix.color, label: taskPhaseStyles.fix.short },
+  clarification: { icon: taskPhaseStyles.clarification.icon, color: taskPhaseStyles.clarification.color, label: taskPhaseStyles.clarification.short },
+  review: { icon: taskPhaseStyles.review.icon, color: taskPhaseStyles.review.color, label: taskPhaseStyles.review.short },
+};
+
+// Graph edge strokes (React Flow inline styles) — from the status tokens.
+const EDGE = {
+  failed: taskStatusStyles.failed.css,
+  done: taskStatusStyles.done.css,
+  checkpoint: "var(--warning)",
+  delay: "var(--info)",
+  idle: "color-mix(in oklch, var(--muted-foreground) 30%, transparent)",
 };
 
 // ── Graph node data ──
@@ -197,13 +212,13 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
 
   const bgColor = liveTask
     ? liveTask.status === "done"
-      ? "bg-emerald-500/5"
+      ? "bg-success/5"
       : liveTask.status === "failed"
-        ? "bg-red-500/5"
+        ? "bg-destructive/5"
         : liveTask.status === "in_progress"
-          ? "bg-blue-500/5"
+          ? "bg-info/5"
           : liveTask.status === "review"
-            ? "bg-amber-500/5"
+            ? "bg-warning/5"
             : "bg-card/90"
     : "bg-card/90";
 
@@ -217,14 +232,14 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
           "rounded-xl border-2 px-4 py-3 shadow-sm backdrop-blur-sm transition-all cursor-pointer overflow-hidden",
           expanded ? "min-w-[320px] max-w-[420px]" : "min-w-[200px] max-w-[280px]",
           selected
-            ? "border-primary ring-2 ring-primary/30 shadow-[0_0_24px_oklch(0.7_0.15_200_/_18%)]"
+            ? "border-primary ring-2 ring-primary/30 shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_18%,transparent)]"
             : borderColor,
           bgColor,
         )}
       >
         {/* Header row */}
         <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-[10px] font-mono text-muted-foreground shrink-0">#{index + 1}</span>
+          <span className="text-micro font-mono text-muted-foreground shrink-0">#{index + 1}</span>
           <StatusIcon
             className={cn(
               "h-3.5 w-3.5 shrink-0",
@@ -233,12 +248,12 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             )}
           />
           {statusCfg && (
-            <Badge variant="outline" className={cn("text-[8px] px-1 py-0", statusCfg.color)}>
+            <Badge variant="outline" className={cn("text-micro px-1 py-0", statusCfg.color)}>
               {statusCfg.label}
             </Badge>
           )}
           {phase && (
-            <Badge variant="outline" className={cn("text-[8px] px-1 py-0 gap-0.5", phase.color)}>
+            <Badge variant="outline" className={cn("text-micro px-1 py-0 gap-0.5", phase.color)}>
               <phase.icon className="h-2 w-2" />
               {phase.label}
             </Badge>
@@ -246,7 +261,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
           {score != null && (
             <Badge
               variant={score >= 3.5 ? "default" : "destructive"}
-              className="text-[8px] px-1 py-0 ml-auto"
+              className="text-micro px-1 py-0 ml-auto"
             >
               <Star className="h-2 w-2 mr-0.5" />
               {score.toFixed(1)}/5
@@ -255,7 +270,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
           {expanded && liveTask && (
             <button
               type="button"
-              className="ml-auto inline-flex h-6 items-center gap-0.5 px-1.5 text-[9px] font-medium text-primary hover:bg-primary/10"
+              className="ml-auto inline-flex h-6 items-center gap-0.5 px-1.5 text-micro font-medium text-primary hover:bg-primary/10"
               onClick={(event) => { event.stopPropagation(); navigate(`/tasks/${liveTask.id}`); }}
               title="View task detail"
             >
@@ -271,36 +286,36 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
         {/* Description — collapsed: 2-line clamp, expanded: full markdown */}
         {taskDef.description && (
           expanded ? (
-            <div className="prose prose-xs prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-[10px] text-muted-foreground leading-snug mb-2 overflow-hidden break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:text-[9px] [&_code]:break-all [&_code]:text-[9px] [&_ul]:pl-3 [&_ol]:pl-3 [&_p]:my-1">
+            <div className="prose prose-xs prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 text-micro text-muted-foreground leading-snug mb-2 overflow-hidden break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_pre]:text-micro [&_code]:break-all [&_code]:text-micro [&_ul]:pl-3 [&_ol]:pl-3 [&_p]:my-1">
               <Markdown>{taskDef.description}</Markdown>
             </div>
           ) : (
-            <p className="text-[10px] text-muted-foreground leading-snug mb-2 line-clamp-2">{taskDef.description}</p>
+            <p className="text-micro text-muted-foreground leading-snug mb-2 line-clamp-2">{taskDef.description}</p>
           )
         )}
 
         {/* Compact footer (always visible) */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {taskDef.assignTo && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 gap-0.5">
+            <Badge variant="outline" className="text-micro px-1 py-0 gap-0.5">
               <Bot className="h-2 w-2" />
               {taskDef.assignTo}
             </Badge>
           )}
           {taskDef.dependsOn && taskDef.dependsOn.length > 0 && (
-            <Badge variant="secondary" className="text-[8px] px-1 py-0 gap-0.5">
+            <Badge variant="secondary" className="text-micro px-1 py-0 gap-0.5">
               <GitBranch className="h-2 w-2" />
               {taskDef.dependsOn.length}
             </Badge>
           )}
           {totalChecks > 0 && !expanded && (
-            <Badge variant="secondary" className="text-[8px] px-1 py-0 gap-0.5">
+            <Badge variant="secondary" className="text-micro px-1 py-0 gap-0.5">
               <Wrench className="h-2 w-2" />
               {totalChecks}
             </Badge>
           )}
           {liveTask?.result?.duration != null && (
-            <span className="text-[9px] text-muted-foreground ml-auto">
+            <span className="text-micro text-muted-foreground ml-auto">
               {Math.round(liveTask.result.duration / 1000)}s
             </span>
           )}
@@ -312,10 +327,10 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             {/* Dependencies */}
             {taskDef.dependsOn && taskDef.dependsOn.length > 0 && (
               <div>
-                <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Dependencies</p>
+                <p className="text-label text-muted-foreground mb-1.5">Dependencies</p>
                 <div className="flex flex-wrap gap-1">
                   {taskDef.dependsOn.map((d, i) => (
-                    <Badge key={i} variant="secondary" className="text-[9px] font-mono">{d}</Badge>
+                    <Badge key={i} variant="secondary" className="text-micro font-mono">{d}</Badge>
                   ))}
                 </div>
               </div>
@@ -325,11 +340,11 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             {taskDef.expectations && taskDef.expectations.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">Expectations</p>
+                  <p className="text-label text-muted-foreground">Expectations</p>
                   {liveTask && totalChecks > 0 && (
                     <span className={cn(
-                      "text-[9px] font-medium",
-                      passedChecks === totalChecks ? "text-emerald-400" : "text-muted-foreground",
+                      "text-micro font-medium",
+                      passedChecks === totalChecks ? "text-success" : "text-muted-foreground",
                     )}>
                       {passedChecks}/{totalChecks}
                     </span>
@@ -343,25 +358,25 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                       <div
                         key={i}
                         className={cn(
-                          "flex items-start gap-1.5 text-[10px] rounded px-1.5 py-1",
-                          passed === true && "bg-emerald-500/8",
-                          passed === false && "bg-red-500/8",
+                          "flex items-start gap-1.5 text-micro rounded px-1.5 py-1",
+                          passed === true && "bg-success/8",
+                          passed === false && "bg-destructive/8",
                         )}
                       >
                         {check != null ? (
                           passed ? (
-                            <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0 mt-px" />
+                            <CheckCircle2 className="h-3 w-3 text-success shrink-0 mt-px" />
                           ) : (
-                            <XCircle className="h-3 w-3 text-red-500 shrink-0 mt-px" />
+                            <XCircle className="h-3 w-3 text-destructive shrink-0 mt-px" />
                           )
                         ) : (
                           <div className="h-3 w-3 rounded-full border border-border/60 shrink-0 mt-px" />
                         )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-1">
-                            <Badge variant="outline" className="text-[7px] px-1 py-0 shrink-0">{exp.type}</Badge>
+                            <Badge variant="outline" className="text-micro px-1 py-0 shrink-0">{exp.type}</Badge>
                             {exp.threshold != null && (
-                              <span className="text-[8px] text-muted-foreground">thr: {exp.threshold}</span>
+                              <span className="text-micro text-muted-foreground">thr: {exp.threshold}</span>
                             )}
                           </div>
                           {exp.type === "file_exists" && exp.paths && exp.paths.length > 0 ? (
@@ -376,7 +391,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                                       e.stopPropagation();
                                       if (fileTarget) navigate(fileTarget);
                                     }}
-                                    className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                    className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
                                     title="Open in file editor"
                                   >
                                     {path}
@@ -400,12 +415,12 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             {/* Metrics */}
             {taskDef.metrics && taskDef.metrics.length > 0 && (
               <div>
-                <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Metrics</p>
+                <p className="text-label text-muted-foreground mb-1.5">Metrics</p>
                 <div className="space-y-1">
                   {taskDef.metrics.map((m, i) => (
-                    <div key={i} className="flex items-center gap-2 text-[10px]">
+                    <div key={i} className="flex items-center gap-2 text-micro">
                       <span className="font-medium">{m.name}</span>
-                      <code className="text-[9px] font-mono text-muted-foreground bg-muted/40 px-1 rounded">{m.command}</code>
+                      <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1 rounded">{m.command}</code>
                       <span className="text-muted-foreground ml-auto shrink-0">thr: {m.threshold}</span>
                     </div>
                   ))}
@@ -415,7 +430,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
 
             {/* Retry config */}
             {(taskDef.maxRetries != null || taskDef.maxDuration != null) && (
-              <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
+              <div className="flex items-center gap-3 text-micro text-muted-foreground">
                 {taskDef.maxRetries != null && <span>Max retries: {taskDef.maxRetries}</span>}
                 {taskDef.maxDuration != null && <span>Timeout: {Math.round(taskDef.maxDuration / 1000)}s</span>}
               </div>
@@ -438,52 +453,52 @@ function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNo
   const { checkpoint, isActive, isResumed } = data;
 
   const borderColor = isResumed
-    ? "border-emerald-400/60"
+    ? "border-success/60"
     : isActive
-      ? "border-amber-400/80"
-      : "border-amber-500/40";
+      ? "border-warning/80"
+      : "border-warning/40";
 
   const bgColor = isResumed
-    ? "bg-emerald-500/5"
+    ? "bg-success/5"
     : isActive
-      ? "bg-amber-500/8"
+      ? "bg-warning/8"
       : "bg-card/60";
 
   const StatusIcon = isResumed ? PlayCircle : PauseCircle;
   const statusLabel = isResumed ? "Resumed" : isActive ? "Waiting" : "Checkpoint";
-  const statusColor = isResumed ? "text-emerald-400" : isActive ? "text-amber-400" : "text-amber-500/70";
+  const statusColor = isResumed ? "text-success" : isActive ? "text-warning" : "text-warning/70";
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-amber-500/50 !border-none !w-2 !h-2" />
+      <Handle type="target" position={Position.Top} className="!bg-warning/50 !border-none !w-2 !h-2" />
       <div
         className={cn(
           "rounded-lg border-2 border-dashed backdrop-blur-sm transition-all duration-200",
           borderColor,
           bgColor,
-          selected && "ring-2 ring-amber-400/30 shadow-[0_0_16px_oklch(0.75_0.15_85/0.15)]",
+          selected && "ring-2 ring-warning/30 shadow-[0_0_16px_color-mix(in_oklch,var(--warning)_15%,transparent)]",
         )}
         style={{ minWidth: CHECKPOINT_WIDTH, maxWidth: CHECKPOINT_WIDTH }}
       >
         <div className="px-3 py-2.5 flex flex-col gap-1">
           {/* Header */}
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-3.5 w-3.5 text-amber-500/70 shrink-0" />
-            <span className="text-[11px] font-semibold text-foreground/90 truncate">{checkpoint.name}</span>
-            <span className={cn("ml-auto text-[9px] font-medium uppercase tracking-wider", statusColor)}>
+            <ShieldCheck className="h-3.5 w-3.5 text-warning/70 shrink-0" />
+            <span className="text-caption font-semibold text-foreground/90 truncate">{checkpoint.name}</span>
+            <span className={cn("ml-auto text-micro font-medium uppercase tracking-wider", statusColor)}>
               {statusLabel}
             </span>
           </div>
           {/* Message */}
           {checkpoint.message && (
-            <p className="text-[10px] text-muted-foreground leading-tight line-clamp-2 mt-0.5">
+            <p className="text-micro text-muted-foreground leading-tight line-clamp-2 mt-0.5">
               {checkpoint.message}
             </p>
           )}
           {/* Flow info */}
           <div className="flex items-center gap-1.5 mt-0.5">
             <StatusIcon className={cn("h-3 w-3", statusColor)} />
-            <span className="text-[9px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               {checkpoint.afterTasks.length} trigger{checkpoint.afterTasks.length !== 1 ? "s" : ""}
               {" → "}
               {checkpoint.blocksTasks.length} blocked
@@ -491,7 +506,7 @@ function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNo
           </div>
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-amber-500/50 !border-none !w-2 !h-2" />
+      <Handle type="source" position={Position.Bottom} className="!bg-warning/50 !border-none !w-2 !h-2" />
     </>
   );
 }
@@ -547,23 +562,23 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
   const startedAgo = startedAt ? formatDistanceToNow(new Date(startedAt), { addSuffix: true }) : null;
 
   const borderColor = isExpired
-    ? "border-emerald-400/60"
+    ? "border-success/60"
     : isActive
-      ? "border-blue-400/80"
-      : "border-blue-500/40";
+      ? "border-info/80"
+      : "border-info/40";
 
   const bgColor = isExpired
-    ? "bg-emerald-500/5"
+    ? "bg-success/5"
     : isActive
-      ? "bg-blue-500/8"
+      ? "bg-info/8"
       : "bg-card/60";
 
   const statusLabel = isExpired ? "Expired" : isActive ? "Waiting" : "Delay";
-  const statusColor = isExpired ? "text-emerald-400" : isActive ? "text-blue-400" : "text-blue-500/70";
+  const statusColor = isExpired ? "text-success" : isActive ? "text-info" : "text-info/70";
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-blue-500/50 !border-none !w-2 !h-2" />
+      <Handle type="target" position={Position.Top} className="!bg-info/50 !border-none !w-2 !h-2" />
       <div
         className={cn(
           "rounded-full border-2 border-dashed backdrop-blur-sm transition-all duration-200",
@@ -571,33 +586,33 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
           borderColor,
           bgColor,
           isActive && "animate-pulse",
-          selected && "ring-2 ring-blue-400/30 shadow-[0_0_16px_oklch(0.65_0.15_240/0.15)]",
+          selected && "ring-2 ring-info/30 shadow-[0_0_16px_color-mix(in_oklch,var(--info)_15%,transparent)]",
         )}
         style={{ width: DELAY_SIZE, height: DELAY_SIZE }}
       >
         <div className="flex flex-col items-center gap-0.5 px-3 max-w-[120px]">
           <Timer className={cn("h-4 w-4 shrink-0", statusColor)} />
-          <span className="text-[10px] font-semibold text-foreground/90 truncate max-w-full text-center">{delay.name}</span>
-          <span className={cn("text-[8px] font-medium uppercase tracking-wider", statusColor)}>
+          <span className="text-micro font-semibold text-foreground/90 truncate max-w-full text-center">{delay.name}</span>
+          <span className={cn("text-micro font-medium uppercase tracking-wider", statusColor)}>
             {statusLabel}
           </span>
           {isActive && remaining > 0 ? (
             <>
-              <span className="text-[9px] font-mono font-bold text-blue-300 tabular-nums">
+              <span className="text-micro font-mono font-bold text-info tabular-nums">
                 {formatCountdown(remaining)}
               </span>
               {startedAgo && (
-                <span className="text-[7px] text-muted-foreground/70">
+                <span className="text-micro text-muted-foreground/70">
                   {startedAgo}
                 </span>
               )}
             </>
           ) : (
             <>
-              <span className="text-[9px] font-mono font-semibold text-foreground/70">
+              <span className="text-micro font-mono font-semibold text-foreground/70">
                 {formatIsoDuration(delay.duration)}
               </span>
-              <span className="text-[8px] text-muted-foreground text-center leading-tight">
+              <span className="text-micro text-muted-foreground text-center leading-tight">
                 {delay.afterTasks.length} trigger{delay.afterTasks.length !== 1 ? "s" : ""}
                 {" \u2192 "}
                 {delay.blocksTasks.length} blocked
@@ -606,7 +621,7 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
           )}
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-blue-500/50 !border-none !w-2 !h-2" />
+      <Handle type="source" position={Position.Bottom} className="!bg-info/50 !border-none !w-2 !h-2" />
     </>
   );
 }
@@ -843,10 +858,10 @@ function buildGraphLayout(
           markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
           style: {
             stroke: isFailed
-              ? "oklch(0.63 0.2 25)"    // red
+              ? EDGE.failed
               : isDone
-                ? "oklch(0.72 0.17 155)" // green
-                : "oklch(0.55 0 0 / 0.3)", // muted
+                ? EDGE.done
+                : EDGE.idle,
             strokeWidth: isDone || isFailed ? 2 : 1.5,
           },
           animated: sourceLive?.status === "in_progress",
@@ -875,8 +890,8 @@ function buildGraphLayout(
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         style: {
           stroke: isDone
-            ? "oklch(0.72 0.15 85)"     // warm amber-green
-            : "oklch(0.55 0 0 / 0.3)",
+            ? EDGE.checkpoint
+            : EDGE.idle,
           strokeWidth: isDone ? 2 : 1.5,
           strokeDasharray: "6 3",
         },
@@ -894,10 +909,10 @@ function buildGraphLayout(
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         style: {
           stroke: isResumedCp
-            ? "oklch(0.72 0.17 155)"      // green — resumed
+            ? EDGE.done   // resumed
             : isActive
-              ? "oklch(0.75 0.15 85)"     // amber — waiting
-              : "oklch(0.55 0 0 / 0.3)",  // muted
+              ? EDGE.checkpoint // waiting
+              : EDGE.idle,
           strokeWidth: isActive || isResumedCp ? 2 : 1.5,
           strokeDasharray: "6 3",
         },
@@ -926,8 +941,8 @@ function buildGraphLayout(
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         style: {
           stroke: isDone
-            ? "oklch(0.65 0.15 240)"     // blue
-            : "oklch(0.55 0 0 / 0.3)",
+            ? EDGE.delay
+            : EDGE.idle,
           strokeWidth: isDone ? 2 : 1.5,
           strokeDasharray: "6 3",
         },
@@ -945,10 +960,10 @@ function buildGraphLayout(
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         style: {
           stroke: isExpiredDl
-            ? "oklch(0.72 0.17 155)"      // green — expired
+            ? EDGE.done   // expired
             : isActiveDl
-              ? "oklch(0.65 0.15 240)"    // blue — waiting
-              : "oklch(0.55 0 0 / 0.3)",  // muted
+              ? EDGE.delay // waiting
+              : EDGE.idle,
           strokeWidth: isActiveDl || isExpiredDl ? 2 : 1.5,
           strokeDasharray: "6 3",
         },
@@ -1087,7 +1102,7 @@ export function MissionGraphInner({
           type="button"
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 bg-background px-2 text-[10px] shadow-sm"
+          className="h-8 gap-1.5 bg-background px-2 text-micro shadow-sm"
           onClick={() => {
             setPreviewNodeId(null);
             setNodes((current: Node[]) => current.map((node) => node.data.expanded
@@ -1120,7 +1135,7 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
     <aside className="nodrag nopan nowheel flex h-full w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden border border-border bg-background shadow-xl">
       <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-micro text-muted-foreground">
             <span className="font-mono">#{index + 1}</span>
             <StatusIcon className={cn("h-3 w-3", status?.color, liveTask?.status === "in_progress" && "animate-spin")} />
             <span>{status?.label ?? "Task definition"}</span>
@@ -1139,21 +1154,21 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
-            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-[9px]"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
-            {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
-            {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-[9px]"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
+            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-micro"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
+            {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
+            {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
           </div>
           {(taskDef.expectations?.length ?? 0) > 0 && (
             <div className="space-y-1.5 border-t border-border pt-3">
-              <p className="text-[9px] font-semibold uppercase text-muted-foreground">Expectations</p>
+              <p className="text-micro font-semibold uppercase text-muted-foreground">Expectations</p>
               {taskDef.expectations!.map((expectation, expectationIndex) => {
                 const check = liveTask?.result?.assessment?.checks?.[expectationIndex];
                 return (
-                  <div key={expectationIndex} className="flex items-start gap-2 text-[11px] leading-relaxed text-muted-foreground">
+                  <div key={expectationIndex} className="flex items-start gap-2 text-caption leading-relaxed text-muted-foreground">
                     {check?.passed === true
-                      ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                      ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
                       : check?.passed === false
-                        ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-red-500" />
+                        ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />
                         : <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full border border-border" />}
                     <span>{expectation.criteria ?? expectation.command ?? expectation.paths?.join(", ") ?? expectation.type}</span>
                   </div>
@@ -1207,12 +1222,12 @@ export function TaskStepCard({
         <div
           className={cn(
             "relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold transition-all",
-            isDone && "border-emerald-500 bg-emerald-500/15 text-emerald-400",
-            isFailed && "border-red-500 bg-red-500/15 text-red-400",
-            isRunning && "border-blue-500 bg-blue-500/15 text-blue-400",
-            isReview && "border-amber-500 bg-amber-500/15 text-amber-400",
+            isDone && "border-success bg-success/15 text-success",
+            isFailed && "border-destructive bg-destructive/15 text-destructive",
+            isRunning && "border-info bg-info/15 text-info",
+            isReview && "border-warning bg-warning/15 text-warning",
             !liveTask && "border-border bg-muted/50 text-muted-foreground",
-            liveTask && !isDone && !isFailed && !isRunning && !isReview && "border-zinc-500 bg-zinc-500/10 text-zinc-400",
+            liveTask && !isDone && !isFailed && !isRunning && !isReview && "border-border bg-muted-foreground/10 text-muted-foreground",
           )}
         >
           {isDone ? (
@@ -1225,14 +1240,14 @@ export function TaskStepCard({
             <span>{index + 1}</span>
           )}
           {isRunning && (
-            <span className="absolute inset-0 rounded-full border-2 border-blue-400 animate-ping opacity-20" />
+            <span className="absolute inset-0 rounded-full border-2 border-info animate-ping opacity-20" />
           )}
         </div>
         {!isLast && (
           <div
             className={cn(
               "w-0.5 flex-1 min-h-6 transition-colors",
-              isDone ? "bg-emerald-500/40" : "bg-border/60",
+              isDone ? "bg-success/40" : "bg-border/60",
             )}
           />
         )}
@@ -1243,11 +1258,11 @@ export function TaskStepCard({
         <div
           className={cn(
             "rounded-lg border transition-all",
-            "hover:shadow-[0_0_20px_oklch(0.7_0.15_200_/_6%)] hover:border-primary/20",
-            isDone && "border-emerald-500/20 bg-emerald-500/[0.03]",
-            isFailed && "border-red-500/20 bg-red-500/[0.03]",
-            isRunning && "border-blue-500/25 bg-blue-500/[0.03]",
-            isReview && "border-amber-500/20 bg-amber-500/[0.03]",
+            "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)] hover:border-primary/20",
+            isDone && "border-success/20 bg-success/[0.03]",
+            isFailed && "border-destructive/20 bg-destructive/[0.03]",
+            isRunning && "border-info/25 bg-info/[0.03]",
+            isReview && "border-warning/20 bg-warning/[0.03]",
             !liveTask && "border-border/60 bg-card/40",
             liveTask && !isDone && !isFailed && !isRunning && !isReview && "border-border/60 bg-card/60",
           )}
@@ -1262,12 +1277,12 @@ export function TaskStepCard({
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-semibold leading-snug">{taskDef.title}</span>
                   {statusCfg && (
-                    <Badge variant="outline" className={cn("text-[9px] shrink-0", statusCfg.color)}>
+                    <Badge variant="outline" className={cn("text-micro shrink-0", statusCfg.color)}>
                       {statusCfg.label}
                     </Badge>
                   )}
                   {phaseInfo && (
-                    <Badge variant="outline" className={cn("text-[9px] gap-0.5 shrink-0", phaseInfo.color)}>
+                    <Badge variant="outline" className={cn("text-micro gap-0.5 shrink-0", phaseInfo.color)}>
                       <phaseInfo.icon className="h-2.5 w-2.5" />
                       {phaseInfo.label}
                     </Badge>
@@ -1284,10 +1299,10 @@ export function TaskStepCard({
                 {score != null && (
                   <div className={cn(
                     "flex flex-col items-center justify-center h-10 w-10 rounded-full border-2",
-                    score >= 3.5 ? "border-emerald-500/50 text-emerald-400" : "border-red-500/50 text-red-400",
+                    score >= 3.5 ? "border-success/50 text-success" : "border-destructive/50 text-destructive",
                   )}>
                     <span className="text-xs font-bold leading-none tabular-nums">{score.toFixed(1)}</span>
-                    <span className="text-[7px] text-muted-foreground leading-none">/ 5</span>
+                    <span className="text-micro text-muted-foreground leading-none">/ 5</span>
                   </div>
                 )}
                 <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
@@ -1295,7 +1310,7 @@ export function TaskStepCard({
             </div>
 
             {/* Metadata row — always visible */}
-            <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-3 mt-2 text-caption text-muted-foreground">
               {taskDef.assignTo && (
                 <span className="flex items-center gap-1">
                   <Bot className="h-3 w-3" />
@@ -1344,10 +1359,10 @@ export function TaskStepCard({
               {/* Dependencies */}
               {taskDef.dependsOn && taskDef.dependsOn.length > 0 && (
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Dependencies</p>
+                  <p className="text-label text-muted-foreground mb-2">Dependencies</p>
                   <div className="flex flex-wrap gap-1.5">
                     {taskDef.dependsOn.map((d, i) => (
-                      <Badge key={i} variant="secondary" className="text-[10px] font-mono">{d}</Badge>
+                      <Badge key={i} variant="secondary" className="text-micro font-mono">{d}</Badge>
                     ))}
                   </div>
                 </div>
@@ -1357,11 +1372,11 @@ export function TaskStepCard({
               {taskDef.expectations && taskDef.expectations.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Expectations</p>
+                    <p className="text-label text-muted-foreground">Expectations</p>
                     {liveTask && totalChecks > 0 && (
                       <span className={cn(
-                        "text-[10px] font-medium",
-                        passedChecks === totalChecks ? "text-emerald-400" : "text-muted-foreground",
+                        "text-micro font-medium",
+                        passedChecks === totalChecks ? "text-success" : "text-muted-foreground",
                       )}>
                         {passedChecks}/{totalChecks} passed
                       </span>
@@ -1376,26 +1391,26 @@ export function TaskStepCard({
                           key={i}
                           className={cn(
                             "flex items-start gap-2 rounded-md px-2.5 py-1.5 text-xs",
-                            passed === true && "bg-emerald-500/5",
-                            passed === false && "bg-red-500/5",
+                            passed === true && "bg-success/5",
+                            passed === false && "bg-destructive/5",
                             passed == null && "bg-muted/30",
                           )}
                         >
                           {check != null ? (
                             passed ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                              <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5" />
                             ) : (
-                              <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                              <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
                             )
                           ) : (
                             <div className="h-3.5 w-3.5 rounded-full border border-border/60 shrink-0 mt-0.5" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 mb-0.5">
-                              <Badge variant="outline" className="text-[8px] px-1 py-0">{exp.type}</Badge>
-                              {exp.confidence && <span className="text-[9px] text-muted-foreground">{exp.confidence}</span>}
+                              <Badge variant="outline" className="text-micro px-1 py-0">{exp.type}</Badge>
+                              {exp.confidence && <span className="text-micro text-muted-foreground">{exp.confidence}</span>}
                               {exp.threshold != null && (
-                                <span className="text-[9px] text-muted-foreground ml-auto">threshold: {exp.threshold}</span>
+                                <span className="text-micro text-muted-foreground ml-auto">threshold: {exp.threshold}</span>
                               )}
                             </div>
                             {exp.type === "file_exists" && exp.paths && exp.paths.length > 0 ? (
@@ -1410,7 +1425,7 @@ export function TaskStepCard({
                                         e.stopPropagation();
                                         if (fileTarget) navigate(fileTarget);
                                       }}
-                                      className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                      className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-caption text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
                                       title="Open in file editor"
                                     >
                                       {path}
@@ -1426,7 +1441,7 @@ export function TaskStepCard({
                             {exp.dimensions && exp.dimensions.length > 0 && (
                               <div className="mt-1.5 space-y-0.5">
                                 {exp.dimensions.map((d, k) => (
-                                  <div key={k} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                  <div key={k} className="flex items-center gap-2 text-micro text-muted-foreground">
                                     <span className="font-medium capitalize">{d.name}</span>
                                     <span className="opacity-60">(w:{d.weight})</span>
                                     <span className="opacity-60 truncate">{d.description}</span>
@@ -1445,12 +1460,12 @@ export function TaskStepCard({
               {/* Metrics */}
               {taskDef.metrics && taskDef.metrics.length > 0 && (
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Metrics</p>
+                  <p className="text-label text-muted-foreground mb-2">Metrics</p>
                   <div className="space-y-1">
                     {taskDef.metrics.map((m, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
                         <span className="font-medium">{m.name}</span>
-                        <code className="text-[10px] font-mono text-muted-foreground bg-muted/40 px-1.5 rounded">{m.command}</code>
+                        <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1.5 rounded">{m.command}</code>
                         <span className="text-muted-foreground ml-auto">thr: {m.threshold}</span>
                       </div>
                     ))}
@@ -1460,7 +1475,7 @@ export function TaskStepCard({
 
               {/* Retry / duration config */}
               {(taskDef.maxRetries != null || taskDef.maxDuration != null || taskDef.retryPolicy) && (
-                <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-4 text-caption text-muted-foreground">
                   {taskDef.maxRetries != null && <span>Max retries: {taskDef.maxRetries}</span>}
                   {taskDef.maxDuration != null && <span>Timeout: {Math.round(taskDef.maxDuration / 1000)}s</span>}
                   {taskDef.retryPolicy?.escalateAfter != null && <span>Escalate after: {taskDef.retryPolicy.escalateAfter}</span>}
@@ -1559,7 +1574,7 @@ function RunsTimeline({
           <div
             key={run.runIndex}
             className={cn(
-              "rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm overflow-hidden",
+              "rounded-lg border border-border bg-card shadow-card overflow-hidden",
               isActive && "border-l-2 border-l-primary/60",
             )}
           >
@@ -1576,23 +1591,23 @@ function RunsTimeline({
               <div className="flex-1" />
               <div className="flex items-center gap-1.5">
                 {isActive && (
-                  <Badge variant="default" className="text-[9px]">
+                  <Badge variant="default" className="text-micro">
                     <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" />Running
                   </Badge>
                 )}
                 {allTerminal && run.allDone && (
-                  <Badge variant="secondary" className="text-[9px] text-emerald-400">
+                  <Badge variant="secondary" className="text-micro text-success">
                     <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Passed
                   </Badge>
                 )}
                 {allTerminal && !run.allDone && (
-                  <Badge variant="secondary" className="text-[9px] text-red-400">
+                  <Badge variant="secondary" className="text-micro text-destructive">
                     <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
                     {run.failedCount} failed
                   </Badge>
                 )}
                 {!allTerminal && !isActive && (
-                  <Badge variant="secondary" className="text-[9px]">
+                  <Badge variant="secondary" className="text-micro">
                     {run.doneCount}/{run.tasks.length}
                   </Badge>
                 )}
@@ -1613,8 +1628,8 @@ function RunsTimeline({
                     >
                       <TaskIcon className={cn("h-3.5 w-3.5 shrink-0", cfg?.color ?? "text-muted-foreground", task.status === "in_progress" && "animate-spin")} />
                       <span className="text-sm truncate flex-1">{task.title}</span>
-                      <span className="text-[10px] text-muted-foreground">{task.assignTo}</span>
-                      <Badge variant="outline" className={cn("text-[9px]", cfg?.color ?? "")}>
+                      <span className="text-micro text-muted-foreground">{task.assignTo}</span>
+                      <Badge variant="outline" className={cn("text-micro", cfg?.color ?? "")}>
                         {cfg?.label ?? task.status}
                       </Badge>
                     </div>
@@ -1744,7 +1759,7 @@ export function MissionDetailView({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold truncate">{mission.name}</h1>
+              <h1 className="font-heading text-h2 truncate">{mission.name}</h1>
               <Badge variant="outline" className={cn("text-xs shrink-0 capitalize", style.color)}>
                 {style.label}
               </Badge>
@@ -1763,10 +1778,10 @@ export function MissionDetailView({
               <Progress value={progress} className="h-2 w-28" />
               <span className="text-sm font-mono text-muted-foreground">{doneCount}/{totalCount}</span>
               {runningCount > 0 && (
-                <Badge variant="secondary" className="text-[10px]">{runningCount} running</Badge>
+                <Badge variant="secondary" className="text-micro">{runningCount} running</Badge>
               )}
               {failedCount > 0 && (
-                <Badge variant="destructive" className="text-[10px]">{failedCount} failed</Badge>
+                <Badge variant="destructive" className="text-micro">{failedCount} failed</Badge>
               )}
             </div>
           )}
@@ -1781,7 +1796,7 @@ export function MissionDetailView({
             </Button>
           )}
           {mission.status === "active" && onAbort && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(onAbort, "Mission aborted")}>
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={!!actionPending} onClick={() => handleAction(onAbort, "Mission aborted")}>
               {actionPending === "Mission aborted" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Abort
             </Button>
           )}
@@ -1790,18 +1805,18 @@ export function MissionDetailView({
 
       {/* Scheduling info strip */}
       {hasScheduleInfo && (
-        <div className="flex items-center gap-4 flex-wrap shrink-0 rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm px-4 py-2.5">
+        <div className="flex items-center gap-4 flex-wrap shrink-0 rounded-lg border border-border bg-card shadow-card px-4 py-2.5">
           {mission.schedule && (
             <div className="flex items-center gap-1.5 text-xs">
-              <Calendar className="h-3.5 w-3.5 text-blue-400" />
+              <Calendar className="h-3.5 w-3.5 text-info" />
               <span className="text-muted-foreground">Schedule:</span>
               <span className="font-medium">{cronToHuman(mission.schedule)}</span>
               {isRecurring ? (
-                <Badge variant="outline" className="text-[9px] gap-0.5 text-violet-400 ml-1">
+                <Badge variant="outline" className="text-micro gap-0.5 text-chart-5 ml-1">
                   <Repeat className="h-2 w-2" />Recurring
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[9px] text-muted-foreground ml-1">One-shot</Badge>
+                <Badge variant="outline" className="text-micro text-muted-foreground ml-1">One-shot</Badge>
               )}
             </div>
           )}
@@ -1809,7 +1824,7 @@ export function MissionDetailView({
             <div className="flex items-center gap-1.5 text-xs">
               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">Next:</span>
-              <span className={cn("font-medium", new Date(scheduleEntry.nextRunAt).getTime() < Date.now() && "text-red-400")}>
+              <span className={cn("font-medium", new Date(scheduleEntry.nextRunAt).getTime() < Date.now() && "text-destructive")}>
                 {new Date(scheduleEntry.nextRunAt).getTime() < Date.now()
                   ? "overdue"
                   : formatDistanceToNow(new Date(scheduleEntry.nextRunAt), { addSuffix: true })}
@@ -1825,15 +1840,15 @@ export function MissionDetailView({
           )}
           {scheduleEntry && (
             <div className="flex items-center gap-1.5 text-xs">
-              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-emerald-500" : "bg-zinc-500")} />
+              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-success" : "bg-muted-foreground")} />
               <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : scheduleEntry.nextRunAt ? "Paused" : "Done"}</span>
             </div>
           )}
           {scheduleEntry?.lastOutcome && (
             <div className="flex items-center gap-1.5 text-xs" title={scheduleEntry.lastError}>
               <span className="text-muted-foreground">Last outcome:</span>
-              <span className={cn("font-medium", scheduleEntry.lastOutcome === "failed" && "text-red-400",
-                (scheduleEntry.lastOutcome === "missed" || scheduleEntry.lastOutcome === "skipped") && "text-amber-400")}>
+              <span className={cn("font-medium", scheduleEntry.lastOutcome === "failed" && "text-destructive",
+                (scheduleEntry.lastOutcome === "missed" || scheduleEntry.lastOutcome === "skipped") && "text-warning")}>
                 {scheduleEntry.lastOutcome}{scheduleEntry.lastError ? ` — ${scheduleEntry.lastError}` : ""}
               </span>
             </div>
@@ -1841,7 +1856,7 @@ export function MissionDetailView({
           {(scheduleEntry?.missedRuns ?? 0) > 0 && (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-muted-foreground">Missed:</span>
-              <span className="font-medium text-amber-400">{scheduleEntry!.missedRuns} while the server was down</span>
+              <span className="font-medium text-warning">{scheduleEntry!.missedRuns} while the server was down</span>
             </div>
           )}
           {mission.endDate && (() => {
@@ -1849,12 +1864,12 @@ export function MissionDetailView({
             const isExpired = ed.getTime() < Date.now();
             return (
               <div className="flex items-center gap-1.5 text-xs">
-                <Calendar className={cn("h-3.5 w-3.5", isExpired ? "text-zinc-500" : "text-muted-foreground")} />
+                <Calendar className={cn("h-3.5 w-3.5", isExpired ? "text-muted-foreground" : "text-muted-foreground")} />
                 <span className="text-muted-foreground">Ends:</span>
-                <span className={cn("font-medium", isExpired && "text-zinc-500 line-through")}>
+                <span className={cn("font-medium", isExpired && "text-muted-foreground line-through")}>
                   {format(ed, "MMM d, yyyy")}
                 </span>
-                {isExpired && <span className="text-[10px] text-zinc-500">(expired)</span>}
+                {isExpired && <span className="text-micro text-muted-foreground">(expired)</span>}
               </div>
             );
           })()}
@@ -1863,9 +1878,9 @@ export function MissionDetailView({
             const isOverdue = dl.getTime() < Date.now();
             return (
               <div className="flex items-center gap-1.5 text-xs">
-                <Timer className={cn("h-3.5 w-3.5", isOverdue ? "text-red-400" : "text-amber-400")} />
+                <Timer className={cn("h-3.5 w-3.5", isOverdue ? "text-destructive" : "text-warning")} />
                 <span className="text-muted-foreground">Deadline:</span>
-                <span className={cn("font-medium", isOverdue && "text-red-400")}>
+                <span className={cn("font-medium", isOverdue && "text-destructive")}>
                   {isOverdue ? "Overdue" : `due ${formatDistanceToNow(dl, { addSuffix: true })}`}
                 </span>
               </div>
@@ -1873,7 +1888,7 @@ export function MissionDetailView({
           })()}
           {mission.qualityThreshold != null && (
             <div className="flex items-center gap-1.5 text-xs">
-              <Star className="h-3.5 w-3.5 text-amber-400" />
+              <Star className="h-3.5 w-3.5 text-warning" />
               <span className="text-muted-foreground">Quality:</span>
               <span className="font-medium">{mission.qualityThreshold}</span>
             </div>
@@ -1891,7 +1906,7 @@ export function MissionDetailView({
           <TabsTrigger value="tasks">
             Tasks
             {groupTasks.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-[9px]">{groupTasks.length}</Badge>
+              <Badge variant="secondary" className="ml-1.5 text-micro">{groupTasks.length}</Badge>
             )}
           </TabsTrigger>
           {isBlueprint && groupTasks.length > 0 && (
@@ -1908,7 +1923,7 @@ export function MissionDetailView({
           {report && (
             <TabsTrigger value="report">
               Report
-              <Badge variant="secondary" className="ml-1.5 text-[9px]">
+              <Badge variant="secondary" className="ml-1.5 text-micro">
                 <BarChart3 className="h-2.5 w-2.5" />
               </Badge>
             </TabsTrigger>
@@ -1921,7 +1936,7 @@ export function MissionDetailView({
             <div className="h-full w-full rounded-lg border border-border/40">
               {isBlueprint && (
                 <div className="px-4 py-2 border-b border-border/40 bg-muted/30">
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     Blueprint view — task definitions are templates. See the <span className="font-medium">Runs</span> tab for execution history.
                   </span>
                 </div>
@@ -1952,7 +1967,7 @@ export function MissionDetailView({
               {/* Blueprint banner */}
               {isBlueprint && (
                 <div className="rounded-lg bg-muted/30 border border-border/40 px-4 py-2.5 mb-4">
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-caption text-muted-foreground">
                     Blueprint view — these are task templates, not live instances. See the <span className="font-medium">Runs</span> tab for execution history.
                   </span>
                 </div>
@@ -1963,7 +1978,7 @@ export function MissionDetailView({
                 <div className="flex items-start gap-3 rounded-lg bg-muted/40 p-3.5 mb-6">
                   <Quote className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                    <p className="text-label text-muted-foreground mb-1">
                       Original Request
                     </p>
                     <p className="text-sm leading-relaxed">{mission.prompt}</p>
@@ -2012,7 +2027,7 @@ export function MissionDetailView({
             <div className="pr-4 space-y-3 max-w-3xl">
               <p className="text-xs text-muted-foreground leading-relaxed">
                 These are the notification rules that would fire for this mission, resolved by scope.
-                Mission-scoped rules replace global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+                Mission-scoped rules replace global rules unless <code className="font-mono text-caption">inherit: true</code> is set.
               </p>
               <MissionAppliedRules mission={mission} />
             </div>
@@ -2056,8 +2071,8 @@ export function MissionDetailView({
                       </Badge>
                       {report.avgScore != null && (
                         <div className="flex items-center gap-2">
-                          <Star className="h-4 w-4 text-amber-400" />
-                          <span className="text-lg font-bold">{report.avgScore.toFixed(2)}</span>
+                          <Star className="h-4 w-4 text-warning" />
+                          <span className="font-heading text-h2 tabular-nums">{report.avgScore.toFixed(2)}</span>
                           <span className="text-xs text-muted-foreground">/ 5 avg</span>
                         </div>
                       )}
@@ -2083,24 +2098,24 @@ export function MissionDetailView({
                       <div className="space-y-2">
                         {report.filesCreated.length > 0 && (
                           <div>
-                            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1 mb-1">
+                            <span className="text-label text-muted-foreground flex items-center gap-1 mb-1">
                               <FilePlus className="h-3 w-3" /> Files Created ({report.filesCreated.length})
                             </span>
                             <div className="flex flex-wrap gap-1">
                               {report.filesCreated.map((f: string, i: number) => (
-                                <code key={i} className="text-[10px] bg-emerald-500/10 text-emerald-400 rounded px-1.5 py-0.5 font-mono">{f}</code>
+                                <code key={i} className="text-micro bg-success/10 text-success rounded px-1.5 py-0.5 font-mono">{f}</code>
                               ))}
                             </div>
                           </div>
                         )}
                         {report.filesEdited.length > 0 && (
                           <div>
-                            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1 mb-1">
+                            <span className="text-label text-muted-foreground flex items-center gap-1 mb-1">
                               <FileEdit className="h-3 w-3" /> Files Edited ({report.filesEdited.length})
                             </span>
                             <div className="flex flex-wrap gap-1">
                               {report.filesEdited.map((f: string, i: number) => (
-                                <code key={i} className="text-[10px] bg-blue-500/10 text-blue-400 rounded px-1.5 py-0.5 font-mono">{f}</code>
+                                <code key={i} className="text-micro bg-info/10 text-info rounded px-1.5 py-0.5 font-mono">{f}</code>
                               ))}
                             </div>
                           </div>
@@ -2113,7 +2128,7 @@ export function MissionDetailView({
                 {/* Per-task breakdown */}
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-3">
+                    <p className="text-label text-muted-foreground mb-3">
                       Per-Task Results
                     </p>
                     <div className="space-y-2">
@@ -2121,28 +2136,28 @@ export function MissionDetailView({
                         <div key={i} className="rounded-md border border-border p-3">
                           <div className="flex items-center gap-2">
                             {t.status === "done" ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
                             ) : (
-                              <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                              <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
                             )}
                             <span className="text-sm font-medium truncate">{t.title}</span>
                             {t.score != null && (
-                              <Badge variant="outline" className="text-[9px] ml-auto shrink-0">
+                              <Badge variant="outline" className="text-micro ml-auto shrink-0">
                                 <Star className="h-2.5 w-2.5 mr-0.5" />
                                 {t.score.toFixed(1)}
                               </Badge>
                             )}
-                            <span className="text-[10px] text-muted-foreground shrink-0">
+                            <span className="text-micro text-muted-foreground shrink-0">
                               {Math.round(t.duration / 1000)}s
                             </span>
                           </div>
                           {(t.filesCreated.length > 0 || t.filesEdited.length > 0) && (
                             <div className="flex flex-wrap gap-1 mt-2 ml-5">
                               {t.filesCreated.map((f: string, j: number) => (
-                                <code key={`c-${j}`} className="text-[9px] bg-emerald-500/10 text-emerald-400 rounded px-1 py-0 font-mono">+{f.split("/").pop()}</code>
+                                <code key={`c-${j}`} className="text-micro bg-success/10 text-success rounded px-1 py-0 font-mono">+{f.split("/").pop()}</code>
                               ))}
                               {t.filesEdited.map((f: string, j: number) => (
-                                <code key={`e-${j}`} className="text-[9px] bg-blue-500/10 text-blue-400 rounded px-1 py-0 font-mono">~{f.split("/").pop()}</code>
+                                <code key={`e-${j}`} className="text-micro bg-info/10 text-info rounded px-1 py-0 font-mono">~{f.split("/").pop()}</code>
                               ))}
                             </div>
                           )}

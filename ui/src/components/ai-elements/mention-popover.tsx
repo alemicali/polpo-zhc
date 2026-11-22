@@ -260,7 +260,7 @@ export function MentionText({
 }: {
   text: string;
   className?: string;
-  /** "default" = blue on neutral bg, "inverted" = light on dark bg (user bubble) */
+  /** "default" = primary on neutral bg, "inverted" = the user bubble's foreground */
   variant?: "default" | "inverted";
 }) {
   const segments = parseSegments(text);
@@ -269,8 +269,8 @@ export function MentionText({
   }
   const mentionClass =
     variant === "inverted"
-      ? "text-white font-semibold"
-      : "text-blue-700 dark:text-blue-300 font-semibold";
+      ? "text-secondary-foreground font-semibold"
+      : "text-primary font-semibold";
   return (
     <span className={className}>
       {segments.map((seg, i) =>
@@ -324,7 +324,7 @@ export const MentionPopover = forwardRef<
           label: a.name,
           value: a.name, // agents: name IS the ID
           secondary: a.role,
-          icon: <User className="size-4 shrink-0 text-blue-500" />,
+          icon: <User className="size-4 shrink-0 text-chart-1" />,
           category: "agent",
         });
       }
@@ -338,7 +338,7 @@ export const MentionPopover = forwardRef<
           value: t.id,
           secondary: t.id,
           badge: t.status,
-          icon: <ListChecks className="size-4 shrink-0 text-amber-500" />,
+          icon: <ListChecks className="size-4 shrink-0 text-chart-4" />,
           category: "task",
         });
       }
@@ -350,7 +350,7 @@ export const MentionPopover = forwardRef<
           label: m.name,
           value: m.id,
           badge: m.status,
-          icon: <Target className="size-4 shrink-0 text-emerald-500" />,
+          icon: <Target className="size-4 shrink-0 text-chart-3" />,
           category: "mission",
         });
       }
@@ -364,8 +364,8 @@ export const MentionPopover = forwardRef<
           value: f.path,
           secondary: f.path !== f.name ? f.path : undefined,
           icon: f.type === "directory"
-            ? <Folder className="size-4 shrink-0 text-sky-500" />
-            : <FileText className="size-4 shrink-0 text-purple-500" />,
+            ? <Folder className="size-4 shrink-0 text-chart-2" />
+            : <FileText className="size-4 shrink-0 text-chart-5" />,
           category: "file",
         });
       }
@@ -378,7 +378,7 @@ export const MentionPopover = forwardRef<
           label: s.name,
           value: s.name,
           secondary: s.description,
-          icon: <BookOpen className="size-4 shrink-0 text-violet-500" />,
+          icon: <BookOpen className="size-4 shrink-0 text-chart-5" />,
           category: "skill",
         });
       }
@@ -390,7 +390,7 @@ export const MentionPopover = forwardRef<
           label: t.name,
           value: t.name,
           secondary: t.description,
-          icon: <Workflow className="size-4 shrink-0 text-teal-500" />,
+          icon: <Workflow className="size-4 shrink-0 text-chart-1" />,
           category: "playbook",
         });
       }
@@ -652,7 +652,7 @@ export const MentionPopover = forwardRef<
       <PopoverContent
         side="top"
         align="start"
-        className="flex h-[24rem] w-[min(30rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-[0_18px_60px_-30px_rgba(0,0,0,0.35)]"
+        className="flex h-[24rem] w-[min(30rem,92vw)] flex-col overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-raised"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
@@ -665,14 +665,14 @@ export const MentionPopover = forwardRef<
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold text-foreground">{triggerCopy.title}</p>
               {query ? (
-                <span className="truncate font-mono text-[10px] text-muted-foreground">
+                <span className="truncate font-mono text-micro text-muted-foreground">
                   query: {query}
                 </span>
               ) : null}
             </div>
-            <p className="truncate text-[11px] text-muted-foreground">{triggerCopy.subtitle}</p>
+            <p className="truncate text-caption text-muted-foreground">{triggerCopy.subtitle}</p>
           </div>
-          <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
             {filteredItems.length}
           </span>
         </div>
@@ -688,7 +688,7 @@ export const MentionPopover = forwardRef<
                   key={tab}
                   type="button"
                   className={cn(
-                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors",
+                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-caption font-medium transition-colors",
                     active
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -699,7 +699,7 @@ export const MentionPopover = forwardRef<
                   }}
                 >
                   <span>{label}</span>
-                  <span className="font-mono text-[9px] tabular-nums opacity-70">{count}</span>
+                  <span className="font-mono text-micro tabular-nums opacity-70">{count}</span>
                 </button>
               );
             })}
@@ -709,7 +709,7 @@ export const MentionPopover = forwardRef<
         {/* Item list */}
         <div className="min-h-0 flex-1">
           {filteredItems.length === 0 ? (
-            <div className="px-3 py-4 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            <div className="px-3 py-4 text-center font-mono text-caption uppercase tracking-[0.16em] text-muted-foreground">
               No matches
             </div>
           ) : (
@@ -721,10 +721,10 @@ export const MentionPopover = forwardRef<
                 if (row.type === "header") {
                   return (
                     <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-popover/95 px-3 py-1.5 backdrop-blur">
-                      <span className="font-mono text-[9.5px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                      <span className="font-mono text-micro font-bold uppercase tracking-[0.18em] text-muted-foreground">
                         {CATEGORY_LABELS[row.category]}
                       </span>
-                      <span className="ml-auto rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+                      <span className="ml-auto rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
                         {row.count}
                       </span>
                     </div>
@@ -758,21 +758,21 @@ export const MentionPopover = forwardRef<
                     </span>
                     <div className="min-w-0 flex-1 leading-tight">
                       <div className="flex items-baseline gap-2">
-                        <span className="truncate text-[13px] font-semibold text-foreground">{item.label}</span>
+                        <span className="truncate text-small font-semibold text-foreground">{item.label}</span>
                         {item.category === "file" && (
-                          <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                          <span className="shrink-0 font-mono text-micro uppercase tracking-[0.14em] text-muted-foreground/70">
                             file
                           </span>
                         )}
                       </div>
                       {item.secondary && item.category !== "task" && (
-                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                        <p className="mt-0.5 truncate text-small text-muted-foreground">
                           {item.secondary}
                         </p>
                       )}
                     </div>
                     {item.badge && (
-                      <kbd className="ml-auto shrink-0 rounded border border-border bg-muted/60 px-1 py-px font-mono text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                      <kbd className="ml-auto shrink-0 rounded border border-border bg-muted/60 px-1 py-px font-mono text-micro font-bold uppercase tracking-[0.14em] text-muted-foreground">
                         {item.badge}
                       </kbd>
                     )}
@@ -784,20 +784,20 @@ export const MentionPopover = forwardRef<
         </div>
 
         {/* Keyboard shortcut hints — sticky footer */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-3 py-2 text-caption text-muted-foreground">
           <span className="inline-flex min-w-0 items-center gap-2">
             <span className="hidden sm:inline">Use</span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">←→</span>
+            <span className="font-mono text-micro uppercase tracking-[0.12em]">←→</span>
             <span>tabs</span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">↑↓</span>
+            <span className="font-mono text-micro uppercase tracking-[0.12em]">↑↓</span>
             <span>to move</span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em]">Enter</span>
+            <span className="font-mono text-micro uppercase tracking-[0.12em]">Enter</span>
             <span>to insert</span>
           </span>
           <button
             type="button"
             onClick={close}
-            className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground"
+            className="cursor-pointer font-mono text-micro uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground"
           >
             Esc
           </button>

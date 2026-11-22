@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,6 +54,7 @@ import { useEvents, usePolpo, useLogs } from "@polpo-ai/react";
 import type { LogEntry } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { productName, useInstanceBranding } from "@/lib/branding";
 import { JsonBlock } from "@/components/json-block";
 
 // ── Event categories ──
@@ -100,92 +102,92 @@ const categoryConfig: Record<
   task: {
     icon: ListChecks,
     label: "Tasks",
-    color: "text-blue-400",
-    bg: "bg-blue-500/10",
+    color: "text-info",
+    bg: "bg-info/10",
   },
   agent: {
     icon: Bot,
     label: "Agents",
-    color: "text-violet-400",
-    bg: "bg-violet-500/10",
+    color: "text-chart-5",
+    bg: "bg-chart-5/10",
   },
   assessment: {
     icon: Shield,
     label: "Assessment",
-    color: "text-amber-400",
-    bg: "bg-amber-500/10",
+    color: "text-warning",
+    bg: "bg-warning/10",
   },
   mission: {
     icon: Target,
     label: "Missions",
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
+    color: "text-success",
+    bg: "bg-success/10",
   },
   deadlock: {
     icon: AlertTriangle,
     label: "Deadlock",
-    color: "text-red-400",
-    bg: "bg-red-500/10",
+    color: "text-destructive",
+    bg: "bg-destructive/10",
   },
   orchestrator: {
     icon: Zap,
     label: "Orchestrator",
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
+    color: "text-muted-foreground",
+    bg: "bg-muted-foreground/10",
   },
   session: {
     icon: MessageSquare,
     label: "Sessions",
-    color: "text-sky-400",
-    bg: "bg-sky-500/10",
+    color: "text-chart-1",
+    bg: "bg-chart-1/10",
   },
   notification: {
     icon: Bell,
     label: "Notifications",
-    color: "text-pink-400",
-    bg: "bg-pink-500/10",
+    color: "text-chart-2",
+    bg: "bg-chart-2/10",
   },
   approval: {
     icon: Shield,
     label: "Approvals",
-    color: "text-orange-400",
-    bg: "bg-orange-500/10",
+    color: "text-chart-4",
+    bg: "bg-chart-4/10",
   },
   room: {
     icon: UsersRound,
     label: "Groups",
-    color: "text-cyan-400",
-    bg: "bg-cyan-500/10",
+    color: "text-chart-1",
+    bg: "bg-chart-1/10",
   },
   channel: {
     icon: MessageSquare,
     label: "Channels",
-    color: "text-sky-400",
-    bg: "bg-sky-500/10",
+    color: "text-chart-1",
+    bg: "bg-chart-1/10",
   },
   schedule: {
     icon: CalendarClock,
     label: "Schedules",
-    color: "text-indigo-400",
-    bg: "bg-indigo-500/10",
+    color: "text-primary",
+    bg: "bg-primary/10",
   },
   sandbox: {
     icon: Box,
     label: "Sandbox",
-    color: "text-teal-400",
-    bg: "bg-teal-500/10",
+    color: "text-chart-3",
+    bg: "bg-chart-3/10",
   },
   log: {
     icon: Info,
     label: "System",
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
+    color: "text-muted-foreground",
+    bg: "bg-muted-foreground/10",
   },
   other: {
     icon: HelpCircle,
     label: "Other",
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
+    color: "text-muted-foreground",
+    bg: "bg-muted-foreground/10",
   },
 };
 
@@ -225,11 +227,11 @@ function getSeverity(event: string): Severity {
 }
 
 const severityStyles: Record<Severity, { dot: string; border: string }> = {
-  success: { dot: "bg-emerald-500", border: "border-l-emerald-500/40" },
-  error: { dot: "bg-red-500", border: "border-l-red-500/40" },
-  warning: { dot: "bg-amber-500", border: "border-l-amber-500/40" },
-  info: { dot: "bg-blue-500", border: "border-l-blue-500/40" },
-  neutral: { dot: "bg-zinc-500", border: "border-l-zinc-500/20" },
+  success: { dot: "bg-success", border: "border-l-success/40" },
+  error: { dot: "bg-destructive", border: "border-l-destructive/40" },
+  warning: { dot: "bg-warning", border: "border-l-warning/40" },
+  info: { dot: "bg-info", border: "border-l-info/40" },
+  neutral: { dot: "bg-muted-foreground", border: "border-l-muted-foreground/20" },
 };
 
 // ── Event action icon ──
@@ -240,37 +242,37 @@ function EventActionIcon({ event }: { event: string }) {
     case "created":
     case "spawned":
     case "saved":
-      return <CheckCircle2 className="h-3 w-3 text-emerald-400" />;
+      return <CheckCircle2 className="h-3 w-3 text-success" />;
     case "finished":
     case "complete":
     case "completed":
     case "resolved":
-      return <CheckCircle2 className="h-3 w-3 text-blue-400" />;
+      return <CheckCircle2 className="h-3 w-3 text-info" />;
     case "failed":
     case "maxRetries":
     case "unresolvable":
-      return <XCircle className="h-3 w-3 text-red-400" />;
+      return <XCircle className="h-3 w-3 text-destructive" />;
     case "retry":
     case "fix":
-      return <RotateCcw className="h-3 w-3 text-amber-400" />;
+      return <RotateCcw className="h-3 w-3 text-warning" />;
     case "transition":
     case "updated":
-      return <ChevronRight className="h-3 w-3 text-zinc-400" />;
+      return <ChevronRight className="h-3 w-3 text-muted-foreground" />;
     case "activity":
     case "tick":
-      return <Clock className="h-3 w-3 text-zinc-500" />;
+      return <Clock className="h-3 w-3 text-muted-foreground" />;
     case "started":
-      return <Zap className="h-3 w-3 text-blue-400" />;
+      return <Zap className="h-3 w-3 text-info" />;
     case "deleted":
     case "removed":
-      return <Trash2 className="h-3 w-3 text-red-400" />;
+      return <Trash2 className="h-3 w-3 text-destructive" />;
     case "executed":
     case "resumed":
-      return <Zap className="h-3 w-3 text-emerald-400" />;
+      return <Zap className="h-3 w-3 text-success" />;
     case "aborted":
-      return <Pause className="h-3 w-3 text-amber-400" />;
+      return <Pause className="h-3 w-3 text-warning" />;
     default:
-      return <FileText className="h-3 w-3 text-zinc-400" />;
+      return <FileText className="h-3 w-3 text-muted-foreground" />;
   }
 }
 
@@ -546,11 +548,11 @@ function EventRow({ event }: { event: EventRowData }) {
               <div className="flex items-center gap-2 mt-0.5">
                 <Badge
                   variant="outline"
-                  className="text-[9px] font-mono px-1.5 py-0"
+                  className="text-micro font-mono px-1.5 py-0"
                 >
                   {event.event}
                 </Badge>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   {formatDistanceToNow(new Date(event.timestamp), {
                     addSuffix: true,
                   })}
@@ -575,7 +577,7 @@ function EventRow({ event }: { event: EventRowData }) {
           <div className="px-3 pb-3 ml-10">
             <JsonBlock
               data={event.data}
-              className="text-[10px] leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-md p-3 whitespace-pre-wrap overflow-x-auto"
+              className="text-micro leading-relaxed font-mono bg-muted/30 border border-border/20 rounded-md p-3 whitespace-pre-wrap overflow-x-auto"
             />
           </div>
         </CollapsibleContent>
@@ -628,7 +630,7 @@ function CategoryStats({ events }: { events: EventRowData[] }) {
                     severityStyles[sev].dot,
                   )}
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   {count}
                 </span>
               </div>
@@ -653,7 +655,7 @@ function CategoryStats({ events }: { events: EventRowData[] }) {
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1 cursor-help">
                   <Icon className={cn("h-3 w-3", cfg.color)} />
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     {count}
                   </span>
                 </div>
@@ -814,7 +816,7 @@ function EventStream({ events, toolbar, emptyHint }: { events: EventRowData[]; t
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search events…"
-            className="pl-9 h-8 text-xs bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -844,7 +846,7 @@ function EventStream({ events, toolbar, emptyHint }: { events: EventRowData[]; t
         <TabsList className="flex-wrap h-auto shrink-0">
           <TabsTrigger value="all">
             All{" "}
-            <Badge variant="secondary" className="ml-1.5 text-[10px]">
+            <Badge variant="secondary" className="ml-1.5 text-micro">
               {tabCounts.all ?? 0}
             </Badge>
           </TabsTrigger>
@@ -856,7 +858,7 @@ function EventStream({ events, toolbar, emptyHint }: { events: EventRowData[]; t
               <TabsTrigger key={cat} value={cat}>
                 <cfg.icon className={cn("h-3 w-3 mr-1", cfg.color)} />
                 {cfg.label}{" "}
-                <Badge variant="secondary" className="ml-1.5 text-[10px]">
+                <Badge variant="secondary" className="ml-1.5 text-micro">
                   {count}
                 </Badge>
               </TabsTrigger>
@@ -865,7 +867,7 @@ function EventStream({ events, toolbar, emptyHint }: { events: EventRowData[]; t
         </TabsList>
 
         <TabsContent value={tab} className="mt-3 flex-1 min-h-0">
-          <Card className="h-full flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+          <Card className="h-full flex flex-col overflow-hidden">
             <ScrollArea className="h-full">
               {display.length === 0 ? (
                 <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -1010,7 +1012,7 @@ function HistoryView() {
 
   if (sessionsError || error) {
     return (
-      <Card className="flex-1 flex flex-col items-center justify-center bg-card/80 border-border/40">
+      <Card className="flex-1 flex flex-col items-center justify-center">
         <CardContent className="flex flex-col items-center py-16 text-muted-foreground">
           <AlertTriangle className="h-10 w-10 mb-3 opacity-40" />
           <p className="text-sm font-medium">Could not read the history</p>
@@ -1023,7 +1025,7 @@ function HistoryView() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-2">
       {capped && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           Showing the {MAX_SESSIONS} most recent server sessions of the period: pick a shorter period or one session for the rest.
         </p>
       )}
@@ -1043,6 +1045,7 @@ function HistoryView() {
 export function EventsPage() {
   const { events } = useEvents(undefined, 500);
   const { connectionStatus } = usePolpo();
+  const brandName = productName(useInstanceBranding());
   const connected = connectionStatus === "connected";
   const [params, setParams] = useSearchParams();
   const mode: "live" | "history" = params.get("view") === "history" ? "history" : "live";
@@ -1072,43 +1075,27 @@ export function EventsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Mode toggle */}
-          <div className="flex items-center rounded-lg border border-border/40 bg-muted/20 p-0.5">
-            <button
-              onClick={() => setMode("live")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
-                mode === "live"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
+          <SegmentedControl size="sm" aria-label="Activity view" value={mode} onValueChange={setMode}>
+            <ToggleGroupItem value="live">
               <Radio
                 className={cn(
-                  "h-3 w-3",
-                  mode === "live" && connected && "text-teal-500",
+                  "h-4 w-4",
+                  mode === "live" && connected && "text-success",
                 )}
               />
               Live
               {mode === "live" && connected && (
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
                 </span>
               )}
-            </button>
-            <button
-              onClick={() => setMode("history")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
-                mode === "history"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Archive className="h-3 w-3" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="history">
+              <Archive className="h-4 w-4" />
               History
-            </button>
-          </div>
+            </ToggleGroupItem>
+          </SegmentedControl>
 
           {/* Connection status (live mode only) */}
           {mode === "live" && (
@@ -1116,11 +1103,11 @@ export function EventsPage() {
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-2">
                 {connected ? (
-                  <Wifi className="h-3.5 w-3.5 text-teal-500" />
+                  <Wifi className="h-3.5 w-3.5 text-success" />
                 ) : (
-                  <WifiOff className="h-3.5 w-3.5 text-red-500" />
+                  <WifiOff className="h-3.5 w-3.5 text-destructive" />
                 )}
-                <span className={cn("text-xs", connected ? "text-teal-400" : "text-muted-foreground")}>
+                <span className={cn("text-xs", connected ? "text-success" : "text-muted-foreground")}>
                   {connected ? "Connected" : "Disconnected"}
                 </span>
               </div>
@@ -1134,12 +1121,12 @@ export function EventsPage() {
         connected ? (
           <EventStream events={liveEvents} />
         ) : (
-          <Card className="flex-1 flex flex-col items-center justify-center bg-card/80 backdrop-blur-sm border-border/40">
+          <Card className="flex-1 flex flex-col items-center justify-center">
             <CardContent className="flex flex-col items-center py-16 text-muted-foreground">
               <WifiOff className="h-10 w-10 mb-3 opacity-40" />
               <p className="text-sm font-medium">Not connected to server</p>
               <p className="text-xs mt-1">
-                Check that the Polpo server is running to see live events
+                Check that the {brandName} server is running to see live events
               </p>
             </CardContent>
           </Card>

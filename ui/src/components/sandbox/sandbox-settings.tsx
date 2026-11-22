@@ -19,8 +19,10 @@ import {
   SANDBOX_PROVIDERS,
   type SandboxSettings,
 } from "@/lib/sandbox-api";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
+  const product = productName(useInstanceBranding());
   const { overview, error, reload } = useSandboxOverview();
   const [draft, setDraft] = useState<SandboxSettings>({});
   const [saving, setSaving] = useState(false);
@@ -50,7 +52,7 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
   return (
     <div className="space-y-8">
       {overview.snapshot && overview.snapshot.state !== "active" && (
-        <div role="status" data-testid="snapshot-inactive" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
+        <div role="status" data-testid="snapshot-inactive" className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-warning">
           Daytona snapshot <code>{overview.snapshot.name}</code> is {overview.snapshot.state === "inactive" ? "inactive" : overview.snapshot.state}
           {overview.snapshot.state === "inactive"
             ? " (Daytona deactivates snapshots nobody used for a while). It is activated automatically on the next run, which then takes a few minutes longer."
@@ -59,20 +61,20 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
       )}
       <NetworkDeniedCard overview={overview} onChanged={() => { void reload(); onSaved?.(); }} />
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <h3 className="text-label text-muted-foreground mb-1.5 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5" /> Isolation
         </h3>
-        <p className="text-[11px] text-muted-foreground/80 mb-3 max-w-2xl">
+        <p className="text-caption text-muted-foreground/80 mb-3 max-w-2xl">
           Agents think on this server; their commands (shell, search, scripts) run in the sandbox chosen here.
           The cascade is instance → agent → mission → task: agents can change the defaults, missions and tasks can only make them stricter.
         </p>
         <div className="flex flex-wrap items-center gap-1.5 mb-4">
-          <span className="text-[11px] text-muted-foreground mr-1">Available on this server:</span>
+          <span className="text-caption text-muted-foreground mr-1">Available on this server:</span>
           {SANDBOX_PROVIDERS.map((p) => (
             <Badge
               key={p.id}
               variant={overview.available.includes(p.id) ? "secondary" : "outline"}
-              className={overview.available.includes(p.id) ? "text-[10px]" : "text-[10px] text-muted-foreground/60"}
+              className={overview.available.includes(p.id) ? "text-micro" : "text-micro text-muted-foreground/60"}
             >
               {p.label}
             </Badge>
@@ -95,27 +97,27 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
       <RemoteProvidersCard onChanged={() => void reload()} />
 
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <h3 className="text-label text-muted-foreground mb-1.5 flex items-center gap-1.5">
           <Box className="h-3.5 w-3.5" /> Effective sandbox
         </h3>
-        <p className="text-[11px] text-muted-foreground/80 mb-3">
+        <p className="text-caption text-muted-foreground/80 mb-3">
           What each one gets with the saved settings, before mission or task restrictions.
         </p>
         <div className="rounded-lg border border-border/30 divide-y divide-border/20 overflow-hidden">
           <div className="grid grid-cols-1 gap-1 px-3 py-2 text-xs sm:grid-cols-[minmax(8rem,1fr)_2fr_2fr]">
-            <span className="font-medium">Polpo</span>
-            <span className="text-muted-foreground"><span className="text-[10px] uppercase tracking-wider mr-1.5">chat</span>{describeSandbox(overview.polpo)}</span>
+            <span className="font-medium">{product}</span>
+            <span className="text-muted-foreground"><span className="text-label mr-1.5">chat</span>{describeSandbox(overview.polpo)}</span>
             <span />
           </div>
           {overview.agents.map((agent) => (
             <div key={agent.name} className="grid grid-cols-1 gap-1 px-3 py-2 text-xs sm:grid-cols-[minmax(8rem,1fr)_2fr_2fr]">
               <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="font-medium hover:underline truncate">
                 {agent.name}
-                {agent.settings && <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">override</Badge>}
+                {agent.settings && <Badge variant="outline" className="ml-1.5 text-micro align-middle">override</Badge>}
               </Link>
-              <span className={agent.task.fallback ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}><span className="text-[10px] uppercase tracking-wider mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
+              <span className={agent.task.fallback ? "text-warning" : "text-muted-foreground"}><span className="text-label mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
               <span className="text-muted-foreground">
-                <span className="text-[10px] uppercase tracking-wider mr-1.5">chat</span>
+                <span className="text-label mr-1.5">chat</span>
                 {agent.chat.provider === agent.task.provider ? "same" : providerLabel(agent.chat.provider)}
               </span>
             </div>

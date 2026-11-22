@@ -69,12 +69,12 @@ function ParamField({
   if (param.enum && param.enum.length > 0) {
     return (
       <div>
-        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+        <label className="flex items-center gap-1.5 text-label text-muted-foreground mb-1">
           {param.name}
-          {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
+          {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm bg-input/50">
+          <SelectTrigger className="h-8 text-sm">
             <SelectValue placeholder={`Select ${param.name}...`} />
           </SelectTrigger>
           <SelectContent>
@@ -86,7 +86,7 @@ function ParamField({
           </SelectContent>
         </Select>
         {param.description && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">{param.description}</p>
+          <p className="text-micro text-muted-foreground mt-0.5">{param.description}</p>
         )}
       </div>
     );
@@ -96,12 +96,12 @@ function ParamField({
   if (param.type === "boolean") {
     return (
       <div>
-        <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+        <label className="flex items-center gap-1.5 text-label text-muted-foreground mb-1">
           {param.name}
-          {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
+          {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm bg-input/50">
+          <SelectTrigger className="h-8 text-sm">
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -110,7 +110,7 @@ function ParamField({
           </SelectContent>
         </Select>
         {param.description && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">{param.description}</p>
+          <p className="text-micro text-muted-foreground mt-0.5">{param.description}</p>
         )}
       </div>
     );
@@ -119,12 +119,12 @@ function ParamField({
   // Default → text input
   return (
     <div>
-      <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+      <label className="flex items-center gap-1.5 text-label text-muted-foreground mb-1">
         {param.name}
-        {param.required && <Asterisk className="h-2 w-2 text-rose-400" />}
+        {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
       </label>
       <Input
-        className="h-8 text-sm font-mono bg-input/50"
+        className="h-8 text-sm font-mono"
         type={param.type === "number" ? "number" : "text"}
         placeholder={
           param.default !== undefined
@@ -135,7 +135,7 @@ function ParamField({
         onChange={(e) => onChange(e.target.value)}
       />
       {param.description && (
-        <p className="text-[10px] text-muted-foreground mt-0.5">{param.description}</p>
+        <p className="text-micro text-muted-foreground mt-0.5">{param.description}</p>
       )}
     </div>
   );
@@ -203,7 +203,7 @@ export function RunPlaybookDialog({
       <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto bg-popover/95 backdrop-blur-xl border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
-            <Play className="h-4 w-4 text-teal-400" />
+            <Play className="h-4 w-4 text-primary" />
             Run "{playbook.name}"
           </DialogTitle>
         </DialogHeader>
@@ -229,21 +229,21 @@ export function RunPlaybookDialog({
         )}
 
         {runError && (
-          <div role="alert" className="flex items-start gap-2 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+          <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div className="min-w-0 space-y-1">
               <p className="font-medium">The playbook cannot run</p>
               <ul className="list-disc space-y-0.5 pl-4">
                 {runError.split("; ").map((issue) => <li key={issue} className="break-words">{issue}</li>)}
               </ul>
-              <p className="text-rose-300/80">Fix it in the Editor tab and save, then run again.</p>
+              <p className="text-destructive/80">Fix it in the Editor tab and save, then run again.</p>
             </div>
           </div>
         )}
 
         <div className="flex items-center gap-2 justify-end pt-2">
           {missingRequired.length > 0 && (
-            <span className="text-[10px] text-rose-400 mr-auto">
+            <span className="text-micro text-destructive mr-auto">
               {missingRequired.length} required param{missingRequired.length > 1 ? "s" : ""} missing
             </span>
           )}
@@ -257,7 +257,7 @@ export function RunPlaybookDialog({
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
+            className="gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground"
             onClick={handleRun}
             disabled={missingRequired.length > 0 || running}
           >
@@ -292,7 +292,7 @@ function PlaybookCard({
 
   return (
     <Card
-      className="group transition-all py-0 bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_oklch(0.7_0.15_200_/_8%)] cursor-pointer"
+      className="group transition-all py-0 bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_8%,transparent)] cursor-pointer"
       onClick={onClick}
     >
       <CardContent className="px-4 py-3">
@@ -306,12 +306,12 @@ function PlaybookCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold">{playbook.name}</span>
-              <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
+              <Badge variant="secondary" className="text-micro gap-1 px-1.5 py-0">
                 <Hash className="h-2 w-2" />
                 {params.length} param{params.length !== 1 ? "s" : ""}
               </Badge>
               {requiredParams.length > 0 && (
-                <Badge variant="outline" className="text-[9px] gap-0.5 px-1.5 py-0 text-rose-400">
+                <Badge variant="outline" className="text-micro gap-0.5 px-1.5 py-0 text-destructive">
                   <Asterisk className="h-2 w-2" />
                   {requiredParams.length} required
                 </Badge>
@@ -322,7 +322,7 @@ function PlaybookCard({
                 className="ml-auto h-7 gap-1.5 text-xs"
                 onClick={(e) => { e.stopPropagation(); onRun(); }}
               >
-                <Play className="h-3.5 w-3.5 text-teal-400" /> Run
+                <Play className="h-3.5 w-3.5 text-primary" /> Run
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
@@ -338,11 +338,11 @@ function PlaybookCard({
                       <Badge
                         variant="outline"
                         className={cn(
-                          "text-[9px] font-mono px-1.5 py-0 gap-0.5 cursor-help",
+                          "text-micro font-mono px-1.5 py-0 gap-0.5 cursor-help",
                           paramTypeColor[p.type ?? "string"] ?? "text-muted-foreground"
                         )}
                       >
-                        {p.required && <Asterisk className="h-1.5 w-1.5 text-rose-400" />}
+                        {p.required && <Asterisk className="h-1.5 w-1.5 text-destructive" />}
                         {p.name}
                         {p.default !== undefined && (
                           <span className="text-muted-foreground/60">={String(p.default)}</span>
@@ -352,7 +352,7 @@ function PlaybookCard({
                     <TooltipContent className="text-xs max-w-xs">
                       <p className="font-medium">{p.name}</p>
                       <p className="text-muted-foreground">{p.description}</p>
-                      <p className="font-mono text-[10px] mt-0.5">
+                      <p className="font-mono text-micro mt-0.5">
                         type: {p.type ?? "string"}
                         {p.required && " (required)"}
                         {p.enum && ` | values: ${p.enum.join(", ")}`}
@@ -366,7 +366,7 @@ function PlaybookCard({
             {/* Path */}
             <div className="flex items-center gap-1 mt-2">
               <FolderOpen className="h-2.5 w-2.5 text-muted-foreground/50" />
-              <span className="text-[9px] font-mono text-muted-foreground/50 truncate">
+              <span className="text-micro font-mono text-muted-foreground/50 truncate">
                 {playbook.path}
               </span>
             </div>
@@ -431,7 +431,7 @@ export function PlaybooksPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search playbooks..."
-            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -450,7 +450,7 @@ export function PlaybooksPage() {
 
       {/* Playbook list */}
       {filtered.length === 0 ? (
-        <Card className="flex-1 bg-card/60 border-border/40">
+        <Card className="flex-1">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Workflow className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">
@@ -462,7 +462,7 @@ export function PlaybooksPage() {
               {playbooks.length === 0 ? (
                 <>
                   Playbooks are parameterized mission definitions.
-                  Create a <code className="text-[10px] bg-muted rounded px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
+                  Create a <code className="text-micro bg-muted rounded px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
                 </>
               ) : (
                 "Try adjusting your search"

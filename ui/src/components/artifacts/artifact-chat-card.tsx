@@ -33,7 +33,7 @@ export function ArtifactChatCard({ artifactId, updated }: { artifactId: string; 
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-4 w-4" /></span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{artifact?.title ?? (gone ? "Artifact deleted" : "Artifact")}</p>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {artifact ? `${artifactLabel(artifact)} · v${artifact.version}${updated ? " · updated" : ""}` : gone ? "It is no longer available" : "Loading…"}
         </p>
       </div>

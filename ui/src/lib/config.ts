@@ -8,6 +8,8 @@ declare global {
     inkHubUrl?: string;
     /** The instance's default look (settings.appearance), inlined by the UI server; null when it could not be read. */
     appearance?: import("./appearance-kit").InstanceAppearance | null;
+    /** The instance's branding (settings.branding display fields), inlined by the UI server; null when it could not be read. */
+    branding?: import("./appearance-kit").InstanceBranding | null;
   } | undefined;
 }
 

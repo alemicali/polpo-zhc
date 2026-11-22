@@ -15,6 +15,40 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { productName, useInstanceBranding } from "@/lib/branding";
+
+/** A theme token as #rrggbb (the QR encoder takes hex only); null when the browser can't resolve it. */
+function tokenHex(name: string): string | null {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (!value) return null;
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.fillStyle = value;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+  } catch {
+    return null;
+  }
+}
+
+function luminance(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
+}
+
+/**
+ * The QR's colours from the look: the darker of foreground/background for the modules, the lighter
+ * for the quiet zone, so it is always dark on light (what every phone camera reads) in both themes.
+ * Falls back to near-black on white when the tokens can't be resolved.
+ */
+function qrColors(): { dark: string; light: string } {
+  const fg = tokenHex("--foreground");
+  const bg = tokenHex("--background");
+  if (!fg || !bg || Math.abs(luminance(fg) - luminance(bg)) < 100) return { dark: "#0a0e1a", light: "#ffffff" };
+  return luminance(fg) < luminance(bg) ? { dark: fg, light: bg } : { dark: bg, light: fg };
+}
 
 interface PwaInstallQrButtonProps {
   className?: string;
@@ -24,6 +58,8 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
   const [open, setOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [qrLight, setQrLight] = useState<string | undefined>(undefined);
+  const branding = useInstanceBranding();
 
   const installUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -42,11 +78,13 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
     void (async () => {
       try {
         const { default: QRCode } = await import("qrcode");
+        const colors = qrColors();
+        if (!cancelled) setQrLight(colors.light);
         const url = await QRCode.toDataURL(installUrl, {
           errorCorrectionLevel: "M",
           margin: 1,
           width: 260,
-          color: { dark: "#0a0e1a", light: "#ffffff" },
+          color: colors,
         });
         if (!cancelled) setQrDataUrl(url);
       } catch {
@@ -88,7 +126,7 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
           <DialogHeader className="px-5 pt-5 pb-0">
             <DialogTitle className="flex items-center gap-2 text-base">
               <Smartphone className="h-4 w-4 text-primary" />
-              Install Polpo on phone
+              Install {productName(branding)} on phone
             </DialogTitle>
             <DialogDescription className="text-xs">
               Scan the QR code from your phone, then install the PWA from the browser menu.
@@ -97,17 +135,17 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
 
           <div className="px-5 pb-5 pt-4 space-y-4">
             <div className="flex justify-center">
-              <div className="flex h-[276px] w-[276px] items-center justify-center rounded-lg border border-border/50 bg-white p-2 shadow-sm">
+              <div className="flex h-[276px] w-[276px] items-center justify-center rounded-lg border border-border/50 p-2 shadow-card" style={{ background: qrLight ?? "var(--background)" }}>
                 {qrDataUrl ? (
                   <img src={qrDataUrl} alt="PWA install QR code" className="h-[260px] w-[260px]" />
                 ) : (
-                  <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 )}
               </div>
             </div>
 
             <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/25 p-2">
-              <code className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{installUrl}</code>
+              <code className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{installUrl}</code>
               <Button variant="outline" size="sm" className="h-7 shrink-0 gap-1.5 text-xs" onClick={copyUrl}>
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 {copied ? "Copied" : "Copy"}
@@ -115,12 +153,12 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
             </div>
 
             {isLocalhost && (
-              <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+              <div className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-caption leading-relaxed text-warning">
                 This address is local to this computer. To use the QR from a phone, run the UI on a network-reachable host or use a tunnel/HTTPS URL.
               </div>
             )}
 
-            <div className="grid gap-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div className="grid gap-2 text-caption leading-relaxed text-muted-foreground">
               <p><span className="font-medium text-foreground">iPhone/iPad:</span> open with Safari, tap Share, then Add to Home Screen.</p>
               <p><span className="font-medium text-foreground">Android:</span> open with Chrome, tap the menu, then Install app or Add to Home screen.</p>
             </div>

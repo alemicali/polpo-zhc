@@ -903,7 +903,12 @@ export interface BrandingConfig {
   logoUrl?: string;
   /** The logo in dark mode (falls back to logoUrl): HTTPS image URL or the managed `/api/v1/config/branding/logo-dark` asset. */
   logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare (no background, same height). */
+  logoFrame?: BrandingLogoFrame;
 }
+
+export const BRANDING_LOGO_FRAMES = ["box", "none"] as const;
+export type BrandingLogoFrame = (typeof BRANDING_LOGO_FRAMES)[number];
 
 export interface PolpoSettings {
   maxRetries: number;

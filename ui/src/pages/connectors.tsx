@@ -29,10 +29,12 @@ import {
   type CatalogEntry, type Connector, type ConnectorCardState,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
+import { productName, useInstanceBranding } from "@/lib/branding";
+import { PageHeader } from "@/components/shared/page-header";
 
-function accessSummary(connector: Connector, agentLabel: (name: string) => string): string {
+function accessSummary(connector: Connector, agentLabel: (name: string) => string, product: string): string {
   const parts: string[] = [];
-  if (connector.access.polpo) parts.push("Polpo");
+  if (connector.access.polpo) parts.push(product);
   if (connector.access.agents === "*") parts.push("all agents");
   else if (connector.access.agents.length === 1) parts.push(agentLabel(connector.access.agents[0]!));
   else if (connector.access.agents.length > 1) parts.push(`${connector.access.agents.length} agents`);
@@ -67,9 +69,9 @@ function CatalogCard({
       </div>
       <p className="line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">{entry.description}</p>
       <div className="mt-auto flex items-center gap-1.5">
-        <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">{authLabel(entry)}</Badge>
+        <Badge variant="outline" className="text-micro font-normal text-muted-foreground">{authLabel(entry)}</Badge>
         {entry.inClaudeDirectory && (
-          <Badge variant="outline" className="gap-1 text-[10px] font-normal text-muted-foreground" title="Listed in Claude's connector directory">
+          <Badge variant="outline" className="gap-1 text-micro font-normal text-muted-foreground" title="Listed in Claude's connector directory">
             <BadgeCheck className="h-3 w-3" /> In Claude directory
           </Badge>
         )}
@@ -90,6 +92,7 @@ function CatalogCard({
 function ConnectorRow({
   connector, agentLabel, onManage, onReconnect,
 }: { connector: Connector; agentLabel: (name: string) => string; onManage: () => void; onReconnect: () => void }) {
+  const product = productName(useInstanceBranding());
   const state = connectorState(connector);
   const needsSignIn = state === "needs_auth" || state === "needs_reauth";
   return (
@@ -98,12 +101,12 @@ function ConnectorRow({
       <button type="button" onClick={onManage} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{connector.name}</span>
-          {!connector.catalogId && <Badge variant="secondary" className="text-[10px] font-normal">Custom</Badge>}
+          {!connector.catalogId && <Badge variant="secondary" className="text-micro font-normal">Custom</Badge>}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {state === "needs_reauth" ? `Polpo lost access to ${connector.name}. Sign in again to keep using it.`
+          {state === "needs_reauth" ? `${product} lost access to ${connector.name}. Sign in again to keep using it.`
             : state === "error" && connector.lastError ? connector.lastError
-            : `${accessSummary(connector, agentLabel)}${connector.toolCount !== undefined && state === "connected" ? ` · ${connector.toolCount} tools` : ""}`}
+            : `${accessSummary(connector, agentLabel, product)}${connector.toolCount !== undefined && state === "connected" ? ` · ${connector.toolCount} tools` : ""}`}
         </span>
       </button>
       <StateBadge state={state} className="hidden sm:inline-flex" />
@@ -123,6 +126,7 @@ export function ConnectorsPage() {
   const connectedParam = params.get("connected");
   const { connectors, catalog, loading, error, refresh, refreshCatalog, upsert, drop } = useConnectors({ withCatalog: true });
   const { agents } = useAgents();
+  const product = productName(useInstanceBranding());
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>(connectedParam ? "connected" : null);
@@ -162,20 +166,19 @@ export function ConnectorsPage() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 overflow-y-auto p-4 pb-bottom-nav sm:p-6 lg:pb-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-xl font-semibold"><Plug className="h-5 w-5" /> Connectors</h1>
-          <p className="text-sm text-muted-foreground">Connect the apps your team uses. Polpo and the agents you choose get their tools.</p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+      <PageHeader
+        title="Connectors"
+        icon={Plug}
+        description={`Connect the apps your team uses. ${product} and the agents you choose get their tools.`}
+        actions={<>
           <Button variant="outline" onClick={() => setAppsOpen(true)}>
             <KeyRound className="h-4 w-4" /> OAuth apps
           </Button>
           <Button onClick={() => setCustomOpen(true)}>
             <Plus className="h-4 w-4" /> Add custom connector
           </Button>
-        </div>
-      </header>
+        </>}
+      />
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

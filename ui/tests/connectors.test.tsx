@@ -32,6 +32,7 @@ import { ConnectorsPage } from "../src/pages/connectors";
 import { AgentConnectorsSection } from "../src/components/connectors/agent-connectors-section";
 import { ConnectorDetailSheet } from "../src/components/connectors/connector-detail-sheet";
 import { CustomConnectorDialog } from "../src/components/connectors/custom-connector-dialog";
+import { DEFAULT_PRODUCT_NAME } from "../src/lib/branding";
 import {
   EMPTY_CUSTOM_FORM, OAUTH_MESSAGE_TYPE, allowedToolsCoverConnector, catalogCardState, catalogCategories, customConnectorInput,
   filterCatalog, splitArgs, toggleAgentAccess, validateCustomConnector,
@@ -414,7 +415,7 @@ test("connected tab lists connectors; needs re-auth offers Reconnect", async () 
   await renderPage();
   expect(byText(/^Connected/, '[role="tab"]')?.getAttribute("aria-selected")).toBe("true");
   const row = container.querySelector('[data-testid="connector-row-linear"]')!;
-  expect(row.textContent).toContain("Polpo lost access to Linear");
+  expect(row.textContent).toContain(`${DEFAULT_PRODUCT_NAME} lost access to Linear`);
   expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Reconnect")).toBe(true);
 });
 
@@ -510,7 +511,7 @@ test("custom connector: stdio is behind Advanced with a warning", async () => {
   await act(async () => root.render(<CustomConnectorDialog open onOpenChange={() => {}} onSubmit={onSubmit} />));
   await click(byText("Advanced"));
   await click(document.querySelector('input[type="checkbox"]'));
-  expect(document.body.textContent).toContain("runs a command on the Polpo server");
+  expect(document.body.textContent).toContain(`runs a command on the ${DEFAULT_PRODUCT_NAME} server`);
   await type(inputByLabel("Name"), "Files");
   await type(inputByLabel("Command"), "npx -y @modelcontextprotocol/server-filesystem /data");
   await click(byText("Add"));

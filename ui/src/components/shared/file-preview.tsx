@@ -97,7 +97,7 @@ function PreviewContent({
 
   if (category === "video" && readUrl) {
     return (
-      <div className="flex items-center justify-center h-full p-4 bg-black">
+      <div className="flex items-center justify-center h-full p-4 bg-muted">
         <video controls src={readUrl} className="max-w-full max-h-full" />
       </div>
     );
@@ -231,10 +231,10 @@ export function FilePreviewDialog({
           <DialogTitle className="text-sm font-medium truncate flex-1">{o.label}</DialogTitle>
           <div className="flex items-center gap-1 shrink-0">
             {o.mimeType && (
-              <Badge variant="outline" className="text-[9px]">{o.mimeType}</Badge>
+              <Badge variant="outline" className="text-micro">{o.mimeType}</Badge>
             )}
             {o.size != null && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 {o.size > 1024 * 1024
                   ? `${(o.size / 1024 / 1024).toFixed(1)} MB`
                   : `${(o.size / 1024).toFixed(1)} KB`}

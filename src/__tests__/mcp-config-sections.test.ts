@@ -185,6 +185,41 @@ describe("appearance and the dark-mode logo", () => {
     expect(reset.structuredContent.appearance).toEqual({});
     expect((await (await app.request("/api/v1/config/appearance")).json()).data).toEqual({});
   });
+
+  it("takes the bundled Inter Tight as a font token", async () => {
+    const r = await tool("polpo_branding_update", { tokens: { light: { fontFamily: "\"Inter Tight\", sans-serif", headingFont: "Inter Tight" } } });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent.appearance.custom.light).toMatchObject({ fontFamily: "\"Inter Tight\", sans-serif", headingFont: "Inter Tight" });
+    expect((await tool("polpo_branding_update", { reset_appearance: true })).isError).toBeFalsy();
+  });
+
+  it("frames the logo in a box or shows it bare (logo_frame), publicly; the REST route checks the value", async () => {
+    expect((await tool("polpo_branding_get")).structuredContent.logoFrame).toBeUndefined(); // default: box
+    const bare = await tool("polpo_branding_update", { logo_frame: "none" });
+    expect(bare.isError).toBeFalsy();
+    expect(bare.structuredContent).toMatchObject({ changed: ["logo_frame"], branding: { logoFrame: "none" } });
+    expect((await tool("polpo_branding_get")).structuredContent.logoFrame).toBe("none");
+    expect(text(await tool("polpo_branding_get"))).toContain("frame: none");
+    // public, before sign-in (runtime-config.js, the sign-in page): only the display fields
+    expect((await (await app.request("/api/v1/config/branding")).json()).data).toMatchObject({ logoFrame: "none" });
+    expect((await tool("polpo_branding_update", { logo_frame: "none" })).structuredContent.changed).toEqual([]);
+    // an invalid value never reaches the config
+    expect(await tool("polpo_branding_update", { logo_frame: "circle" })).toMatchObject({ isError: true });
+    const bad = await app.request("/api/v1/config/settings", {
+      method: "PATCH", headers: { authorization: `Bearer ${MCP_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ branding: { logoFrame: "circle" } }),
+    });
+    expect(bad.status).toBe(400);
+    const viaRest = await app.request("/api/v1/config/settings", {
+      method: "PATCH", headers: { authorization: `Bearer ${MCP_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ branding: { logoFrame: "box" } }),
+    });
+    expect(viaRest.status).toBe(200);
+    expect((await tool("polpo_branding_get")).structuredContent.logoFrame).toBe("box");
+    const reset = await tool("polpo_branding_update", { logo_frame: null });
+    expect(reset.structuredContent.changed).toEqual(["logo_frame"]);
+    expect(reset.structuredContent.branding.logoFrame).toBeUndefined();
+  });
 });
 
 describe("general settings", () => {

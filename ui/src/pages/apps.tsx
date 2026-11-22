@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { apiUrl, config } from "@/lib/config";
 import { useApps, type AppDeployment, type AppDomain, type AppEnvironment, type AppInput, type AppRuntime, type AppService, type RegisteredApp } from "@/hooks/use-apps";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 const emptyApp = (): AppInput => ({ name: "", slug: "", description: "", localPath: "", tags: [], services: [], deployments: [], domains: [] });
 const makeId = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -77,7 +79,7 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="outline" size="sm" className={cn("h-8", selectedTags.size > 0 && "border-primary/40 bg-primary/10 text-primary")} disabled={allTags.length === 0}>
-                <Tag className="h-3.5 w-3.5" />Categories{selectedTags.size > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] text-primary-foreground">{selectedTags.size}</span>}
+                <Tag className="h-3.5 w-3.5" />Categories{selectedTags.size > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-micro text-primary-foreground">{selectedTags.size}</span>}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
@@ -87,28 +89,28 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
               {selectedTags.size > 0 && <><DropdownMenuSeparator /><DropdownMenuItem className="text-xs" onSelect={() => setSelectedTags(new Set())}>Clear category filters</DropdownMenuItem></>}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="flex shrink-0 items-center rounded-md border border-border/70 bg-muted/20 p-0.5">
+          <SegmentedControl size="sm" aria-label="Apps view" value={view} onValueChange={setView}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant={view === "cards" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none" aria-label="Card view" aria-pressed={view === "cards"} onClick={() => setView("cards")}>
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                </Button>
+                <ToggleGroupItem value="cards" aria-label="Card view">
+                  <LayoutGrid className="h-4 w-4" />
+                </ToggleGroupItem>
               </TooltipTrigger>
               <TooltipContent>Card view</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" variant={view === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none" aria-label="List view" aria-pressed={view === "list"} onClick={() => setView("list")}>
-                  <LayoutList className="h-3.5 w-3.5" />
-                </Button>
+                <ToggleGroupItem value="list" aria-label="List view">
+                  <LayoutList className="h-4 w-4" />
+                </ToggleGroupItem>
               </TooltipTrigger>
               <TooltipContent>List view</TooltipContent>
             </Tooltip>
-          </div>
+          </SegmentedControl>
           <AppEditor mode="create" onSave={async (input) => { const app = await api.create(input); navigate(`/apps/${app.id}`); }} />
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void api.refetch()} aria-label="Refresh apps"><RefreshCw className="h-3.5 w-3.5" /></Button>
         </div>
-        {selectedTags.size > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="mr-1 text-[10px] text-muted-foreground">{filtered.length} of {api.apps.length}</span>{[...selectedTags].map((tag) => <button key={tag} type="button" onClick={() => toggleTag(tag)} className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 text-[10px] text-foreground hover:bg-muted"><Tag className="h-3 w-3 text-muted-foreground" />{tag}<X className="h-3 w-3 text-muted-foreground" /></button>)}</div>}
+        {selectedTags.size > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="mr-1 text-micro text-muted-foreground">{filtered.length} of {api.apps.length}</span>{[...selectedTags].map((tag) => <button key={tag} type="button" onClick={() => toggleTag(tag)} className="inline-flex h-6 items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 text-micro text-foreground hover:bg-muted"><Tag className="h-3 w-3 text-muted-foreground" />{tag}<X className="h-3 w-3 text-muted-foreground" /></button>)}</div>}
       </div>
       {api.isLoading ? <CenteredLoader /> : api.error ? <Empty icon={XCircle} title="Apps unavailable" detail={api.error} /> : filtered.length === 0 ? (
         <Empty icon={AppWindow} title={api.apps.length ? "No matching apps" : "No apps yet"} detail="Add a local project to manage development, previews and delivery." />
@@ -157,13 +159,13 @@ function AppProjectListRow({ app, api, onOpen }: { app: RegisteredApp; api: Retu
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="truncate text-sm font-semibold">{app.name}</h2>
-            {app.tags.slice(0, 2).map((tag) => <Badge key={tag} variant="outline" className="hidden h-5 max-w-24 shrink-0 px-1.5 text-[9px] font-normal md:inline-flex"><span className="truncate">{tag}</span></Badge>)}
-            {app.tags.length > 2 && <span className="hidden shrink-0 text-[10px] text-muted-foreground md:inline">+{app.tags.length - 2}</span>}
+            <h2 className="truncate font-heading text-h3">{app.name}</h2>
+            {app.tags.slice(0, 2).map((tag) => <Badge key={tag} variant="outline" className="hidden h-5 max-w-24 shrink-0 px-1.5 text-micro font-normal md:inline-flex"><span className="truncate">{tag}</span></Badge>)}
+            {app.tags.length > 2 && <span className="hidden shrink-0 text-micro text-muted-foreground md:inline">+{app.tags.length - 2}</span>}
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{app.description || app.localPath}</p>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="flex shrink-0 items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-emerald-500" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : running ? "Active" : "Stopped"}</span>
+          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-micro text-muted-foreground">
+            <span className="flex shrink-0 items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : running ? "Active" : "Stopped"}</span>
             <span className="text-border">/</span>
             <span className="shrink-0">{publishedUrl ? "Published" : "Not published"}</span>
             {app.framework && <><span className="hidden text-border lg:inline">/</span><span className="hidden truncate lg:inline">{app.framework}</span></>}
@@ -201,14 +203,14 @@ function AppProjectCard({ app, api, onOpen }: { app: RegisteredApp; api: ReturnT
     <article className="group min-w-0 overflow-hidden rounded-md border border-border/70 bg-background transition-[border-color,box-shadow] hover:border-foreground/25 hover:shadow-sm">
       <button type="button" onClick={onOpen} className="block w-full text-left">
         <div className="relative aspect-[16/9] overflow-hidden border-b border-border/60 bg-muted/25">
-          {screenshot ? <img src={screenshot} alt={`${app.name} preview`} loading="lazy" decoding="async" className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.015]" /> : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><AppWindow className="h-7 w-7 opacity-30" /><span className="mt-2 text-[11px]">No preview yet</span></div>}
+          {screenshot ? <img src={screenshot} alt={`${app.name} preview`} loading="lazy" decoding="async" className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.015]" /> : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><AppWindow className="h-7 w-7 opacity-30" /><span className="mt-2 text-caption">No preview yet</span></div>}
         </div>
         <div className="p-4">
-          <div className="flex min-w-0 items-center gap-3"><h2 className="truncate text-sm font-semibold">{app.name}</h2><ArrowLeft className="ml-auto h-3.5 w-3.5 shrink-0 rotate-180 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" /></div>
+          <div className="flex min-w-0 items-center gap-3"><h2 className="truncate font-heading text-h3">{app.name}</h2><ArrowLeft className="ml-auto h-3.5 w-3.5 shrink-0 rotate-180 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" /></div>
           <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{app.description || "No description"}</p>
-          {app.tags.length > 0 && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-hidden">{app.tags.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="h-5 max-w-28 shrink-0 px-1.5 text-[9px] font-normal"><span className="truncate">{tag}</span></Badge>)}{app.tags.length > 3 && <span className="shrink-0 text-[10px] text-muted-foreground">+{app.tags.length - 3}</span>}</div>}
-          <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-emerald-500" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : `Development ${status.toLowerCase()}`}</span>
+          {app.tags.length > 0 && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-hidden">{app.tags.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="h-5 max-w-28 shrink-0 px-1.5 text-micro font-normal"><span className="truncate">{tag}</span></Badge>)}{app.tags.length > 3 && <span className="shrink-0 text-micro text-muted-foreground">+{app.tags.length - 3}</span>}</div>}
+          <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : `Development ${status.toLowerCase()}`}</span>
             <span className="text-border">/</span>
             <span>{publishedUrl ? "Published" : "Not published"}</span>
             {app.framework && <><span className="text-border">/</span><span>{app.framework}</span></>}
@@ -253,7 +255,7 @@ function AppDetail({ appId, api }: { appId: string; api: ReturnType<typeof useAp
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="grid shrink-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/70 px-5 py-4 sm:flex lg:px-6">
         <Button variant="ghost" size="icon" onClick={() => navigate("/apps")} aria-label="Back to apps"><ArrowLeft className="h-4 w-4" /></Button>
-        <div className="min-w-0 flex-1 sm:basis-auto"><p className="text-[10px] font-medium text-muted-foreground">Apps / {app.slug}</p><h1 className="mt-0.5 truncate text-base font-semibold">{app.name}</h1></div>
+        <div className="min-w-0 flex-1 sm:basis-auto"><p className="text-micro font-medium text-muted-foreground">Apps / {app.slug}</p><h1 className="mt-0.5 truncate font-heading text-h2">{app.name}</h1></div>
         <div className="col-start-3 flex items-center gap-2 sm:ml-0">
           <AppEditor mode="edit" app={app} onSave={save} />
         </div>
@@ -262,11 +264,11 @@ function AppDetail({ appId, api }: { appId: string; api: ReturnType<typeof useAp
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 px-4">
           <div className="min-w-0 flex-1 overflow-x-auto scrollbar-none">
             <TabsList className="h-8 w-max shrink-0 justify-start">
-              <TabsTrigger className="h-6 flex-none px-2 text-[11px]" value="overview">Overview</TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-[11px]" value="services">Services <Count value={app.services.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-[11px]" value="deployments">Deployments <Count value={app.deployments.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-[11px]" value="domains">Domains <Count value={app.domains.length} /></TabsTrigger>
-              <TabsTrigger className="h-6 flex-none px-2 text-[11px]" value="settings">Settings</TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="overview">Overview</TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="services">Services <Count value={app.services.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="deployments">Deployments <Count value={app.deployments.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="domains">Domains <Count value={app.domains.length} /></TabsTrigger>
+              <TabsTrigger className="flex-none text-small" value="settings">Settings</TabsTrigger>
             </TabsList>
           </div>
         </div>
@@ -331,14 +333,14 @@ function AppOverview({ app, previewUrl, coverTarget, busy, run, api }: { app: Re
     <section className="px-5 py-5 lg:px-6 lg:py-6">
       <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(320px,.9fr)_minmax(340px,1.1fr)] lg:gap-8">
         <div className="group relative aspect-video min-h-48 overflow-hidden rounded-md border border-border/70 bg-muted/20">
-          {screenshot ? <img src={screenshot} alt={`${app.name} cover`} className="h-full w-full object-cover object-top" /> : <div className="flex h-full flex-col items-center justify-center px-6 text-center text-muted-foreground"><AppWindow className="h-8 w-8 opacity-30" /><p className="mt-3 text-xs font-medium">No preview captured</p><p className="mt-1 text-[11px]">Start the app or connect a production URL.</p></div>}
+          {screenshot ? <img src={screenshot} alt={`${app.name} cover`} className="h-full w-full object-cover object-top" /> : <div className="flex h-full flex-col items-center justify-center px-6 text-center text-muted-foreground"><AppWindow className="h-8 w-8 opacity-30" /><p className="mt-3 text-xs font-medium">No preview captured</p><p className="mt-1 text-caption">Start the app or connect a production URL.</p></div>}
         </div>
         <div className="flex min-w-0 flex-col justify-center py-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className={cn("h-2 w-2 rounded-full", failed ? "bg-destructive" : active ? "bg-emerald-500" : "bg-muted-foreground/40")} />{developmentLabel}</span>
+            <span className="flex items-center gap-1.5"><span className={cn("h-2 w-2 rounded-full", failed ? "bg-destructive" : active ? "bg-success" : "bg-muted-foreground/40")} />{developmentLabel}</span>
             <span className="text-border">/</span>
             <span>{publishedUrl ? "Published" : "Not published"}</span>
-            {app.framework && <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">{app.framework}</Badge>}
+            {app.framework && <Badge variant="outline" className="h-5 px-1.5 text-micro font-normal">{app.framework}</Badge>}
           </div>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-foreground/85">{app.description || "No description yet."}</p>
           <div className="mt-6 flex flex-wrap items-center gap-2">
@@ -365,6 +367,7 @@ function AppOverview({ app, previewUrl, coverTarget, busy, run, api }: { app: Re
 }
 
 function CoverCaptureButton({ app, target, hasCover, busy, run, api }: { app: RegisteredApp; target?: AppCoverTarget; hasCover: boolean; busy: boolean; run: (key: string, action: () => Promise<unknown>, message?: string) => Promise<void>; api: ReturnType<typeof useApps> }) {
+  const product = productName(useInstanceBranding());
   const [promptOpen, setPromptOpen] = useState(false);
   const serviceStopped = Boolean(target?.service && target.status !== "running" && target.status !== "starting");
 
@@ -408,14 +411,14 @@ function CoverCaptureButton({ app, target, hasCover, busy, run, api }: { app: Re
       <DialogContent className="w-[calc(100vw-2rem)] max-w-xl overflow-hidden sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Start {target?.service?.name} to capture the cover?</DialogTitle>
-          <DialogDescription>Polpo will start the stopped service, wait until it is reachable, and capture the app cover automatically. Choose what should happen to the service afterward.</DialogDescription>
+          <DialogDescription>{product} will start the stopped service, wait until it is reachable, and capture the app cover automatically. Choose what should happen to the service afterward.</DialogDescription>
         </DialogHeader>
         <div className="min-w-0 border-y border-border/70 py-3 text-xs text-muted-foreground">
           <div className="min-w-0">
-            <span className="block text-[11px] font-medium text-muted-foreground">Command</span>
-            <code className="mt-1.5 block max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-all border border-border/60 bg-muted/30 px-3 py-2 font-mono text-[11px] leading-5 text-foreground">{target?.service?.command}</code>
+            <span className="block text-caption font-medium text-muted-foreground">Command</span>
+            <code className="mt-1.5 block max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-all border border-border/60 bg-muted/30 px-3 py-2 font-mono text-caption leading-5 text-foreground">{target?.service?.command}</code>
           </div>
-          {target?.service?.port && <div className="mt-3 grid min-w-0 grid-cols-[80px_minmax(0,1fr)] items-center gap-3"><span>Port</span><span className="min-w-0 break-all font-mono text-[11px] text-foreground">:{target.service.port}</span></div>}
+          {target?.service?.port && <div className="mt-3 grid min-w-0 grid-cols-[80px_minmax(0,1fr)] items-center gap-3"><span>Port</span><span className="min-w-0 break-all font-mono text-caption text-foreground">:{target.service.port}</span></div>}
         </div>
         <DialogFooter className="min-w-0 gap-2 sm:flex-row sm:flex-wrap sm:justify-between">
           <Button type="button" variant="ghost" onClick={() => setPromptOpen(false)}>Cancel</Button>
@@ -529,7 +532,7 @@ function AppSettingsPanel({ app, onSave, onDelete }: { app: RegisteredApp; onSav
 
       <div className="grid gap-5 border-t border-destructive/30 py-7 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)] sm:gap-8">
         <div>
-          <h2 className="text-sm font-semibold text-destructive">Danger zone</h2>
+          <h2 className="font-heading text-h3 text-destructive">Danger zone</h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">Destructive registry operations.</p>
         </div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -556,7 +559,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
   return (
     <section className="grid gap-5 border-b border-border/70 py-7 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)] sm:gap-8">
       <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
+        <h2 className="font-heading text-h3">{title}</h2>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
       <div className="min-w-0">{children}</div>
@@ -569,7 +572,7 @@ function SettingsField({ label, hint, className, children }: { label: string; hi
     <label className={cn("block min-w-0 text-xs font-medium", className)}>
       <span className="mb-1.5 block">{label}</span>
       {children}
-      {hint && <span className="mt-1.5 block text-[11px] font-normal leading-4 text-muted-foreground">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-caption font-normal leading-4 text-muted-foreground">{hint}</span>}
     </label>
   );
 }
@@ -589,7 +592,7 @@ function AppTagInput({ value, onChange }: { value: string[]; onChange: (tags: st
     setDraft("");
   };
   return <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
-    {value.map((tag) => <span key={tag} className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted px-2 text-[10px] font-normal text-foreground"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{tag}</span><button type="button" aria-label={`Remove ${tag}`} className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => onChange(value.filter((item) => item !== tag))}><X className="h-3 w-3" /></button></span>)}
+    {value.map((tag) => <span key={tag} className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted px-2 text-micro font-normal text-foreground"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{tag}</span><button type="button" aria-label={`Remove ${tag}`} className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => onChange(value.filter((item) => item !== tag))}><X className="h-3 w-3" /></button></span>)}
     <input value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={addDraft} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addDraft(); } else if (event.key === "Backspace" && !draft && value.length > 0) onChange(value.slice(0, -1)); }} placeholder={value.length ? "Add category" : "internal, client, public"} className="h-6 min-w-24 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground" />
   </div>;
 }
@@ -598,7 +601,7 @@ function MetadataRow({ label, value, mono }: { label: string; value: string; mon
   return (
     <div className="grid gap-1 py-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:gap-4">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("min-w-0 break-words text-foreground", mono && "font-mono text-[11px]")}>{value}</dd>
+      <dd className={cn("min-w-0 break-words text-foreground", mono && "font-mono text-caption")}>{value}</dd>
     </div>
   );
 }
@@ -610,8 +613,8 @@ function ResourceDetailShell({ icon: Icon, title, subtitle, status, onBack, acti
         <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={onBack} aria-label="Back to list"><ArrowLeft className="h-4 w-4" /></Button>
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground"><Icon className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2"><h2 className="truncate text-sm font-semibold">{title}</h2>{status && <StatusBadge status={status} />}</div>
-          <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
+          <div className="flex min-w-0 items-center gap-2"><h2 className="truncate font-heading text-h3">{title}</h2>{status && <StatusBadge status={status} />}</div>
+          <p className="truncate text-caption text-muted-foreground">{subtitle}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">{actions}</div>
       </div>
@@ -619,11 +622,11 @@ function ResourceDetailShell({ icon: Icon, title, subtitle, status, onBack, acti
         {children}
         {logs !== undefined && <section className="mt-8 border-t border-border/70 pt-6">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div><h3 className="text-sm font-semibold">Runtime output</h3><p className="mt-0.5 text-xs text-muted-foreground">Latest output retained for this process.</p></div>
-            <Badge variant="outline" className="font-mono text-[10px] font-normal">{logs?.length ?? 0} lines</Badge>
+            <div><h3 className="font-heading text-h3">Runtime output</h3><p className="mt-0.5 text-xs text-muted-foreground">Latest output retained for this process.</p></div>
+            <Badge variant="outline" className="font-mono text-micro font-normal">{logs?.length ?? 0} lines</Badge>
           </div>
           {logs?.length
-            ? <pre className="max-h-96 overflow-auto border border-border/70 bg-code p-4 text-[11px] leading-5 text-[var(--ink-inverse)]">{logs.map((line) => `[${new Date(line.at).toLocaleTimeString()}]${line.stream === "stderr" ? " [stderr]" : ""} ${line.text}`).join("\n")}</pre>
+            ? <pre className="max-h-96 overflow-auto border border-border/70 bg-muted p-4 text-caption leading-5 text-foreground">{logs.map((line) => `[${new Date(line.at).toLocaleTimeString()}]${line.stream === "stderr" ? " [stderr]" : ""} ${line.text}`).join("\n")}</pre>
             : <div className="border border-dashed border-border/70 px-4 py-8 text-center text-xs text-muted-foreground">No runtime output yet.</div>}
         </section>}
       </div>
@@ -642,7 +645,7 @@ function ServiceDetail({ app, service, runtime, busy, run, save, api, onBack }: 
     {active && servicePreviewUrl(service) && <IconLink href={servicePreviewUrl(service)!} label="Open service" />}
     <ServiceEditor item={service} triggerNode={<Button type="button" variant="outline" size="sm" className="h-8"><Settings2 className="h-3.5 w-3.5" />Edit</Button>} onSave={(next) => save(toInput({ ...app, services: app.services.map((item) => item.id === next.id ? next : item) }))} />
   </>}>
-    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="text-sm font-semibold">Configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">How this process starts and becomes reachable.</p></div><RemoveResourceButton name={service.name} label="Remove service" onDelete={async () => { if (active) await api.serviceAction(app.id, service.id, "stop"); await save(toInput({ ...app, services: app.services.filter((item) => item.id !== service.id) })); onBack(); }} /></div>
+    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="font-heading text-h3">Configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">How this process starts and becomes reachable.</p></div><RemoveResourceButton name={service.name} label="Remove service" onDelete={async () => { if (active) await api.serviceAction(app.id, service.id, "stop"); await save(toInput({ ...app, services: app.services.filter((item) => item.id !== service.id) })); onBack(); }} /></div>
     <DetailFields>
       <MetadataRow label="Command" value={service.command} mono />
       <MetadataRow label="Working directory" value={service.cwd || "."} mono />
@@ -664,7 +667,7 @@ function DeploymentDetail({ app, deployment, runtime, busy, run, save, api, onBa
     {deployment.url && <IconLink href={deployment.url} label="Open deployment" />}
     <DeploymentEditor item={deployment} triggerNode={<Button type="button" variant="outline" size="sm" className="h-8"><Settings2 className="h-3.5 w-3.5" />Edit</Button>} onSave={(next) => save(toInput({ ...app, deployments: app.deployments.map((item) => item.id === next.id ? next : item) }))} />
   </>}>
-    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="text-sm font-semibold">Deployment configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">Command, source and latest persisted result.</p></div><RemoveResourceButton name={deployment.name} label="Remove deployment" onDelete={async () => { if (active) await api.deploymentAction(app.id, deployment.id, "stop"); await save(toInput({ ...app, deployments: app.deployments.filter((item) => item.id !== deployment.id) })); onBack(); }} /></div>
+    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="font-heading text-h3">Deployment configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">Command, source and latest persisted result.</p></div><RemoveResourceButton name={deployment.name} label="Remove deployment" onDelete={async () => { if (active) await api.deploymentAction(app.id, deployment.id, "stop"); await save(toInput({ ...app, deployments: app.deployments.filter((item) => item.id !== deployment.id) })); onBack(); }} /></div>
     <DetailFields>
       <MetadataRow label="Command" value={deployment.command} mono />
       <MetadataRow label="Environment" value={deployment.environment} />
@@ -685,7 +688,7 @@ function DomainDetail({ app, domain, busy, run, save, api, onBack }: { app: Regi
     <IconLink href={`https://${domain.hostname}`} label="Open domain" />
     <DomainEditor item={domain} triggerNode={<Button type="button" variant="outline" size="sm" className="h-8"><Settings2 className="h-3.5 w-3.5" />Edit</Button>} onSave={(next) => save(toInput({ ...app, domains: app.domains.map((item) => item.id === next.id ? next : item) }))} />
   </>}>
-    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="text-sm font-semibold">Domain configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">DNS expectations and the latest reachability check.</p></div><RemoveResourceButton name={domain.hostname} label="Remove domain" onDelete={async () => { await save(toInput({ ...app, domains: app.domains.filter((item) => item.id !== domain.id) })); onBack(); }} /></div>
+    <div className="mb-3 flex items-start justify-between gap-4"><div><h3 className="font-heading text-h3">Domain configuration</h3><p className="mt-0.5 text-xs text-muted-foreground">DNS expectations and the latest reachability check.</p></div><RemoveResourceButton name={domain.hostname} label="Remove domain" onDelete={async () => { await save(toInput({ ...app, domains: app.domains.filter((item) => item.id !== domain.id) })); onBack(); }} /></div>
     <DetailFields>
       <MetadataRow label="Hostname" value={domain.hostname} mono />
       <MetadataRow label="Environment" value={domain.environment} />
@@ -693,7 +696,7 @@ function DomainDetail({ app, domain, busy, run, save, api, onBack }: { app: Regi
       <MetadataRow label="Last checked" value={domain.verification.checkedAt ? new Date(domain.verification.checkedAt).toLocaleString() : "Never"} />
       <MetadataRow label="HTTPS" value={domain.verification.httpOk === undefined ? "Not checked" : domain.verification.httpOk ? "Reachable" : "Unavailable"} />
     </DetailFields>
-    <section className="mt-8"><h3 className="text-sm font-semibold">Expected DNS records</h3><p className="mt-0.5 text-xs text-muted-foreground">Records checked when verification runs.</p><div className="mt-3 overflow-hidden border border-border/70">{domain.expectedRecords.length ? domain.expectedRecords.map((record, index) => <div key={`${record.type}:${record.name}:${index}`} className="grid gap-1 border-b border-border/60 px-3 py-2.5 text-xs last:border-b-0 sm:grid-cols-[70px_minmax(120px,.7fr)_minmax(180px,1fr)]"><span className="font-medium">{record.type}</span><span className="truncate font-mono text-[11px]">{record.name}</span><span className="break-all font-mono text-[11px] text-muted-foreground">{record.value}</span></div>) : <div className="px-4 py-8 text-center text-xs text-muted-foreground">No DNS records configured.</div>}</div>{domain.verification.details?.length ? <div className="mt-4 space-y-1 border-l-2 border-border pl-3 text-xs text-muted-foreground">{domain.verification.details.map((detail) => <p key={detail}>{detail}</p>)}</div> : null}</section>
+    <section className="mt-8"><h3 className="font-heading text-h3">Expected DNS records</h3><p className="mt-0.5 text-xs text-muted-foreground">Records checked when verification runs.</p><div className="mt-3 overflow-hidden border border-border/70">{domain.expectedRecords.length ? domain.expectedRecords.map((record, index) => <div key={`${record.type}:${record.name}:${index}`} className="grid gap-1 border-b border-border/60 px-3 py-2.5 text-xs last:border-b-0 sm:grid-cols-[70px_minmax(120px,.7fr)_minmax(180px,1fr)]"><span className="font-medium">{record.type}</span><span className="truncate font-mono text-caption">{record.name}</span><span className="break-all font-mono text-caption text-muted-foreground">{record.value}</span></div>) : <div className="px-4 py-8 text-center text-xs text-muted-foreground">No DNS records configured.</div>}</div>{domain.verification.details?.length ? <div className="mt-4 space-y-1 border-l-2 border-border pl-3 text-xs text-muted-foreground">{domain.verification.details.map((detail) => <p key={detail}>{detail}</p>)}</div> : null}</section>
   </ResourceDetailShell>;
 }
 
@@ -726,7 +729,7 @@ function ResourcePanel({ title, description, action, children }: { title: string
     <div className="h-full min-h-0 min-w-0 overflow-auto p-4">
       <div className="mb-4 flex min-w-0 items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="font-heading text-h3">{title}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         </div>
         <div className="shrink-0">{action}</div>
@@ -746,7 +749,7 @@ function ResourceRow({ icon: Icon, title, subtitle, status, logs, detail, action
     setPrevLogState({ status, logCount });
     if (status === "failed" && logCount > 0) setExpanded(true);
   }
-  return <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} className="group min-w-0 max-w-full cursor-pointer overflow-hidden px-4 py-3.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"><div className="flex min-w-0 flex-wrap items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground"><Icon className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><span className="truncate text-sm font-medium">{title}</span>{status && <StatusBadge status={status} />}</div><p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{subtitle}</p>{detail && <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{detail}</p>}</div><div className="ml-12 flex basis-[calc(100%-3rem)] shrink-0 items-center justify-end gap-1 sm:ml-0 sm:basis-auto" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>{logs?.length ? <IconAction label={expanded ? "Hide logs" : "View logs"} text="Logs" onClick={() => setExpanded(!expanded)} icon={Activity} /> : null}{actions}<ChevronRight className="ml-1 h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" /></div></div>{expanded && logs?.length ? <pre className="mt-3 max-h-64 w-full max-w-full overflow-auto border border-border/70 bg-code p-3 text-[11px] leading-5 text-[var(--ink-inverse)]" onClick={(event) => event.stopPropagation()}>{logs.map((line) => `[${new Date(line.at).toLocaleTimeString()}]${line.stream === "stderr" ? " [stderr]" : ""} ${line.text}`).join("\n")}</pre> : null}</div>;
+  return <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} className="group min-w-0 max-w-full cursor-pointer overflow-hidden px-4 py-3.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"><div className="flex min-w-0 flex-wrap items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground"><Icon className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-2"><span className="truncate text-sm font-medium">{title}</span>{status && <StatusBadge status={status} />}</div><p className="mt-0.5 truncate font-mono text-caption text-muted-foreground">{subtitle}</p>{detail && <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{detail}</p>}</div><div className="ml-12 flex basis-[calc(100%-3rem)] shrink-0 items-center justify-end gap-1 sm:ml-0 sm:basis-auto" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>{logs?.length ? <IconAction label={expanded ? "Hide logs" : "View logs"} text="Logs" onClick={() => setExpanded(!expanded)} icon={Activity} /> : null}{actions}<ChevronRight className="ml-1 h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" /></div></div>{expanded && logs?.length ? <pre className="mt-3 max-h-64 w-full max-w-full overflow-auto border border-border/70 bg-muted p-3 text-caption leading-5 text-foreground" onClick={(event) => event.stopPropagation()}>{logs.map((line) => `[${new Date(line.at).toLocaleTimeString()}]${line.stream === "stderr" ? " [stderr]" : ""} ${line.text}`).join("\n")}</pre> : null}</div>;
 }
 
 function AppEditor({ mode, app, onSave, trigger }: { mode: "create" | "edit"; app?: RegisteredApp; onSave: (input: AppInput) => Promise<unknown>; trigger?: React.ReactNode }) {
@@ -757,7 +760,7 @@ function AppEditor({ mode, app, onSave, trigger }: { mode: "create" | "edit"; ap
 
 function ServiceEditor({ onSave, item: initial, triggerNode }: { onSave: (service: AppService) => Promise<unknown>; item?: AppService; triggerNode?: React.ReactNode }) { const [open, setOpen] = useState(false); const [item, setItem] = useState<AppService>(initial ?? { id: makeId("service"), name: "Web", kind: "frontend", command: "pnpm dev", autoStart: true }); const editing = Boolean(initial); return <ResourceEditor open={open} setOpen={setOpen} title={`${editing ? "Edit" : "Add"} service`} onSubmit={() => onSave(item)} trigger="Add service" triggerNode={triggerNode} submitLabel={editing ? "Save" : "Add"}><Field label="Name"><Input required value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} /></Field><Field label="Kind"><EnumSelect value={item.kind} values={["frontend", "backend", "worker", "database"]} onChange={(kind) => setItem({ ...item, kind: kind as AppService["kind"] })} /></Field><Field label="Command" wide><Input required className="font-mono" value={item.command} onChange={(e) => setItem({ ...item, command: e.target.value })} /></Field><Field label="Working directory"><Input placeholder="." value={item.cwd ?? ""} onChange={(e) => setItem({ ...item, cwd: e.target.value || undefined })} /></Field><Field label="Port"><Input type="number" value={item.port ?? ""} onChange={(e) => setItem({ ...item, port: e.target.value ? Number(e.target.value) : undefined })} /></Field><Field label="Public URL" wide><Input placeholder="https://app.example.com" value={item.publicUrl ?? ""} onChange={(e) => setItem({ ...item, publicUrl: e.target.value || undefined })} /></Field><Field label="Health path"><Input placeholder="/api/health" value={item.healthPath ?? ""} onChange={(e) => setItem({ ...item, healthPath: e.target.value || undefined })} /></Field><label className="flex items-center gap-2 self-end pb-2 text-xs"><input type="checkbox" checked={item.autoStart ?? false} onChange={(e) => setItem({ ...item, autoStart: e.target.checked })} /><span>Include in Start App</span></label></ResourceEditor>; }
 function DeploymentEditor({ onSave, item: initial, triggerNode }: { onSave: (item: AppDeployment) => Promise<unknown>; item?: AppDeployment; triggerNode?: React.ReactNode }) { const [open, setOpen] = useState(false); const [item, setItem] = useState<AppDeployment>(initial ?? { id: makeId("deploy"), name: "Production", environment: "production", command: "" }); const editing = Boolean(initial); return <ResourceEditor open={open} setOpen={setOpen} title={`${editing ? "Edit" : "Add"} deployment`} onSubmit={() => onSave(item)} trigger="Add deployment" triggerNode={triggerNode} submitLabel={editing ? "Save" : "Add"}><Field label="Name"><Input required value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} /></Field><Field label="Environment"><EnvironmentSelect value={item.environment} onChange={(environment) => setItem({ ...item, environment })} /></Field><Field label="Command" wide><Input required className="font-mono" value={item.command} onChange={(e) => setItem({ ...item, command: e.target.value })} /></Field><Field label="Working directory"><Input value={item.cwd ?? ""} onChange={(e) => setItem({ ...item, cwd: e.target.value || undefined })} /></Field><Field label="Provider"><Input placeholder="Vercel" value={item.provider ?? ""} onChange={(e) => setItem({ ...item, provider: e.target.value || undefined })} /></Field><Field label="URL"><Input value={item.url ?? ""} onChange={(e) => setItem({ ...item, url: e.target.value || undefined })} /></Field><Field label="Branch"><Input value={item.branch ?? ""} onChange={(e) => setItem({ ...item, branch: e.target.value || undefined })} /></Field></ResourceEditor>; }
-function DomainEditor({ onSave, item: initial, triggerNode }: { onSave: (item: AppDomain) => Promise<unknown>; item?: AppDomain; triggerNode?: React.ReactNode }) { const [open, setOpen] = useState(false); const [item, setItem] = useState<AppDomain>(initial ?? { id: makeId("domain"), hostname: "", environment: "production", expectedRecords: [], verification: { status: "unchecked" } }); const [record, setRecord] = useState(initial?.expectedRecords.map((entry) => `${entry.type} ${entry.name} ${entry.value}`).join("\n") ?? ""); const editing = Boolean(initial); return <ResourceEditor open={open} setOpen={setOpen} title={`${editing ? "Edit" : "Add"} domain`} onSubmit={() => onSave({ ...item, expectedRecords: parseRecords(record), verification: editing ? item.verification : { status: "unchecked" } })} trigger="Add domain" triggerNode={triggerNode} submitLabel={editing ? "Save" : "Add"}><Field label="Hostname"><Input required placeholder="app.example.com" value={item.hostname} onChange={(e) => setItem({ ...item, hostname: e.target.value })} /></Field><Field label="Environment"><EnvironmentSelect value={item.environment} onChange={(environment) => setItem({ ...item, environment })} /></Field><Field label="Deployment ID"><Input value={item.deploymentId ?? ""} onChange={(e) => setItem({ ...item, deploymentId: e.target.value || undefined })} /></Field><Field label="Expected DNS records" wide><Textarea className="font-mono text-xs" placeholder={"CNAME app.example.com target.example.net\nTXT _verify.app.example.com token"} value={record} onChange={(e) => setRecord(e.target.value)} /><p className="mt-1 text-[11px] text-muted-foreground">One record per line: TYPE NAME VALUE</p></Field></ResourceEditor>; }
+function DomainEditor({ onSave, item: initial, triggerNode }: { onSave: (item: AppDomain) => Promise<unknown>; item?: AppDomain; triggerNode?: React.ReactNode }) { const [open, setOpen] = useState(false); const [item, setItem] = useState<AppDomain>(initial ?? { id: makeId("domain"), hostname: "", environment: "production", expectedRecords: [], verification: { status: "unchecked" } }); const [record, setRecord] = useState(initial?.expectedRecords.map((entry) => `${entry.type} ${entry.name} ${entry.value}`).join("\n") ?? ""); const editing = Boolean(initial); return <ResourceEditor open={open} setOpen={setOpen} title={`${editing ? "Edit" : "Add"} domain`} onSubmit={() => onSave({ ...item, expectedRecords: parseRecords(record), verification: editing ? item.verification : { status: "unchecked" } })} trigger="Add domain" triggerNode={triggerNode} submitLabel={editing ? "Save" : "Add"}><Field label="Hostname"><Input required placeholder="app.example.com" value={item.hostname} onChange={(e) => setItem({ ...item, hostname: e.target.value })} /></Field><Field label="Environment"><EnvironmentSelect value={item.environment} onChange={(environment) => setItem({ ...item, environment })} /></Field><Field label="Deployment ID"><Input value={item.deploymentId ?? ""} onChange={(e) => setItem({ ...item, deploymentId: e.target.value || undefined })} /></Field><Field label="Expected DNS records" wide><Textarea className="font-mono text-xs" placeholder={"CNAME app.example.com target.example.net\nTXT _verify.app.example.com token"} value={record} onChange={(e) => setRecord(e.target.value)} /><p className="mt-1 text-caption text-muted-foreground">One record per line: TYPE NAME VALUE</p></Field></ResourceEditor>; }
 
 function ResourceEditor({ open, setOpen, title, onSubmit, trigger, triggerNode, submitLabel, children }: { open: boolean; setOpen: (v: boolean) => void; title: string; onSubmit: () => Promise<unknown>; trigger: string; triggerNode?: React.ReactNode; submitLabel: string; children: React.ReactNode }) { const [busy, setBusy] = useState(false); return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild>{triggerNode ?? <Button type="button" size="sm"><Plus className="h-4 w-4" />{trigger}</Button>}</DialogTrigger><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg"><form onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSubmit(); setOpen(false); toast.success(`${title.replace(/^(Add|Edit) /, "")} ${submitLabel === "Add" ? "added" : "updated"}`); } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); } }}><DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader><div className="grid gap-3 py-4 sm:grid-cols-2">{children}</div><DialogFooter><Button type="submit" disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{submitLabel}</Button></DialogFooter></form></DialogContent></Dialog>; }
 function RemoveResourceButton({ name, label, onDelete }: { name: string; label: string; onDelete: () => Promise<void> }) { const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" />{label}</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>{label}?</DialogTitle><DialogDescription>This removes {name} from the app registry. Any active managed process for this resource will be stopped where applicable.</DialogDescription></DialogHeader><DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button type="button" variant="destructive" disabled={busy} onClick={async () => { setBusy(true); try { await onDelete(); setOpen(false); toast.success(`${name} removed`); } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); } }}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Remove</Button></DialogFooter></DialogContent></Dialog>; }
@@ -769,8 +772,8 @@ function IconAction({ label, text, icon: Icon, onClick, disabled }: { label: str
 function CardAction({ label, text, icon: Icon, onClick, disabled }: { label: string; text?: string; icon: typeof Play; onClick: () => void; disabled?: boolean }) { return <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size={text ? "sm" : "icon"} className={cn("h-8", !text && "w-8")} aria-label={label} onClick={onClick} disabled={disabled}><Icon className={cn("h-3.5 w-3.5", disabled && "opacity-50")} />{text}</Button></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>; }
 function CardLink({ label, icon: Icon, href }: { label: string; icon: typeof Play; href: string }) { return <Tooltip><TooltipTrigger asChild><Button asChild variant="ghost" size="icon" className="h-7 w-7"><a href={href} target="_blank" rel="noreferrer" aria-label={label}><Icon className="h-3.5 w-3.5" /></a></Button></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>; }
 function IconLink({ href, label }: { href: string; label: string }) { return <Tooltip><TooltipTrigger asChild><Button asChild variant="ghost" size="icon" className="h-8 w-8"><a href={href} target="_blank" rel="noreferrer" aria-label={label}><ExternalLink className="h-3.5 w-3.5" /></a></Button></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>; }
-function StatusBadge({ status }: { status: string }) { const good = status === "running" || status === "succeeded" || status === "valid"; const bad = status === "failed" || status === "invalid"; return <Badge variant="outline" className={cn("text-[10px]", good && "border-emerald-500/30 text-emerald-500", bad && "border-destructive/30 text-destructive")}>{status}</Badge>; }
-function Count({ value }: { value: number }) { return <span className="ml-1 text-[10px] text-muted-foreground">{value}</span>; }
+function StatusBadge({ status }: { status: string }) { const good = status === "running" || status === "succeeded" || status === "valid"; const bad = status === "failed" || status === "invalid"; return <Badge variant="outline" className={cn("text-micro", good && "border-success/30 text-success", bad && "border-destructive/30 text-destructive")}>{status}</Badge>; }
+function Count({ value }: { value: number }) { return <span className="ml-1 text-micro text-muted-foreground">{value}</span>; }
 function EmptyRows({ text }: { text: string }) { return <div className="px-4 py-12 text-center text-xs text-muted-foreground">{text}</div>; }
 function CenteredLoader() { return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>; }
 function Empty({ icon: Icon, title, detail, action }: { icon: typeof AppWindow; title: string; detail: string; action?: React.ReactNode }) { return <div className="flex flex-1 flex-col items-center justify-center px-6 text-center"><Icon className="mb-3 h-8 w-8 text-muted-foreground/50" /><p className="text-sm font-medium">{title}</p><p className="mt-1 max-w-md text-xs text-muted-foreground">{detail}</p>{action && <div className="mt-4">{action}</div>}</div>; }

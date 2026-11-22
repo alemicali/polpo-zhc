@@ -32,18 +32,18 @@ export function AgentHeroCard() {
   const tc = getTeamColor(teamColorIndex);
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+    <Card className="gap-0 overflow-hidden py-0">
       {/* Gradient header bar — colored by team */}
-      <div className={cn("h-10 rounded-t-xl bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
+      <div className={cn("h-10 bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
       <CardContent className="pt-0 -mt-5 pb-4 space-y-3">
         {/* Avatar + name */}
         <div className="flex items-center gap-3">
-          <div className={cn("relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 shadow-lg z-10", tc.border)}>
+          <div className={cn("relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 shadow-raised z-10", tc.border)}>
             <AgentAvatar avatar={identity?.avatar} name={agent.name} size="xl" iconClassName={tc.text} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight leading-tight truncate">
+              <h1 className="font-heading text-h2 truncate">
                 {identity?.displayName ?? agent.name}
               </h1>
               {process && (
@@ -51,7 +51,7 @@ export function AgentHeroCard() {
               )}
             </div>
             {identity?.displayName && identity.displayName !== agent.name && (
-              <p className="text-[10px] font-mono text-muted-foreground">@{agent.name}</p>
+              <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
             )}
           </div>
         </div>
@@ -60,12 +60,12 @@ export function AgentHeroCard() {
         {(agent.volatile || agent.missionGroup) && (
           <div className="flex flex-wrap gap-1.5">
             {agent.volatile && (
-              <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+              <Badge variant="outline" className="text-micro text-warning border-warning/30">
                 <Zap className="h-2.5 w-2.5 mr-0.5" /> Volatile
               </Badge>
             )}
             {agent.missionGroup && (
-              <Badge variant="outline" className="text-[9px] text-amber-400 border-amber-500/30">
+              <Badge variant="outline" className="text-micro text-warning border-warning/30">
                 mission: {agent.missionGroup}
               </Badge>
             )}
@@ -73,50 +73,50 @@ export function AgentHeroCard() {
         )}
 
         {/* Identity fields */}
-        <div className="divide-y divide-border/20 text-[11px]">
+        <div className="divide-y divide-border/60 text-small">
           <div className="flex items-center gap-2 py-1.5">
-            <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Title</span>
-            <span className={cn("ml-auto truncate", identity?.title ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.title || "not set"}</span>
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Title</span>
+            <span className={cn("ml-auto truncate", identity?.title ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.title || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Company</span>
-            <span className={cn("ml-auto truncate", identity?.company ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.company || "not set"}</span>
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Company</span>
+            <span className={cn("ml-auto truncate", identity?.company ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.company || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <Mail className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Email</span>
-            <span className={cn("ml-auto truncate font-mono", identity?.email ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.email || "not set"}</span>
+            <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Email</span>
+            <span className={cn("ml-auto truncate font-mono", identity?.email ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.email || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Timezone</span>
-            <span className={cn("ml-auto", identity?.timezone ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{identity?.timezone || "not set"}</span>
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Timezone</span>
+            <span className={cn("ml-auto", identity?.timezone ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.timezone || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <Zap className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Model</span>
-            <span className={cn("ml-auto truncate font-mono", agent.model ? "text-muted-foreground" : "text-muted-foreground/30 italic")}>{agent.model || "not set"}</span>
+            <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Model</span>
+            <span className={cn("ml-auto truncate font-mono", agent.model ? "text-foreground" : "text-muted-foreground/60 italic")}>{agent.model || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <Brain className="h-3 w-3 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground/60 shrink-0">Reasoning</span>
+            <Brain className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Reasoning</span>
             {agent.reasoning && agent.reasoning !== "off" ? (
-              <Badge variant="outline" className={cn("text-[9px] ml-auto", reasoningMeta[agent.reasoning]?.color)}>
+              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[agent.reasoning]?.color)}>
                 {reasoningMeta[agent.reasoning]?.label ?? agent.reasoning}
               </Badge>
             ) : (
-              <span className="ml-auto text-muted-foreground/30 italic">off</span>
+              <span className="ml-auto text-muted-foreground/60 italic">off</span>
             )}
           </div>
           {agent.createdAt && (
             <div className="flex items-center gap-2 py-1.5">
-              <Cake className="h-3 w-3 text-muted-foreground shrink-0" />
-              <span className="text-muted-foreground/60 shrink-0">Age</span>
+              <Cake className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground shrink-0">Age</span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="ml-auto text-muted-foreground cursor-help">
+                  <span className="ml-auto text-foreground cursor-help">
                     {formatAgentAge(agent.createdAt)}
                   </span>
                 </TooltipTrigger>
@@ -130,8 +130,8 @@ export function AgentHeroCard() {
 
         {/* Refresh */}
         <div className="pt-1">
-          <Button variant="outline" size="sm" className="w-full text-xs" onClick={refetch} disabled={isRefreshing}>
-            <RefreshCw className={cn("h-3 w-3 mr-1.5", isRefreshing && "animate-spin")} />
+          <Button variant="outline" size="sm" className="w-full" onClick={refetch} disabled={isRefreshing}>
+            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
             {isRefreshing ? "Refreshing" : "Refresh"}
           </Button>
         </div>

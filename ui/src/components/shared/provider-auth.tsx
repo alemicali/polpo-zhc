@@ -30,6 +30,7 @@ import {
   Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { productName, useInstanceBranding } from "@/lib/branding";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
 // ── Types ──
@@ -158,7 +159,7 @@ export function AuthStep({
         <>
           <div className="space-y-6">
             <div>
-              <h2 className="text-xl font-semibold tracking-tight">Connect a provider</h2>
+              <h2 className="font-heading text-h2">Connect a provider</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 You need at least one LLM provider to continue. Choose how to connect.
               </p>
@@ -181,13 +182,13 @@ export function AuthStep({
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {oauthProviders.slice(0, 3).map((p) => (
-                      <Badge key={p.id} variant="secondary" className="text-[10px]">
-                        {p.free && <span className="text-emerald-600 mr-0.5">FREE</span>}
+                      <Badge key={p.id} variant="secondary" className="text-micro">
+                        {p.free && <span className="text-success mr-0.5">FREE</span>}
                         {p.name.split("(")[0].trim()}
                       </Badge>
                     ))}
                     {oauthProviders.length > 3 && (
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge variant="secondary" className="text-micro">
                         +{oauthProviders.length - 3} more
                       </Badge>
                     )}
@@ -215,8 +216,8 @@ export function AuthStep({
                   onClick={onChooseLocal}
                   className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
                 >
-                  <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Server className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Server className="h-5 w-5 text-success" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-medium text-sm">Local model (offline)</p>
@@ -238,7 +239,7 @@ export function AuthStep({
       <>
         <div className="space-y-6">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">Your providers</h2>
+            <h2 className="font-heading text-h2">Your providers</h2>
             <p className="text-sm text-muted-foreground mt-1">
               {connected.length} provider{connected.length > 1 ? "s" : ""} connected. You can add more or continue to the next step.
             </p>
@@ -248,12 +249,12 @@ export function AuthStep({
             {connected.map((p) => (
               <div
                 key={p.name}
-                className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5"
+                className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-success/20 bg-success/5"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
                   <span className="text-sm font-medium capitalize">{p.name}</span>
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                  <Badge variant="secondary" className="text-micro px-1.5 py-0">
                     {p.source === "oauth" ? "subscription" : "API key"}
                   </Badge>
                 </div>
@@ -299,7 +300,7 @@ export function AuthStep({
               <ChevronLeft className="h-4 w-4" />
             </button>
             <div>
-              <h2 className="text-xl font-semibold tracking-tight">Add a provider</h2>
+              <h2 className="font-heading text-h2">Add a provider</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Choose how to connect another LLM provider.
               </p>
@@ -341,8 +342,8 @@ export function AuthStep({
                 onClick={onChooseLocal}
                 className="w-full flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all"
               >
-                <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Server className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                <div className="h-10 w-10 rounded-lg bg-success/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <Server className="h-5 w-5 text-success" />
                 </div>
                 <div className="min-w-0">
                   <p className="font-medium text-sm">Local model (offline)</p>
@@ -415,6 +416,7 @@ export function OAuthFlow({
   /** When set, skip provider selection and start the flow immediately. */
   initialProvider?: string;
 }) {
+  const product = productName(useInstanceBranding());
   const [selected, setSelected] = useState<string | null>(initialProvider ?? null);
   const [flowId, setFlowId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>(initialProvider ? "starting" : "idle");
@@ -570,7 +572,7 @@ export function OAuthFlow({
             <ChevronLeft className="h-4 w-4" />
           </button>
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">Login with subscription</h2>
+            <h2 className="font-heading text-h2">Login with subscription</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
               Select your provider to authenticate via OAuth.
             </p>
@@ -579,19 +581,19 @@ export function OAuthFlow({
 
         {free.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Free</p>
+            <p className="text-label text-success">Free</p>
             <div className="space-y-1.5">
               {free.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => startFlow(p.id)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-emerald-500/30 hover:bg-emerald-500/5 text-left text-sm transition-all"
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-border hover:border-success/30 hover:bg-success/5 text-left text-sm transition-all"
                 >
                   <div>
                     <span className="font-medium">{p.name}</span>
                     <span className="text-xs text-muted-foreground ml-2">{p.flow}</span>
                   </div>
-                  <Badge variant="secondary" className="text-[10px] text-emerald-600">FREE</Badge>
+                  <Badge variant="secondary" className="text-micro text-success">FREE</Badge>
                 </button>
               ))}
             </div>
@@ -600,7 +602,7 @@ export function OAuthFlow({
 
         {paid.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Subscription required</p>
+            <p className="text-label text-muted-foreground">Subscription required</p>
             <div className="space-y-1.5">
               {paid.map((p) => (
                 <button
@@ -637,7 +639,7 @@ export function OAuthFlow({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <h2 className="text-xl font-semibold tracking-tight">
+        <h2 className="font-heading text-h2">
           {oauthProviders.find((p) => p.id === selected)?.name}
         </h2>
       </div>
@@ -657,7 +659,7 @@ export function OAuthFlow({
             {instructions && (
               <p className="text-sm text-muted-foreground">{instructions}</p>
             )}
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <p className="text-label text-muted-foreground">
               Open this link in your browser
             </p>
             <a
@@ -676,7 +678,7 @@ export function OAuthFlow({
         {status === "awaiting_device" && deviceCode && (
           <div className="space-y-4">
             <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <p className="text-label text-muted-foreground">
                 Open the verification page
               </p>
               <a
@@ -692,7 +694,7 @@ export function OAuthFlow({
               </a>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <p className="text-label text-muted-foreground">
                 Enter this device code
               </p>
               <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
@@ -718,7 +720,7 @@ export function OAuthFlow({
         {status === "awaiting_input" && promptMsg && (
           <div className="space-y-3">
             {promptType === "manual_code" && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs leading-relaxed text-warning">
                 <div className="flex items-start gap-2">
                   <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
                   <p>
@@ -727,7 +729,7 @@ export function OAuthFlow({
                 </div>
               </div>
             )}
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <p className="text-label text-muted-foreground">
               {promptMsg}
             </p>
             {promptType === "select" ? (
@@ -746,7 +748,7 @@ export function OAuthFlow({
                         <span className="block text-sm font-medium">{option.label}</span>
                         {(option.description || remoteHint) && (
                           <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {option.description || "Recommended when Polpo runs on another machine."}
+                            {option.description || `Recommended when ${product} runs on another machine.`}
                           </span>
                         )}
                       </span>
@@ -784,7 +786,7 @@ export function OAuthFlow({
 
         {/* Complete */}
         {status === "complete" && (
-          <div className="flex items-center gap-3 py-8 justify-center text-emerald-600 dark:text-emerald-400">
+          <div className="flex items-center gap-3 py-8 justify-center text-success">
             <CheckCircle2 className="h-5 w-5" />
             <span className="text-sm font-medium">Login successful!</span>
           </div>
@@ -866,7 +868,7 @@ export function ApiKeyStep({
           <ChevronLeft className="h-4 w-4" />
         </button>
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">
+          <h2 className="font-heading text-h2">
             {initialProvider ? `API key for ${initialProvider}` : "Enter an API key"}
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -887,7 +889,7 @@ export function ApiKeyStep({
                 className={cn(
                   "relative flex items-center gap-2 px-3 py-2.5 rounded-lg border text-left text-sm transition-all",
                   isSaved
-                    ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                    ? "border-success/30 bg-success/5 text-success"
                     : selected === p.name
                       ? "border-primary bg-primary/5 ring-1 ring-primary/20"
                       : "border-border hover:border-primary/30 hover:bg-accent/50",
@@ -903,7 +905,7 @@ export function ApiKeyStep({
 
       {selected && (
         <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <label className="text-label text-muted-foreground">
             {providers.find((p) => p.name === selected)?.envVar}
           </label>
           <div className="flex gap-2">
@@ -938,7 +940,7 @@ export function ApiKeyStep({
       )}
 
       {saved.length > 0 && !selected && (
-        <p className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+        <p className="text-sm text-success flex items-center gap-1.5">
           <CheckCircle2 className="h-4 w-4" />
           {saved.length} provider{saved.length > 1 ? "s" : ""} connected
         </p>

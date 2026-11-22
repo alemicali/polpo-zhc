@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/connectors/connector-bits";
 import { NetworkNotice } from "./network-notice";
 import {
   NETWORK_MODES,
@@ -25,6 +26,7 @@ import {
   type SandboxSettings,
   type SandboxVolumeSelection,
 } from "@/lib/sandbox-api";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 const INHERIT = "__inherit";
 
@@ -33,7 +35,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <div className="space-y-1">
       <label className="text-xs font-medium text-foreground">{label}</label>
       {children}
-      {hint && <p className="text-[10px] text-muted-foreground leading-tight">{hint}</p>}
+      {hint && <p className="text-micro text-muted-foreground leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -41,21 +43,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
   return (
     <div className="flex items-center gap-3">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-          checked ? "bg-emerald-500/70" : "bg-white/[0.12]",
-        )}
-      >
-        <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
-          checked ? "translate-x-[1.125rem]" : "translate-x-0.5")} />
-      </button>
-      <span className="text-[12px] text-foreground/80">{label}</span>
+      <Switch checked={checked} onChange={onChange} label={label} />
+      <span className="text-small text-foreground/80">{label}</span>
     </div>
   );
 }
@@ -92,6 +81,7 @@ export interface SandboxEditorProps {
 }
 
 export function SandboxEditor({ level, value, onChange, available, readsExternalContent, confineExternal, agentName }: SandboxEditorProps) {
+  const product = productName(useInstanceBranding());
   const set = (patch: Partial<SandboxSettings>) => onChange({ ...value, ...patch });
   const resources = value.resources ?? {};
   const setResource = (key: keyof NonNullable<SandboxSettings["resources"]>, n?: number) =>
@@ -103,7 +93,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
       <Field
         label="Where tools run"
         hint={level === "instance"
-          ? "Default for every agent and for Polpo's own commands. Chats always stay on this machine; remote sandboxes are for tasks."
+          ? `Default for every agent and for ${product}'s own commands. Chats always stay on this machine; remote sandboxes are for tasks.`
           : "Overrides the instance default for this agent."}
       >
         <Select
@@ -123,7 +113,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
           </SelectContent>
         </Select>
         {value.provider && (
-          <p className="text-[10px] text-muted-foreground leading-tight">
+          <p className="text-micro text-muted-foreground leading-tight">
             {SANDBOX_PROVIDERS.find((p) => p.id === value.provider)?.description}
           </p>
         )}
@@ -143,7 +133,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
                   set({ allowedProviders: SANDBOX_PROVIDERS.map((x) => x.id).filter((id) => list.has(id)) });
                 }}
                 className={cn(
-                  "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                  "rounded-md border px-2 py-1 text-caption transition-colors",
                   on ? "border-primary/50 bg-primary/10 text-foreground" : "border-border/40 text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -187,7 +177,7 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
         <Field label="Disk (MB)"><NumberInput value={resources.diskMb} onChange={(n) => setResource("diskMb", n)} placeholder="—" /></Field>
         <Field label="Timeout (min)"><NumberInput value={resources.timeoutMin} onChange={(n) => setResource("timeoutMin", n)} placeholder="—" /></Field>
       </div>
-      <p className="-mt-3 text-[10px] text-muted-foreground leading-tight">
+      <p className="-mt-3 text-micro text-muted-foreground leading-tight">
         Upper limits for each command. Missions and tasks can lower them, not raise them. Empty: no limit.
       </p>
 
@@ -208,8 +198,8 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
             onChange={(next) => set({ confineExternalContent: next || undefined, allowLocal: next ? value.allowLocal : undefined })}
             label="Isolate agents that read external content"
           />
-          <p className="text-[10px] text-muted-foreground leading-tight">
-            Off: the sandbox applies only where you set it (here, on an agent, in a mission). On: Polpo and agents with web,
+          <p className="text-micro text-muted-foreground leading-tight">
+            Off: the sandbox applies only where you set it (here, on an agent, in a mission). On: {product} and agents with web,
             email, messaging or search tools (or no tool list) run at least in bubblewrap, even when the default is this machine.
           </p>
         </div>
@@ -220,18 +210,18 @@ export function SandboxEditor({ level, value, onChange, available, readsExternal
           <Toggle
             checked={!!value.allowLocal}
             onChange={(next) => set({ allowLocal: next || undefined })}
-            label={level === "instance" ? "Let Polpo run commands without isolation" : "Allow running without isolation"}
+            label={level === "instance" ? `Let ${product} run commands without isolation` : "Allow running without isolation"}
           />
           <p className={cn(
-            "flex items-start gap-1.5 text-[10px] leading-tight",
-            value.allowLocal ? "text-amber-500" : "text-muted-foreground",
+            "flex items-start gap-1.5 text-micro leading-tight",
+            value.allowLocal ? "text-warning" : "text-muted-foreground",
           )}>
             <AlertTriangle className="h-3 w-3 mt-px shrink-0" />
             {level === "instance"
-              ? "Polpo reads messages from people and channels. Without isolation, a message crafted to look like an instruction could make it run commands with access to this server's keys and data."
+              ? `${product} reads messages from people and channels. Without isolation, a message crafted to look like an instruction could make it run commands with access to this server's keys and data.`
               : "This agent reads content from outside (web, email or messages). It runs at least in bubblewrap unless you allow this — for example when it needs git push or the gh login."}
           </p>
-          {value.allowLocal && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">unconfined</Badge>}
+          {value.allowLocal && <Badge variant="outline" className="text-micro border-warning/40 text-warning">unconfined</Badge>}
         </div>
       )}
     </div>
@@ -256,7 +246,7 @@ function VolumesField({ level, value, set, agentName }: {
   if (!candidates.length && !selected.length) {
     return (
       <Field label="Volumes" hint="Folders of this server or buckets the agent can work on.">
-        <p className="text-[10px] text-muted-foreground leading-tight">
+        <p className="text-micro text-muted-foreground leading-tight">
           No volume {level === "agent" ? "granted to this agent" : "yet"}: add one in <Link to="/files" className="underline">Files</Link> (Volumes → Add volume) and give it to this agent.
         </p>
       </Field>
@@ -281,8 +271,8 @@ function VolumesField({ level, value, set, agentName }: {
               <label className="flex min-w-0 flex-1 items-center gap-2">
                 <input type="checkbox" checked={!!sel} onChange={(ev) => toggle(e.slug, ev.target.checked)} />
                 <span className="font-mono truncate">{local ? e.name : `/volumes/${e.slug}`}</span>
-                <Badge variant="outline" className="text-[9px]">{local ? "this server only" : strategy === "hydrated" ? "copy" : "live"}</Badge>
-                {sel && local && remote && <span className="text-[10px] text-amber-500">not attached in remote sandboxes</span>}
+                <Badge variant="outline" className="text-micro">{local ? "this server only" : strategy === "hydrated" ? "copy" : "live"}</Badge>
+                {sel && local && remote && <span className="text-micro text-warning">not attached in remote sandboxes</span>}
               </label>
               {sel && rw && (
                 <Select value={sel.access ?? "__max"} onValueChange={(v) => update(e.slug, { access: v === "__max" ? undefined : v as "read-only" | "read-write", ...(v === "read-only" ? { writeBack: undefined } : {}) })}>
@@ -306,7 +296,7 @@ function VolumesField({ level, value, set, agentName }: {
           );
         })}
         {selected.filter((v) => !candidates.some((e) => e.slug === v.name)).map((v) => (
-          <div key={v.name} className="flex items-center gap-2 text-xs text-amber-500">
+          <div key={v.name} className="flex items-center gap-2 text-xs text-warning">
             <AlertTriangle className="h-3 w-3" /> <span className="font-mono">{v.name}</span> is not a volume granted here: runs fail until it is granted or removed.
             <button className="underline" onClick={() => toggle(v.name, false)}>Remove</button>
           </div>
@@ -334,7 +324,7 @@ function RemoteLifecycle({ level, value, set, available }: {
   const inherit = level === "agent";
   return (
     <div className="space-y-4 rounded-xl border border-border/40 bg-muted/10 p-4">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Remote VMs (Daytona, E2B)</div>
+      <div className="text-label text-muted-foreground">Remote VMs (Daytona, E2B)</div>
 
       <div className="space-y-1.5">
         <Toggle
@@ -342,7 +332,7 @@ function RemoteLifecycle({ level, value, set, available }: {
           onChange={(next) => set({ chatRemote: next || undefined })}
           label={level === "instance" ? "Chats can run on the remote VM (Cowork)" : "This agent's chats run on the remote VM (Cowork)"}
         />
-        <p className="text-[10px] text-muted-foreground leading-tight">
+        <p className="text-micro text-muted-foreground leading-tight">
           Off: chats stay on this machine (bubblewrap at most) and remote VMs are for tasks. On: when the provider above is Daytona or E2B,
           a chat gets its own VM; commands and file tools run there, files the agent puts in the chat's output folder come back after every command (persistent files: volumes), tools with keys stay here.
           The VM is suspended after a minute without tools and goes back to the pool when the chat is idle.

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { PALETTES, type Palette } from "@/lib/palette";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/lib/appearance";
 import type { TokenGroup, TokenMap } from "@/lib/appearance-kit";
 import { parseImportedAppearance } from "@/lib/appearance-import";
+import { FONT_PRESETS } from "@/lib/font-presets";
 
 const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "brand", label: "Brand", hint: "Buttons, links, highlights" },
@@ -27,23 +29,13 @@ const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "borders", label: "Borders & focus", hint: "Lines, inputs, focus ring" },
   { id: "sidebar", label: "Sidebar", hint: "The navigation column" },
   { id: "charts", label: "Charts", hint: "Series colours" },
-  { id: "status", label: "Status", hint: "Errors and destructive actions" },
-  { id: "typography", label: "Typography", hint: "Body, headings, code" },
+  { id: "status", label: "Status", hint: "Success, warning, info, errors (and text on them); task states" },
+  { id: "typography", label: "Typography", hint: "Fonts; the type scale (rem or px); heading weight; label tracking and case" },
   { id: "shape", label: "Shape", hint: "Corners and shadows" },
 ];
 
-const FONT_PRESETS: Array<{ label: string; value: string }> = [
-  { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
-  { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "IBM Plex Sans", value: "\"IBM Plex Sans\", ui-sans-serif, system-ui, sans-serif" },
-  { label: "Newsreader", value: "\"Newsreader\", Georgia, serif" },
-  { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
-  { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
-];
-
 function label(name: string): string {
-  return name.replace(/([A-Z])/g, " $1").replace(/(\d)/, " $1").replace(/^./, (c) => c.toUpperCase());
+  return name.replace(/([A-Z])/g, " $1").replace(/([a-z])(\d)/, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
 /** #rrggbb for the colour picker (any CSS colour, through a 1px canvas), or null. */
@@ -69,19 +61,13 @@ function toHex(color: string | undefined): string | null {
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: Array<{ value: T; label: string; icon?: typeof Sun }>; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
+    <SegmentedControl size="sm" value={value} onValueChange={onChange}>
       {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={cn("inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
-            value === o.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-        >
-          {o.icon && <o.icon className="h-3.5 w-3.5" />}{o.label}
-        </button>
+        <ToggleGroupItem key={o.value} value={o.value}>
+          {o.icon && <o.icon className="h-4 w-4" />}{o.label}
+        </ToggleGroupItem>
       ))}
-    </div>
+    </SegmentedControl>
   );
 }
 
@@ -101,12 +87,13 @@ function TokenRow({ name, value, derived, computed, onChange }: {
   }
   const shown = value ?? derived;
   const placeholder = derived !== undefined ? `${derived} (derived)` : computed ? `${computed} (palette)` : "palette";
-  const invalid = draft.trim() !== "" && kind !== "radius" && kit.tokenValue(name, draft) === undefined;
+  const numeric = kind === "radius" || kind === "weight";
+  const invalid = draft.trim() !== "" && !numeric && kit.tokenValue(name, draft) === undefined;
 
   const commit = (text: string) => {
     setDraft(text);
     if (text.trim() === "") return onChange(undefined);
-    const ok = kit.tokenValue(name, kind === "radius" ? Number(text) : text);
+    const ok = kit.tokenValue(name, numeric ? Number(text) : text);
     if (ok !== undefined) onChange(ok);
   };
 
@@ -114,7 +101,7 @@ function TokenRow({ name, value, derived, computed, onChange }: {
     <div className="grid grid-cols-[8.5rem_minmax(0,1fr)_auto] items-center gap-2 py-1">
       <span className="truncate text-xs" title={kit.TOKENS[name][0]}>
         {label(name)}
-        {value === undefined && derived !== undefined && <span className="ml-1 text-[9px] uppercase text-muted-foreground">auto</span>}
+        {value === undefined && derived !== undefined && <span className="ml-1 text-micro uppercase text-muted-foreground">auto</span>}
       </span>
       <div className="flex min-w-0 items-center gap-2">
         {kind === "color" && (
@@ -135,8 +122,29 @@ function TokenRow({ name, value, derived, computed, onChange }: {
               onChange={(e) => commit(e.target.value)}
               className="w-full accent-primary"
             />
-            <code className="w-12 shrink-0 text-right text-[11px] text-muted-foreground">{value === undefined ? "palette" : `${value}px`}</code>
+            <code className="w-12 shrink-0 text-right text-caption text-muted-foreground">{value === undefined ? "palette" : `${value}px`}</code>
           </>
+        ) : kind === "weight" ? (
+          <>
+            <input
+              type="range" min={100} max={900} step={100}
+              aria-label={label(name)}
+              value={typeof shown === "number" ? shown : Number(computed) || 700}
+              onChange={(e) => commit(e.target.value)}
+              className="w-full accent-primary"
+            />
+            <code className="w-12 shrink-0 text-right text-caption text-muted-foreground">{value === undefined ? computed || "palette" : value}</code>
+          </>
+        ) : kind === "case" ? (
+          <select
+            aria-label={label(name)}
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => commit(e.target.value)}
+            className="h-8 w-40 rounded-md border border-border bg-background px-2 text-xs"
+          >
+            <option value="">{computed ? `${computed} (palette)` : "Palette"}</option>
+            {["uppercase", "none", "capitalize", "lowercase"].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         ) : kind === "font" ? (
           <div className="flex min-w-0 flex-1 gap-2">
             <select
@@ -149,12 +157,12 @@ function TokenRow({ name, value, derived, computed, onChange }: {
               {FONT_PRESETS.map((f) => <option key={f.label} value={f.value}>{f.label}</option>)}
             </select>
             <Input value={draft} placeholder={placeholder} onChange={(e) => commit(e.target.value)}
-              className={cn("h-8 min-w-0 font-mono text-[11px]", invalid && "border-destructive")} />
+              className={cn("h-8 min-w-0 font-mono text-caption", invalid && "border-destructive")} />
           </div>
         ) : (
           <Input value={draft} placeholder={placeholder} onChange={(e) => commit(e.target.value)}
             aria-label={label(name)}
-            className={cn("h-8 min-w-0 font-mono text-[11px]", invalid && "border-destructive")} />
+            className={cn("h-8 min-w-0 font-mono text-caption", invalid && "border-destructive")} />
         )}
       </div>
       <Button variant="ghost" size="icon" className="h-7 w-7" disabled={value === undefined} title="Back to the palette's value"
@@ -244,7 +252,18 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
     "--pv-destructive": String(withDerived.destructive ?? "var(--destructive)"),
     "--pv-radius": typeof withDerived.radius === "number" ? `${withDerived.radius}px` : "var(--radius)",
     "--pv-font": String(withDerived.fontFamily ?? "var(--app-font-family)"),
-    "--pv-heading": String(withDerived.headingFont ?? withDerived.fontFamily ?? "inherit"),
+    "--pv-heading": String(withDerived.headingFont ?? withDerived.fontFamily ?? "var(--app-heading-font)"),
+    "--pv-heading-weight": String(withDerived.headingWeight ?? "var(--font-weight-heading)"),
+    "--pv-heading-size": String(withDerived.textH2 ?? "var(--text-h2)"),
+    "--pv-label-tracking": String(withDerived.labelTracking ?? "var(--tracking-label)"),
+    "--pv-label-case": String(withDerived.labelCase ?? "var(--label-transform)"),
+    "--pv-success": String(withDerived.success ?? "var(--success)"),
+    "--pv-success-fg": String(withDerived.successForeground ?? "var(--success-foreground)"),
+    "--pv-warning": String(withDerived.warning ?? "var(--warning)"),
+    "--pv-warning-fg": String(withDerived.warningForeground ?? "var(--warning-foreground)"),
+    "--pv-info": String(withDerived.info ?? "var(--info)"),
+    "--pv-info-fg": String(withDerived.infoForeground ?? "var(--info-foreground)"),
+    "--pv-destructive-fg": String(withDerived.destructiveForeground ?? "var(--destructive-foreground)"),
   } as CSSProperties;
 
   return (
@@ -257,7 +276,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
               {customized ? <Laptop className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
               {customized ? "Customized in this browser" : hasInstance ? "Following the instance default" : "Built-in default"}
             </div>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <p className="mt-0.5 text-caption text-muted-foreground">
               The instance default is what everyone sees. Changes below apply to this browser only, until you save them as the instance default.
             </p>
           </div>
@@ -281,9 +300,9 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
 
       {/* Theme */}
       <section>
-        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="text-label mb-2 flex items-center gap-1.5 text-muted-foreground">
           <Sun className="h-3.5 w-3.5" /> Theme
-          {resolved.sources.theme !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.theme}</Badge>}
+          {resolved.sources.theme !== "browser" && <Badge variant="outline" className="ml-1 text-micro">{resolved.sources.theme}</Badge>}
         </h3>
         <Segmented
           value={resolved.theme}
@@ -294,9 +313,9 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
 
       {/* Palette */}
       <section>
-        <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="text-label mb-2 flex items-center gap-1.5 text-muted-foreground">
           <PaletteIcon className="h-3.5 w-3.5" /> Palette
-          {resolved.sources.palette !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.palette}</Badge>}
+          {resolved.sources.palette !== "browser" && <Badge variant="outline" className="ml-1 text-micro">{resolved.sources.palette}</Badge>}
         </h3>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {PALETTES.map((option) => (
@@ -316,7 +335,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                   <span key={index} className="flex-1" style={{ background: color }} />
                 ))}
               </div>
-              <p className="text-[11px] leading-snug text-muted-foreground">{option.blurb}</p>
+              <p className="text-caption leading-snug text-muted-foreground">{option.blurb}</p>
             </button>
           ))}
         </div>
@@ -325,9 +344,9 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
       {/* Design tokens */}
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h3 className="text-label flex items-center gap-1.5 text-muted-foreground">
             Design tokens
-            {resolved.sources.custom !== "browser" && <Badge variant="outline" className="ml-1 text-[9px]">{resolved.sources.custom}</Badge>}
+            {resolved.sources.custom !== "browser" && <Badge variant="outline" className="ml-1 text-micro">{resolved.sources.custom}</Badge>}
           </h3>
           <div className="flex flex-wrap items-center gap-2">
             <Segmented value={custom.enabled ? "on" : "off"} options={[{ value: "off", label: "Off" }, { value: "on", label: "On" }]}
@@ -349,7 +368,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
           <div className="mb-3 space-y-2 rounded-lg border border-border/50 bg-card/50 p-3">
             <Textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6}
               placeholder={'{ "theme": "dark", "palette": "claude", "custom": { "enabled": true, "light": { "primary": "#c96442" }, "dark": {} } }'}
-              className="font-mono text-[11px]" />
+              className="font-mono text-caption" />
             <div className="flex gap-2">
               <Button size="sm" className="h-8 text-xs" onClick={() => importJson(importText)}>Import</Button>
               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => fileInput.current?.click()}>From a file…</Button>
@@ -369,9 +388,9 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div>
                       <span className="text-xs font-semibold">{group.label}</span>
-                      <span className="ml-2 text-[10px] text-muted-foreground">{group.hint}{set ? ` · ${set} set` : ""}</span>
+                      <span className="ml-2 text-micro text-muted-foreground">{group.hint}{set ? ` · ${set} set` : ""}</span>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" disabled={!set} onClick={() => resetGroup(group.id)}>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-micro" disabled={!set} onClick={() => resetGroup(group.id)}>
                       Reset group
                     </Button>
                   </div>
@@ -389,20 +408,24 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
           <div className="h-fit rounded-lg border border-border/40 bg-card/60 p-4 lg:sticky lg:top-4" style={previewStyle}>
             <div className="mb-3 flex items-center justify-between">
               <span className="text-xs font-semibold">Preview</span>
-              <Badge variant="outline" className="text-[10px]">{mode}</Badge>
+              <Badge variant="outline" className="text-micro">{mode}</Badge>
             </div>
             <div className="space-y-3 rounded-[var(--pv-radius)] border p-3"
               style={{ background: "var(--pv-bg)", borderColor: "var(--pv-border)", color: "var(--pv-text)", fontFamily: "var(--pv-font)" }}>
-              <div className="text-base font-semibold" style={{ fontFamily: "var(--pv-heading)" }}>Heading</div>
+              <div className="text-micro font-semibold" style={{ letterSpacing: "var(--pv-label-tracking)", textTransform: "var(--pv-label-case)" as CSSProperties["textTransform"] }}>Label</div>
+              <div style={{ fontFamily: "var(--pv-heading)", fontWeight: "var(--pv-heading-weight)" as CSSProperties["fontWeight"], fontSize: "var(--pv-heading-size)" }}>Heading</div>
               <button type="button" className="h-9 w-full rounded-[var(--pv-radius)] px-3 text-sm font-medium"
                 style={{ background: "var(--pv-primary)", color: "var(--pv-primary-fg)" }}>Primary action</button>
               <div className="rounded-[var(--pv-radius)] border p-3 text-xs" style={{ background: "var(--pv-card)", borderColor: "var(--pv-border)" }}>
                 Card surface
                 <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Muted text</div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
-                <span className="rounded-full px-2 py-0.5 text-xs text-white" style={{ background: "var(--pv-destructive)" }}>Error</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
+                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
               </div>
               <div className="flex h-4 overflow-hidden rounded">
                 {["chart1", "chart2", "chart3", "chart4", "chart5"].map((c, i) => (
@@ -410,7 +433,7 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                 ))}
               </div>
             </div>
-            <p className="mt-2 text-[10px] text-muted-foreground">The whole page is the live preview: changes apply as you make them.</p>
+            <p className="mt-2 text-micro text-muted-foreground">The whole page is the live preview: changes apply as you make them.</p>
           </div>
         </div>
       </section>

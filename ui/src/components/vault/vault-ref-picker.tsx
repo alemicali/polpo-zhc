@@ -85,7 +85,7 @@ export function VaultRefPicker({
             className={cn(
               "flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-left text-xs shadow-xs transition-[color,box-shadow] outline-none",
               "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
-              (notFound || missing.length > 0) && "border-amber-500/50",
+              (notFound || missing.length > 0) && "border-warning/50",
             )}
           >
             <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -108,7 +108,7 @@ export function VaultRefPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search agent, service or key"
-              className="h-7 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+              className="h-7 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
             />
             <button
               type="button"
@@ -130,7 +130,7 @@ export function VaultRefPicker({
             )}
             {groups.map((group) => (
               <div key={group.owner} className="py-0.5">
-                <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{group.owner}</div>
+                <div className="px-3 pb-0.5 pt-1.5 text-label text-muted-foreground/70">{group.owner}</div>
                 {group.entries.map((entry) => {
                   const isSelected = sameVaultRef(entry, value);
                   const lacks = missingCredentials(entry.keys, requiredKeys).length > 0;
@@ -152,15 +152,15 @@ export function VaultRefPicker({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5">
                           <span className="truncate font-mono">{entry.owner} · {entry.service}</span>
-                          <span className="shrink-0 rounded border border-border/50 px-1 text-[9.5px] text-muted-foreground">{TYPE_LABEL[entry.type]}</span>
+                          <span className="shrink-0 rounded border border-border/50 px-1 text-micro text-muted-foreground">{TYPE_LABEL[entry.type]}</span>
                           {shared && (
-                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-500/10 px-1.5 text-[9.5px] text-sky-400" title={entry.allowedAgents.join(", ")}>
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-info/10 px-1.5 text-micro text-info" title={entry.allowedAgents.join(", ")}>
                               <Users className="h-2.5 w-2.5" /> {shared}
                             </span>
                           )}
                         </span>
                         {entry.label && <span className="block truncate text-muted-foreground">{entry.label}</span>}
-                        <span className={cn("block truncate font-mono text-[10px]", lacks ? "text-amber-500/80" : "text-muted-foreground/70")}>
+                        <span className={cn("block truncate font-mono text-micro", lacks ? "text-warning/80" : "text-muted-foreground/70")}>
                           {entry.keys.length ? entry.keys.join(", ") : "no keys"}
                         </span>
                       </span>
@@ -171,7 +171,7 @@ export function VaultRefPicker({
             ))}
           </div>
           {entries && requiredKeys.length > 0 && fitting.length === 0 && addOwner && (
-            <div className="border-t border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="border-t border-border/40 px-3 py-2 text-caption text-muted-foreground">
               No entry holds {expectedNames(requiredKeys)}.{" "}
               <Link to={credentialsTabPath(addOwner)} className="text-primary underline" onClick={() => setOpen(false)}>
                 Add it in the agent's Credentials tab
@@ -179,7 +179,7 @@ export function VaultRefPicker({
             </div>
           )}
           {entries && entries.length === 0 && (
-            <div className="border-t border-border/40 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="border-t border-border/40 px-3 py-2 text-caption text-muted-foreground">
               Keys live in an agent's vault (shared with other agents when needed).{" "}
               <Link to="/agents" className="text-primary underline" onClick={() => setOpen(false)}>Open Agents</Link>
             </div>
@@ -198,13 +198,13 @@ export function VaultRefPicker({
         </PopoverContent>
       </Popover>
       {notFound && (
-        <p className="flex items-center gap-1 text-[10.5px] text-amber-500">
+        <p className="flex items-center gap-1 text-caption text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" /> Not found in {value!.owner}'s vault.{" "}
           <Link to={credentialsTabPath(value!.owner)} className="underline">Add it in the agent's Credentials tab</Link>
         </p>
       )}
       {!notFound && missing.length > 0 && (
-        <p className="flex items-center gap-1 text-[10.5px] text-amber-500">
+        <p className="flex items-center gap-1 text-caption text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" /> This entry has no {expectedNames(missing)} key.
         </p>
       )}

@@ -4,9 +4,36 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Inter Tight (SIL OFL 1.1, public/fonts/inter-tight/OFL.txt), self-hosted: one variable woff2 per
+ * subset, weights 100–900. Declared only: the browser fetches a file just when text uses the family
+ * (an appearance with "Inter Tight"), and lib/appearance-kit.ts preloads the latin one then.
+ */
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/inter-tight/inter-tight-latin-ext-wght-normal.woff2") format("woff2-variations"), url("/fonts/inter-tight/inter-tight-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("/fonts/inter-tight/inter-tight-latin-wght-normal.woff2") format("woff2-variations"), url("/fonts/inter-tight/inter-tight-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Tailwind's theme, wired to the runtime tokens (the palettes below, and the overrides stylesheet
+ * lib/appearance-kit.ts writes for a custom look): `inline` makes a utility use the token itself
+ * (`font-sans` is `font-family: var(--app-font-family)`), so it follows the look at runtime.
+ */
 @theme inline {
-  --font-sans: "Satoshi", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  --font-sans: var(--app-font-family);
+  --font-mono: var(--app-mono-font);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -29,6 +56,16 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-status-running: var(--status-running);
+  --color-status-queued: var(--status-queued);
+  --color-status-assigned: var(--status-assigned);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -47,6 +84,71 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * The type scale: `text-display`, `text-h1` … `text-micro` (font size + line height), `leading-*`
+ * of the same names, `tracking-heading` / `tracking-label`. Not inline: the variables are on :root
+ * (static: always, used or not), so a palette or a custom look overrides them by name
+ * (--text-h1: 1.75rem). The names do not clash with Tailwind's (xs … 9xl).
+ */
+@theme static {
+  --text-display: 2.25rem;
+  --text-display--line-height: var(--leading-display);
+  --text-h1: 1.5rem;
+  --text-h1--line-height: var(--leading-h1);
+  --text-h2: 1.125rem;
+  --text-h2--line-height: var(--leading-h2);
+  --text-h3: 0.9375rem;
+  --text-h3--line-height: var(--leading-h3);
+  --text-body: 0.875rem;
+  --text-body--line-height: var(--leading-body);
+  --text-small: 0.8125rem;
+  --text-small--line-height: var(--leading-small);
+  --text-caption: 0.6875rem;
+  --text-caption--line-height: var(--leading-caption);
+  --text-micro: 0.625rem;
+  --text-micro--line-height: var(--leading-micro);
+  --leading-display: 1.1;
+  --leading-h1: 1.25;
+  --leading-h2: 1.3;
+  --leading-h3: 1.4;
+  --leading-body: 1.5;
+  --leading-small: 1.45;
+  --leading-caption: 1.4;
+  --leading-micro: 1.3;
+  --tracking-heading: -0.025em;
+  --tracking-label: 0.06em;
+}
+
+/* Headings: the heading font, weight and tracking (h1–h3 get them in the base layer). */
+@utility font-heading {
+  font-family: var(--app-heading-font);
+  font-weight: var(--font-weight-heading);
+  letter-spacing: var(--tracking-heading);
+}
+
+/* A small label / eyebrow: caption size, semibold, the label case and tracking, the body font. */
+@utility text-label {
+  font-family: var(--app-font-family);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  font-weight: 600;
+  text-transform: var(--label-transform);
+  letter-spacing: var(--tracking-label);
+}
+
+/*
+ * The look's shadows: cards (shadow-card) and what floats above the page — popovers, menus,
+ * dialogs, tooltips (shadow-raised). Composed like Tailwind's shadow-* (rings still apply).
+ */
+@utility shadow-card {
+  --tw-shadow: var(--shadow-card);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+@utility shadow-raised {
+  --tw-shadow: var(--shadow-raised);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+
 /* ─── Light theme: tide pool — Mediterranean shore at midday ───
  *
  * The light counterpart to the dark "deep-sea bioluminescence" theme.
@@ -59,6 +161,23 @@
  */
 :root {
   --radius: 0.75rem;
+
+  /* Typography — the fonts every palette starts from (Tailwind's font-sans / font-mono follow them) */
+  --app-font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --app-heading-font: var(--app-font-family);
+  --app-mono-font: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  --font-heading: var(--app-heading-font);
+  --font-weight-heading: 700;
+  --label-transform: uppercase;
+
+  /* Task states: follow the status tokens unless a look sets them */
+  --status-running: var(--info);
+  --status-queued: var(--muted-foreground);
+  --status-assigned: var(--primary);
+
+  /* Shadows — cards, and what floats (popovers, menus, dialogs, tooltips) */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 8%), 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --shadow-raised: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
 
   /* Surfaces — pearlescent whites with the faintest seawater cast */
   --background: oklch(0.985 0.006 215);
@@ -82,6 +201,13 @@
 
   /* Coral instead of red traffic-light — alive, not aggressive */
   --destructive: oklch(0.625 0.165 28);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.5 0.12 165);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.55 0.14 60);
+  --warning-foreground: #ffffff;
+  --info: oklch(0.52 0.13 240);
+  --info-foreground: #ffffff;
 
   /* Borders — sea-glass edge */
   --border: oklch(0.9 0.014 215);
@@ -108,6 +234,8 @@
 
 /* ─── Dark theme: deep-sea bioluminescence ─── */
 .dark {
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 30%), 0 1px 2px -1px rgb(0 0 0 / 30%);
+  --shadow-raised: 0 12px 28px -6px rgb(0 0 0 / 55%), 0 4px 10px -4px rgb(0 0 0 / 40%);
   --background: oklch(0.1 0.025 260);
   --foreground: oklch(0.93 0.01 250);
   --card: oklch(0.135 0.03 260);
@@ -123,6 +251,13 @@
   --accent: oklch(0.2 0.035 260);
   --accent-foreground: oklch(0.9 0.01 250);
   --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.76 0.14 165);
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.8 0.14 80);
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: oklch(0.76 0.11 230);
+  --info-foreground: oklch(0.18 0.02 260);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.7 0.15 200);
@@ -146,8 +281,11 @@
  * Each palette overrides:
  *   - colour tokens (background / foreground / primary / etc.)
  *   - --radius          (geometric language: 0 sharp, large soft)
- *   - --shadow-soft     (card/popover shadow)
- *   - --shadow-pressed  (pressed/hover shadow — neobrutalist solid drop, etc.)
+ *   - --shadow-card     (cards: the shadow-card utility)
+ *   - --shadow-raised   (popovers, menus, dialogs, tooltips: shadow-raised)
+ *   - --success / --warning / --info (+ -foreground), --destructive-foreground
+ *   - type tokens where the palette has its own voice (--app-heading-font,
+ *     --font-weight-heading, --tracking-heading, --tracking-label)
  *
  * Default palette (no `data-palette`) is "tide" — see :root / .dark above.
  */
@@ -170,6 +308,13 @@
   --accent: oklch(0.92 0 0);
   --accent-foreground: oklch(0 0 0);
   --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.48 0.16 145);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.55 0.17 55);
+  --warning-foreground: #ffffff;
+  --info: oklch(0.48 0.2 262);
+  --info-foreground: #ffffff;
   --border: oklch(0 0 0);
   --input: oklch(0 0 0);
   --ring: oklch(0 0 0);
@@ -204,6 +349,13 @@
   --accent: oklch(0.22 0 0);
   --accent-foreground: oklch(1 0 0);
   --destructive: oklch(0.7 0.22 25);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.8 0.2 145);
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.84 0.17 85);
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: oklch(0.76 0.15 250);
+  --info-foreground: oklch(0.18 0.02 260);
   --border: oklch(1 0 0);
   --input: oklch(1 0 0);
   --ring: oklch(1 0 0);
@@ -221,17 +373,17 @@
   --sidebar-border: oklch(1 0 0);
   --sidebar-ring: oklch(1 0 0);
 }
-/* Brutalist decoration — every card/button gets a hard 4px solid drop. */
+/* Brutalist decoration — every card gets a hard 4px solid drop, what floats a 6px one. */
 :root[data-palette="brutal"] {
   --shadow-card: 4px 4px 0 0 oklch(0 0 0 / 100%);
+  --shadow-raised: 6px 6px 0 0 oklch(0 0 0 / 100%);
 }
 .dark[data-palette="brutal"] {
   --shadow-card: 4px 4px 0 0 oklch(1 0 0 / 100%);
+  --shadow-raised: 6px 6px 0 0 oklch(1 0 0 / 100%);
 }
-[data-palette="brutal"] .deep-sea-bg { background: none; }
 [data-palette="brutal"] [data-slot="card"] {
   border-width: 2px;
-  box-shadow: var(--shadow-card);
 }
 [data-palette="brutal"] button:not([data-state="open"]):not(.no-brutal-shadow) {
   border-width: 1px;
@@ -255,6 +407,13 @@
   --accent: oklch(0.92 0.04 70);
   --accent-foreground: oklch(0.28 0.05 50);
   --destructive: oklch(0.5 0.18 25);
+  --destructive-foreground: #ffffff;
+  --success: oklch(0.47 0.1 150);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.52 0.12 60);
+  --warning-foreground: #ffffff;
+  --info: oklch(0.48 0.1 235);
+  --info-foreground: #ffffff;
   --border: oklch(0.86 0.025 70);
   --input: oklch(0.86 0.025 70);
   --ring: oklch(0.42 0.13 25);
@@ -272,6 +431,7 @@
   --sidebar-border: oklch(0.84 0.03 65);
   --sidebar-ring: oklch(0.42 0.13 25);
   --shadow-card: 0 14px 40px -18px oklch(0.3 0.06 50 / 30%);
+  --shadow-raised: 0 20px 48px -16px oklch(0.3 0.06 50 / 35%);
 }
 .dark[data-palette="editorial"] {
   --radius: 1rem;
@@ -290,6 +450,13 @@
   --accent: oklch(0.27 0.04 60);
   --accent-foreground: oklch(0.92 0.022 75);
   --destructive: oklch(0.7 0.18 25);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.74 0.12 150);
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.8 0.12 78);
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: oklch(0.74 0.09 230);
+  --info-foreground: oklch(0.18 0.02 260);
   --border: oklch(1 0.02 75 / 9%);
   --input: oklch(1 0.02 75 / 13%);
   --ring: oklch(0.7 0.13 35);
@@ -307,8 +474,8 @@
   --sidebar-border: oklch(1 0.02 75 / 7%);
   --sidebar-ring: oklch(0.7 0.13 35);
   --shadow-card: 0 18px 45px -22px oklch(0 0 0 / 60%);
+  --shadow-raised: 0 24px 56px -18px oklch(0 0 0 / 70%);
 }
-[data-palette="editorial"] [data-slot="card"] { box-shadow: var(--shadow-card); }
 /* Subtle paper grain on body for editorial feel */
 [data-palette="editorial"] body::before {
   content: "";
@@ -351,6 +518,13 @@
   --accent: #e93f33;
   --accent-foreground: #ffffff;
   --destructive: #b72720;
+  --destructive-foreground: #ffffff;
+  --success: #2e6b45;
+  --success-foreground: #ffffff;
+  --warning: #94590f;
+  --warning-foreground: #ffffff;
+  --info: #1f5f86;
+  --info-foreground: #ffffff;
   --border: var(--line);
   --input: var(--line);
   --ring: #e93f33;
@@ -368,16 +542,17 @@
   --sidebar-border: var(--line);
   --sidebar-ring: #e93f33;
 
-  --font-sans: "IBM Plex Sans", "Aptos", sans-serif;
   --font-serif: "Newsreader", Georgia, serif;
-  --app-font-family: var(--font-sans);
+  --app-font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --app-heading-font: "Newsreader", Georgia, serif;
+  --font-weight-heading: 500;
+  --tracking-heading: 0;
+  --tracking-label: 0;
   --text-xs: 12px;
   --text-sm: 14px;
   --text-base: 16px;
   --text-md: 17px;
   --text-lg: 20px;
-  --text-display: clamp(38px, 7vw, 72px);
-  --lh-display: 0.98;
   --lh-snug: 1.35;
   --lh-body: 1.55;
   --w-medium: 500;
@@ -437,6 +612,13 @@
   --accent: #ff6257;
   --accent-foreground: #171715;
   --destructive: #ff6257;
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: #7fbf92;
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: #e0a95a;
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: #7db4d4;
+  --info-foreground: oklch(0.18 0.02 260);
   --border: var(--line);
   --input: #484841;
   --ring: #ff6257;
@@ -458,17 +640,16 @@
 
 [data-palette="redline"] * {
   border-radius: 0 !important;
+}
+/* Zero letter-spacing everywhere, except what the type tokens drive (0 here too, unless a look sets them). */
+[data-palette="redline"] *:not(h1, h2, h3, .font-heading, .tracking-heading, .text-label, .tracking-label) {
   letter-spacing: 0 !important;
 }
-[data-palette="redline"] body {
-  font-family: "IBM Plex Sans", "Aptos", sans-serif;
+/* Flat newsprint: no shadows, except the look's own (cards are flat, what floats is raised). */
+[data-palette="redline"] {
+  --shadow-card: 0 0 #0000;
 }
-[data-palette="redline"] h1 {
-  font-family: "Newsreader", Georgia, serif;
-  font-weight: var(--w-medium);
-}
-[data-palette="redline"] .deep-sea-bg { background: none; }
-[data-palette="redline"] [class*="shadow-"] { box-shadow: none !important; }
+[data-palette="redline"] [class*="shadow-"]:not(.shadow-card, .shadow-raised) { box-shadow: none !important; }
 [data-palette="redline"] [data-slot="tabs-trigger"][data-state="active"] {
   box-shadow: var(--shadow-raised) !important;
 }
@@ -491,6 +672,13 @@
   --accent: oklch(0.93 0.04 335);
   --accent-foreground: oklch(0.22 0.04 250);
   --destructive: oklch(0.6 0.24 30);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.5 0.15 155);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.55 0.16 65);
+  --warning-foreground: #ffffff;
+  --info: oklch(0.5 0.16 240);
+  --info-foreground: #ffffff;
   --border: oklch(0.87 0.025 240);
   --input: oklch(0.87 0.025 240);
   --ring: oklch(0.55 0.18 200);
@@ -508,6 +696,7 @@
   --sidebar-border: oklch(0.84 0.03 240);
   --sidebar-ring: oklch(0.5 0.18 200);
   --shadow-card: 0 0 0 1px oklch(0.55 0.18 200 / 12%), 0 4px 18px -6px oklch(0.55 0.18 200 / 18%);
+  --shadow-raised: 0 0 0 1px oklch(0.55 0.18 200 / 20%), 0 10px 30px -8px oklch(0.55 0.18 200 / 28%);
 }
 .dark[data-palette="cyber"] {
   --radius: 0.25rem;
@@ -526,6 +715,13 @@
   --accent: oklch(0.2 0.06 335);
   --accent-foreground: oklch(0.92 0.04 195);
   --destructive: oklch(0.7 0.24 30);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.84 0.2 150);
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.86 0.17 92);
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: oklch(0.8 0.14 230);
+  --info-foreground: oklch(0.18 0.02 260);
   --border: oklch(0.78 0.16 195 / 18%);
   --input: oklch(0.78 0.16 195 / 22%);
   --ring: oklch(0.78 0.18 195);
@@ -543,8 +739,8 @@
   --sidebar-border: oklch(0.78 0.16 195 / 16%);
   --sidebar-ring: oklch(0.78 0.18 195);
   --shadow-card: 0 0 0 1px oklch(0.78 0.18 195 / 22%), 0 0 24px -6px oklch(0.78 0.18 195 / 32%);
+  --shadow-raised: 0 0 0 1px oklch(0.78 0.18 195 / 35%), 0 0 32px -6px oklch(0.78 0.18 195 / 40%);
 }
-[data-palette="cyber"] [data-slot="card"] { box-shadow: var(--shadow-card); }
 /* Soft scanlines on the dark variant */
 .dark[data-palette="cyber"] body::after {
   content: "";
@@ -580,6 +776,13 @@
   --accent: oklch(0.94 0 0);
   --accent-foreground: oklch(0.18 0 0);
   --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: #ffffff;
+  --success: oklch(0.49 0.1 155);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.54 0.11 65);
+  --warning-foreground: #ffffff;
+  --info: oklch(0.5 0.12 250);
+  --info-foreground: #ffffff;
   --border: oklch(0.88 0 0);
   --input: oklch(0.88 0 0);
   --ring: oklch(0.55 0.16 250);
@@ -598,6 +801,7 @@
   --sidebar-border: oklch(0.86 0 0);
   --sidebar-ring: oklch(0.55 0.16 250);
   --shadow-card: 0 0 0 1px oklch(0 0 0 / 6%);
+  --shadow-raised: 0 0 0 1px oklch(0 0 0 / 10%), 0 8px 20px -8px oklch(0 0 0 / 18%);
 }
 .dark[data-palette="mono"] {
   --radius: 0px;
@@ -616,6 +820,13 @@
   --accent: oklch(0.21 0 0);
   --accent-foreground: oklch(0.95 0 0);
   --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.76 0.11 155);
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.8 0.11 80);
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: oklch(0.76 0.1 245);
+  --info-foreground: oklch(0.18 0.02 260);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.65 0.18 250);
@@ -633,9 +844,8 @@
   --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-ring: oklch(0.65 0.18 250);
   --shadow-card: 0 0 0 1px oklch(1 0 0 / 8%);
+  --shadow-raised: 0 0 0 1px oklch(1 0 0 / 12%), 0 10px 24px -8px oklch(0 0 0 / 60%);
 }
-[data-palette="mono"] [data-slot="card"] { box-shadow: var(--shadow-card); }
-[data-palette="mono"] .deep-sea-bg { background: none; }
 
 /* ─── Lovable — warm workspace chrome with a focused blue signal ─── */
 :root[data-palette="lovable"] {
@@ -656,6 +866,13 @@
   --accent: #e8ebff;
   --accent-foreground: #1d3fc4;
   --destructive: #d33d45;
+  --destructive-foreground: #ffffff;
+  --success: #137a52;
+  --success-foreground: #ffffff;
+  --warning: #9a5b00;
+  --warning-foreground: #ffffff;
+  --info: #1d63c9;
+  --info-foreground: #ffffff;
   --border: #dedbd5;
   --input: #d4d0c9;
   --ring: #315efb;
@@ -674,6 +891,7 @@
   --sidebar-ring: #315efb;
   --app-font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
   --shadow-card: 0 1px 2px rgb(34 31 27 / 6%), 0 8px 24px rgb(34 31 27 / 5%);
+  --shadow-raised: 0 2px 6px rgb(34 31 27 / 8%), 0 16px 40px rgb(34 31 27 / 12%);
 }
 .dark[data-palette="lovable"] {
   color-scheme: dark;
@@ -692,6 +910,13 @@
   --accent: #2d3351;
   --accent-foreground: #dfe5ff;
   --destructive: #ff6b72;
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: #5ccba7;
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: #f0b55a;
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: #7cb4ff;
+  --info-foreground: oklch(0.18 0.02 260);
   --border: #3a3834;
   --input: #48453f;
   --ring: #7590ff;
@@ -709,6 +934,7 @@
   --sidebar-border: #302f2c;
   --sidebar-ring: #7590ff;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 25%), 0 10px 28px rgb(0 0 0 / 16%);
+  --shadow-raised: 0 2px 6px rgb(0 0 0 / 35%), 0 18px 44px rgb(0 0 0 / 35%);
 }
 
 /* ─── ChatGPT — neutral, low-noise monochrome application chrome ─── */
@@ -730,6 +956,13 @@
   --accent: #ececec;
   --accent-foreground: #0d0d0d;
   --destructive: #d00e17;
+  --destructive-foreground: #ffffff;
+  --success: #0b7a5f;
+  --success-foreground: #ffffff;
+  --warning: #9a5a00;
+  --warning-foreground: #ffffff;
+  --info: #2563c4;
+  --info-foreground: #ffffff;
   --border: #e5e5e5;
   --input: #d9d9d9;
   --ring: #707070;
@@ -746,8 +979,9 @@
   --sidebar-accent-foreground: #0d0d0d;
   --sidebar-border: #eeeeee;
   --sidebar-ring: #707070;
-  --app-font-family: "OpenAI Sans", "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --app-font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 4%);
+  --shadow-raised: 0 4px 16px rgb(0 0 0 / 8%), 0 0 0 1px rgb(0 0 0 / 4%);
 }
 .dark[data-palette="chatgpt"] {
   color-scheme: dark;
@@ -766,6 +1000,13 @@
   --accent: #383838;
   --accent-foreground: #ffffff;
   --destructive: #ff676f;
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: #46c6a3;
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: #f0a64b;
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: #7fb2f0;
+  --info-foreground: oklch(0.18 0.02 260);
   --border: #424242;
   --input: #4a4a4a;
   --ring: #9b9b9b;
@@ -782,7 +1023,8 @@
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #2c2c2c;
   --sidebar-ring: #9b9b9b;
-  --shadow-card: none;
+  --shadow-card: 0 0 #0000;
+  --shadow-raised: 0 8px 24px -6px rgb(0 0 0 / 50%), 0 0 0 1px rgb(255 255 255 / 6%);
 }
 
 /* ─── Claude — warm paper, terracotta actions, editorial hierarchy ─ */
@@ -804,6 +1046,13 @@
   --accent: #e9e4da;
   --accent-foreground: #4b4037;
   --destructive: #b93832;
+  --destructive-foreground: #ffffff;
+  --success: #3f7a4f;
+  --success-foreground: #ffffff;
+  --warning: #94621a;
+  --warning-foreground: #ffffff;
+  --info: #3b6ea5;
+  --info-foreground: #ffffff;
   --border: #ddd9d0;
   --input: #d2cdc3;
   --ring: #c96442;
@@ -820,8 +1069,11 @@
   --sidebar-accent-foreground: #2f2e2b;
   --sidebar-border: #dedad1;
   --sidebar-ring: #c96442;
-  --app-font-family: "Aptos", "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --app-font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --app-heading-font: "Newsreader", Georgia, serif;
+  --font-weight-heading: 600;
   --shadow-card: 0 1px 2px rgb(54 48 40 / 5%);
+  --shadow-raised: 0 4px 18px rgb(54 48 40 / 10%), 0 0 0 1px rgb(54 48 40 / 5%);
 }
 .dark[data-palette="claude"] {
   color-scheme: dark;
@@ -840,6 +1092,13 @@
   --accent: #3a332d;
   --accent-foreground: #f4e8de;
   --destructive: #ef716a;
+  --destructive-foreground: oklch(0.18 0.02 260);
+  --success: #86bf8f;
+  --success-foreground: oklch(0.18 0.02 260);
+  --warning: #d9a75a;
+  --warning-foreground: oklch(0.18 0.02 260);
+  --info: #8fb5dc;
+  --info-foreground: oklch(0.18 0.02 260);
   --border: #444139;
   --input: #504c43;
   --ring: #e08b6c;
@@ -857,27 +1116,22 @@
   --sidebar-border: #37352f;
   --sidebar-ring: #e08b6c;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 18%);
+  --shadow-raised: 0 6px 22px rgb(0 0 0 / 40%), 0 0 0 1px rgb(255 255 255 / 4%);
+  --app-heading-font: "Newsreader", Georgia, serif;
+  --font-weight-heading: 600;
 }
 
-[data-palette="lovable"] *,
-[data-palette="chatgpt"] *,
-[data-palette="claude"] * {
+[data-palette="lovable"],
+[data-palette="chatgpt"],
+[data-palette="claude"] {
+  --tracking-heading: 0;
+  --tracking-label: 0;
+}
+/* Zero letter-spacing everywhere, except what the type tokens drive (0 here too, unless a look sets them). */
+[data-palette="lovable"] *:not(h1, h2, h3, .font-heading, .tracking-heading, .text-label, .tracking-label),
+[data-palette="chatgpt"] *:not(h1, h2, h3, .font-heading, .tracking-heading, .text-label, .tracking-label),
+[data-palette="claude"] *:not(h1, h2, h3, .font-heading, .tracking-heading, .text-label, .tracking-label) {
   letter-spacing: 0 !important;
-}
-[data-palette="lovable"] [data-slot="card"],
-[data-palette="chatgpt"] [data-slot="card"],
-[data-palette="claude"] [data-slot="card"] {
-  box-shadow: var(--shadow-card);
-}
-[data-palette="lovable"] .deep-sea-bg,
-[data-palette="chatgpt"] .deep-sea-bg,
-[data-palette="claude"] .deep-sea-bg {
-  background: none;
-}
-[data-palette="claude"] h1,
-[data-palette="claude"] h2 {
-  font-family: "Newsreader", Georgia, serif;
-  font-weight: 600;
 }
 
 @layer base {
@@ -918,12 +1172,18 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  h1, h2, h3, h4, h5, h6 {
-    letter-spacing: -0.025em;
+  /* Headings follow the type tokens (utilities on the element still win: text-label, font-medium…) */
+  h1, h2, h3 {
+    font-family: var(--app-heading-font);
+    font-weight: var(--font-weight-heading);
+    letter-spacing: var(--tracking-heading);
+  }
+  h4, h5, h6 {
+    letter-spacing: var(--tracking-heading);
     font-weight: 700;
   }
-  code, pre, .font-mono {
-    font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  code, pre, kbd, .font-mono {
+    font-family: var(--app-mono-font);
     font-feature-settings: "liga" 1, "calt" 1;
   }
 }
@@ -1051,14 +1311,10 @@
   display: none;
 }
 
-/* ─── Custom scrollbar — gentle, theme-aligned ─── */
+/* ─── Custom scrollbar — gentle, from the look's muted text colour ─── */
 * {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.84 0.018 210) transparent;
-}
-
-.dark * {
-  scrollbar-color: oklch(0.25 0.03 260) transparent;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -1071,36 +1327,30 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: oklch(0.84 0.018 210);
+  background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
   border-radius: 9999px;
 }
 
-.dark *::-webkit-scrollbar-thumb {
-  background-color: oklch(0.25 0.03 260);
-}
-
 *::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.74 0.03 210);
+  background-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
 }
 
-.dark *::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.35 0.04 260);
-}
-
-/* ─── Bioluminescent glow effects ─── */
+/* ─── Glows — from the look's tokens (glow-primary; glow-cyan is the old name) ─── */
+.glow-primary,
 .glow-cyan {
-  box-shadow: 0 0 20px oklch(0.7 0.15 200 / 15%),
-              0 0 40px oklch(0.7 0.15 200 / 5%);
+  box-shadow: 0 0 20px color-mix(in oklch, var(--primary) 15%, transparent),
+              0 0 40px color-mix(in oklch, var(--primary) 5%, transparent);
 }
 
 .glow-magenta {
-  box-shadow: 0 0 20px oklch(0.68 0.18 330 / 15%),
-              0 0 40px oklch(0.68 0.18 330 / 5%);
+  box-shadow: 0 0 20px color-mix(in oklch, var(--chart-3) 15%, transparent),
+              0 0 40px color-mix(in oklch, var(--chart-3) 5%, transparent);
 }
 
+.glow-warning,
 .glow-amber {
-  box-shadow: 0 0 20px oklch(0.75 0.15 85 / 15%),
-              0 0 40px oklch(0.75 0.15 85 / 5%);
+  box-shadow: 0 0 20px color-mix(in oklch, var(--warning) 15%, transparent),
+              0 0 40px color-mix(in oklch, var(--warning) 5%, transparent);
 }
 
 /* ─── Subtle noise texture on cards ─── */
@@ -1112,26 +1362,6 @@
   opacity: 0.03;
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* ─── Gradient mesh background for sidebar ───
- *
- * Light: a tide pool — sunlit teal at the bottom, a hint of coral at
- * the top edge, jade in the deepest spot. Sub­tle, never saturated.
- * Dark: deep-sea bioluminescence (unchanged).
- */
-.deep-sea-bg {
-  background:
-    radial-gradient(ellipse at 20% 85%, oklch(0.9 0.045 205 / 65%) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% 15%, oklch(0.92 0.04 30 / 35%) 0%, transparent 55%),
-    radial-gradient(ellipse at 50% 100%, oklch(0.86 0.04 165 / 28%) 0%, transparent 60%);
-}
-
-.dark .deep-sea-bg {
-  background:
-    radial-gradient(ellipse at 20% 80%, oklch(0.2 0.08 200 / 30%) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, oklch(0.18 0.06 330 / 20%) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, oklch(0.12 0.04 260 / 40%) 0%, transparent 70%);
 }
 
 /* ─── Animated pulse for live indicators ─── */

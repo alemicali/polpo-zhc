@@ -263,9 +263,9 @@ function OverflowSelector({
           type="button"
           title={`${tabs.length} more session${tabs.length === 1 ? "" : "s"}`}
           className={cn(
-            "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium transition-colors",
+            "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-caption font-medium transition-colors",
             activeFlash
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              ? "bg-primary/10 text-primary"
               : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
           )}
         >
@@ -278,7 +278,7 @@ function OverflowSelector({
         align="start"
         className="w-72 p-0"
       >
-        <div className="border-b border-border/70 px-3 py-2 text-[10px] uppercase text-muted-foreground">
+        <div className="border-b border-border/70 px-3 py-2 text-label text-muted-foreground">
           More sessions
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
@@ -293,7 +293,7 @@ function OverflowSelector({
                 {t.label.trim() || t.branch || "session"}
               </button>
               {t.branch && (
-                <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
+                <span className="shrink-0 truncate font-mono text-micro text-muted-foreground">
                   {t.branch}
                 </span>
               )}
@@ -326,7 +326,7 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
         >
           <History className="h-3.5 w-3.5" />
           {hidden.length > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-emerald-400 px-1 text-[8.5px] font-bold tabular-nums text-black">
+            <span className="absolute -right-0.5 -top-0.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-success px-1 text-micro font-bold tabular-nums text-success-foreground">
               {hidden.length}
             </span>
           )}
@@ -337,7 +337,7 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
         align="end"
         className="w-72 p-0"
       >
-        <div className="border-b border-border/70 px-3 py-2 text-[10px] uppercase text-muted-foreground">
+        <div className="border-b border-border/70 px-3 py-2 text-label text-muted-foreground">
           History · click to reopen
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
@@ -354,7 +354,7 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
                 {t.label.trim() || t.branch || "session"}
               </span>
               {t.branch && (
-                <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
+                <span className="shrink-0 truncate font-mono text-micro text-muted-foreground">
                   {t.branch}
                 </span>
               )}
@@ -380,9 +380,9 @@ function ConnectionDot({ state }: { state: ConnectionState }) {
       title={state}
       className={cn(
         "inline-block h-1.5 w-1.5 rounded-full",
-        state === "error" ? "bg-rose-400"
-        : state === "connecting" ? "bg-amber-400"
-        : "bg-zinc-500",
+        state === "error" ? "bg-destructive"
+        : state === "connecting" ? "bg-warning"
+        : "bg-muted-foreground",
       )}
     />
   );

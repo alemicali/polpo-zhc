@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { Loader2, Monitor, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/shared/page-header";
 import { ComputerCard } from "@/components/computers/computer-card";
 import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-dialog";
 import { ComputerDialog } from "@/components/computers/computer-dialog";
@@ -24,18 +25,15 @@ export function ComputersPage() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 overflow-y-auto p-4 pb-bottom-nav sm:p-6 lg:pb-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-xl font-semibold"><Monitor className="h-5 w-5" /> Computers</h1>
-          <p className="text-sm text-muted-foreground">
-            Machines agents keep between chats and tasks. Give an agent its computer in its Computer tab.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+      <PageHeader
+        title="Computers"
+        icon={Monitor}
+        description="Machines agents keep between chats and tasks. Give an agent its computer in its Computer tab."
+        actions={<>
           <Button variant="outline" onClick={() => void refresh(true)} aria-label="Refresh status"><RefreshCw className="h-4 w-4" /></Button>
           <Button onClick={() => setDialog({})}><Plus className="h-4 w-4" /> New computer</Button>
-        </div>
-      </header>
+        </>}
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">

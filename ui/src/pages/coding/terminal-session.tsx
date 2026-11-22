@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { config, websocketUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { followAppearance, terminalFontFamily, terminalTheme } from "./xterm-theme";
 import type { ConnectionState } from "./types";
 
 type Props = {
@@ -53,21 +54,18 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     onConnRef.current("loading");
 
     const term = new Terminal({
-      fontFamily: "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+      fontFamily: terminalFontFamily(),
       fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 5_000,
-      theme: {
-        background: "#0a0a0a",
-        foreground: "#e6e6e6",
-        cursor: "#e6e6e6",
-      },
+      theme: terminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.open(host);
+    const stopFollowing = followAppearance(term);
 
     termRef.current = term;
     fitRef.current = fit;
@@ -86,6 +84,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
 
     return () => {
       ro.disconnect();
+      stopFollowing();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -170,7 +169,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
   return (
     <div
       className={cn(
-        "absolute inset-0 transition-opacity duration-100 bg-[#0a0a0a]",
+        "absolute inset-0 transition-opacity duration-100 bg-card",
         active ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none",
       )}
       aria-hidden={!active}

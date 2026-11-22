@@ -238,8 +238,8 @@ export function GroupSettingsDialog({ room, open, onOpenChange, members, members
             <Separator className="bg-border/50" />
             <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
               <div className="min-w-0">
-                <p className="text-[13px] font-medium">Delete group</p>
-                <p className="text-[11px] text-muted-foreground">Removes the group and its transcript for everyone.</p>
+                <p className="text-small font-medium">Delete group</p>
+                <p className="text-caption text-muted-foreground">Removes the group and its transcript for everyone.</p>
               </div>
               <Button
                 type="button"

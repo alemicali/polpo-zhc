@@ -827,6 +827,8 @@ export interface BrandingConfig {
   logoUrl?: string;
   /** The logo in dark mode (falls back to logoUrl). */
   logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare. */
+  logoFrame?: "box" | "none";
 }
 
 /** A mode's design tokens (any subset): colours, fonts, radius (px), shadows. See docs/configuration. */

@@ -95,11 +95,11 @@ function MobileIdentitySummary() {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold truncate">{identity?.displayName ?? agent.name}</h1>
+            <h1 className="font-heading text-h2 truncate">{identity?.displayName ?? agent.name}</h1>
             {process && <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />}
           </div>
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
-          {agent.model && <p className="mt-0.5 truncate text-[10px] font-mono text-muted-foreground">{agent.model}</p>}
+          {agent.model && <p className="mt-0.5 truncate text-micro font-mono text-muted-foreground">{agent.model}</p>}
         </div>
         <Button
           variant="outline"
@@ -141,7 +141,7 @@ function AgentDetailContent() {
 
       {/* Activity heatmap */}
       {sortedTasks.length > 0 && (
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 mb-3">
+        <Card className="py-0 gap-0 mb-3">
           <CardContent className="pt-3 pb-3 overflow-x-auto">
             <ActivityHeatmap tasks={sortedTasks} />
           </CardContent>

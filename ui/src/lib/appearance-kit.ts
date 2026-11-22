@@ -18,7 +18,12 @@
 export type BootTheme = "light" | "dark" | "system";
 
 export type TokenGroup = "brand" | "surfaces" | "text" | "borders" | "sidebar" | "charts" | "status" | "typography" | "shape";
-export type TokenKind = "color" | "font" | "radius" | "shadow";
+/**
+ * How a token is checked: a colour, a font stack, a radius (px, 0–24), a box-shadow, a font size
+ * (rem 0.5–6 or px 8–96), a font weight (100–900), a letter-spacing (em -0.1–0.3, px -3–6, 0 or
+ * normal) or a text case (uppercase, none, capitalize, lowercase).
+ */
+export type TokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case";
 
 /** A mode's design tokens: any subset (radius in px, the rest CSS values). */
 export type TokenMap = Record<string, string | number>;
@@ -36,6 +41,17 @@ export interface InstanceAppearance {
   theme?: BootTheme;
   palette?: string;
   custom?: { enabled?: boolean; derive?: boolean; light?: TokenMap; dark?: TokenMap };
+}
+
+/** The instance's branding as the API gives it (public display fields; settings.branding). */
+export interface InstanceBranding {
+  productName?: string;
+  tagline?: string;
+  logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl). */
+  logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare. */
+  logoFrame?: "box" | "none";
 }
 
 export interface ResolveInput {
@@ -73,6 +89,7 @@ interface KitElement {
   appendChild(child: KitElement): unknown;
 }
 interface KitDocument {
+  title: string;
   documentElement: KitElement;
   head: KitElement;
   getElementById(id: string): KitElement | null;
@@ -85,7 +102,7 @@ export interface KitWindow {
   location: { origin: string };
   localStorage?: KitStorage;
   matchMedia?: (query: string) => { matches: boolean };
-  __POLPO_RUNTIME_CONFIG__?: { baseUrl?: string; appearance?: InstanceAppearance | null } | undefined;
+  __POLPO_RUNTIME_CONFIG__?: { baseUrl?: string; appearance?: InstanceAppearance | null; branding?: InstanceBranding | null } | undefined;
 }
 
 export function appearanceKit() {
@@ -140,9 +157,31 @@ export function appearanceKit() {
     chart4: ["--chart-4", "charts", "color"],
     chart5: ["--chart-5", "charts", "color"],
     destructive: ["--destructive", "status", "color"],
+    destructiveForeground: ["--destructive-foreground", "status", "color"],
+    success: ["--success", "status", "color"],
+    successForeground: ["--success-foreground", "status", "color"],
+    warning: ["--warning", "status", "color"],
+    warningForeground: ["--warning-foreground", "status", "color"],
+    info: ["--info", "status", "color"],
+    infoForeground: ["--info-foreground", "status", "color"],
+    statusRunning: ["--status-running", "status", "color"],
+    statusQueued: ["--status-queued", "status", "color"],
+    statusAssigned: ["--status-assigned", "status", "color"],
     fontFamily: ["--app-font-family", "typography", "font"],
     headingFont: ["--app-heading-font", "typography", "font"],
     monoFont: ["--app-mono-font", "typography", "font"],
+    textDisplay: ["--text-display", "typography", "size"],
+    textH1: ["--text-h1", "typography", "size"],
+    textH2: ["--text-h2", "typography", "size"],
+    textH3: ["--text-h3", "typography", "size"],
+    textBody: ["--text-body", "typography", "size"],
+    textSmall: ["--text-small", "typography", "size"],
+    textCaption: ["--text-caption", "typography", "size"],
+    textMicro: ["--text-micro", "typography", "size"],
+    headingWeight: ["--font-weight-heading", "typography", "weight"],
+    headingTracking: ["--tracking-heading", "typography", "tracking"],
+    labelTracking: ["--tracking-label", "typography", "tracking"],
+    labelCase: ["--label-transform", "typography", "case"],
     radius: ["--radius", "shape", "radius"],
     shadowCard: ["--shadow-card", "shape", "shadow"],
     shadowRaised: ["--shadow-raised", "shape", "shadow"],
@@ -171,6 +210,13 @@ export function appearanceKit() {
     ["sidebarAccentForeground", "contrast:sidebarAccent"],
     ["sidebarRing", "sidebarPrimary"],
     ["chart1", "primary"],
+    ["destructiveForeground", "contrast:destructive"],
+    ["successForeground", "contrast:success"],
+    ["warningForeground", "contrast:warning"],
+    ["infoForeground", "contrast:info"],
+    ["statusRunning", "info"],
+    ["statusAssigned", "primary"],
+    ["statusQueued", "mutedForeground"],
   ];
   const STYLE_ID = "polpo-appearance-overrides";
   const KEYS = { theme: "polpo-theme", palette: "polpo-palette", custom: "polpo-appearance" };
@@ -179,8 +225,26 @@ export function appearanceKit() {
   /** The instance's default look, cached per API for when runtime-config.js does not carry it. */
   const INSTANCE_KEY = "polpo-instance-appearance";
   const COLOR_RE = /^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:oklch|oklab|lab|lch|hsla?|rgba?)\(\s*[0-9a-zA-Z.%\s,/+-]{1,80}\))$/;
+  /** The instance's branding, cached per API for when runtime-config.js does not carry it. */
+  const BRANDING_KEY = "polpo-instance-branding";
+  const DEFAULT_PRODUCT_NAME = "Polpo ZHC";
+  const DEFAULT_PRODUCT_TAGLINE = "AI Factory";
+  const LOGO_PRELOAD_ID = "polpo-brand-logo-preload";
+  /**
+   * Fonts the dashboard ships (public/fonts, @font-face in index.css): the file to preload when a
+   * look uses the family, so it never flashes in late. Relative to the app's base.
+   */
+  const BUNDLED_FONTS: Record<string, string> = {
+    "Inter Tight": "fonts/inter-tight/inter-tight-latin-wght-normal.woff2",
+  };
+  const FONT_PRELOAD_PREFIX = "polpo-font-preload-";
   const FONT_RE = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
   const SHADOW_RE = /^(none|[0-9a-zA-Z.%\s,/#()+-]{1,240})$/;
+  /** A font size: a number of rem or px (ranges checked in tokenValue). */
+  const SIZE_RE = /^(\d{1,2}(?:\.\d{1,4})?|\.\d{1,4})(rem|px)$/;
+  /** A letter-spacing: a number of em or px (ranges checked in tokenValue). */
+  const TRACKING_RE = /^(-?(?:\d(?:\.\d{1,4})?|\.\d{1,4}))(em|px)$/;
+  const CASES = ["uppercase", "none", "capitalize", "lowercase"];
 
   function slug(value: string): string {
     return value.trim().toLowerCase().replace(/[^a-z0-9._:-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "default";
@@ -209,14 +273,33 @@ export function appearanceKit() {
     return typeof v === "string" && PALETTES.indexOf(v) >= 0;
   }
 
-  /** A token's value when valid (a font stack, a colour, a shadow, a radius 0–24), else undefined. */
+  /**
+   * A token's value when valid (see TokenKind), else undefined. Numbers out of range are clamped
+   * (radius 0–24, weight 100–900); sizes and trackings out of range are refused.
+   */
   function tokenValue(name: string, value: unknown): string | number | undefined {
     const def = TOKENS[name];
     if (!def) return undefined;
-    if (def[2] === "radius") return typeof value === "number" && isFinite(value) ? Math.min(24, Math.max(0, value)) : undefined;
+    const kind = def[2];
+    if (kind === "radius") return typeof value === "number" && isFinite(value) ? Math.min(24, Math.max(0, value)) : undefined;
+    if (kind === "weight") return typeof value === "number" && isFinite(value) ? Math.round(Math.min(900, Math.max(100, value))) : undefined;
     const s = typeof value === "string" ? value.trim() : "";
-    if (def[2] === "color") return COLOR_RE.test(s) ? s : undefined;
-    if (def[2] === "font") return FONT_RE.test(s) ? s : undefined;
+    if (kind === "color") return COLOR_RE.test(s) ? s : undefined;
+    if (kind === "font") return FONT_RE.test(s) ? s : undefined;
+    if (kind === "size") {
+      const m = SIZE_RE.exec(s);
+      if (!m) return undefined;
+      const n = parseFloat(m[1]);
+      return (m[2] === "rem" ? n >= 0.5 && n <= 6 : n >= 8 && n <= 96) ? s : undefined;
+    }
+    if (kind === "tracking") {
+      if (s === "0" || s === "normal") return s;
+      const m = TRACKING_RE.exec(s);
+      if (!m) return undefined;
+      const n = parseFloat(m[1]);
+      return (m[2] === "em" ? n >= -0.1 && n <= 0.3 : n >= -3 && n <= 6) ? s : undefined;
+    }
+    if (kind === "case") return CASES.indexOf(s) >= 0 ? s : undefined;
     return SHADOW_RE.test(s) && !/url\s*\(/i.test(s) ? s : undefined;
   }
 
@@ -320,7 +403,10 @@ export function appearanceKit() {
       const value = tokens[name];
       if (value === undefined) continue;
       const css = TOKENS[name][0];
-      lines.push(`  ${css}: ${name === "radius" ? `${value}px` : value};`);
+      const kind = TOKENS[name][2];
+      // a shadow is composed with Tailwind's rings (shadow-card / shadow-raised): "none" would void the list
+      const out = kind === "radius" ? `${value}px` : kind === "shadow" && value === "none" ? "0 0 #0000" : value;
+      lines.push(`  ${css}: ${out};`);
       // the sans font is also Tailwind's --font-sans
       if (name === "fontFamily") lines.push(`  --font-sans: ${value};`);
     }
@@ -335,17 +421,12 @@ export function appearanceKit() {
     if (!custom.enabled) return null;
     const light = deriveTokens(custom.light, custom.derive).tokens;
     const dark = deriveTokens(custom.dark, custom.derive).tokens;
-    const has = (name: string) => light[name] !== undefined || dark[name] !== undefined;
+    // Only the variables: index.css reads every token by name (body and headings, code, the
+    // shadow-card / shadow-raised utilities, the type scale), palettes included.
     const blocks = [
       "html:root, html:root[data-palette] {", declarations(light), "}",
       "html:root.dark, html:root.dark[data-palette] {", declarations(dark), "}",
     ];
-    if (has("fontFamily")) blocks.push("html:root body, html:root[data-palette] body { font-family: var(--app-font-family); }");
-    if (has("headingFont")) {
-      blocks.push("html:root h1, html:root h2, html:root h3, html:root[data-palette] h1, html:root[data-palette] h2, html:root[data-palette] h3 { font-family: var(--app-heading-font); }");
-    }
-    if (has("monoFont")) blocks.push("html:root code, html:root pre, html:root .font-mono, html:root kbd { font-family: var(--app-mono-font); }");
-    if (has("shadowCard")) blocks.push("html:root [data-slot=\"card\"] { box-shadow: var(--shadow-card); }");
     return blocks.join("\n");
   }
 
@@ -376,8 +457,45 @@ export function appearanceKit() {
     };
   }
 
-  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color. */
-  function apply(doc: KitDocument, r: ResolvedAppearance): void {
+  /** The bundled font families a look uses (its custom fonts, either mode). */
+  function bundledFontsUsed(custom: BootCustom): string[] {
+    if (!custom.enabled) return [];
+    const fonts: string[] = [];
+    for (const mode of [custom.light, custom.dark]) {
+      for (const key of ["fontFamily", "headingFont"]) {
+        const value = mode[key];
+        if (typeof value === "string") fonts.push(value);
+      }
+    }
+    return Object.keys(BUNDLED_FONTS).filter((family) => fonts.some((stack) => stack.indexOf(family) !== -1));
+  }
+
+  /** A preload for each bundled font the look uses; none left for the others. */
+  function applyFontPreloads(doc: KitDocument, custom: BootCustom, assetBase: string): void {
+    const used = bundledFontsUsed(custom);
+    for (const family of Object.keys(BUNDLED_FONTS)) {
+      const id = FONT_PRELOAD_PREFIX + slug(family);
+      let link = doc.getElementById(id);
+      if (used.indexOf(family) === -1) {
+        if (link) link.remove();
+        continue;
+      }
+      if (!link) {
+        link = doc.createElement("link");
+        link.id = id;
+        link.setAttribute("rel", "preload");
+        link.setAttribute("as", "font");
+        link.setAttribute("type", "font/woff2");
+        link.setAttribute("crossorigin", "anonymous");
+        doc.head.appendChild(link);
+      }
+      link.setAttribute("href", assetBase + BUNDLED_FONTS[family]);
+    }
+  }
+
+  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color, font preloads. */
+  function apply(doc: KitDocument, r: ResolvedAppearance, assetBase = "/"): void {
+    try { applyFontPreloads(doc, r.custom, assetBase); } catch { /* the look applies anyway */ }
     const root = doc.documentElement;
     root.classList.toggle("dark", r.dark);
     root.dataset.palette = r.palette;
@@ -434,20 +552,105 @@ export function appearanceKit() {
   }
 
   /** Resolve and apply from the page's state; a failure leaves the page's default look. */
-  function boot(win: KitWindow, buildBaseUrl: string): ResolvedAppearance | null {
+  function boot(win: KitWindow, buildBaseUrl: string, assetBase = "/"): ResolvedAppearance | null {
+    let r: ResolvedAppearance | null = null;
     try {
-      const r = resolve(read(win, buildBaseUrl));
-      apply(win.document, r);
-      return r;
+      r = resolve(read(win, buildBaseUrl));
+      apply(win.document, r, assetBase);
     } catch {
-      return null;
+      r = null;
     }
+    // the branding after the look: the logo to preload depends on the theme just applied
+    try { bootBranding(win, buildBaseUrl, r ? r.dark : true); } catch { /* keep the page's defaults */ }
+    return r;
+  }
+
+  // ── Branding: the product name, the logo ─────────────────────────────
+
+  /** Only the display fields, as strings; an unknown frame is the default. */
+  function normalizeBranding(value: unknown): InstanceBranding {
+    const out: InstanceBranding = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+    const v = value as Record<string, unknown>;
+    for (const key of ["productName", "tagline", "logoUrl", "logoDarkUrl"] as const) {
+      const field = v[key];
+      if (typeof field === "string" && field.trim()) out[key] = field.trim();
+    }
+    if (v.logoFrame === "box" || v.logoFrame === "none") out.logoFrame = v.logoFrame;
+    return out;
+  }
+
+  /** The instance branding: runtime-config.js when it carries one (even empty), else the cached copy. */
+  function instanceBranding(win: KitWindow, api: string): InstanceBranding | null {
+    const rc = win.__POLPO_RUNTIME_CONFIG__;
+    if (rc && Object.prototype.hasOwnProperty.call(rc, "branding") && rc.branding !== undefined) return rc.branding ? normalizeBranding(rc.branding) : null;
+    const cached = parseJson(storageGet(win, `${BRANDING_KEY}:${api}`));
+    return cached && typeof cached === "object" ? normalizeBranding(cached) : null;
+  }
+
+  /**
+   * The browser tab: the product name, then " · page" when there is one; without a product name
+   * the default ("Polpo ZHC — AI Factory", or "Polpo ZHC · page").
+   */
+  function brandingTitle(b: InstanceBranding | null | undefined, page?: string): string {
+    const name = b && b.productName;
+    if (page) return `${name || DEFAULT_PRODUCT_NAME} · ${page}`;
+    return name || `${DEFAULT_PRODUCT_NAME} — ${DEFAULT_PRODUCT_TAGLINE}`;
+  }
+
+  /** A logo URL the page may load: http(s), a data: image, or a path on the API. */
+  function logoHref(url: string | undefined, baseUrl: string): string | null {
+    if (!url) return null;
+    if (url.charAt(0) === "/" && url.charAt(1) !== "/") return `${baseUrl}${url}`;
+    return /^(https?:\/\/|data:image\/)/i.test(url) ? url : null;
+  }
+
+  /** The logo shown first: in dark mode the dark one (else the logo), otherwise the logo. */
+  function brandingLogo(b: InstanceBranding | null | undefined, dark: boolean, baseUrl: string): string | null {
+    if (!b) return null;
+    return (dark ? logoHref(b.logoDarkUrl, baseUrl) : null) || logoHref(b.logoUrl, baseUrl);
+  }
+
+  /** Put the branding on the page: the title (and the home-screen name), a preload for the logo. */
+  function applyBranding(doc: KitDocument, b: InstanceBranding | null, dark: boolean, baseUrl: string, page?: string): void {
+    if (b || page) doc.title = brandingTitle(b, page);
+    if (!b) return;
+    if (b.productName) {
+      const meta = doc.querySelector("meta[name=\"apple-mobile-web-app-title\"]");
+      if (meta) meta.setAttribute("content", b.productName);
+    }
+    const href = brandingLogo(b, dark, baseUrl);
+    let link = doc.getElementById(LOGO_PRELOAD_ID);
+    if (!href) {
+      if (link) link.remove();
+      return;
+    }
+    if (!link) {
+      link = doc.createElement("link");
+      link.id = LOGO_PRELOAD_ID;
+      link.setAttribute("rel", "preload");
+      link.setAttribute("as", "image");
+      link.setAttribute("fetchpriority", "high");
+      doc.head.appendChild(link);
+    }
+    link.setAttribute("href", href);
+  }
+
+  function bootBranding(win: KitWindow, buildBaseUrl: string, dark: boolean): InstanceBranding | null {
+    const rc = win.__POLPO_RUNTIME_CONFIG__ || {};
+    const baseUrl = (rc.baseUrl !== undefined && rc.baseUrl !== null ? rc.baseUrl : buildBaseUrl) || "";
+    const b = instanceBranding(win, scopes(win, buildBaseUrl).api);
+    applyBranding(win.document, b, dark, baseUrl);
+    return b;
   }
 
   return {
     PALETTES, DEFAULT_PALETTE, DEFAULT_THEME, THEME_COLORS, TOKENS, DERIVE, STYLE_ID, KEYS, LAST_SCOPE_KEY, INSTANCE_KEY,
     slug, apiScope, scopedKey, isTheme, isPalette, tokenValue, normalizeTokens, normalizeCustom, lightness, contrastOn, deriveTokens,
     overridesCss, resolve, apply, read, boot, instanceDefault,
+    BUNDLED_FONTS, FONT_PRELOAD_PREFIX, bundledFontsUsed,
+    BRANDING_KEY, DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, LOGO_PRELOAD_ID,
+    normalizeBranding, instanceBranding, brandingTitle, brandingLogo, applyBranding, bootBranding,
   };
 }
 
@@ -455,10 +658,11 @@ export type AppearanceKit = ReturnType<typeof appearanceKit>;
 
 /**
  * The inline <head> script: the kit's own source, run on the page. `buildBaseUrl` is the API URL
- * baked in at build time (VITE_POLPO_API_URL), used when runtime-config.js does not name one.
+ * baked in at build time (VITE_POLPO_API_URL), used when runtime-config.js does not name one;
+ * `assetBase` the app's base (Vite's `base`), for the bundled fonts.
  */
-export function bootScriptSource(buildBaseUrl = ""): string {
-  const source = `(function(){try{(${appearanceKit.toString()})().boot(window,${JSON.stringify(buildBaseUrl)});}catch(e){}})();`;
+export function bootScriptSource(buildBaseUrl = "", assetBase = "/"): string {
+  const source = `(function(){try{(${appearanceKit.toString()})().boot(window,${JSON.stringify(buildBaseUrl)},${JSON.stringify(assetBase)});}catch(e){}})();`;
   // never let the source close the <script> element it is inlined in
   return source.replace(/<\/(script)/gi, "<\\/$1");
 }

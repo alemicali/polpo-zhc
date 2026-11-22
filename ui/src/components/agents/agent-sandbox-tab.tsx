@@ -58,16 +58,16 @@ export function AgentSandboxTab() {
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
         <AgentComputerPointer defaultComputer={(agent as { defaultComputer?: string }).defaultComputer} />
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="py-3 px-4 space-y-1.5 text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Effective sandbox</div>
+            <div className="text-label text-muted-foreground">Effective sandbox</div>
             {error && <p className="text-destructive">{error}</p>}
             {!overview && !error && <p className="text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</p>}
             {effective && (
               <>
-                <p className={effective.task.fallback ? "text-amber-600 dark:text-amber-400" : undefined}><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
+                <p className={effective.task.fallback ? "text-warning" : undefined}><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
                 <p><span className="text-muted-foreground mr-1.5">Chat</span>{describeSandbox(effective.chat)}</p>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-micro text-muted-foreground">
                   Missions and tasks can only make this stricter. Instance defaults are in{" "}
                   <Link to="/config?section=sandbox" className="underline">Settings → Sandbox</Link>.
                 </p>
@@ -77,7 +77,7 @@ export function AgentSandboxTab() {
         </Card>
 
         {overview && (
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="py-4 px-4">
               <SandboxEditor
                 level="agent"
@@ -112,7 +112,7 @@ function AgentComputerPointer({ defaultComputer }: { defaultComputer?: string })
   const { computers } = useComputers({ live: false });
   const name = id === "host" ? "This server (host)" : computers.find((c) => c.id === id)?.name ?? id;
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0" data-testid="agent-computer-pointer">
+    <Card className="py-0 gap-0" data-testid="agent-computer-pointer">
       <CardContent className="py-2.5 px-4 space-y-1 text-xs">
         <p className="flex flex-wrap items-center gap-1.5">
           <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
@@ -121,7 +121,7 @@ function AgentComputerPointer({ defaultComputer }: { defaultComputer?: string })
           <span className="text-muted-foreground">— manage in the <Link to="?tab=computer" className="underline">Computer tab</Link></span>
         </p>
         {id !== "host" && (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             The sandbox settings below apply only when a task asks for an ephemeral sandbox; on the computer, its own network rule applies.
           </p>
         )}
@@ -138,24 +138,24 @@ function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]
   for (const name of names) groups[toolPlacement(name)].push(name);
   const where = (p?: string) => p === "local" || !p ? "this machine, no isolation" : p === "bwrap" ? "bubblewrap" : p === "daytona" ? "Daytona VM" : p === "e2b" ? "E2B VM" : p;
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+    <Card className="py-0 gap-0">
       <CardContent className="py-3 px-4 space-y-3 text-xs">
         <div className="flex items-baseline justify-between gap-2">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Where the tools run</div>
-          <div className="text-[10px] text-muted-foreground">tasks: {where(provider)} · chat: {where(chatProvider)}</div>
+          <div className="text-label text-muted-foreground">Where the tools run</div>
+          <div className="text-micro text-muted-foreground">tasks: {where(provider)} · chat: {where(chatProvider)}</div>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {(["sandbox", "host"] as ToolPlacement[]).map((placement) => (
             <div key={placement} className={cn(
               "rounded-lg border p-2.5",
-              placement === "sandbox" ? "border-teal-500/25 bg-teal-500/5" : "border-border/40 bg-muted/10",
+              placement === "sandbox" ? "border-primary/25 bg-primary/5" : "border-border/40 bg-muted/10",
             )}>
-              <div className={cn("text-[11px] font-medium", placement === "sandbox" ? "text-teal-400" : "text-foreground")}>{PLACEMENT_INFO[placement].label}</div>
-              <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{PLACEMENT_INFO[placement].description}</p>
+              <div className={cn("text-caption font-medium", placement === "sandbox" ? "text-primary" : "text-foreground")}>{PLACEMENT_INFO[placement].label}</div>
+              <p className="mt-0.5 text-micro leading-tight text-muted-foreground">{PLACEMENT_INFO[placement].description}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {groups[placement].length
-                  ? groups[placement].map((t) => <code key={t} className="rounded bg-muted/40 px-1 py-0.5 text-[10px]">{t}</code>)
-                  : <span className="text-[10px] text-muted-foreground/60">none</span>}
+                  ? groups[placement].map((t) => <code key={t} className="rounded bg-muted/40 px-1 py-0.5 text-micro">{t}</code>)
+                  : <span className="text-micro text-muted-foreground/60">none</span>}
               </div>
             </div>
           ))}
