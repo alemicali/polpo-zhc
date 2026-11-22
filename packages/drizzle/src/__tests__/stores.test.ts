@@ -6,7 +6,7 @@
  *
  * The schema comes from the real migrations, so the tests also prove they build a working database.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -559,6 +559,46 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(msgs).toHaveLength(2);
       expect(msgs[0].role).toBe("user");
       expect(msgs[1].content).toBe("Hi there");
+    });
+
+    it("messages added in the same millisecond keep the order they were added in", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2026-05-09T01:25:45.278Z"));
+        const sid = await stores.sessionStore.create();
+        for (const [role, text] of [["user", "one"], ["assistant", "two"], ["user", "three"], ["assistant", "four"]] as const) {
+          await stores.sessionStore.addMessage(sid, role, text);
+        }
+        const all = await stores.sessionStore.getMessages(sid);
+        expect(all.map((m) => m.content)).toEqual(["one", "two", "three", "four"]);
+        expect(new Set(all.map((m) => m.ts)).size).toBe(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("messages already stored with the same timestamp come back in one stable order, the question first", async () => {
+      // rows saved before timestamps were made distinct can share a millisecond (seen in live data)
+      const spy = vi.spyOn(stores.sessionStore as any, "nextMessageTs").mockResolvedValue("2026-05-09T01:25:45.278Z");
+      try {
+        const sid = await stores.sessionStore.create();
+        // stored answer first, question second, all in the same millisecond
+        await stores.sessionStore.addMessage(sid, "assistant", "a1");
+        await stores.sessionStore.addMessage(sid, "user", "q1");
+        await stores.sessionStore.addMessage(sid, "assistant", "a2");
+        await stores.sessionStore.addMessage(sid, "assistant", "a3");
+        const all = await stores.sessionStore.getMessages(sid);
+        expect(all.map((m) => m.content).slice(0, 1)).toEqual(["q1"]);
+        // same order on every read, in every reader
+        for (let i = 0; i < 3; i += 1) expect(await stores.sessionStore.getMessages(sid)).toEqual(all);
+        expect((await stores.sessionStore.getRecentMessages(sid, 2)).map((m) => m.id)).toEqual(all.slice(-2).map((m) => m.id));
+        expect((await stores.sessionStore.getMessagesAfter!(sid, all[1]!.id))!.map((m) => m.id)).toEqual(all.slice(2).map((m) => m.id));
+        // a branch keeps the order, ties included
+        const fork = await stores.sessionStore.forkSession!(sid, all[3]!.id);
+        expect((await stores.sessionStore.getMessages(fork!.session.id)).map((m) => m.content)).toEqual(all.map((m) => m.content));
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it("getRecentMessages returns last N", async () => {
