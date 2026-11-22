@@ -70,6 +70,7 @@ import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
+import { harnessRoutes } from "./routes/harnesses.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -1498,6 +1499,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (payload) => o.emit("computer:changed", payload),
   };
   authed.route("/computers", computerRoutes(computerDeps));
+  // agent harnesses (Claude Code, Codex): settings overview and their sessions (status, stop, reset)
+  authed.route("/harnesses", harnessRoutes({
+    polpoDir: () => o.getPolpoDir(),
+    settings: () => o.getConfig()?.settings,
+    agents: () => o.getAgents(),
+    vault: () => o.getVaultStore(),
+    manager: computerDeps.manager,
+  }));
   // every egress proxy and every remote computer's egress (read-only)
   authed.route("/egress", egressRoutes(computerDeps));
   // Polpo's own MCP connector: who may use it (OAuth grants, MCP keys) and with which scopes

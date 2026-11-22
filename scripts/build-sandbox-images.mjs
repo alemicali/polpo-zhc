@@ -10,6 +10,9 @@
  *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
  *     through a tailnet-only egress proxy join the tailnet from inside the VM
  *   - git, curl, python3 (+ edge-tts), poppler-utils, sudo, node 22
+ *   - pnpm (PNPM_VERSION, activated with corepack): agent harnesses (Claude Code, Codex) install
+ *     their bridge with `pnpm install --frozen-lockfile` (lockfile v9 + allowBuilds: pnpm 10). Polpo
+ *     activates it at run time when an older image lacks it (src/adapters/harness-engine.ts).
  *
  * Daytona v0: a snapshot built from the SDK's declarative Image, named "polpo-runner-<version>".
  * Daytona v2: an image (Linux VM) built with the 2.x SDK's ImageBuilder in the project the key
@@ -45,7 +48,9 @@ export const DAYTONA_SNAPSHOT = `polpo-runner-${version}`;
  * DAYTONA_V2_RUNNER_IMAGE in packages/core/src/sandbox.ts must match; a test checks it). A named
  * v2 image with other contents cannot be rebuilt under the same name.
  */
-export const DAYTONA_V2_IMAGE = "polpo-runner-vm-2";
+export const DAYTONA_V2_IMAGE = "polpo-runner-vm-3";
+/** pnpm for agent harness bootstraps (src/adapters/harness-engine.ts HARNESS_PNPM_VERSION must match; a test checks it). */
+export const PNPM_VERSION = "10.30.1";
 export const E2B_TEMPLATE = `polpo-runner-${version.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 
 /** Debian packages: baseline tools, PDF text, python for edge-tts, FUSE, every library agent-browser's Chromium links against, fonts. */
@@ -87,6 +92,8 @@ export const ROOT_STEPS = [
   "pip install --no-cache-dir --break-system-packages edge-tts",
   // agent-browser CLI (its Chromium is downloaded per user, below); playwright-core for pdf_create
   "npm install -g agent-browser playwright-core && npm cache clean --force",
+  // pnpm 10 for agent harness bootstraps (corepack ships with node 22; pinned, no download prompt)
+  `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate && corepack enable pnpm && pnpm --version`,
   "sed -i 's/^# *user_allow_other/user_allow_other/' /etc/fuse.conf || true",
 ];
 

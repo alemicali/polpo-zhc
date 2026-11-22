@@ -17,6 +17,8 @@ import { basename, extname, join } from "node:path";
 import { FileRunStore } from "../stores/file-run-store.js";
 import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
+import { spawnHarnessEngine } from "../adapters/harness-engine.js";
+import { agentHarness } from "@polpo-ai/core";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
@@ -366,7 +368,10 @@ async function main(): Promise<void> {
       resumeMessages: checkpoint?.messages,
       continuation,
     };
-    handle = spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
+    // an agent on an official harness (Claude Code, Codex) runs it in its computer; others on Polpo's engine
+    handle = agentHarness(config.agent)
+      ? spawnHarnessEngine(config.agent, config.task, config.cwd, spawnCtx)
+      : spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => {
       actLog.logTranscript(entry);

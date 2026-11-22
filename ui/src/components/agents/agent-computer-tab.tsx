@@ -27,6 +27,7 @@ import { useComputerActions } from "@/hooks/use-computer-actions";
 import { useComputers } from "@/hooks/use-computers";
 import { KIND_LABELS, computersApi, suggestComputerId, type Computer } from "@/lib/computers-api";
 import { useAgentDetail } from "./agent-detail-context";
+import { AgentEngineCard } from "./agent-engine-card";
 
 const selectClass = "h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs sm:flex-none sm:min-w-[12rem]";
 
@@ -160,6 +161,8 @@ export function AgentComputerTab() {
             )}
           </CardContent>
         </Card>
+
+        <AgentEngineCard />
 
         {error && (
           <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">

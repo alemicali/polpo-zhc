@@ -24,7 +24,7 @@ import { resolve, sep } from "node:path";
 import { nanoid } from "nanoid";
 import {
   DEFAULT_ISOLATION, VOLUME_REVISION_OBJECT, effectiveLifecycle,
-  type EffectiveSandbox, type ResolvedSandboxVolume, type SandboxIsolation, type SandboxLifecycleSettings, type ExecOptions, type ExecResult, type RemoteSandboxProvider, type StorageMountSpec, type Workspace, type WorkspaceEntry, type WorkspaceFileStat,
+  type ComputerConfig, type EffectiveSandbox, type ResolvedSandboxVolume, type SandboxIsolation, type SandboxLifecycleSettings, type ExecOptions, type ExecResult, type RemoteSandboxProvider, type StorageMountSpec, type Workspace, type WorkspaceEntry, type WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
 import type { FileSystem, SandboxLifecycle, SandboxLifecycleInfo, SandboxProvider, SandboxSession, SandboxUsage, Shell } from "@polpo-ai/core";
 import { remoteAdapter, type RemoteAdapter, type RemoteDriver } from "./remote-adapters.js";
@@ -156,6 +156,11 @@ export class RemoteVmSession implements SandboxSession {
 
   get remoteId(): string {
     return this.driver.remoteId;
+  }
+
+  /** The VM's driver (agent harnesses start their bridge through it). */
+  get remoteDriver(): RemoteDriver {
+    return this.driver;
   }
 
   usage(): SandboxUsage {
@@ -608,6 +613,23 @@ export class RemoteWorkspace implements Workspace {
   /** The provider's id of the VM, once acquired. */
   get remoteId(): string | undefined {
     return this.vm.session?.remoteId;
+  }
+
+  /** The computer this workspace runs on (remote computers only). */
+  get computer(): ComputerConfig | undefined {
+    return this.opts.sandbox.computer;
+  }
+
+  /**
+   * The VM's driver, acquired (agent harnesses: spawn, port endpoints). On a computer it is the
+   * computer's driver: it follows the computer to its new VM after a hibernation or a rotation.
+   */
+  async driver(): Promise<RemoteDriver> {
+    if (this.disposed) throw new Error("This sandbox has been closed");
+    await this.lease.shell.execute(":");
+    const session = this.vm.session;
+    if (!session) throw new Error("The sandbox has no VM");
+    return session.remoteDriver;
   }
 
   async exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {

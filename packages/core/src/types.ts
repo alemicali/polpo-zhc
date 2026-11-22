@@ -418,6 +418,11 @@ export interface AgentConfig {
   computers?: string[];
   /** The machine its chats and tasks run on by default: a computer id, or "host" (unset: this server, with the sandbox cascade). */
   defaultComputer?: string;
+  /**
+   * The runtime that drives this agent: "polpo" (default, Polpo's own engine) or an official agent
+   * harness (Claude Code, Codex) running inside its computer (see harnesses.ts).
+   */
+  engine?: import("./harnesses.js").AgentEngine;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -985,6 +990,8 @@ export interface PolpoSettings {
   egressProxies?: Record<string, string>;
   /** Tailscale inside remote computers, so their browser can reach a tailnet-only egress proxy (see tailnet.ts). */
   tailscale?: import("./tailnet.js").TailscaleSettings;
+  /** Official agent harnesses (Claude Code, Codex) agents may run on (agent.engine), with their credentials (vault references). */
+  harnesses?: import("./harnesses.js").HarnessesSettings;
   /** Connectors (MCP servers): network policy and defaults. */
   connectors?: {
     /** Allow remote connectors on private / local network addresses (and http:// on localhost). Default false. */
