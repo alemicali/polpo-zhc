@@ -79,21 +79,42 @@ export async function harnessesOverview(settings: PolpoSettings | undefined, vau
   const h = harnessesSettingsOf(settings);
   let computers: ReturnType<typeof parseComputers> = [];
   try { computers = parseComputers(settings?.computers); } catch { /* reported where they are edited */ }
+  const { harnessCredentialRef } = await import("@polpo-ai/core");
+  const exists = async (ref: { owner: string; service: string } | undefined) => (ref ? !!(await vault?.get(ref.owner, ref.service).catch(() => undefined)) : false);
   const items = await Promise.all(HARNESS_IDS.map(async (id) => {
     const s = h?.[id];
-    const found = s ? !!(await vault?.get(s.credentialRef.owner, s.credentialRef.service).catch(() => undefined)) : false;
+    const ref = harnessCredentialRef(s);
+    const found = await exists(ref);
+    // the gateway as configured: vault references and literal (non-secret) header values only
+    const gateway = s?.gateway ? {
+      ...s.gateway,
+      ...(s.gateway.headers ? { headers: await Promise.all(s.gateway.headers.map(async (x) => ({ ...x, ...(x.credentialRef ? { credentialFound: await exists(x.credentialRef) } : {}) }))) } : {}),
+    } : undefined;
     return {
       id, name: HARNESS_NAMES[id], enabled: !!h?.enabled.includes(id),
-      ...(s ? { auth: s.auth, credentialRef: s.credentialRef, credentialFound: found } : {}),
+      ...(s ? { auth: s.auth, ...(ref ? { credentialRef: ref, credentialFound: found } : {}) } : {}),
+      // the setting as saved (vault references only, never a secret): what the dashboard edits
+      ...(s ? { settings: s } : {}),
+      ...(gateway ? { gateway } : {}),
+      // how the model credential reaches the model at run time
+      ...(s ? { brokering: s.auth === "bedrock" || s.auth === "vertex" ? "not-brokered" as const : process.env.POLPO_PUBLIC_URL?.trim() ? "relay" as const : "in-vm" as const } : {}),
       ...(s?.model ? { model: s.model } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.bedrock ? { bedrock: h["claude-code"].bedrock } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.vertex ? { vertex: h["claude-code"].vertex } : {}),
       agents: agents.filter((a) => agentHarness(a)?.harness === id).map((a) => a.name),
     };
   }));
+  const publicUrl = process.env.POLPO_PUBLIC_URL?.trim().replace(/\/+$/, "") || undefined;
   return {
     allowHost: !!h?.allowHost,
     harnesses: items,
+    /**
+     * Polpo's model relay (credential brokering for API keys and gateways): its public URL when
+     * POLPO_PUBLIC_URL is set. Without it the model key goes into the computer (a warning).
+     */
+    relay: publicUrl
+      ? { available: true, url: `${publicUrl}/api/v1/harness-relay/`, path: "/api/v1/harness-relay/" }
+      : { available: false, path: "/api/v1/harness-relay/", warning: "POLPO_PUBLIC_URL is not set: computers cannot reach Polpo's model relay, so API keys and gateway keys go into the computer's VM. Set POLPO_PUBLIC_URL and expose <public URL>/api/v1/harness-relay/." },
     /** Computers that can run a harness (Daytona; v2 checked at run time). */
     computers: computers.filter((c) => isRemoteComputer(c) && c.kind === "daytona").map((c) => c.id),
   };

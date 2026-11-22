@@ -122,7 +122,8 @@ describe("chat completions: progressive tools", () => {
 
     // the search result names the tool; the meta tools never reach the agent's executor
     const searchResult = calls[1].messages.find((m) => m.role === "toolResult" && m.toolName === "tools_search");
-    expect(searchResult.content[0].text).toContain("- mcp__linear__create_issue [Linear]");
+    expect(searchResult.content[0].text).toContain("Linear [connector linear]");
+    expect(searchResult.content[0].text).toContain("- mcp__linear__create_issue — ");
 
     // after tools_load: the same top-level tools, the new one declared in the transcript
     for (const call of calls) expect(names(call.tools)).toEqual(first);

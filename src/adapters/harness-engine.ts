@@ -30,12 +30,13 @@ import { RemoteWorkspace } from "../sandbox/remote.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import { loadAgentSkills } from "../llm/skills.js";
 import { buildAgentToolset, buildPrompt, collectOutcome, createActivity } from "./engine.js";
-import { resolveHarnessAuth, scrubSecrets, type ResolvedHarnessAuth } from "../harness/credentials.js";
+import { brokeredHarnessAuth, resolveHarnessAuth, scrubSecrets, type HarnessBrokering, type ResolvedHarnessAuth } from "../harness/credentials.js";
 import { classifyHarnessError, harnessTurnFailure, type HarnessFailure, type HarnessTurnOutcome } from "../harness/errors.js";
+import { harnessRelayPublicUrl, openRelayLease, type HarnessRelayLease, type RelayLeaseOptions } from "../harness/relay.js";
 import { toHarnessHostTools } from "../harness/host-tools.js";
 import { liveHarnessSessions, type HarnessSuspendMode } from "../harness/live-sessions.js";
 import {
-  createHarnessSandboxSession, freeHostPort, freeMachinePort, hostHarnessMachine, remoteHarnessMachine, type HarnessMachine,
+  createHarnessSandboxSession, freeHostPort, freeMachinePort, hostHarnessMachine, remoteHarnessMachine, type HarnessCredentialBroker, type HarnessMachine,
 } from "../harness/sandbox-session.js";
 import { HarnessSessionStore, harnessSessionKey, type HarnessSessionStatus } from "../harness/session-store.js";
 import type {
@@ -59,6 +60,10 @@ export interface HarnessEngineDeps {
   /** Token usage sink (default: the project's token usage store). */
   recordUsage?: (r: TokenUsageRecord) => Promise<void>;
   store?: HarnessSessionStore;
+  /** Polpo's public URL, for the model relay (default: POLPO_PUBLIC_URL). */
+  publicUrl?: () => string | undefined;
+  /** Opens the run's model relay lease (tests inject one). */
+  openRelayLease?: (o: RelayLeaseOptions) => Promise<HarnessRelayLease>;
 }
 
 export interface OpenedMachine {
@@ -108,7 +113,11 @@ async function defaultOpenMachine(o: { agent: AgentConfig; cwd: string; ctx: Spa
     // the session works in the run's working directory, in the VM
     await driver.exec(`mkdir -p '${o.cwd.replace(/'/g, `'\\''`)}'`, {});
     return {
-      machine: remoteHarnessMachine({ driver: () => ws.driver(), workDir: o.cwd, label: computer.id, portTtlSeconds: PORT_TTL_SECONDS }),
+      machine: remoteHarnessMachine({
+        driver: () => ws.driver(), workDir: o.cwd, label: computer.id, portTtlSeconds: PORT_TTL_SECONDS,
+        // a provider that rewrites outbound requests itself brokers the credential natively
+        nativeTransformations: !!driver.requestTransformations,
+      }),
       computerId: computer.id,
       hold: () => driver.hold?.() ?? (() => {}),
       remoteId: () => ws.remoteId,
@@ -210,6 +219,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
     let workspace: import("@polpo-ai/core/sandbox").Workspace | undefined;
     let opened: OpenedMachine | undefined;
     let unregister: (() => void) | undefined;
+    let lease: HarnessRelayLease | undefined;
     let toolsetCleanup: Array<() => Promise<unknown>> = [];
     let lastText = "";
     let harnessName = "The harness";
@@ -272,9 +282,41 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       });
 
       // ── credentials: explicit, from the settings' vault reference ──
-      auth = await resolveHarnessAuth(engine, harnessesSettingsOf(settings), ctx.vaultStore);
+      const resolved: ResolvedHarnessAuth = await resolveHarnessAuth(engine, harnessesSettingsOf(settings), ctx.vaultStore);
+      secrets = resolved.secrets;
+
+      // ── credential brokering: the VM gets placeholders, the key is injected outside it ──
+      // native: the computer's provider rewrites outbound requests; relay: Polpo's model relay
+      // (POLPO_PUBLIC_URL); none: the key goes into the VM (no relay reachable, Bedrock, Vertex)
+      let brokering: HarnessBrokering = "none";
+      if (resolved.route && opened.computerId !== "host") {
+        const publicUrl = (deps.publicUrl ?? harnessRelayPublicUrl)();
+        if (machine.nativeRequestTransformations) {
+          brokering = "native";
+        } else if (publicUrl) {
+          lease = await (deps.openRelayLease ?? openRelayLease)({
+            polpoDir, publicUrl, upstream: resolved.route.upstream, headers: resolved.route.headers, scheme: resolved.route.scheme,
+            log: (line) => transcript({ type: "log", message: line }),
+          });
+          secrets = [...secrets, lease.token];
+          brokering = "relay";
+        } else {
+          const warning = `${name}: POLPO_PUBLIC_URL is not set, so Polpo's model relay is not reachable from the computer: the model key goes into the VM (credential brokering off). Set POLPO_PUBLIC_URL and expose its /api/v1/harness-relay/ path.`;
+          console.warn(`[polpo/harness] ${warning}`);
+          transcript({ type: "log", message: warning });
+        }
+      }
+      auth = brokeredHarnessAuth(resolved, brokering, lease?.baseUrl);
       const creds = auth;
-      secrets = creds.secrets;
+      const broker: HarnessCredentialBroker | undefined = brokering === "none" ? undefined : {
+        ...(lease ? { lease } : {}),
+        ...(resolved.route?.scheme ? { scheme: resolved.route.scheme } : {}),
+        // native: Polpo's gateway headers are rules too (the relay lease holds its own)
+        ...(brokering === "native" && resolved.route && Object.keys(resolved.route.headers).length
+          ? { rules: [{ match: { host: new URL(resolved.route.upstream).hostname }, transform: { headers: { ...resolved.route.headers } } }] }
+          : {}),
+      };
+      if (resolved.route) transcript({ type: "log", message: `${name}: model credential ${brokering === "none" ? "in the computer (not brokered)" : brokering === "relay" ? "brokered by Polpo's model relay (placeholders only in the computer)" : "brokered by the computer's provider (placeholders only in the computer)"}` });
       // where and with what this run executes (the task's run context; no secrets)
       activity.runContext = {
         ...(creds.model ? { model: creds.model } : {}),
@@ -329,7 +371,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       const port = resumeFrom && prior?.bridgePort
         ? prior.bridgePort
         : opened.computerId === "host" ? await freeHostPort() : await freeMachinePort(machine);
-      const sandbox: HarnessSandbox = createHarnessSandboxSession(machine, { port });
+      const sandbox: HarnessSandbox = createHarnessSandboxSession(machine, { port, ...(broker ? { broker } : {}) });
       const now = () => new Date().toISOString();
       const status = (patch: Partial<HarnessSessionStatus>) => store.update(key, (cur) => ({
         key, agent: agentConfig.name, harness: engine.harness, computerId: opened!.computerId, scope: "task", taskId: task.id,
@@ -341,6 +383,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
 
       const open = async (from?: HarnessResumeState, sessionId?: string): Promise<HarnessRuntimeSession> => {
         const t0 = Date.now();
+        lease?.resume();
         const s = await runtime.createSession({ ...(sessionId ? { sessionId } : {}), ...(from ? { resumeFrom: from } : {}), sandbox, abortSignal: abort.signal });
         const ms = Date.now() - t0;
         const vm = opened!.remoteId?.();
@@ -373,6 +416,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           }
           const s = session;
           session = undefined;
+          // the VM goes away: its relay token stops working until the session re-attaches
+          lease?.suspend();
           try {
             parked = mode === "memory" ? await s.detach() : await s.stop();
             await store.saveResumeState(key, parked);
@@ -454,7 +499,22 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         }
       };
 
-      const account = async (r: HarnessTurnResult) => {
+      // cost: what a gateway reports (relay, response headers) beats the runtime's estimate, which
+      // uses Anthropic's list prices: right for Anthropic, approximate through a gateway, wrong for
+      // non-Claude models (then only tokens are recorded)
+      let leaseCostSeen = 0;
+      const turnCost = (r: HarnessTurnResult): { usd?: number; source: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" } => {
+        const gateway = lease ? lease.costUsd - leaseCostSeen : 0;
+        if (lease) leaseCostSeen = lease.costUsd;
+        if (gateway > 0) return { usd: gateway, source: "gateway" };
+        if (creds.nonClaude || (resolved.route && resolved.route.mode !== "direct" && engine.harness === "codex")) return { source: "tokens-only" };
+        if (r.costUsd === undefined) return { source: "tokens-only" };
+        return { usd: r.costUsd, source: resolved.route && resolved.route.mode !== "direct" ? "runtime-estimate" : "runtime" };
+      };
+      const account = async (r0: HarnessTurnResult) => {
+        const c = turnCost(r0);
+        const r: HarnessTurnResult = { ...r0 };
+        if (c.usd === undefined) delete r.costUsd; else r.costUsd = c.usd;
         activity.totalTokens += r.usage.totalTokens;
         const prevCost = activity.runContext?.cost;
         activity.runContext = {
@@ -462,6 +522,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           cost: {
             ...prevCost,
             tokens: activity.totalTokens,
+            costSource: c.source,
             ...(r.costUsd !== undefined ? { harnessUsd: (prevCost?.harnessUsd ?? 0) + r.costUsd } : {}),
           },
         };
@@ -479,7 +540,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, cacheReadTokens: r.usage.cacheReadTokens,
           cacheWriteTokens: r.usage.cacheWriteTokens, totalTokens: r.usage.totalTokens, cost: r.costUsd ?? 0,
         }).catch(() => undefined);
-        transcript({ type: "usage", harness: engine.harness, ...r.usage, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) });
+        transcript({ type: "usage", harness: engine.harness, ...r.usage, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}), costSource: c.source });
       };
 
       // ── the turns: the task, then queued follow-ups ──
@@ -562,6 +623,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           await store.update(key, (cur) => (cur ? { ...cur, state: "stopped", pid: undefined } : null)).catch(() => undefined);
         }
       }
+      // the run is over: its relay token stops working
+      await lease?.revoke().catch(() => undefined);
       opened?.machine.close();
       for (const c of toolsetCleanup) await c().catch(() => undefined);
       await workspace?.dispose().catch(() => undefined);
