@@ -84,6 +84,10 @@ const createMissionRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Mission created",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+    },
   },
 });
 
@@ -100,6 +104,10 @@ const updateMissionRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Mission updated",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
     },
   },
 });
@@ -366,6 +374,11 @@ const updateMissionNotificationsRoute = createRoute({
 /**
  * Mission CRUD + execute/resume/abort routes.
  */
+/** A mission task's tool scope asking for more than its agent has (TaskToolScopeError). */
+function isToolScopeError(err: unknown): err is Error {
+  return err instanceof Error && (err.name === "TaskToolScopeError" || (err as { code?: string }).code === "INVALID_TOOL_SCOPE");
+}
+
 export function missionRoutes(getDeps: () => {
   getAllMissions: () => Promise<any[]>;
   getResumableMissions: () => Promise<any[]>;
@@ -492,14 +505,20 @@ export function missionRoutes(getDeps: () => {
     const deps = getDeps();
     const body = c.req.valid("json");
 
-    const mission = await deps.saveMission({
-      data: body.data,
-      prompt: body.prompt,
-      name: body.name,
-      status: body.status,
-      notifications: body.notifications,
-      ...(body.budgetUsd !== undefined ? { budgetUsd: body.budgetUsd } : {}),
-    });
+    let mission: any;
+    try {
+      mission = await deps.saveMission({
+        data: body.data,
+        prompt: body.prompt,
+        name: body.name,
+        status: body.status,
+        notifications: body.notifications,
+        ...(body.budgetUsd !== undefined ? { budgetUsd: body.budgetUsd } : {}),
+      });
+    } catch (err) {
+      if (isToolScopeError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_TOOL_SCOPE" }, 400);
+      throw err;
+    }
 
     return c.json({ ok: true, data: mission }, 201);
   });
@@ -516,8 +535,14 @@ export function missionRoutes(getDeps: () => {
       ...(endDate !== undefined ? { endDate: endDate ?? undefined } : {}),
       ...(budgetUsd !== undefined ? { budgetUsd: budgetUsd ?? undefined } : {}),
     };
-    const mission = await deps.updateMission(missionId, updates);
-    return c.json({ ok: true, data: mission });
+    let mission: any;
+    try {
+      mission = await deps.updateMission(missionId, updates);
+    } catch (err) {
+      if (isToolScopeError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_TOOL_SCOPE" }, 400);
+      throw err;
+    }
+    return c.json({ ok: true, data: mission }, 200);
   });
 
   // DELETE /missions/:missionId — delete mission
@@ -582,6 +607,7 @@ export function missionRoutes(getDeps: () => {
       const mission = await deps.addMissionTask(missionId, body);
       return c.json({ ok: true, data: mission }, 201);
     } catch (e: any) {
+      if (isToolScopeError(e)) return c.json({ ok: false, error: e.message, code: "INVALID_TOOL_SCOPE" }, 400 as any);
       return c.json({ ok: false, error: e.message, code: "BAD_REQUEST" }, 404);
     }
   });
@@ -595,6 +621,7 @@ export function missionRoutes(getDeps: () => {
       const mission = await deps.updateMissionTask(missionId, decodeURIComponent(taskTitle), body);
       return c.json({ ok: true, data: mission }, 200);
     } catch (e: any) {
+      if (isToolScopeError(e)) return c.json({ ok: false, error: e.message, code: "INVALID_TOOL_SCOPE" }, 400 as any);
       return c.json({ ok: false, error: e.message, code: "NOT_FOUND" }, 404);
     }
   });

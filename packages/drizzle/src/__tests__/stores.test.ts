@@ -102,6 +102,20 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.runs).toEqual(runs);
     });
 
+    it("keeps a task's tool scope, and clears it (back to the agent's tools)", async () => {
+      const toolScope = { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] }, allowedTools: ["read"] };
+      const task = await stores.taskStore.addTask({
+        title: "Scoped", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [], toolScope,
+      });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toEqual(toolScope);
+      await stores.taskStore.updateTask(task.id, { toolScope: { connectors: "none" } });
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.toolScope).toEqual({ connectors: "none" });
+      await stores.taskStore.updateTask(task.id, { title: "Scoped 2" });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toEqual({ connectors: "none" });
+      await stores.taskStore.updateTask(task.id, { toolScope: undefined });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toBeUndefined();
+    });
+
     it("getAllTasks returns ordered by createdAt", async () => {
       await stores.taskStore.addTask({
         title: "A", description: "first", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],

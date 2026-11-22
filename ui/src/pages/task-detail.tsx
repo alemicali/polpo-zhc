@@ -79,6 +79,7 @@ import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { RunContextCard } from "@/components/shared/run-context";
+import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
 import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -1024,6 +1025,14 @@ export function TaskDetailPage() {
 
       {/* Where and with what it runs: engine, computer, egress, session, cost (and earlier runs) */}
       <RunContextCard runs={task.runs} computers={computers} />
+
+      {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
+      <TaskToolScopeCard
+        scope={task.toolScope}
+        stale={task.toolScopeStale}
+        agent={agentConfig}
+        onSave={(toolScope) => updateTask({ toolScope })}
+      />
 
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}

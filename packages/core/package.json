@@ -54,6 +54,10 @@
       "types": "./dist/run-context.d.ts",
       "import": "./dist/run-context.js"
     },
+    "./task-tool-scope": {
+      "types": "./dist/task-tool-scope.d.ts",
+      "import": "./dist/task-tool-scope.js"
+    },
     "./mission-cost": {
       "types": "./dist/mission-cost.d.ts",
       "import": "./dist/mission-cost.js"

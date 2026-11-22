@@ -3,6 +3,7 @@
  */
 import { z } from "zod";
 import { describeTaskRun, type TaskRunContext } from "@polpo-ai/core/run-context";
+import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
   encodeCursor, enc, fail, limitParam, looseObject, ok, pageOutput, progress, qs, short, sleep,
@@ -27,7 +28,32 @@ type FullTask = TaskRow & {
   sideEffects?: boolean;
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
+  toolScope?: TaskToolScope;
+  /** What of the tool scope its agent no longer has. */
+  toolScopeStale?: string[];
 };
+
+/** A task's optional tool scope, as MCP arguments (they map to Task.toolScope). */
+export const toolScopeInput = {
+  connectors: z.union([z.literal("none"), z.array(z.string().min(1))]).optional()
+    .describe("Only for a run that must be deterministic: the connector ids it may use (each account of an app is its own connector, e.g. gmail-2; polpo_connectors_list { agent } shows the agent's), or \"none\". Omit to inherit every connector the agent has"),
+  connector_tools: z.record(z.string(), z.union([z.literal("*"), z.array(z.string().min(1))])).optional()
+    .describe("Per connector id: \"*\" or the raw tool names the run may use (a subset of what the agent gets)"),
+  allowed_tools: z.array(z.string().min(1)).optional()
+    .describe("Built-in tools or patterns the run may use (read, bash, browser_*), a subset of the agent's; not connector tools"),
+};
+
+/** Task.toolScope from the MCP arguments (undefined when none is given). */
+export function toolScopeFromArgs(a: { connectors?: string[] | "none"; connector_tools?: Record<string, "*" | string[]>; allowed_tools?: string[] }): TaskToolScope | undefined {
+  if (a.connectors === undefined && a.connector_tools === undefined && a.allowed_tools === undefined) return undefined;
+  return {
+    ...(a.connectors !== undefined ? { connectors: a.connectors } : {}),
+    ...(a.connector_tools !== undefined ? { connectorTools: a.connector_tools } : {}),
+    ...(a.allowed_tools !== undefined ? { allowedTools: a.allowed_tools } : {}),
+  };
+}
+
+const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools.";
 
 export const taskLine = (t: TaskRow) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`;
 
@@ -145,6 +171,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       `${t.id} [${t.status}${t.phase ? `/${t.phase}` : ""}] ${t.title}`,
       `agent: ${t.assignTo ?? "-"}${t.group ? ` · group: ${t.group}` : ""}${t.missionId ? ` · mission: ${t.missionId}` : ""}`,
       `retries: ${t.retries ?? 0}/${t.maxRetries ?? "-"}${t.dependsOn?.length ? ` · depends on: ${t.dependsOn.join(", ")}` : ""}${t.sideEffects ? " · side effects" : ""}`,
+      ...(t.toolScope ? [`tools: ${describeTaskToolScope(t.toolScope)}${t.toolScopeStale?.length ? ` · stale: ${t.toolScopeStale.join("; ")}` : ""}`] : []),
       `created ${t.createdAt ?? "?"} · updated ${t.updatedAt ?? "?"}`,
       "",
       short(t.description, 2000),
@@ -179,10 +206,12 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       max_duration_minutes: z.number().positive().max(24 * 60).optional().describe("Stop it after this many minutes"),
       side_effects: z.boolean().optional().describe("true if it does something irreversible (sends, pays, deletes): it is then never retried automatically"),
       draft: z.boolean().optional().describe("true to create it without starting it (polpo_task_update with start: true starts it)"),
+      ...toolScopeInput,
     },
     outputSchema: { task: looseObject },
     annotations: WRITE,
-  }, async ({ max_retries, max_duration_minutes, side_effects, ...rest }) => {
+  }, async ({ max_retries, max_duration_minutes, side_effects, connectors, connector_tools, allowed_tools, ...rest }) => {
+    const toolScope = toolScopeFromArgs({ connectors, connector_tools, allowed_tools });
     const missing = await unknownAgents(deps, [rest.assignTo]);
     if (missing) return fail(missing);
     const r = await apiSend(deps, "POST", "/tasks", {
@@ -190,20 +219,22 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(max_retries !== undefined ? { maxRetries: max_retries } : {}),
       ...(max_duration_minutes !== undefined ? { maxDuration: Math.round(max_duration_minutes * 60_000) } : {}),
       ...(side_effects !== undefined ? { sideEffects: side_effects } : {}),
+      ...(toolScope ? { toolScope } : {}),
     });
     if (!r.ok) {
+      if (r.code === "INVALID_TOOL_SCOPE") return apiError(r, "Creating the task", TOOL_SCOPE_HINT);
       if (r.status === 409) return fail(`${r.error}: give it another title, or use the existing task (polpo_tasks_list with text).`);
       if (r.code === "UNKNOWN_DEPENDENCY") return apiError(r, "Creating the task", "Find the ids with polpo_tasks_list; a task waits for every task in dependsOn.");
       if (/agent/i.test(r.error)) return apiError(r, "Creating the task", "Check the agent's name with polpo_agents_list.");
       return apiError(r, "Creating the task");
     }
     const t = r.data as FullTask;
-    return ok(`Created task ${t.id} [${t.status}] ${t.title} → ${t.assignTo}. Follow it with polpo_task_wait.`, { task: r.data as Record<string, unknown> });
+    return ok(`Created task ${t.id} [${t.status}] ${t.title} → ${t.assignTo}${t.toolScope ? ` (tools ${describeTaskToolScope(t.toolScope)})` : ""}. Follow it with polpo_task_wait.`, { task: r.data as Record<string, unknown> });
   });
 
   tool("tasks", "polpo_task_update", {
     title: "Update a task",
-    description: "Change a task's description, agent, retries or side-effects flag, or start a draft. Only the fields given change; "
+    description: "Change a task's description, agent, retries, side-effects flag or tool scope (connectors, connector_tools, allowed_tools; inherit_tools drops it), or start a draft. Only the fields given change; "
       + "the result lists what changed. A running task keeps its current run: use polpo_task_direct to steer it.",
     inputSchema: {
       id: z.string().min(1).describe("The task's id"),
@@ -212,10 +243,14 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       max_retries: z.number().int().min(0).max(10).optional().describe("Retries after a failure"),
       side_effects: z.boolean().optional().describe("Whether it does something irreversible"),
       start: z.boolean().optional().describe("true to start a draft task (it becomes pending)"),
+      ...toolScopeInput,
+      inherit_tools: z.boolean().optional().describe("true to drop the task's tool scope: it uses everything its agent has again"),
     },
     outputSchema: { task: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ id, description, assignTo, max_retries, side_effects, start }) => {
+  }, async ({ id, description, assignTo, max_retries, side_effects, start, connectors, connector_tools, allowed_tools, inherit_tools }) => {
+    // any of connectors / connector_tools / allowed_tools replaces the task's whole tool scope
+    const toolScope = inherit_tools ? null : toolScopeFromArgs({ connectors, connector_tools, allowed_tools });
     const before = await loadTask(deps, id);
     if (!before.ok) return before.status === 404 ? notFound(id) : apiError(before, `Reading task ${id}`);
     if (start && before.task.status !== "draft") return fail(`Task ${id} is ${before.task.status}, not a draft: only drafts can be started (polpo_task_retry runs a failed one again).`);
@@ -225,12 +260,13 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(max_retries !== undefined ? { maxRetries: max_retries } : {}),
       ...(side_effects !== undefined ? { sideEffects: side_effects } : {}),
       ...(start ? { status: "pending" } : {}),
+      ...(toolScope !== undefined ? { toolScope } : {}),
     };
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one of description, assignTo, max_retries, side_effects, start.");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one of description, assignTo, max_retries, side_effects, start, connectors, connector_tools, allowed_tools, inherit_tools.");
     const missing = await unknownAgents(deps, [assignTo]);
     if (missing) return fail(missing);
     const r = await apiSend(deps, "PATCH", `/tasks/${enc(id)}`, body);
-    if (!r.ok) return apiError(r, `Updating task ${id}`, /agent/i.test(r.error) ? "Check the agent's name with polpo_agents_list." : undefined);
+    if (!r.ok) return apiError(r, `Updating task ${id}`, r.code === "INVALID_TOOL_SCOPE" ? TOOL_SCOPE_HINT : /agent/i.test(r.error) ? "Check the agent's name with polpo_agents_list." : undefined);
     const after = (r.data ?? {}) as FullTask;
     const fields: Array<[string, unknown, unknown]> = [
       ["description", before.task.description, after.description], ["assignTo", before.task.assignTo, after.assignTo],
@@ -238,6 +274,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ["status", before.task.status, after.status],
     ];
     const changed = fields.filter(([, a, b]) => b !== undefined && JSON.stringify(a) !== JSON.stringify(b)).map(([k]) => k);
+    if (toolScope !== undefined && JSON.stringify(before.task.toolScope ?? null) !== JSON.stringify(after.toolScope ?? null)) changed.push("toolScope");
     return ok(changed.length ? `Updated ${id}: ${changed.join(", ")}.` : `Nothing changed on ${id} (the values were the same).`, { task: after as Record<string, unknown>, changed });
   });
 

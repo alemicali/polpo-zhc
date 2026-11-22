@@ -751,6 +751,7 @@ export class TaskRunner {
         runCtx = buildRunContext({
           runId, startedAt: now, agent, settings: this.ctx.config.settings as never, sandbox,
           browserEgress: runnerConfig.browserEgress, continuation,
+          ...(task.toolScope ? { toolScope: task.toolScope } : {}),
         });
         const fresh = await this.ctx.registry.getTask(task.id);
         await this.ctx.registry.updateTask(task.id, { runs: upsertTaskRun(fresh?.runs ?? task.runs, runCtx) });

@@ -144,6 +144,24 @@ describe("the bridged tools on a real instance", () => {
     expect(await run("harnesses_update", {})).toMatch(/^Error: Nothing to change/);
   });
 
+  it("create_task / update_task: an optional tool scope, checked against the agent (narrow only)", async () => {
+    await writeFile(join(tmpDir, ".polpo", "connectors.json"), JSON.stringify({ connectors: [
+      { id: "linear", name: "Linear", kind: "mcp", transport: { type: "http", url: "http://127.0.0.1:1/mcp" }, auth: { type: "none" }, access: { agents: ["agent-1"], polpo: false }, enabled: true, createdAt: "2026-01-01" },
+      { id: "notion", name: "Notion", kind: "mcp", transport: { type: "http", url: "http://127.0.0.1:1/mcp" }, auth: { type: "none" }, access: { agents: [], polpo: false }, enabled: true, createdAt: "2026-01-01" },
+    ] }));
+    const made = await run("create_task", { title: "Scoped task", description: "d", assignTo: "agent-1", toolScope: { connectors: ["linear"], allowedTools: ["read"] } });
+    expect(made).toMatch(/Task created: .* \(tools restricted: Linear; built-in: read\)/);
+    const id = made.match(/\[([^\]]+)\]/)![1]!;
+    expect((await polpo.getStore().getTask(id))!.toolScope).toEqual({ connectors: ["linear"], allowedTools: ["read"] });
+    expect(await run("create_task", { title: "Grant", description: "d", assignTo: "agent-1", toolScope: { connectors: ["notion"] } }))
+      .toMatch(/^Error: Invalid toolScope: connectors: agent "agent-1" has no access to Notion/);
+    expect(await run("update_task", { taskId: id, toolScope: { connectors: "none" } })).toMatch(/tools → restricted: no connectors/);
+    expect(await run("update_task", { taskId: id, toolScope: { allowedTools: ["browser_click"] } })).toMatch(/^Error: Invalid toolScope/);
+    expect(await run("update_task", { taskId: id, toolScope: null })).toMatch(/tools → inherited from the agent/);
+    expect((await polpo.getStore().getTask(id))!.toolScope).toBeUndefined();
+    await polpo.deleteTask(id);
+  });
+
   it("add_agent / update_agent: engine, computers and connector tools, checked like the API", async () => {
     // unknown computer
     expect(await run("add_agent", { name: "coder", defaultComputer: "nina" })).toMatch(/^Error: Unknown computer: nina/);

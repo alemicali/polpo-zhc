@@ -27,6 +27,25 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-task-tool-scope",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Strumenti per singolo task",
+    summary: "Un task può usare solo alcuni connettori, account e strumenti del suo agente: utile quando un'esecuzione deve essere prevedibile. Di base eredita tutto dall'agente.",
+    body: [
+      "Nella pagina di un task, la sezione **Tools for this task** ha due scelte:",
+      "",
+      "- **Inherit from agent** (predefinito): il task usa tutti i connettori e gli strumenti che l'agente ha, come prima.",
+      "- **Restrict**: scegli quali connettori (e quali account, per esempio Gmail – info@…) può usare, eventualmente solo alcuni loro strumenti (con ricerca, seleziona tutti / nessuno) e solo alcuni strumenti integrati.",
+      "",
+      "Si può solo restringere: quello che l'agente non ha non si può aggiungere, e viene rifiutato con un messaggio chiaro. Se l'agente perde qualcosa (connettore rimosso, accesso revocato) la pagina lo segnala. Il badge mostra cosa è limitato (\"Restricted: Linear (3 tools), Gmail – info@…\") e ogni esecuzione registra i limiti che aveva.",
+      "",
+      "Vale con Polpo, Claude Code e Codex, anche per la ricerca degli strumenti su richiesta; si imposta anche dai task delle missioni (pure programmate e ricorrenti), dall'API, da MCP (`connectors`, `connector_tools`, `allowed_tools`) e chiedendolo a Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
     id: "2026-11-22-compaction-fix",
     date: "2026-11-22",
     kind: "fixed",

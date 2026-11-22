@@ -13,6 +13,7 @@
 import type { AgentHarnessEngine, HarnessId } from "./harnesses.js";
 import type { ComputerConfig, ComputerKind } from "./computers.js";
 import type { SandboxProviderId } from "./sandbox.js";
+import type { TaskToolScope } from "./task-tool-scope.js";
 
 export type RunEngine = "polpo" | HarnessId;
 export type RunContextStatus = "running" | "completed" | "failed" | "killed";
@@ -89,6 +90,8 @@ export interface TaskRunContext {
   budgetUsd?: number;
   durationMs?: number;
   exitCode?: number;
+  /** The task's tool scope this run had (absent: everything its agent has). */
+  toolScope?: TaskToolScope;
 }
 
 /** Runs kept on a task (newest last). */
@@ -109,6 +112,8 @@ export interface BuildRunContextInput {
   sandbox?: { provider: SandboxProviderId | string; computer?: Pick<ComputerConfig, "id" | "name" | "kind">; fallback?: { from: string } };
   browserEgress?: { name: string; url: string; tailnet?: unknown };
   continuation?: boolean;
+  /** The task's tool scope (Task.toolScope), recorded as the run had it. */
+  toolScope?: TaskToolScope;
 }
 
 /** The agent's harness engine (lenient: the engine was validated when the agent was saved). */
@@ -173,6 +178,7 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     computer,
     sandbox: { provider, ephemeral: !c && remote, ...(i.sandbox?.fallback ? { fallbackFrom: i.sandbox.fallback.from } : {}) },
     egress,
+    ...(i.toolScope ? { toolScope: i.toolScope } : {}),
   };
   if (harness) {
     const h = harnessSetting(i.settings, harness.harness);
@@ -251,6 +257,16 @@ export function summarizeTaskRun(ctx: TaskRunContext | undefined): TaskRunSummar
   };
 }
 
+function describeScopeShort(scope: TaskToolScope): string {
+  const parts: string[] = [];
+  if (scope.connectors === "none") parts.push("no connectors");
+  else if (Array.isArray(scope.connectors)) parts.push(`connectors ${scope.connectors.join(", ")}`);
+  const picked = Object.entries(scope.connectorTools ?? {}).filter(([, t]) => Array.isArray(t));
+  if (picked.length) parts.push(picked.map(([id, t]) => `${id}: ${(t as string[]).length}`).join(", "));
+  if (scope.allowedTools) parts.push(`built-in ${scope.allowedTools.join(", ") || "none"}`);
+  return `restricted (${parts.join("; ")})`;
+}
+
 /** One line describing a run, for text outputs (MCP). */
 export function describeTaskRun(ctx: TaskRunContext): string {
   const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : "Codex";
@@ -267,6 +283,7 @@ export function describeTaskRun(ctx: TaskRunContext): string {
   return [
     `${ctx.runId} [${ctx.status}]${ctx.continuation ? " continuation" : ""} ${engine}${ctx.model ? ` ${ctx.model}` : ""}${auth}`,
     `on ${where}`, egress, session, cost,
+    ctx.toolScope ? `tools ${describeScopeShort(ctx.toolScope)}` : "",
     ctx.durationMs !== undefined ? `${Math.round(ctx.durationMs / 1000)} s` : "",
   ].filter(Boolean).join(" · ");
 }

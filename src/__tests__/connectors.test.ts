@@ -6,7 +6,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -14,7 +14,10 @@ import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CONNECTORS_VAULT_OWNER } from "@polpo-ai/core";
+import { CONNECTORS_VAULT_OWNER, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+import { buildAgentToolset } from "../adapters/engine.js";
+import { toHarnessHostTools } from "../harness/host-tools.js";
+import { scopedAgentForRun } from "../core/task-tool-scope.js";
 import { ProgressiveToolSet } from "@polpo-ai/core/progressive-tools";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { ConnectorManager } from "../mcp/manager.js";
@@ -381,6 +384,46 @@ describe("connection manager", () => {
     expect(set.search("lin").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
     expect(set.search("very large text").map((h) => h.name)).not.toContain("mcp__lin__big");
     expect(set.load(["mcp__lin__big", "mcp__lin"])).toEqual({ loaded: ["mcp__lin__echo"], already: [], unknown: ["mcp__lin__big"] });
+  });
+
+  it("a task's tool scope narrows the run's tools: Polpo's engine, progressive discovery and harness host tools", async () => {
+    const { manager, polpoDir } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: false } });
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "t", team: { name: "t", agents: [{ name: "alice" }] }, settings: { connectors: { allowPrivateNetwork: true } } }));
+    const agent = { name: "alice" } as AgentConfig;
+    const run = async (toolScope?: TaskToolScope) => {
+      const task = { id: "t2", title: "T", description: "d", assignTo: "alice", dependsOn: ["t1"], status: "pending", expectations: [], metrics: [], retries: 0, maxRetries: 1, createdAt: "", updatedAt: "", ...(toolScope ? { toolScope } : {}) } as Task;
+      const agentConfig = scopedAgentForRun({ agent, task, polpoDir });
+      const toolset = await buildAgentToolset({ agentConfig, cwd: polpoDir, ctx: { polpoDir }, sandboxProvider: "local", browserProfileDir: join(polpoDir, "bp"), hasExtendedTools: false, task });
+      await toolset.connectorManager?.closeAll();
+      return { names: toolset.tools.map((t) => t.name), tools: toolset.tools, note: toolset.connectorNote };
+    };
+    // no scope: everything the agent has (unchanged behaviour)
+    const all = await run();
+    expect(all.names.filter((n) => n.startsWith("mcp__")).length).toBe(10);
+    expect(all.names).toEqual(expect.arrayContaining(["read", "bash", "write", "task_result", "register_outcome"]));
+    // scoped: one connector, one tool of it, one built-in tool
+    const scoped = await run({ connectors: ["lin"], connectorTools: { lin: ["echo"] }, allowedTools: ["read"] });
+    expect(scoped.names.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(scoped.names).toContain("read");
+    expect(scoped.names).not.toContain("bash");
+    expect(scoped.names).not.toContain("write");
+    // the dependency results and outcome tools are not affected
+    expect(scoped.names).toEqual(expect.arrayContaining(["task_result", "dependency_results", "register_outcome"]));
+    // the prompt's Connectors section leaves out the connector the scope excludes
+    expect(scoped.note).toContain("mcp__lin__*");
+    expect(scoped.note).not.toContain("mcp__other__*");
+    // progressive tools_search / tools_load see only the scoped set
+    const set = new ProgressiveToolSet({ tools: scoped.tools, mode: "always", connectorNames: { lin: "Lin", other: "Other" } });
+    expect(set.search("echo").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
+    expect(set.load(["mcp__other__echo", "mcp__lin__big"]).unknown).toEqual(["mcp__other__echo", "mcp__lin__big"]);
+    // harness host tools (Claude Code, Codex) get the same set
+    const host = toHarnessHostTools(scoped.tools).map((t) => t.name);
+    expect(host.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(host).toContain("task_result");
+    // "none": no connector tool at all
+    expect((await run({ connectors: "none" })).names.some((n) => n.startsWith("mcp__"))).toBe(false);
   });
 
   it("skips a connector that cannot connect, with a note, without failing", async () => {

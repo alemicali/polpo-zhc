@@ -64,7 +64,8 @@ export function connectorRedirectUri(): string | undefined {
 
 /** Prompt lines on the connectors `agent` (undefined: Polpo) may use. */
 export function connectorsPromptSection(connectors: ConnectorConfig[], agent: string | undefined, notes: string[] = [], connectorTools?: AgentConnectorTools): string {
-  const granted = connectors.filter((c) => connectorGrants(c, agent));
+  // a connector the agent (or this task's tool scope) selects no tool of is left out
+  const granted = connectors.filter((c) => connectorGrants(c, agent) && !(Array.isArray(connectorTools?.[c.id]) && connectorTools![c.id]!.length === 0));
   if (granted.length === 0 && notes.length === 0) return "";
   const lines = [
     "## Connectors",

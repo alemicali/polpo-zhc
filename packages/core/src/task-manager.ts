@@ -1,3 +1,4 @@
+import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
@@ -29,6 +30,8 @@ export class TaskManager {
     draft?: boolean;
     /** Retries for this task (e.g. a mission task's maxRetries); default: settings.maxRetries. */
     maxRetries?: number;
+    /** Narrowing of the run's tools; absent: everything the agent has. Validated by the caller. */
+    toolScope?: TaskToolScope;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
 
@@ -86,6 +89,7 @@ export class TaskManager {
       retryPolicy: hookData.retryPolicy,
       notifications: hookData.notifications,
       sideEffects: hookData.sideEffects,
+      ...(normalizeTaskToolScope(opts.toolScope) ? { toolScope: normalizeTaskToolScope(opts.toolScope) } : {}),
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });

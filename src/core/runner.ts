@@ -19,6 +19,7 @@ import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import { spawnHarnessEngine } from "../adapters/harness-engine.js";
 import { agentHarness } from "@polpo-ai/core";
+import { scopedAgentForRun } from "./task-tool-scope.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
@@ -369,9 +370,12 @@ async function main(): Promise<void> {
       continuation,
     };
     // an agent on an official harness (Claude Code, Codex) runs it in its computer; others on Polpo's engine
-    handle = agentHarness(config.agent)
-      ? spawnHarnessEngine(config.agent, config.task, config.cwd, spawnCtx)
-      : spawnEngine(config.agent, config.task, config.cwd, spawnCtx);
+    // The task's tool scope narrows the agent's tools for this run: Polpo's engine, progressive
+    // tools_search / tools_load and harness host tools all resolve from this config
+    const runAgent = scopedAgentForRun(config);
+    handle = agentHarness(runAgent)
+      ? spawnHarnessEngine(runAgent, config.task, config.cwd, spawnCtx)
+      : spawnEngine(runAgent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
     handle.onTranscript = (entry) => {
       actLog.logTranscript(entry);
@@ -538,3 +542,4 @@ main().catch((err) => {
   console.error("Runner fatal error:", err);
   process.exit(1);
 });
+
