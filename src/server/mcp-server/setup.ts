@@ -16,7 +16,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
-export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector"] as const;
+export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data"] as const;
 export type SetupKind = (typeof SETUP_KINDS)[number];
 
 /** What is awaited: a channel's field, a provider's key, a vault entry… */
@@ -56,6 +56,7 @@ export function setupPath(t: SetupTarget): string {
     case "sync": return `/config?${q({ section: "sync", focus: t.field ?? "secretAccessKey" })}`;
     case "vault": return `/agents/${enc(t.item ?? "")}?${q({ tab: "credentials", service: t.field })}`;
     case "connector": return `/connectors?${q({ connector: t.item, focus: t.field })}`;
+    case "data": return `/data?${q({ tab: "sources", source: t.item, focus: t.field ?? "password" })}`;
   }
 }
 
@@ -130,6 +131,14 @@ export async function setupDone(deps: McpDeps, t: SetupTarget): Promise<boolean 
       if (t.field === "clientSecret") return !!s.clientSecret;
       if (t.field === "headers") return (s.headers ?? []).length > 0;
       return !!s.bearerToken || (s.headers ?? []).length > 0 || !!s.clientSecret || !!s.oauth?.authorized;
+    }
+    case "data": {
+      // a data source's credentials (vault $data / data:<id>): their field names only
+      const r = await apiGet(deps, `/data/${enc(t.item ?? "")}`);
+      if (!r.ok) return r.status === 404 ? false : null;
+      const keys = (r.data as { credentialKeys?: string[] }).credentialKeys;
+      if (!keys) return null;
+      return t.field ? keys.includes(t.field) : keys.length > 0;
     }
   }
 }

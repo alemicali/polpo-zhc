@@ -16,7 +16,8 @@ import {
   type McpDeps, type McpPrincipal, type PolpoScope, type ToolScope, type ToolsetName,
 } from "./mcp-server/kit.js";
 import { registerConversationTools } from "./mcp-server/conversation.js";
-import { registerAgentTools, registerApprovalTools, registerArtifactTools, registerDataTools, registerFileTools } from "./mcp-server/core-tools.js";
+import { registerAgentTools, registerApprovalTools, registerArtifactTools, registerFileTools } from "./mcp-server/core-tools.js";
+import { registerDataTools } from "./mcp-server/data.js";
 import { registerTaskTools } from "./mcp-server/tasks.js";
 import { registerMissionTools } from "./mcp-server/missions.js";
 import { registerAdminTools } from "./mcp-server/admin.js";

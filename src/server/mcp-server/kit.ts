@@ -81,7 +81,7 @@ export const TOOLSETS = {
   tasks: { default: true, description: "Tasks: list, read, create, update, retry, kill, direct, wait, logs" },
   missions: { default: true, description: "Missions and playbooks: list, read, create, update, run, abort, wait" },
   artifacts: { default: true, description: "Artifacts: documents, html dashboards and designs, diagrams" },
-  data: { default: true, description: "Structured data sources and queries" },
+  data: { default: true, description: "Data sources (schema, test, activity, who may use them; changes need admin scope), queries, read-only SQL, row changes, data views" },
   files: { default: true, description: "The instance's files: browse, search, read, write (writes need files scope)" },
   team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
   config: { default: true, description: "Settings (general ones too), branding and appearance, providers and models (changes need admin scope)" },
@@ -135,13 +135,13 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
 /** The scopes, in the order people see them, with what they allow in plain words. */
 export const SCOPES = {
   "polpo:read": { label: "Read", description: "See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings" },
-  "polpo:work": { label: "Work", description: "Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, rooms, memory, schedules and checks; resolve approvals" },
+  "polpo:work": { label: "Work", description: "Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, data views and rows, rooms, memory, schedules and checks; resolve approvals" },
   "polpo:files": { label: "Files", description: "Write, move and delete the instance's files" },
   "polpo:messages": { label: "Messages", description: "Send messages on Telegram, WhatsApp and email, as Polpo or an agent" },
   "polpo:connectors": { label: "Connectors", description: "Add, change, connect, disconnect and remove connectors (the services agents use)" },
   "polpo:computers": { label: "Computers", description: "Create, start, stop, reset and delete computers (they may cost money)" },
   "polpo:vault": { label: "Vault", description: "See the names of vault entries (never their values) and delete them" },
-  "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
+  "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, data sources and who may use them, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
 } as const;
 
 export type PolpoScope = keyof typeof SCOPES;

@@ -1,5 +1,5 @@
 /**
- * Agents, approvals, artifacts, data and files.
+ * Agents, approvals, artifacts and files (data: data.ts).
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
@@ -256,46 +256,6 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return apiError(r, "Creating the artifact");
     const a = r.data as { id?: string; title?: string };
     return ok(`Created artifact ${a.id}: ${a.title}.`, { artifact: r.data as Record<string, unknown> });
-  });
-}
-
-export function registerDataTools(tool: Register, deps: McpDeps): void {
-  tool("data", "polpo_data_sources_list", {
-    title: "List data sources",
-    description: "The structured data sources (databases, APIs, files) the instance can query, with their ids for polpo_data_query.",
-    inputSchema: {},
-    outputSchema: { items: z.array(z.object({ id: z.string(), name: z.string(), kind: z.string(), description: z.string().optional() }).passthrough()) },
-    annotations: READ,
-  }, async () => {
-    const r = await apiGet(deps, "/data");
-    if (!r.ok) return apiError(r, "Listing data sources");
-    const sources = ((r.data as Array<{ id: string; name: string; kind: string; description?: string }>) ?? [])
-      .map((s) => ({ id: s.id, name: s.name, kind: s.kind, ...(s.description ? { description: s.description } : {}) }));
-    return ok(sources.map((s) => `- ${s.id} ${s.name} (${s.kind})${s.description ? `: ${s.description}` : ""}`).join("\n") || "No data sources.", { items: sources });
-  });
-
-  tool("data", "polpo_data_query", {
-    title: "Query data",
-    description: "Read rows from a data source's dataset: choose fields, filter, sort and limit. polpo_data_sources_list gives the source ids; "
-      + "an invalid dataset or field name returns the valid ones.",
-    inputSchema: {
-      sourceId: z.string().min(1).describe("The data source's id"),
-      dataset: z.string().min(1).describe("The dataset (table, collection, sheet…)"),
-      fields: z.array(z.string()).optional().describe("Fields to return (default all)"),
-      filters: z.array(z.object({
-        field: z.string().describe("Field name"),
-        operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "contains", "startsWith", "in", "isNull"]).describe("Comparison"),
-        value: z.unknown().optional().describe("Value (an array for in; omit for isNull)"),
-      })).optional().describe("All must match"),
-      sort: z.array(z.object({ field: z.string().describe("Field name"), direction: z.enum(["asc", "desc"]).describe("asc or desc") })).optional().describe("Order"),
-      limit: z.number().int().min(1).max(1000).optional().describe("Most rows (default the source's, max 1000)"),
-    },
-    outputSchema: { result: z.unknown() },
-    annotations: READ,
-  }, async (args) => {
-    const r = await apiSend(deps, "POST", "/data/query", args);
-    if (!r.ok) return apiError(r, "The query");
-    return ok(clip(r.data), { result: r.data });
   });
 }
 
