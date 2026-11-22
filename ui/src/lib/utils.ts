@@ -13,6 +13,7 @@ const twMerge = extendTailwindMerge({
       leading: ["display", "h1", "h2", "h3", "body", "small", "caption", "micro"],
       tracking: ["heading", "label"],
       shadow: ["card", "raised"],
+      radius: ["card", "control"],
     },
     classGroups: {
       "font-size": ["text-label"],

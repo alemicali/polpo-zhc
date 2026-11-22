@@ -16,7 +16,7 @@ const SERVER = fileURLToPath(new URL("../../ui/server.mjs", import.meta.url));
 let root: string;
 let api: Server;
 let apiHits = 0;
-let appearance: unknown = { theme: "light", palette: "claude", custom: { enabled: true, light: { primary: "#c96442" } } };
+let appearance: unknown = { theme: "light", palette: "claude", custom: { enabled: true, light: { primary: "#c96442" } }, fonts: [{ family: "Manrope", source: "google", weights: "400;700" }] };
 let branding: unknown = { productName: "Acme Ops", tagline: "Internal AI", logoUrl: "/api/v1/config/branding/logo", logoFrame: "none", secret: "never inlined" };
 let brandingHits = 0;
 const uis: ChildProcess[] = [];
@@ -70,7 +70,7 @@ afterAll(async () => {
 });
 
 describe("runtime-config.js", () => {
-  it("carries the instance appearance, cached for a while", async () => {
+  it("carries the instance appearance (web fonts too), cached for a while", async () => {
     const apiUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
     const base = await startUi({ POLPO_API_URL: apiUrl, POLPO_APPEARANCE_TTL_MS: "60000" });
     const { config } = await runtimeConfig(base);
