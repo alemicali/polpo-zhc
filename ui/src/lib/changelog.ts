@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-theme-everywhere",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Il tuo tema su ogni schermata",
+    summary: "Colori, font, dimensioni dei titoli, sidebar e ombre del tuo aspetto ora valgono su tutte le pagine; il nome del brand è anche nel titolo della scheda.",
+    body: [
+      "- **Ogni schermata segue il tema**: chat, task, missioni, agenti, file, configurazione, terminale e grafici usano i colori e i font dell'istanza, anche la sidebar.",
+      "- **Colori di stato configurabili**: successo, attenzione, info ed errore hanno i loro colori nel tema.",
+      "- **Tipografia**: una scala di titoli e testi (display, titoli, corpo, didascalie, etichette) che si regola dall'aspetto; aggiunto **Inter Tight**.",
+      "- **Nome e logo subito**: niente più lampo di Polpo al caricamento; il titolo della scheda mostra il nome del brand. Il riquadro del logo si può togliere.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri l'aspetto", to: "/config?section=appearance" },
+  },
+  {
     id: "2026-11-22-appearance-config-mcp",
     date: "2026-11-22",
     kind: "new",
