@@ -1007,10 +1007,10 @@ export async function buildAgentToolset(o: {
         settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
         log: (line) => o.log?.(line),
       });
-      const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools);
+      const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools, agentConfig.connectorTools);
       const taken = new Set(allTools.map((tool) => tool.name));
       allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
-      connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
+      connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes, agentConfig.connectorTools);
     } catch { /* no connectors */ }
   }
   return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };

@@ -9,6 +9,7 @@ Connectors link a Polpo workspace to the apps people already use (Linear, Notion
 - A connector is a remote MCP server (Streamable HTTP, falling back to SSE automatically; or legacy SSE), or a local process (stdio, admin only).
 - Its tools appear to the model as `mcp__<connector>__<tool>` (only `a-z A-Z 0-9 _ -`, at most 64 characters; long names end with a short hash). Parameters are the server's own JSON Schema.
 - **Who may use it** is set on the connector: `access.agents` (agent names, or `"*"` for every agent) and `access.polpo` (Polpo's chat). New connectors default to Polpo only; grant agents explicitly.
+- **Which tools** of a granted connector an agent gets is set on the agent: `connectorTools` (see [below](#choosing-an-agents-tools)). By default, all of them.
 - An agent with `allowedTools` gets a connector's tools only when its list matches them: `mcp__*` (every connector granted to it), `mcp__linear__*` (one connector), or exact names such as `mcp__linear__create_issue`. Agents without `allowedTools` get every tool of the connectors granted to them.
 - **Per-tool policy** (`toolPolicy`): `"off"` hides a tool from everyone; `"ask"` is reserved for asking the person before the call runs (today it behaves like `"allow"`); `"allow"` is the default.
 - Connections are opened lazily and reused; tool lists are cached for 5 minutes and refreshed when the server announces a change. Tool calls time out after 60 s (`toolTimeoutMs` per connector, or `settings.connectors.toolTimeoutMs`). Results over 100 KB of text are cut, with a note telling the model to ask for less.
@@ -115,6 +116,21 @@ A stdio connector **runs a command on the Polpo server** with the server's user,
 - **Network**: remote connectors must use https; private, loopback, link-local and CGNAT (tailnet) addresses are refused unless `settings.connectors.allowPrivateNetwork` is `true` (or `POLPO_CONNECTORS_ALLOW_PRIVATE=1`), which also allows `http://localhost`. The URL is checked when saved and before every connection.
 - Tokens are never logged; tool results are capped; tool calls time out and honor cancellation.
 
+## Choosing an agent's tools
+
+Connector access is per connector: an agent granted Linear gets every Linear tool. To give it only some of them, set `connectorTools` on the agent, keyed by connector id:
+
+```json
+{ "name": "pm", "connectorTools": { "linear": ["create_issue", "list_issues"], "notion": "*" } }
+```
+
+- A missing key or `"*"`: every tool of that connector, current and future (the default).
+- A list: only those tools, by the server's own tool name (`create_issue`, not `mcp__linear__create_issue`). An empty list: none.
+- It narrows, never grants: an agent gets a tool only when the connector is granted to it (`access.agents`), the tool is not `"off"` (`toolPolicy`), the agent's `connectorTools` selects it, and its `allowedTools` (if any) matches it. Progressive `tools_search` / `tools_load` and harness host tools see only that intersection. Polpo's own chat is not affected.
+- Names the connector does not list (renamed, removed, or the connector is disconnected right now) are kept, and shown as stale on the agent page, by `polpo_agent_get` (`stale_connector_tools`) and by `polpo_connectors_list { id, agent }` (`stale_tools`).
+
+Set it from the dashboard (agent page → **Tools & Skills** → Connectors → **Tools** on a granted connector: "All tools" or "Only selected", with search and select all / none), with `PATCH /api/v1/agents/:name { "connectorTools": … }` (the whole map; `null` clears it; `"*"` entries are dropped and lists deduplicated), or over MCP with `connector_tools` on `polpo_agent_create` / `polpo_agent_update`. `polpo_connectors_list { agent }` shows what an agent gets.
+
 ## Progressive tool discovery
 
 A few connectors easily add a hundred tools to every request. When a run (a task, a chat turn of an agent or of Polpo) has more tools than `settings.tools.progressiveThreshold` (default 30), it starts with its essential tools plus two meta tools, and the rest is loaded on demand:
@@ -123,7 +139,7 @@ A few connectors easily add a hundred tools to every request. When a run (a task
 - The prompt lists the deferred groups with their size (`Connector Linear (mcp__linear__*): 12 tools`). `tools_search { query, limit }` ranks the deferred tools by name, description and connector; `tools_load { names }` loads tools by name, or a whole group by its name (`mcp__linear`, `Linear`, `browser`).
 - A loaded tool is declared to the model before its next step as a pi-ai system message with `toolsAdded`. Where the provider supports changing tools mid-conversation it goes inline and the cached prompt prefix survives: Anthropic (inline `tool_addition` blocks on recent Claude models), OpenAI Responses (`additional_tools` / tool search on GPT-5.6+ and Codex), Kimi (K3). Every other model gets the current tool list at the top of the request.
 - Loaded tools stay for the rest of the conversation: in a chat, the next turns start with the tools loaded (or used) in earlier turns; in a task, for the run. After a compaction, loaded tools are declared again.
-- Search and load only see the tools the run was given: `allowedTools`, connector access and `toolPolicy` are applied first. In a chat, calling a deferred tool by name without loading it loads it (in a task the call fails as an unknown tool until it is loaded).
+- Search and load only see the tools the run was given: `allowedTools`, connector access, `toolPolicy` and the agent's `connectorTools` are applied first. In a chat, calling a deferred tool by name without loading it loads it (in a task the call fails as an unknown tool until it is loaded).
 
 | Setting | Default | |
 |---|---|---|

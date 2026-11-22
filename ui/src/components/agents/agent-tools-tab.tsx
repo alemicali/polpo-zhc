@@ -33,6 +33,7 @@ export function AgentToolsTab() {
       agentAllowedTools,
       enabledCategories,
     },
+    actions: { refetch },
   } = useAgentDetail();
 
   return (
@@ -169,7 +170,12 @@ export function AgentToolsTab() {
         )}
 
         {/* Connectors */}
-        <AgentConnectorsSection agentName={agent.name} allowedTools={agent.allowedTools} />
+        <AgentConnectorsSection
+          agentName={agent.name}
+          allowedTools={agent.allowedTools}
+          connectorTools={agent.connectorTools}
+          onConnectorToolsSaved={refetch}
+        />
 
         {/* Allowed Paths */}
         {agent.allowedPaths && agent.allowedPaths.length > 0 && (

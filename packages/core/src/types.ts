@@ -406,6 +406,12 @@ export interface AgentConfig {
    * `settings.tools.progressiveThreshold` tools; "always" always does; "never" gives every tool up front.
    */
   progressiveTools?: import("./progressive-tools.js").ProgressiveToolsMode;
+  /**
+   * Which tools of each granted connector this agent gets, keyed by connector id: "*" or a missing
+   * key = all (current and future), a list = only those raw MCP tool names. Narrows connector access;
+   * the connector's toolPolicy ("off") and allowedTools still apply.
+   */
+  connectorTools?: import("./connectors.js").AgentConnectorTools;
   /** Voice replies in chats (Telegram); default "off". The agent can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
   /** Learning from its conversations (memory, own skills); off by default. The agent can change it (set_learning). */

@@ -80,6 +80,11 @@ function installFetch() {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     const method = init?.method ?? "GET";
+    if (url.pathname.startsWith("/api/v1/agents/")) {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      server.calls.push({ method: init?.method ?? "GET", path: url.pathname, body });
+      return ok({ name: decodeURIComponent(url.pathname.split("/").pop()!), ...(body?.connectorTools ? { connectorTools: body.connectorTools } : {}) });
+    }
     const path = url.pathname.replace("/api/v1/connectors", "") || "/";
     const catalog = server.catalog ?? CATALOG;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -478,6 +483,62 @@ test("agent page: connectors section grants and revokes this agent", async () =>
   await click(sw("notion"));
   await flush();
   expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toMatchObject({ path: "/notion", body: { access: { agents: ["dev"], polpo: false } } });
+});
+
+test("agent page: choose which of a connector's tools the agent gets", async () => {
+  installFetch();
+  server.connectors = [
+    connector("linear", { status: "connected", toolCount: 2, access: { agents: ["pm"], polpo: false }, toolPolicy: {} }),
+    connector("notion", { status: "connected", access: { agents: ["pm"], polpo: false } }),
+  ];
+  const onSaved = vi.fn();
+  await act(async () => root.render(
+    <MemoryRouter><AgentConnectorsSection agentName="pm" connectorTools={{ notion: ["search", "gone_tool"] }} onConnectorToolsSaved={onSaved} /></MemoryRouter>,
+  ));
+  await flush();
+  expect(container.querySelector('[data-testid="agent-connector-notion"]')?.textContent).toContain("2 selected tools");
+
+  // Linear: "All tools" by default; switch to "Only selected" (starts from every tool), uncheck one, save
+  await click(container.querySelector('[aria-label="Choose Linear tools for pm"]'));
+  await flush();
+  const panel = () => container.querySelector('[data-testid="agent-connector-tools-linear"]')!;
+  expect(panel().querySelector('[aria-label="All tools"]')?.getAttribute("aria-checked")).toBe("true");
+  expect((byText("Save", '[data-testid="agent-connector-tools-linear"] button') as HTMLButtonElement).disabled).toBe(true);
+  await click(panel().querySelector('[aria-label="Only selected"]'));
+  await flush();
+  const box = (label: string) => panel().querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`)!;
+  expect(box("Create issue").checked).toBe(true);
+  expect(box("list_issues").checked).toBe(true);
+  await click(box("list_issues"));
+  expect(box("list_issues").checked).toBe(false);
+
+  // search filters the list; select none / all act on the visible tools
+  await type(panel().querySelector('input[aria-label="Search Linear tools"]') as HTMLInputElement, "create");
+  expect(panel().querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  await click(byText("Select none", '[data-testid="agent-connector-tools-linear"] button'));
+  expect(box("Create issue").checked).toBe(false);
+  await click(byText("Select all", '[data-testid="agent-connector-tools-linear"] button'));
+  expect(box("Create issue").checked).toBe(true);
+  await type(panel().querySelector('input[aria-label="Search Linear tools"]') as HTMLInputElement, "");
+
+  await click(byText("Save", '[data-testid="agent-connector-tools-linear"] button'));
+  await flush();
+  // the whole selection is saved: Notion's list is kept
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toEqual({
+    method: "PATCH", path: "/api/v1/agents/pm", body: { connectorTools: { notion: ["search", "gone_tool"], linear: ["create_issue"] } },
+  });
+  expect(onSaved).toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="agent-connector-linear"]')?.textContent).toContain("1 selected tool");
+
+  // Notion: a name the connector does not list is shown as stale; back to "All tools" drops the key
+  await click(container.querySelector('[aria-label="Choose Notion tools for pm"]'));
+  await flush();
+  const notion = () => container.querySelector('[data-testid="agent-connector-tools-notion"]')!;
+  expect(notion().querySelector('[data-testid="stale-connector-tools"]')?.textContent).toContain("gone_tool");
+  await click(notion().querySelector('[aria-label="All tools"]'));
+  await click(byText("Save", '[data-testid="agent-connector-tools-notion"] button'));
+  await flush();
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)?.body).toEqual({ connectorTools: { linear: ["create_issue"] } });
 });
 
 // ── Custom connector dialog ─────────────────────────────────────────────────

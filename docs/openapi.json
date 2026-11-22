@@ -5175,6 +5175,62 @@
                     "type": "string",
                     "pattern": "^([a-z0-9][a-z0-9-]{0,39})?$"
                   },
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "polpo"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude-code",
+                              "codex"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "effort": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "maxBudgetUsd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 10000
+                          }
+                        },
+                        "required": [
+                          "harness"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
+                  },
                   "sandbox": {
                     "nullable": true
                   },
@@ -5188,6 +5244,28 @@
                       "always",
                       "never"
                     ]
+                  },
+                  "connectorTools": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "*"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "maxItems": 1000
+                        }
+                      ]
+                    }
                   },
                   "voiceReplies": {
                     "type": "string",
@@ -5578,6 +5656,29 @@
                       null
                     ]
                   },
+                  "connectorTools": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "*"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "maxItems": 1000
+                        }
+                      ]
+                    }
+                  },
                   "voiceReplies": {
                     "type": "string",
                     "enum": [
@@ -5747,6 +5848,62 @@
                   "defaultComputer": {
                     "type": "string",
                     "pattern": "^([a-z0-9][a-z0-9-]{0,39})?$"
+                  },
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "polpo"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude-code",
+                              "codex"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "effort": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "maxBudgetUsd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 10000
+                          }
+                        },
+                        "required": [
+                          "harness"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   },
                   "emailAllowedDomains": {
                     "type": "array",
@@ -9767,7 +9924,42 @@
                             ]
                           }
                         ]
+                      },
+                      "logoDarkUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "/api/v1/config/branding/logo-dark"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          }
+                        ]
+                      },
+                      "logoFrame": {
+                        "type": "string",
+                        "enum": [
+                          "box",
+                          "none",
+                          ""
+                        ]
                       }
+                    }
+                  },
+                  "appearance": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "nullable": true
                     }
                   },
                   "egressProxies": {
@@ -9809,6 +10001,304 @@
                     "required": [
                       "authKey"
                     ]
+                  },
+                  "harnesses": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  },
+                  "maxRetries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "logLevel": {
+                    "type": "string",
+                    "enum": [
+                      "quiet",
+                      "normal",
+                      "verbose"
+                    ]
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "taskTimeout": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1000
+                  },
+                  "staleThreshold": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1000
+                  },
+                  "maxFixAttempts": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxQuestionRounds": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxResolutionAttempts": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxAssessmentRetries": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "defaultQualityThreshold": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "autoCorrectExpectations": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "enableScheduler": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "enableVolatileTeams": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "volatileCleanup": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "on_complete",
+                      "manual",
+                      null
+                    ]
+                  },
+                  "logRetentionDays": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 3650
+                  },
+                  "emailAllowedDomains": {
+                    "type": "array",
+                    "nullable": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253,
+                      "pattern": "^[A-Za-z0-9.*-]+$"
+                    }
+                  },
+                  "voiceReplies": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "off",
+                      "voice",
+                      "always",
+                      null
+                    ]
+                  },
+                  "defaultRetryPolicy": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "escalateAfter": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "fallbackAgent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "escalateModel": {
+                        "type": "string",
+                        "minLength": 3
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "connectors": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "allowPrivateNetwork": {
+                        "type": "boolean"
+                      },
+                      "toolTimeoutMs": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 3600000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "mcp": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "toolsets": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "keyRef": {
+                              "type": "object",
+                              "properties": {
+                                "owner": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "owner",
+                                "service"
+                              ]
+                            },
+                            "scopes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "keyRef"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "escalationPolicy": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "levels": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "level": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "handler": {
+                              "type": "string",
+                              "enum": [
+                                "agent",
+                                "orchestrator",
+                                "human"
+                              ]
+                            },
+                            "target": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "notifyChannels": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "level",
+                            "handler"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "levels"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "sla": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "warningThreshold": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "checkIntervalMs": {
+                        "type": "integer",
+                        "minimum": 1000
+                      },
+                      "warningChannels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "violationChannels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "violationAction": {
+                        "type": "string",
+                        "enum": [
+                          "notify",
+                          "fail"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 }
               }
@@ -10540,6 +11030,28 @@
               }
             }
           },
+          "400": {
+            "description": "The id in the body does not match the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No configuration loaded",
             "content": {
@@ -10802,6 +11314,28 @@
               }
             }
           },
+          "400": {
+            "description": "The id in the body does not match the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No configuration loaded",
             "content": {
@@ -10938,8 +11472,20 @@
         "tags": [
           "Config"
         ],
-        "summary": "Upload the managed instance logo",
+        "summary": "Upload the managed instance logo (?variant=dark: the logo for dark mode)",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "required": false,
+            "name": "variant",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "string"
@@ -11087,8 +11633,20 @@
         "tags": [
           "Config"
         ],
-        "summary": "Remove the managed instance logo",
+        "summary": "Remove the managed instance logo (?variant=dark: the logo for dark mode)",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "required": false,
+            "name": "variant",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "string"

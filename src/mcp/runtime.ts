@@ -2,7 +2,7 @@
  * The server's connector manager for an orchestrator, the OAuth redirect URI as people reach this
  * instance, and the prompt lines that tell an agent (or Polpo) which connectors it has.
  */
-import { connectorGrants, type ConnectorChangedEvent, type ConnectorConfig, type PolpoSettings, type VaultStore } from "@polpo-ai/core";
+import { connectorGrants, type AgentConnectorTools, type ConnectorChangedEvent, type ConnectorConfig, type PolpoSettings, type VaultStore } from "@polpo-ai/core";
 import { getConnectorManager, type ConnectorManager } from "./manager.js";
 
 import { CONNECTOR_OAUTH_CALLBACK_PATH } from "./paths.js";
@@ -39,7 +39,7 @@ export function connectorRedirectUri(): string | undefined {
 }
 
 /** Prompt lines on the connectors `agent` (undefined: Polpo) may use. */
-export function connectorsPromptSection(connectors: ConnectorConfig[], agent: string | undefined, notes: string[] = []): string {
+export function connectorsPromptSection(connectors: ConnectorConfig[], agent: string | undefined, notes: string[] = [], connectorTools?: AgentConnectorTools): string {
   const granted = connectors.filter((c) => connectorGrants(c, agent));
   if (granted.length === 0 && notes.length === 0) return "";
   const lines = [
@@ -47,7 +47,8 @@ export function connectorsPromptSection(connectors: ConnectorConfig[], agent: st
     "",
     "External apps connected to this workspace (MCP). Their tools are named mcp__<connector>__<tool>; use them for that app instead of the browser or raw HTTP.",
     ...granted.map((c) => {
-      const state = c.status === "connected" ? `${c.toolCount ?? "?"} tools`
+      const selected = connectorTools?.[c.id];
+      const state = c.status === "connected" ? (Array.isArray(selected) ? `${selected.length} selected tools` : `${c.toolCount ?? "?"} tools`)
         : c.status === "needs_auth" || c.status === "needs_reauth" ? "needs to be (re)connected by a person in Settings → Connectors"
         : c.status === "error" ? `unavailable${c.lastError ? `: ${c.lastError.slice(0, 160)}` : ""}`
         : c.status ?? "not connected yet";

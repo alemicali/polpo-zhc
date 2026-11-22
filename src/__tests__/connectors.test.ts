@@ -15,6 +15,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CONNECTORS_VAULT_OWNER } from "@polpo-ai/core";
+import { ProgressiveToolSet } from "@polpo-ai/core/progressive-tools";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { buildConnector, ConnectorInputError } from "../mcp/validate.js";
@@ -343,6 +344,42 @@ describe("connection manager", () => {
     expect((await manager.toolsFor("alice", ["mcp__everyone__echo"])).tools.map((t) => t.name)).toEqual(["mcp__everyone__echo"]);
     expect((await manager.toolsFor("alice", ["mcp__*"])).tools.length).toBe(10);
     expect((await manager.toolsFor("alice", ["read", "bash"])).tools).toEqual([]);
+  });
+
+  it("intersects connector access, toolPolicy, the agent's connectorTools selection and allowedTools", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: true }, toolPolicy: { image: "off" } });
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    const names = async (agent: string | undefined, allowed?: string[], selection?: Record<string, "*" | string[]>) =>
+      (await manager.toolsFor(agent, allowed, selection)).tools.map((t) => t.name).sort();
+    // no selection / "*": every tool the policy allows (today's behaviour)
+    expect((await names("alice")).filter((n) => n.startsWith("mcp__lin__"))).toEqual(["mcp__lin__big", "mcp__lin__echo", "mcp__lin__fail", "mcp__lin__weird_name"]);
+    expect(await names("alice", undefined, { lin: "*" })).toEqual(await names("alice"));
+    // a list: only those tools of that connector; other connectors untouched; unknown names ignored
+    expect(await names("alice", undefined, { lin: ["echo", "gone-tool"] })).toEqual([
+      "mcp__lin__echo", "mcp__other__big", "mcp__other__echo", "mcp__other__fail", "mcp__other__image", "mcp__other__weird_name",
+    ]);
+    // an empty list: none of that connector's tools
+    expect((await names("alice", undefined, { lin: [], other: ["fail"] }))).toEqual(["mcp__other__fail"]);
+    // toolPolicy "off" wins over a selection
+    expect(await names("bob", undefined, { lin: ["image", "echo"] })).toEqual(["mcp__lin__echo"]);
+    // allowedTools still applies on top
+    expect(await names("alice", ["mcp__lin__*"], { lin: ["echo", "big"] })).toEqual(["mcp__lin__big", "mcp__lin__echo"]);
+    expect(await names("alice", ["mcp__lin__fail"], { lin: ["echo"] })).toEqual([]);
+    // a selection never grants: bob has no access to "other"
+    expect(await names("bob", undefined, { other: ["echo"] })).toEqual(["mcp__lin__big", "mcp__lin__echo", "mcp__lin__fail", "mcp__lin__weird_name"]);
+    // Polpo has no agent selection
+    expect((await names(undefined, undefined, { lin: ["echo"] })).length).toBe(4);
+  });
+
+  it("progressive tools_search / tools_load only see the agent's selected connector tools", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: false } });
+    const { tools } = await manager.toolsFor("alice", undefined, { lin: ["echo"] });
+    const set = new ProgressiveToolSet({ tools, mode: "always", connectorNames: { lin: "Lin" } });
+    expect(set.search("lin").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
+    expect(set.search("very large text").map((h) => h.name)).not.toContain("mcp__lin__big");
+    expect(set.load(["mcp__lin__big", "mcp__lin"])).toEqual({ loaded: ["mcp__lin__echo"], already: [], unknown: ["mcp__lin__big"] });
   });
 
   it("skips a connector that cannot connect, with a note, without failing", async () => {

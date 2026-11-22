@@ -29,7 +29,11 @@ const connectorItem = z.object({
   agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean(), tool_count: z.number().int().optional(),
   authorized: z.boolean().optional(), credentials_set: z.boolean().optional(), last_error: z.string().optional(), catalog_id: z.string().optional(),
   tool_policy: z.record(z.string(), z.string()).optional(),
+  agent_tools: z.union([z.literal("*"), z.array(z.string())]).optional(),
 });
+
+/** Whether the connector's access lets `agent` use it (the API's connectorGrants, on the view). */
+const grants = (c: Connector, agent: string) => c.enabled && (c.access.agents === "*" || c.access.agents.includes(agent));
 
 /** A server URL without what could carry a key (user info, query, fragment). */
 function safeUrl(url: string): string {
@@ -74,29 +78,54 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
   tool("connectors", "polpo_connectors_list", {
     title: "List connectors",
     description: "The connectors (MCP servers agents and Polpo use): status, auth and whether it is authorized or has its token (never the secrets), "
-      + "tool count, who may use them. With id, that connector and its tools with their policy (allow, ask, off).",
+      + "tool count, who may use them. With id, that connector and its tools with their policy (allow, ask, off). "
+      + "With agent, only the connectors granted to that agent and which of their tools it gets (its connector_tools selection; with id, each tool's effective state).",
     inputSchema: {
       id: z.string().optional().describe("One connector, with its tools"),
+      agent: z.string().optional().describe("An agent's name: the connectors it may use and the tools it gets from them"),
       limit: limitParam(50, 200),
       cursor: cursorParam(),
     },
-    outputSchema: { ...pageOutput(connectorItem), tools: z.array(z.object({ name: z.string(), description: z.string().optional(), policy: z.string() })).optional() },
+    outputSchema: {
+      ...pageOutput(connectorItem),
+      tools: z.array(z.object({ name: z.string(), description: z.string().optional(), policy: z.string(), agent_gets: z.boolean().optional() })).optional(),
+      stale_tools: z.array(z.string()).optional(),
+    },
     annotations: READ,
-  }, async ({ id, limit, cursor }) => {
+  }, async ({ id, agent, limit, cursor }) => {
+    let selection: Record<string, "*" | string[]> | undefined;
+    if (agent) {
+      const a = await apiGet(deps, `/agents/${enc(agent)}`);
+      if (!a.ok) return a.status === 404 ? fail(`There is no agent "${agent}". Find the name with polpo_agents_list.`) : apiError(a, `Reading agent ${agent}`);
+      selection = (a.data as { connectorTools?: Record<string, "*" | string[]> })?.connectorTools ?? {};
+    }
+    const agentView = (c: Connector) => ({ ...view(c), ...(agent ? { agent_tools: selection?.[c.id] ?? "*" as const } : {}) });
+    const agentNote = (v: ReturnType<typeof agentView>) => (v.agent_tools === undefined ? ""
+      : ` · ${agent} gets: ${v.agent_tools === "*" ? "all tools" : v.agent_tools.length ? v.agent_tools.join(", ") : "no tools"}`);
     if (id) {
       const c = await loadConnector(deps, id);
       if (!c.ok) return c.status === 404 ? notFound(id) : apiError(c, `Reading connector ${id}`);
+      if (agent && !grants(c.connector, agent)) return fail(`${agent} may not use connector ${id}: grant it with polpo_connector_update_access first.`);
       const t = await apiGet(deps, `/connectors/${enc(id)}/tools`);
-      const tools = t.ok ? ((t.data as { tools?: Array<{ name: string; description?: string; policy: string }> })?.tools ?? []).map((x) => ({ name: x.name, ...(x.description ? { description: short(x.description, 200) } : {}), policy: x.policy })) : undefined;
-      const v = view(c.connector);
-      return ok(`${line(v).slice(2)}${tools ? `\ntools:\n${tools.map((x) => `- ${x.name} [${x.policy}]${x.description ? `: ${short(x.description, 100)}` : ""}`).join("\n") || "(none)"}` : `\n(tools not available: ${t.ok ? "" : t.error})`}`,
-        { items: [v], next_cursor: null, total: 1, ...(tools ? { tools } : {}) });
+      const picked = agent ? selection?.[id] ?? "*" : undefined;
+      const tools = t.ok ? ((t.data as { tools?: Array<{ name: string; description?: string; policy: string }> })?.tools ?? []).map((x) => ({
+        name: x.name, ...(x.description ? { description: short(x.description, 200) } : {}), policy: x.policy,
+        ...(picked !== undefined ? { agent_gets: x.policy !== "off" && (picked === "*" || picked.includes(x.name)) } : {}),
+      })) : undefined;
+      const stale = tools && Array.isArray(picked) ? picked.filter((name) => !tools.some((x) => x.name === name)) : [];
+      const v = agentView(c.connector);
+      const toolLine = (x: NonNullable<typeof tools>[number]) => `- ${x.name} [${x.policy}${x.agent_gets === undefined ? "" : x.agent_gets ? ", on" : ", not for this agent"}]${x.description ? `: ${short(x.description, 100)}` : ""}`;
+      return ok(`${line(v).slice(2)}${agentNote(v)}${tools ? `\ntools:\n${tools.map(toolLine).join("\n") || "(none)"}` : `\n(tools not available: ${t.ok ? "" : t.error})`}`
+        + `${stale.length ? `\nstale (selected, no longer listed by the connector): ${stale.join(", ")}` : ""}`,
+        { items: [v], next_cursor: null, total: 1, ...(tools ? { tools } : {}), ...(stale.length ? { stale_tools: stale } : {}) });
     }
     const r = await apiGet(deps, "/connectors");
     if (!r.ok) return apiError(r, "Listing connectors");
-    const p = page(((r.data as { connectors?: Connector[] })?.connectors ?? []).map(view), limit ?? 50, cursor);
+    const all = ((r.data as { connectors?: Connector[] })?.connectors ?? []).filter((c) => !agent || grants(c, agent));
+    const p = page(all.map(agentView), limit ?? 50, cursor);
     if (!p) return fail(BAD_CURSOR);
-    return ok(`${p.items.map(line).join("\n") || "No connectors. Find one with polpo_connector_catalog."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
+    const empty = agent ? `No connectors are granted to ${agent}.` : "No connectors. Find one with polpo_connector_catalog.";
+    return ok(`${p.items.map((v) => `${line(v)}${agentNote(v)}`).join("\n") || empty}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 
   const catalogItem = z.object({

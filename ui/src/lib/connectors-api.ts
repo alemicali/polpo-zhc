@@ -145,13 +145,13 @@ export class ConnectorRequestError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, base = "/api/v1/connectors"): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("content-type", "application/json");
   if (config.apiKey) headers.set("authorization", `Bearer ${config.apiKey}`);
   let response: Response;
   try {
-    response = await fetch(apiUrl(`/api/v1/connectors${path}`), { ...init, headers, credentials: "include" });
+    response = await fetch(apiUrl(`${base}${path}`), { ...init, headers, credentials: "include" });
   } catch {
     throw new Error("Could not reach the Polpo server");
   }
@@ -183,6 +183,11 @@ export const connectorsApi = {
     request<OAuthApp>(`/oauth-apps/${encodeURIComponent(app)}`, json("PUT", input)),
   removeOAuthApp: (app: string) => request<{ removed: boolean }>(`/oauth-apps/${encodeURIComponent(app)}`, json("DELETE")),
 };
+
+/** Save an agent's per-connector tool selection (null: every tool of every granted connector). */
+export function saveAgentConnectorTools(agent: string, connectorTools: AgentConnectorTools | null): Promise<{ connectorTools?: AgentConnectorTools } | null> {
+  return request(`/${encodeURIComponent(agent)}`, json("PATCH", { connectorTools }), "/api/v1/agents");
+}
 
 // ── Catalog search ───────────────────────────────────────────────────────────
 
@@ -315,6 +320,42 @@ export function toggleAgentAccess(access: ConnectorAccess, agent: string, on: bo
   }
   const current = access.agents === "*" ? allAgents : access.agents;
   return { ...access, agents: current.filter((a) => a !== agent) };
+}
+
+// ── Per-agent tool selection ─────────────────────────────────────────────────
+
+/** agent.connectorTools: { <connector id>: "*" | [raw tool names] }; a missing key = every tool. */
+export type AgentConnectorTools = Record<string, "*" | string[]>;
+
+/** The agent's selection for one connector: "*" (all tools, current and future) or the chosen names. */
+export function connectorToolsEntry(selection: AgentConnectorTools | undefined, connectorId: string): "*" | string[] {
+  const entry = selection?.[connectorId];
+  return Array.isArray(entry) ? entry : "*";
+}
+
+/** The whole selection with one connector's entry replaced ("*" drops the key); null when nothing is left. */
+export function withConnectorToolsEntry(selection: AgentConnectorTools | undefined, connectorId: string, entry: "*" | string[]): AgentConnectorTools | null {
+  const next: AgentConnectorTools = { ...(selection ?? {}) };
+  if (entry === "*") delete next[connectorId];
+  else next[connectorId] = [...new Set(entry)];
+  return Object.keys(next).length ? next : null;
+}
+
+/** Selected names the connector does not list (any more): kept, shown as stale. */
+export function staleConnectorTools(entry: "*" | string[], tools: Array<{ name: string }> | null): string[] {
+  if (entry === "*" || !tools) return [];
+  const known = new Set(tools.map((t) => t.name));
+  return entry.filter((name) => !known.has(name));
+}
+
+/** Tools whose name, title or description contains every word of `query`. */
+export function filterConnectorTools<T extends { name: string; title?: string; description?: string }>(tools: T[], query: string): T[] {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return tools;
+  return tools.filter((t) => {
+    const text = fold(`${t.name} ${t.title ?? ""} ${t.description ?? ""}`);
+    return words.every((w) => text.includes(w));
+  });
 }
 
 /**

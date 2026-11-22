@@ -344,7 +344,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // the connectors it may use (state from the last connection; tools come with resolveAgentTools)
       let connectorsNote = "";
       try {
-        const section = connectorsPromptSection(connectorManagerFor(o).store.list(), agentConfig.name);
+        const section = connectorsPromptSection(connectorManagerFor(o).store.list(), agentConfig.name, [], agentConfig.connectorTools);
         if (section) connectorsNote = `\n\n${section}`;
       } catch { /* no connectors file: nothing to say */ }
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
@@ -472,7 +472,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
       // connector that cannot connect is skipped (and logged): it never breaks the chat.
       try {
-        const { tools: connectorTools } = await connectorManagerFor(o).toolsFor(agentConfig.name, agentConfig.allowedTools);
+        const { tools: connectorTools } = await connectorManagerFor(o).toolsFor(agentConfig.name, agentConfig.allowedTools, agentConfig.connectorTools);
         const taken = new Set(tools.map((tool: any) => tool.name));
         tools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
       } catch (err) {

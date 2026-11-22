@@ -139,6 +139,13 @@ function fakeInstance() {
       const s = schedules.get(decodeURIComponent(m[1]!));
       return s ? okData(s) : notFound("Schedule");
     }
+    const lin = { id: "lin", name: "Lin", transport: { type: "http", url: "https://mcp.lin.example/mcp" }, auth: { type: "none" }, access: { agents: ["coach"], polpo: false }, enabled: true, status: "connected", toolCount: 3, toolPolicy: { delete_issue: "off" } };
+    const notion = { ...lin, id: "notion", name: "Notion", access: { agents: ["writer"], polpo: true } };
+    if (p === "/connectors" && method === "GET") return okData({ connectors: [lin, notion] });
+    if (p === "/connectors/lin" && method === "GET") return okData(lin);
+    if (p === "/connectors/lin/tools" && method === "GET") return okData({ tools: [
+      { name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "list_issues", policy: "allow" }, { name: "delete_issue", policy: "off" },
+    ] });
     return reply(404, { ok: false, error: `No route ${method} ${p}` });
   });
   return { api, calls, tasks, missions, schedules, logo: () => logo };
@@ -432,6 +439,47 @@ describe("the team", () => {
     const upd = await call(deps(f), "polpo_agent_update", { name: "coach", role: "Nutrition coach" });
     expect(upd.structuredContent.changed).toEqual(["role"]);
     expect((await call(deps(f), "polpo_agent_get", { name: "coach" })).structuredContent.agent.role).toBe("Nutrition coach");
+  });
+});
+
+describe("connector tools per agent", () => {
+  it("polpo_agent_create / polpo_agent_update take connector_tools and send connectorTools; null clears it", async () => {
+    const f = fakeInstance();
+    expect((await call(deps(f), "polpo_agent_create", { name: "analyst", connector_tools: { lin: ["create_issue"], notion: "*" } })).isError).toBeFalsy();
+    expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/agents")!.body).toEqual({ name: "analyst", connectorTools: { lin: ["create_issue"], notion: "*" } });
+    const upd = await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "gone_tool"] } });
+    expect(upd.isError).toBeFalsy();
+    expect(upd.structuredContent.changed).toEqual(["connectorTools"]);
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ connectorTools: { lin: ["create_issue", "gone_tool"] } });
+    expect((await call(deps(f), "polpo_agent_update", { name: "writer", connector_tools: null })).isError).toBeFalsy();
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ connectorTools: null });
+    expect((await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { "Bad Id": "*" } })).isError).toBe(true);
+  });
+
+  it("polpo_agent_get returns the selection and reports stale tool names", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "gone_tool"] } });
+    const r = await call(deps(f), "polpo_agent_get", { name: "coach" });
+    expect(r.structuredContent.agent.connectorTools).toEqual({ lin: ["create_issue", "gone_tool"] });
+    expect(r.structuredContent.stale_connector_tools).toEqual({ lin: ["gone_tool"] });
+    expect(r.content[0].text).toContain("connector tools: lin: create_issue, gone_tool (stale: gone_tool)");
+  });
+
+  it("polpo_connectors_list with agent: only its connectors, and the tools it gets", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "delete_issue", "gone_tool"] } });
+    const list = await call(deps(f), "polpo_connectors_list", { agent: "coach" });
+    expect(list.structuredContent.items.map((c: { id: string }) => c.id)).toEqual(["lin"]);
+    expect(list.structuredContent.items[0].agent_tools).toEqual(["create_issue", "delete_issue", "gone_tool"]);
+    expect((await call(deps(f), "polpo_connectors_list", { agent: "writer" })).structuredContent.items[0]).toMatchObject({ id: "notion", agent_tools: "*" });
+    const one = await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "coach" });
+    expect(one.structuredContent.tools).toEqual([
+      { name: "create_issue", description: "Create an issue", policy: "allow", agent_gets: true },
+      { name: "list_issues", policy: "allow", agent_gets: false },
+      { name: "delete_issue", policy: "off", agent_gets: false },
+    ]);
+    expect(one.structuredContent.stale_tools).toEqual(["gone_tool"]);
+    expect((await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "writer" })).isError).toBe(true);
   });
 });
 

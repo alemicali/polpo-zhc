@@ -57,8 +57,8 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_agent_get` | An agent's configuration: role, model, instructions, tools, skills, identity. | read-only |
-| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity, manager or browser egress proxy (`browserEgress`, a name from the settings' egress proxies). `computers: null` (or `[]`) clears its list of computers. `engine`: `"polpo"` (default) or an agent harness `{ harness: "claude-code" \| "codex", model?, permissionMode?, effort?, maxBudgetUsd? }` running in its computer; refused unless the harness is enabled and the agent's computer can run it (see [harnesses.md](harnesses.md)). | write |
+| `polpo_agent_get` | An agent's configuration: role, model, instructions, tools, skills, identity, and its per-connector tool selection (`connectorTools`); selected tool names a connector no longer lists come back in `stale_connector_tools`. | read-only |
+| `polpo_agent_create`, `polpo_agent_update` | Add an agent, or change its role, model, instructions, tools, skills, identity, manager or browser egress proxy (`browserEgress`, a name from the settings' egress proxies). `computers: null` (or `[]`) clears its list of computers. `engine`: `"polpo"` (default) or an agent harness `{ harness: "claude-code" \| "codex", model?, permissionMode?, effort?, maxBudgetUsd? }` running in its computer; refused unless the harness is enabled and the agent's computer can run it (see [harnesses.md](harnesses.md)). `connector_tools`: which tools of each connector granted to it the agent gets, `{ <connector id>: "*" \| [tool names] }` (`"*"` or no key: all, current and future; a list: only those raw MCP tool names); on update it replaces the whole selection and `null` clears it (see [connectors.md](connectors.md#choosing-an-agents-tools)). | write |
 | `polpo_agent_delete` | Remove an agent (`confirm: true`). | destructive |
 | `polpo_agent_avatar_set` | An agent's picture, from a public https URL, a file of the instance or base64 (checked by its bytes); `remove: true` removes it. | write, idempotent |
 | `polpo_teams_list` | The teams and their agents. | read-only |
@@ -139,7 +139,7 @@ Group chats of people and agents (the dashboard's groups).
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_connectors_list` | Connectors with their status, auth (authorized? token set?), tool count and who may use them; with `id`, its tools and their policy. Never secrets. | read-only |
+| `polpo_connectors_list` | Connectors with their status, auth (authorized? token set?), tool count and who may use them; with `id`, its tools and their policy. With `agent`, only the connectors granted to that agent and the tools it gets (`agent_tools`; with `id`, `agent_gets` per tool and `stale_tools`). Never secrets. | read-only |
 | `polpo_connector_catalog` | Well-known remote MCP servers to add in one step, and what each needs. | read-only |
 | `polpo_connector_add` | Add from the catalog or a remote https URL (never a local process). OAuth ones return `authorization_url` for the person to open; token-based ones are finished in the dashboard (`setup_url`). | write, open world |
 | `polpo_connector_update` | Who may use it (agents, Polpo), on or off, name, per-tool policy (`allow`, `ask`, `off`). | write, idempotent |
