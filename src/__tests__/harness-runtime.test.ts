@@ -46,6 +46,7 @@ const { liveHarnessSessions } = await import("../harness/live-sessions.js");
 const { HarnessSessionStore, HARNESS_VAULT_OWNER } = await import("../harness/session-store.js");
 const { controlHarnessSession, harnessSessionViews, killBridgeCommand } = await import("../harness/control.js");
 const { spawnHarnessEngine } = await import("../adapters/harness-engine.js");
+const { classifyHarnessError, harnessTurnFailure } = await import("../harness/errors.js");
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
@@ -279,7 +280,7 @@ describe("harness engine (tasks)", () => {
   const task = { id: "t1", title: "Write notes", description: "Create notes.txt", expectations: [], status: "in_progress" } as any;
   const agent = { name: "ada", role: "dev", engine: { harness: "claude-code", maxBudgetUsd: 2 } } as any;
 
-  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>, machineOpts: { remoteId?: () => string } = {}, runAgent: any = agent) {
+  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>, machineOpts: { remoteId?: () => string } = {}, runAgent: any = agent, realSdk = false) {
     const root = tmp("polpo-harness-engine-");
     const polpoDir = join(root, ".polpo");
     mkdirSync(polpoDir, { recursive: true });
@@ -314,7 +315,7 @@ describe("harness engine (tasks)", () => {
     const handle = spawnHarnessEngine(runAgent, task, root, { polpoDir, outputDir: join(polpoDir, "output", "t1"), vaultStore: vault } as any, {
       settings: () => settings,
       openMachine: async () => ({ machine: machine as any, computerId: "nina", hold: () => () => {}, ...machineOpts }),
-      runtimeFactory: (s) => { spec = s; return runtime as any; },
+      runtimeFactory: (s) => { spec = s; return realSdk ? createSdkHarnessRuntime(s) : runtime as any; },
       recordUsage: async (r) => { usage.push(r); },
     });
     handle.onTranscript = (e) => transcript.push(e);
@@ -439,6 +440,85 @@ describe("harness engine (tasks)", () => {
     expect(await env.handle.done).toMatchObject({ exitCode: 1, stderr: "Killed" });
     const bad = spawnHarnessEngine({ ...agent, engine: { harness: "codex" } }, task, tmp("polpo-x-"), { polpoDir: tmp("polpo-y-") } as any, { settings: () => settings });
     expect(await bad.done).toMatchObject({ exitCode: 1, stderr: expect.stringMatching(/Codex is not enabled/) });
+  });
+
+  // the two live run logs (lumea): Claude Code on Bedrock, a model not enabled for the AWS account
+  const bedrock403 = (id: string) =>
+    `AWS authentication failed · refresh your AWS credentials (SSO sign-in, access keys, API key or proxy token) and retry · if credentials are current, check AWS permissions and model access · API Error: 403 ${id} is not available for this account. You can explore other available models on Amazon Bedrock. For additional access options, contact AWS Sales at https://aws.amazon.com/contact-us/sales-support/`;
+  const zero = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
+
+  for (const [model, providerId] of [["us.anthropic.claude-sonnet-5-5", "anthropic.claude-sonnet-5-5"], ["us.anthropic.claude-sonnet-5", "anthropic.claude-sonnet-5"]] as const) {
+    it(`a model not enabled on Bedrock (${model}): the task fails, not retried, with the reason and the model id`, async () => {
+      const env = setup([async (_s, onEvent) => {
+        onEvent({ type: "error", message: bedrock403(providerId) });
+        return { text: "", finishReason: "stop", usage: zero };
+      }], {}, { ...agent, engine: { ...agent.engine, model } });
+      const r = await env.handle.done;
+      expect(r).toMatchObject({ exitCode: 1, stdout: "", retryable: false });
+      expect(r.stderr).toContain(`Bedrock: model "${model}" not enabled for this account`);
+      expect(r.stderr).toMatch(/enable it in the Bedrock console/);
+      expect(r.stderr).toContain(`API Error: 403 ${providerId} is not available for this account`);
+      expect(env.transcript.filter((e) => e.type === "error").map((e) => e.message)).toContain(r.stderr);
+      expect(new HarnessSessionStore(env.polpoDir).get("task:t1")!.lastError).toBe(r.stderr);
+    });
+  }
+
+  it("the same through the SDK wrapper: an error part, then a finish with no usage", async () => {
+    sdk.parts.push([
+      { type: "start" },
+      { type: "error", error: bedrock403("anthropic.claude-sonnet-5-5") },
+      { type: "finish", finishReason: "other", totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+    ]);
+    const env = setup([], {}, { ...agent, engine: { ...agent.engine, model: "us.anthropic.claude-sonnet-5-5" } }, true);
+    const r = await env.handle.done;
+    expect(r).toMatchObject({ exitCode: 1, retryable: false, stderr: expect.stringMatching(/^Bedrock: model "us\.anthropic\.claude-sonnet-5-5" not enabled/) });
+  });
+
+  it("an error the runtime recovers from (text after it) is not a failure; an error finish reason is", async () => {
+    const ok = setup([async (_s, onEvent) => {
+      onEvent({ type: "error", message: "API Error: 529 overloaded, retrying" });
+      onEvent({ type: "text", text: "Done anyway" });
+      return done("Done anyway");
+    }]);
+    const r = await ok.handle.done;
+    expect(r).toMatchObject({ exitCode: 0, stdout: "Done anyway", stderr: "" });
+    expect(r.retryable).toBeUndefined();
+    const budget = setup([async (_s, onEvent) => { onEvent({ type: "text", text: "half" }); return { ...done("half"), finishReason: "error_max_budget_usd" }; }]);
+    const b = await budget.handle.done;
+    expect(b).toMatchObject({ exitCode: 1, stderr: expect.stringMatching(/spend limit/) });
+    expect(b.retryable).toBeUndefined();
+  });
+
+  it("no model call at all (0 tokens, no reply, no tool call) fails; follow-ups do not run after a failed turn", async () => {
+    let second = false;
+    const env = setup([
+      async () => ({ text: "", finishReason: "stop", usage: zero }),
+      async () => { second = true; return done("late"); },
+    ]);
+    env.handle.followUp("and then this");
+    const r = await env.handle.done;
+    expect(r).toMatchObject({ exitCode: 1, stderr: expect.stringMatching(/no reply and used no tokens/) });
+    expect(r.retryable).toBeUndefined();
+    expect(second).toBe(false);
+  });
+
+  it("a runtime crash after an auth error: failed, labelled, not retryable", async () => {
+    const env = setup([async (_s, onEvent) => {
+      onEvent({ type: "error", message: "API Error: 401 Invalid API key" });
+      throw new Error("Claude Code process exited with code 1");
+    }]);
+    const r = await env.handle.done;
+    expect(r).toMatchObject({ exitCode: 1, retryable: false, stderr: expect.stringMatching(/^Bedrock: authentication failed/) });
+    expect(r.stderr).toContain("exited with code 1");
+  });
+
+  it("classifies harness errors: model access and auth are not retryable, others keep their text", () => {
+    const m = classifyHarnessError(bedrock403("anthropic.claude-sonnet-5"), { harnessName: "Claude Code", provider: "bedrock" });
+    expect(m).toMatchObject({ retryable: false, message: expect.stringMatching(/^Bedrock: model "anthropic\.claude-sonnet-5" not enabled/) });
+    expect(classifyHarnessError("Unexpected server response: 403", { harnessName: "Claude Code", provider: "bedrock" })).toMatchObject({ retryable: true });
+    expect(classifyHarnessError("socket hang up", { harnessName: "Codex", provider: "openai" })).toEqual({ retryable: true, message: "Codex: socket hang up" });
+    expect(harnessTurnFailure({ errors: [], outputAfterError: false, output: false, totalTokens: 0, text: "API Error: 403 forbidden" }, "Claude Code")).toBe("API Error: 403 forbidden");
+    expect(harnessTurnFailure({ errors: [], outputAfterError: false, output: true, totalTokens: 0, text: "hi" }, "Claude Code")).toBeUndefined();
   });
 
   it("status, stop and reset of a parked session (its bridge in the VM ended by its port)", async () => {

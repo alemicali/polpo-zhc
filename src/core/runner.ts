@@ -508,7 +508,11 @@ async function main(): Promise<void> {
       result.stderr = (result.stderr ? result.stderr + "\n" : "") + "Killed by SIGTERM (timeout or shutdown)";
     }
     const status = sigterm ? "killed" : (result.exitCode === 0 ? "completed" : "failed");
-    actLog.logEvent("done", { status, exitCode: result.exitCode, duration: result.duration });
+    actLog.logEvent("done", {
+      status, exitCode: result.exitCode, duration: result.duration,
+      ...(status !== "completed" && result.stderr ? { error: result.stderr.slice(0, 2000) } : {}),
+      ...(result.retryable === false ? { retryable: false } : {}),
+    });
     await runStore.completeRun(config.runId, status, result);
     if (config.notifySocket) {
       notifyRunComplete(config.notifySocket, config.runId, config.taskId, status);

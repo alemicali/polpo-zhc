@@ -32,7 +32,7 @@ export class EscalationManager {
       name: "escalation-manager",
       handler: (hookCtx) => {
         const { taskId, task, reason } = hookCtx.data;
-        if (reason !== "maxRetries") return;
+        if (reason !== "maxRetries" && reason !== "nonRetryable") return;
 
         const currentLevel = this.taskLevels.get(taskId) ?? this.getStartLevel(policy);
         const level = policy.levels.find(l => l.level === currentLevel);
