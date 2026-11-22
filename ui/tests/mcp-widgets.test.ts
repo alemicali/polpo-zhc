@@ -92,6 +92,16 @@ describe("the work card (MCP App)", () => {
     expect(brandMark("e2b").tagName).toBe("IMG");
   });
 
+  it("a task with a tool scope: a badge and what its runs get", () => {
+    const root = document.createElement("div");
+    const scoped = { ...done, toolScope: { connectors: ["gmail-2"] }, toolScopeStale: ["connector linear"] };
+    const card = buildTaskCard({ task: scoped as never, tasks: [], connectors: [{ id: "gmail-2", name: "Gmail", account: "info@acme.com" }], now: new Date(), key });
+    renderView(root, env(card));
+    expect(root.querySelector(".head .chip-info")?.textContent).toBe("Tools restricted");
+    expect(root.textContent).toContain("restricted: Gmail – info@acme.com");
+    expect(root.textContent).toContain("the agent no longer has: connector linear");
+  });
+
   it("shows the id while loading, and the error when the card could not load", () => {
     const root = document.createElement("div");
     renderView(root, env(undefined, { pending: "t9" }));

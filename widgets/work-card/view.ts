@@ -15,6 +15,7 @@ export const STRINGS = {
     askTask: (t: string, failed: boolean) => failed ? `Why did the task "${t}" fail, and what should change before it runs again?` : `How is the task "${t}" going?`,
     askMission: (n: string) => `How is the mission "${n}" going, and what has it cost so far?`,
     ask: "Ask about it", agent: "Agent", failed: "Failed", notRetried: "Not retried", notRetriedWhy: "a re-run would fail the same way",
+    tools: "Tools", toolsRestricted: "Tools restricted", staleScope: "the agent no longer has",
     lastRun: "Latest run", runs: "Runs", noRuns: "Not run yet", dependsOn: "Depends on", result: "Result", outcomes: "Outcomes",
     cost: "Cost", budget: "Budget", noBudget: "No budget", overBudget: "Over budget", pausedBudget: "Paused: over budget",
     byEngine: "By engine", byAgent: "By agent", tasks: "Tasks", noTasks: "No tasks yet", runsN: (n: number) => `${n} run${n === 1 ? "" : "s"}`,
@@ -29,6 +30,7 @@ export const STRINGS = {
     askTask: (t: string, failed: boolean) => failed ? `Perché il task "${t}" è fallito, e cosa va cambiato prima di rilanciarlo?` : `Come sta andando il task "${t}"?`,
     askMission: (n: string) => `Come sta andando la missione "${n}", e quanto è costata finora?`,
     ask: "Chiedi", agent: "Agente", failed: "Fallito", notRetried: "Non ritentato", notRetriedWhy: "un nuovo tentativo fallirebbe allo stesso modo",
+    tools: "Strumenti", toolsRestricted: "Strumenti ristretti", staleScope: "l'agente non ha più",
     lastRun: "Ultima esecuzione", runs: "Esecuzioni", noRuns: "Non ancora eseguito", dependsOn: "Dipende da", result: "Risultato", outcomes: "Risultati",
     cost: "Costo", budget: "Budget", noBudget: "Nessun budget", overBudget: "Oltre il budget", pausedBudget: "In pausa: oltre il budget",
     byEngine: "Per motore", byAgent: "Per agente", tasks: "Task", noTasks: "Ancora nessun task", runsN: (n: number) => `${n} esecuzion${n === 1 ? "e" : "i"}`,
@@ -127,7 +129,7 @@ function failureBox(f: NonNullable<CardTaskRef["failure"]>, s: Strings): HTMLEle
 function taskRow(x: CardTaskRef & { lastRun?: MissionCard["tasks"][number]["lastRun"]; costUsd?: number }, s: Strings): HTMLElement {
   return h("div", { class: "row" },
     h("div", { class: "row-main" },
-      h("div", {}, x.title),
+      h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
       h("div", { class: "muted small marks" },
         x.lastRun ? brandMark(x.lastRun.engineMark, 14) : null,
         [x.assignTo, x.lastRun ? `${x.lastRun.engineLabel}${x.lastRun.modelLabel ? ` ${x.lastRun.modelLabel}` : ""}` : "", x.lastRun ? x.lastRun.computer.label : "", usd(x.costUsd)].filter(Boolean).join(" · ")),
@@ -155,11 +157,13 @@ export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
   const last = c.runs[0];
   const facts: Array<[string, Node | string]> = [];
   if (tk.assignTo) facts.push([s.agent, tk.assignTo]);
+  if (c.toolScope) facts.push([s.tools, h("span", { class: "scope" }, c.toolScope.label, c.toolScope.stale?.length ? h("span", { class: "small danger-text" }, ` · ${s.staleScope}: ${c.toolScope.stale.join("; ")}`) : null)]);
   facts.push([s.lastRun, last ? runLine(last, s, full) : s.noRuns]);
   if (c.costUsd !== undefined) facts.push([s.cost, `${usd(c.costUsd)} · ${s.runsN(c.runs.length)}`]);
   if (c.dependencies.length) facts.push([s.dependsOn, h("div", { class: "deps" }, ...c.dependencies.map((d) => h("span", { class: "dep" }, d.title, chip(s, d.status))))]);
   return h("div", { class: full ? "full" : "card" },
-    header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.status, s),
+    header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.status, s,
+      c.toolScope ? h("span", { class: "chip chip-info", title: c.toolScope.label }, s.toolsRestricted) : null),
     tk.failure ? failureBox(tk.failure, s) : null,
     h("dl", { class: "facts" }, ...facts.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     full && c.runs.length > 1 ? h("section", {}, h("h3", {}, s.runs), ...c.runs.map((r) => h("div", { class: "row" },

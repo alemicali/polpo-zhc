@@ -27,8 +27,12 @@ async function loadTaskCard(deps: McpDeps, id: string): Promise<Loaded<TaskCard>
   const r = unwrap(await deps.api("GET", `/api/v1/tasks/${enc(id)}`));
   if (!r.ok) return { ok: false, error: r.status === 404 ? `There is no task ${id}. Find the id with polpo_tasks_list.` : r.error };
   const task = r.data as AnyTask;
-  const tasks = task.dependsOn?.length ? await allTasks(deps) : [];
-  return { ok: true, card: buildTaskCard({ task, tasks, now: new Date(), key: key() }) };
+  const [tasks, connectors] = await Promise.all([
+    task.dependsOn?.length ? allTasks(deps) : Promise.resolve([]),
+    // a tool scope names connectors: their names and accounts
+    task.toolScope ? deps.api("GET", "/api/v1/connectors").then(unwrap).then((c) => (c.ok ? (c.data as { connectors?: Array<{ id: string; name: string; account?: string }> })?.connectors ?? [] : [])) : Promise.resolve([]),
+  ]);
+  return { ok: true, card: buildTaskCard({ task, tasks, connectors, now: new Date(), key: key() }) };
 }
 
 async function loadMissionCard(deps: McpDeps, id: string): Promise<Loaded<MissionCard>> {
@@ -51,6 +55,8 @@ const taskCardOutput = z.object({
   generatedAt: z.string().optional(),
   task: z.object({ id: z.string(), title: z.string(), status: z.string(), failure: failureShape.optional() }).passthrough()
     .describe("The task; failure: why it failed (the labelled reason) and whether it was retried"),
+  toolScope: z.object({ label: z.string(), stale: z.array(z.string()).optional() }).passthrough().optional()
+    .describe("The tools its runs get when the task narrows the agent's (Task.toolScope), and what of it the agent no longer has"),
   runs: z.array(looseObject).optional().describe("Its runs, newest first: engine, model, auth, computer, egress, session, cost"),
   costUsd: z.number().optional().describe("Every recorded run's cost, USD"),
   dependencies: z.array(looseObject).optional().describe("The tasks it depends on, with their status"),
@@ -94,7 +100,7 @@ export function registerWorkCards(server: McpServer, deps: McpDeps, enabled: Rea
     registerAppTool(server, "polpo_task_show", {
       title: "Show a task",
       description: "Show one task's card: its status, why it failed (and whether it was retried), where and with what each run executed "
-        + "(engine and model, authentication, computer, egress, cost), the tasks it depends on and its result. "
+        + "(engine and model, authentication, computer, egress, cost), its tool scope when it narrows the agent's tools, the tasks it depends on and its result. "
         + "Use it when the person asks how a task went (polpo_tasks_list for ids; polpo_task_get for the full record).",
       inputSchema: { id: z.string().min(1).describe("The task's id") },
       annotations: { title: "Show a task", ...READ },

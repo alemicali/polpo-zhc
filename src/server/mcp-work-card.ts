@@ -13,6 +13,7 @@
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
 import type { MissionCost, MissionCostSummary } from "@polpo-ai/core/mission-cost";
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
+import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
 import { ENGINE_LABELS, engineMark, formatMs, formatUsd, runCostUsd, runView, runViewLine, type BrandMark, type RunView } from "./mcp-run-view.js";
 
 export interface CardKey { createdAt: number; seq: number }
@@ -23,6 +24,8 @@ export interface CardTaskRef {
   status: string;
   assignTo?: string;
   failure?: TaskFailure;
+  /** Its runs get only part of the agent's tools (Task.toolScope). */
+  toolScoped?: boolean;
 }
 
 export interface TaskCard {
@@ -40,6 +43,8 @@ export interface TaskCard {
     createdAt?: string;
     updatedAt?: string;
   };
+  /** The tools its runs get, when the task narrows the agent's (Task.toolScope): a label, and what the agent no longer has. */
+  toolScope?: { label: string; stale?: string[] };
   /** Its runs, newest first (at most 10). */
   runs: RunView[];
   /** Every recorded run's cost, USD. */
@@ -86,6 +91,8 @@ type InTask = {
   outcomes?: Array<{ type?: string; label?: string; path?: string; url?: string; text?: string }>;
   runs?: TaskRunContext[];
   failure?: TaskFailure;
+  toolScope?: TaskToolScope;
+  toolScopeStale?: string[];
 };
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -96,6 +103,7 @@ const ref = (t: InTask): CardTaskRef => {
     id: t.id, title: t.title, status: t.status,
     ...(t.assignTo ? { assignTo: t.assignTo } : {}),
     ...(failure ? { failure } : {}),
+    ...(t.toolScope ? { toolScoped: true } : {}),
   };
 };
 
@@ -114,7 +122,11 @@ function resolveDependency(entry: string, task: InTask, all: InTask[]): InTask |
     ?? all.find((t) => t.title === entry && (task.missionId ? t.missionId === task.missionId : t.group === task.group));
 }
 
-export function buildTaskCard(input: { task: InTask; tasks: InTask[]; now: Date; key: CardKey }): TaskCard {
+export function buildTaskCard(input: {
+  task: InTask; tasks: InTask[]; now: Date; key: CardKey;
+  /** The connectors, to name the ones a tool scope lists (with their accounts). */
+  connectors?: Array<{ id: string; name: string; account?: string }>;
+}): TaskCard {
   const t = input.task;
   const runs = [...(t.runs ?? [])].reverse().slice(0, 10).map(runView);
   const cost = totalCost(t.runs);
@@ -136,6 +148,7 @@ export function buildTaskCard(input: { task: InTask; tasks: InTask[]; now: Date;
       ...(t.createdAt ? { createdAt: t.createdAt } : {}),
       ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
     },
+    ...(t.toolScope ? { toolScope: { label: describeTaskToolScope(t.toolScope, input.connectors ?? []), ...(t.toolScopeStale?.length ? { stale: t.toolScopeStale } : {}) } } : {}),
     runs,
     ...(cost !== undefined ? { costUsd: cost } : {}),
     dependencies: (t.dependsOn ?? []).map((d) => {
@@ -214,6 +227,7 @@ export function taskCardText(card: TaskCard): string {
   const t = card.task;
   const lines = [`${t.id} [${t.status}${t.phase ? `/${t.phase}` : ""}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`];
   if (card.task.failure) lines.push(`Failed: ${failureText(card.task.failure)}`);
+  if (card.toolScope) lines.push(`Tools: ${card.toolScope.label}${card.toolScope.stale?.length ? ` (the agent no longer has: ${card.toolScope.stale.join("; ")})` : ""}`);
   const cost = formatUsd(card.costUsd);
   if (card.runs.length) lines.push(`Runs (${card.runs.length}${cost ? `, ${cost} in all` : ""}):`, ...card.runs.slice(0, 5).map((r) => `- ${r.runId} [${r.status}] ${runViewLine(r)}${r.durationMs !== undefined ? ` · ${formatMs(r.durationMs)}` : ""}`));
   if (card.dependencies.length) lines.push(`Depends on: ${card.dependencies.map((d) => `${d.title} [${d.status}]`).join(", ")}`);
@@ -235,7 +249,7 @@ export function missionCardText(card: MissionCard): string {
   const counts = Object.entries(card.counts).map(([k, v]) => `${v} ${k}`).join(", ");
   lines.push(`Tasks: ${counts || "none yet"}`);
   for (const t of card.tasks.slice(0, 20)) {
-    lines.push(`- ${t.id} [${t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.lastRun ? ` (${t.lastRun.engineLabel}${t.lastRun.modelLabel ? ` ${t.lastRun.modelLabel}` : ""})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}`);
+    lines.push(`- ${t.id} [${t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.toolScoped ? " · tools restricted" : ""}${t.lastRun ? ` (${t.lastRun.engineLabel}${t.lastRun.modelLabel ? ` ${t.lastRun.modelLabel}` : ""})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}`);
   }
   return lines.join("\n");
 }

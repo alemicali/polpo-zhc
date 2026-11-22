@@ -135,6 +135,16 @@ describe("the task and mission cards", () => {
     expect(text).toContain("Depends on: Collect data [done], Ghost [missing]");
   });
 
+  it("a task with a tool scope: the card names its connectors with their accounts, and what the agent no longer has", () => {
+    const scoped = { ...TASKS[0], toolScope: { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send"] } }, toolScopeStale: ["connector linear"] };
+    const card = buildTaskCard({ task: scoped as never, tasks: [], connectors: CONNECTORS as never, now: new Date(), key });
+    expect(card.toolScope).toEqual({ label: "restricted: Gmail – info@acme.com (1 tool)", stale: ["connector linear"] });
+    expect(taskCardText(card)).toContain("Tools: restricted: Gmail");
+    const mission = buildMissionCard({ mission: MISSION as never, tasks: [scoped] as never, now: new Date(), key });
+    expect(mission.tasks[0]!.toolScoped).toBe(true);
+    expect(missionCardText(mission)).toContain("· tools restricted");
+  });
+
   it("a mission card: cost against the budget (over), by engine with marks, tasks with their latest run and failure", () => {
     const card = buildMissionCard({ mission: MISSION as never, tasks: TASKS as never, now: new Date(), key });
     expect(card.cost).toMatchObject({ usd: 0.62, budgetUsd: 0.5, overBudget: true, budgetUsed: 1.24 });

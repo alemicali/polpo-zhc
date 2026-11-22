@@ -20,6 +20,8 @@ export interface AgentCardTask {
   run?: Pick<RunView, "engine" | "engineLabel" | "engineMark" | "modelLabel" | "auth" | "computer" | "costUsd">;
   /** Why it failed (the labelled reason) and whether it was retried. */
   failure?: TaskFailure;
+  /** Its runs get only part of the agent's tools (Task.toolScope). */
+  toolScoped?: boolean;
 }
 
 /** A connector the agent may use: several accounts of one app are told apart by name and account. */
@@ -103,7 +105,7 @@ export interface AgentCardInput {
   };
   tasks: Array<{
     id: string; title: string; status: string; assignTo?: string; updatedAt?: string; createdAt?: string;
-    runs?: TaskRunContext[]; result?: { stderr?: string; exitCode?: number; retryable?: boolean; assessment?: { passed?: boolean; llmReview?: string; globalScore?: number } };
+    runs?: TaskRunContext[]; toolScope?: unknown; result?: { stderr?: string; exitCode?: number; retryable?: boolean; assessment?: { passed?: boolean; llmReview?: string; globalScore?: number } };
   }>;
   /** GET /connectors: the agent's are those whose access lists it (or "*"). */
   connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" } }>;
@@ -149,6 +151,7 @@ function cardTask(t: InputTask): AgentCardTask {
       ...(v.modelLabel ? { modelLabel: v.modelLabel } : {}), ...(v.auth ? { auth: v.auth } : {}), ...(cost !== undefined ? { costUsd: cost } : {}),
     } } : {}),
     ...(failure ? { failure } : {}),
+    ...(t.toolScope ? { toolScoped: true } : {}),
   };
 }
 

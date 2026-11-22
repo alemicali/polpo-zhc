@@ -30,6 +30,11 @@ export function errorMiddleware(): MiddlewareHandler {
         );
       }
 
+      // a task's tool scope asking for more than its agent has (src/core/task-tool-scope.ts)
+      if (err instanceof Error && err.name === "TaskToolScopeError") {
+        return c.json({ ok: false, error: err.message, code: "INVALID_TOOL_SCOPE" }, 400);
+      }
+
       const message = err instanceof Error ? err.message : String(err);
 
       // Map known error patterns to status codes

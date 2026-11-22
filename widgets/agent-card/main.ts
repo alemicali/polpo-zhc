@@ -41,7 +41,7 @@ const STRINGS = {
     status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft" } as Record<string, string>,
     error: "Could not load the agent",
     on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
-    notRetried: "not retried", failedBecause: "Failed",
+    notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
   },
   it: {
     working: "Al lavoro", idle: "Libero", waiting: "In attesa di te",
@@ -59,7 +59,7 @@ const STRINGS = {
     status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza" } as Record<string, string>,
     error: "Non riesco a caricare l'agente",
     on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
-    notRetried: "non ritentato", failedBecause: "Fallito",
+    notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
   },
 };
 type Strings = typeof STRINGS.en;
@@ -168,7 +168,7 @@ function taskSummary(x: AgentCardTask, s: Strings): HTMLElement {
   const r = x.run;
   const cost = r?.costUsd === undefined ? "" : r.costUsd < 0.01 ? `$${r.costUsd.toFixed(4)}` : `$${r.costUsd.toFixed(2)}`;
   return h("div", { class: "task-sum" },
-    h("div", {}, x.title),
+    h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
     r ? h("div", { class: "muted small marks" }, brandMark(r.engineMark, 14),
       [`${r.engineLabel}${r.modelLabel ? ` ${r.modelLabel}` : ""}`, r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · ")) : null,
     x.failure ? h("div", { class: "small fail-text" }, `${s.failedBecause}: ${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried})`}`) : null);
