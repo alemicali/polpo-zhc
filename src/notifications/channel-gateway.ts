@@ -1529,7 +1529,9 @@ export class ChannelGateway {
         tools: () => turnTools,
         original: piMessages,
         sessionId,
-        scope: JSON.stringify([session?.createdAt, "polpo:channel", m?.provider, m?.id]),
+        // the same scope as the completions route (agent: null), which runs this session's turns
+        // with media and from the web: one checkpoint for the conversation, whichever path answers
+        scope: JSON.stringify([session?.createdAt, null, m?.provider, m?.id]),
         store: this.orchestrator.getContextCheckpointStore?.(),
         completeLLM: completeSimpleWithAuth as any,
         summaryModel: (promptTokens) => resolveSummaryModel(m, compactionSettings.model, promptTokens),

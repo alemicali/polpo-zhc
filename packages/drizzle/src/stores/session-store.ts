@@ -1,4 +1,4 @@
-import { eq, desc, asc, count as drizzleCount, isNull, and, gte } from "drizzle-orm";
+import { eq, desc, asc, count as drizzleCount, isNull, and, gte, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { CreateSessionOptions, ForkSessionOptions, ForkSessionResult, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
@@ -42,6 +42,21 @@ export class DrizzleSessionStore implements SessionStore {
       forkMessageId: this.sessions.forkMessageId,
       messageCount: drizzleCount(this.messages.id),
     };
+  }
+
+  /**
+   * Message order: by timestamp, then user before assistant, then id. Messages saved in the same
+   * millisecond exist (a question and its answer stored together): ordered by timestamp alone they
+   * come back in any order (Postgres does not keep ties stable), which reshuffles the conversation
+   * sent to the model and invalidates its compaction checkpoint at every turn.
+   */
+  private messageOrder(direction: "asc" | "desc"): any[] {
+    const m = this.messages;
+    const rank = sql`case when ${m.role} = 'user' then 0 else 1 end`;
+    // byte order on both dialects (Postgres would otherwise compare ids with the locale's collation)
+    const id = this.dialect === "pg" ? sql`${m.id} collate "C"` : m.id;
+    const by = direction === "asc" ? asc : desc;
+    return [by(m.ts), by(rank), by(id)];
   }
 
   private rowToMessage(row: any): Message {
@@ -119,7 +134,7 @@ export class DrizzleSessionStore implements SessionStore {
   async getMessages(sessionId: string): Promise<Message[]> {
     const rows: any[] = await this.db.select().from(this.messages)
       .where(eq(this.messages.sessionId, sessionId))
-      .orderBy(asc(this.messages.ts));
+      .orderBy(...this.messageOrder("asc"));
     return rows.map((r) => this.rowToMessage(r));
   }
 
@@ -131,7 +146,7 @@ export class DrizzleSessionStore implements SessionStore {
     // From the anchor's timestamp on (ties included), then cut after the anchor itself.
     const rows: any[] = await this.db.select().from(m)
       .where(and(eq(m.sessionId, sessionId), gte(m.ts, anchor[0].ts)))
-      .orderBy(asc(m.ts));
+      .orderBy(...this.messageOrder("asc"));
     const index = rows.findIndex((r) => r.id === messageId);
     return rows.slice(index + 1).map((r) => this.rowToMessage(r));
   }
@@ -139,7 +154,7 @@ export class DrizzleSessionStore implements SessionStore {
   async getRecentMessages(sessionId: string, limit: number): Promise<Message[]> {
     const rows: any[] = await this.db.select().from(this.messages)
       .where(eq(this.messages.sessionId, sessionId))
-      .orderBy(desc(this.messages.ts))
+      .orderBy(...this.messageOrder("desc"))
       .limit(limit);
     return rows.reverse().map((r) => this.rowToMessage(r));
   }
@@ -222,7 +237,7 @@ export class DrizzleSessionStore implements SessionStore {
     const parent = parentRows[0];
     const rows: any[] = await this.db.select().from(this.messages)
       .where(eq(this.messages.sessionId, sessionId))
-      .orderBy(asc(this.messages.ts));
+      .orderBy(...this.messageOrder("asc"));
     const cut = rows.findIndex((r) => r.id === messageId);
     if (cut < 0) return undefined;
     const copied = rows.slice(0, cut + 1);
@@ -242,9 +257,11 @@ export class DrizzleSessionStore implements SessionStore {
       forkMessageId: messageId,
     };
     const messageIds: Record<string, string> = {};
-    // New ids, same timestamps: the copy sorts exactly like the original.
-    const messageRows = copied.map((r) => {
-      const copyId = nanoid();
+    // New ids, same timestamps: the copy sorts exactly like the original (the new ids increase in
+    // the original order, so messages saved in the same millisecond keep their order too).
+    const copyIds = copied.map(() => nanoid()).sort();
+    const messageRows = copied.map((r, index) => {
+      const copyId = copyIds[index]!;
       messageIds[r.id] = copyId;
       return { id: copyId, sessionId: id, role: r.role, content: r.content, ts: r.ts, toolCalls: r.toolCalls, segments: r.segments };
     });

@@ -1,6 +1,10 @@
 /** Summary of the compacted start of a chat session, reused while the prefix it covers is unchanged. */
 export interface ContextCheckpoint {
-  version: 1;
+  /**
+   * 1: one hash per message, compared by position (older checkpoints, no longer reused).
+   * 2: one hash per message with text, on its normalized text (see packages/server context-checkpoint).
+   */
+  version: 1 | 2;
   revision: string;
   scope: string;
   prefixHashes: string[];
@@ -18,7 +22,7 @@ export interface ContextCheckpointStore {
 /** Shape check for checkpoints read back from storage (untrusted: files can be edited by hand). */
 export function isValidContextCheckpoint(value: unknown): value is ContextCheckpoint {
   const v = value as Partial<ContextCheckpoint> | null;
-  return !!v && v.version === 1 && typeof v.revision === "string" && typeof v.scope === "string" &&
+  return !!v && (v.version === 1 || v.version === 2) && typeof v.revision === "string" && typeof v.scope === "string" &&
     typeof v.summary === "string" && v.summary.length <= 60_000 &&
     (v.count === undefined || (typeof v.count === "number" && v.count >= 0)) &&
     Array.isArray(v.prefixHashes) && v.prefixHashes.length > 0 &&

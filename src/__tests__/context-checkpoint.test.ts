@@ -106,9 +106,13 @@ test("a stale checkpoint is replaced: the next turn reuses the new one instead o
 
 test("inspection says why a checkpoint is not reused", async () => {
   const { store } = await setup();
-  const { inspectContextCheckpoint } = await import("@polpo-ai/server");
+  const { inspectContextCheckpoint, saveContextCheckpoint } = await import("@polpo-ai/server");
   const history = [message("a"), message("b"), message("c"), message("d")];
+  // a checkpoint of an older version (hashes by position) is replaced, not reused
   await (await contextCheckpointProjection(store, "chat", "model", history)).remember(history.slice(0, 3), message("marker"));
+  const older = await inspectContextCheckpoint(store, "chat", "model", history);
+  expect(older.rejected).toBe("made by an older version");
+  expect(await saveContextCheckpoint(store, "chat", "model", history, 3, "summary", 1, older.storedRevision)).toBeTruthy();
   expect((await inspectContextCheckpoint(store, "chat", "model", history.slice(0, 2))).rejected).toBe("it covers 3 messages, the conversation has 2");
   expect((await inspectContextCheckpoint(store, "chat", "model", [history[1], history[0], ...history.slice(2)])).rejected).toBe("message 1 of the 3 it covers is in another position (user)");
   expect((await inspectContextCheckpoint(store, "chat", "model", [history[0], message("edited"), ...history.slice(2)])).rejected).toBe("message 2 of the 3 it covers changed (user)");

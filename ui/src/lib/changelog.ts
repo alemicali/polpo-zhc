@@ -27,6 +27,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-compaction-fix",
+    date: "2026-11-22",
+    kind: "fixed",
+    title: "Le chat lunghe non si compattano più a ogni messaggio",
+    summary: "Una chat lunga usata dal web e da Telegram riassumeva di nuovo tutta la conversazione quasi a ogni messaggio: ora riusa il riassunto e risponde subito.",
+    body: [
+      "Quando una chat diventa troppo lunga, Polpo ne riassume l'inizio e riusa quel riassunto nei messaggi successivi, controllando che la conversazione sia ancora la stessa.",
+      "",
+      "Il controllo era troppo rigido: bastava che due messaggi salvati nello stesso istante tornassero in ordine diverso, o che il web e Telegram mostrassero la conversazione in modo leggermente diverso (risposte vuote, allegati), per scartare il riassunto e rifarlo da capo, con attese lunghe e molti token a ogni giro.",
+      "",
+      "Ora i messaggi hanno sempre lo stesso ordine (prima la domanda, poi la risposta) e il riassunto vale per la conversazione qualunque sia la strada da cui arriva il messaggio. Alla prossima compattazione il vecchio riassunto viene sostituito, poi viene riusato.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-22-dependency-results",
     date: "2026-11-22",
     kind: "new",
