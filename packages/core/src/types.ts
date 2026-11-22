@@ -185,6 +185,12 @@ export interface TaskResult {
   stdout: string;
   stderr: string;
   duration: number;
+  /**
+   * false: the run failed for a reason a re-run of the same agent cannot fix (the model is not
+   * enabled for the account, the credentials are refused): no automatic retry; the task fails
+   * (escalation still applies). Omitted: retryable.
+   */
+  retryable?: boolean;
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
