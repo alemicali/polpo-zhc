@@ -34,7 +34,7 @@ export function BackgroundWaits({
   const visibleWaits = historyOpen ? [...activeWaits, ...finishedWaits] : activeWaits;
 
   return (
-    <div className="border border-border/60 bg-card/80 shadow-sm">
+    <div className="border border-border/60 bg-card/80 shadow-card">
       <div className="flex h-9 items-center gap-2 border-b border-border/50 px-3">
         <ClockArrowUp className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="flex-1 text-xs font-medium">Background waits</span>
@@ -44,7 +44,7 @@ export function BackgroundWaits({
         </Button>
       </div>
       {visibleWaits.length === 0 ? (
-        <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No active background waits.</div>
+        <div className="px-3 py-4 text-center text-caption text-muted-foreground">No active background waits.</div>
       ) : (
         <div className="max-h-56 divide-y divide-border/40 overflow-y-auto">
           {visibleWaits.map((wait) => {
@@ -54,7 +54,7 @@ export function BackgroundWaits({
                 {wait.state === "running" ? (
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
                 ) : (
-                  <span className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-amber-500" : wait.state === "completed" ? "bg-emerald-500" : "bg-muted-foreground/50")} />
+                  <span className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-warning" : wait.state === "completed" ? "bg-success" : "bg-muted-foreground/50")} />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -70,12 +70,12 @@ export function BackgroundWaits({
                     </button>
                     <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                   </div>
-                  <p className="truncate text-[10px] text-muted-foreground" title={wait.error}>
+                  <p className="truncate text-micro text-muted-foreground" title={wait.error}>
                     {wait.targetStatus ? `until ${wait.targetStatus}` : "until done or failed"}
                     {wait.error ? ` · ${wait.error}` : ""}
                   </p>
                 </div>
-                <Badge variant="outline" className="h-5 text-[9px] font-normal">{wait.state}</Badge>
+                <Badge variant="outline" className="h-5 text-micro font-normal">{wait.state}</Badge>
                 {active && (
                   <Button
                     type="button"
@@ -98,7 +98,7 @@ export function BackgroundWaits({
       {finishedWaits.length > 0 && (
         <button
           type="button"
-          className="flex h-8 w-full items-center gap-2 border-t border-border/50 px-3 text-[10px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          className="flex h-8 w-full items-center gap-2 border-t border-border/50 px-3 text-micro text-muted-foreground hover:bg-muted/40 hover:text-foreground"
           onClick={() => setHistoryOpen((value) => !value)}
           aria-expanded={historyOpen}
         >
