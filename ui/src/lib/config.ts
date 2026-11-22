@@ -12,6 +12,8 @@ declare global {
     branding?: import("./appearance-kit").InstanceBranding | null;
     /** The orchestrator's display name (settings.orchestratorName, "Polpo" by default), inlined by the UI server. */
     orchestratorName?: string;
+    /** id → ISO datetime each What's new entry first went online on this instance, recorded by the UI server. */
+    whatsNewPublishedAt?: Record<string, string>;
   } | undefined;
 }
 

@@ -28,3 +28,4 @@ release/
 binaries/polpo-server*
 !binaries/build-sidecar.sh
 !binaries/.gitkeep
+.polpo-ui-state

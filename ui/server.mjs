@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,13 +114,116 @@ const instanceOrchestratorName = cachedPublic(orchestratorUrl, (data) => {
   return name && name.length <= 40 ? name : null;
 });
 
+// When each What's new entry went online on this instance. The build lists its entry ids in
+// whats-new-ids.json (vite.config.ts); the first time this server serves a build containing an id,
+// it records the time in <POLPO_UI_STATE_DIR>/whats-new.json (default: .polpo-ui-state next to the
+// static root, so it survives rebuilds) and never changes it afterwards. The very first time (no
+// state file yet) the ids already there are recorded without a time: they went online before
+// times were kept, and the page shows their day only. Only ids and times are stored, no secrets.
+const whatsNewIdsPath = join(root, "whats-new-ids.json");
+const uiStateDir = resolve(process.env.POLPO_UI_STATE_DIR || join(root, "..", ".polpo-ui-state"));
+const whatsNewStatePath = join(uiStateDir, "whats-new.json");
+const WHATS_NEW_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+const whatsNew = { key: "", value: undefined, pending: null };
+
+async function readWhatsNewIds() {
+  const parsed = JSON.parse(await readFile(whatsNewIdsPath, "utf8"));
+  const list = Array.isArray(parsed) ? parsed : parsed?.ids;
+  if (!Array.isArray(list)) throw new Error("no ids");
+  return [...new Set(list.filter((id) => typeof id === "string" && WHATS_NEW_ID.test(id)))].slice(0, 5000);
+}
+
+/** The recorded map (id → ISO time or null), or null when there is no state file yet. */
+async function readWhatsNewState() {
+  let text;
+  try {
+    text = await readFile(whatsNewStatePath, "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT") return null;
+    throw error;
+  }
+  const parsed = JSON.parse(text);
+  const map = parsed && typeof parsed === "object" ? parsed.firstSeen : undefined;
+  if (!map || typeof map !== "object" || Array.isArray(map)) throw new Error("unexpected content");
+  const out = {};
+  for (const [id, value] of Object.entries(map)) {
+    if (!WHATS_NEW_ID.test(id)) continue;
+    out[id] = typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : null;
+  }
+  return out;
+}
+
+async function writeWhatsNewState(map) {
+  await mkdir(uiStateDir, { recursive: true });
+  const tmp = `${whatsNewStatePath}.${process.pid}.tmp`;
+  await writeFile(tmp, `${JSON.stringify({ version: 1, firstSeen: map }, null, 2)}\n`, { mode: 0o644 });
+  await rename(tmp, whatsNewStatePath);
+}
+
+/** Record the build's new ids and return { id: ISO time } for the ids of this build that have one. */
+async function recordWhatsNew() {
+  let ids;
+  try {
+    ids = await readWhatsNewIds();
+  } catch {
+    return undefined; // a build without the list (older, dev): nothing to record or show
+  }
+  let stored;
+  try {
+    stored = await readWhatsNewState();
+  } catch (error) {
+    // never overwrite a file we cannot read: show no times rather than wrong ones
+    console.warn(`What's new: cannot read ${whatsNewStatePath} (${error instanceof Error ? error.message : error}); times not shown`);
+    return undefined;
+  }
+  const firstRun = stored === null;
+  let known = stored ?? {};
+  const now = new Date().toISOString();
+  const added = ids.filter((id) => !Object.hasOwn(known, id));
+  if (added.length > 0 || firstRun) {
+    const next = { ...known };
+    for (const id of added) next[id] = firstRun ? null : now;
+    try {
+      await writeWhatsNewState(next);
+      known = next;
+      if (!firstRun) console.log(`What's new: ${added.length} new entr${added.length === 1 ? "y" : "ies"} online at ${now}`);
+    } catch (error) {
+      // not persisted: a time kept only in memory would change at the next restart, so show none
+      console.warn(`What's new: cannot write ${whatsNewStatePath} (${error instanceof Error ? error.message : error}); new entries shown without a time`);
+    }
+  }
+  const out = {};
+  for (const id of ids) if (typeof known[id] === "string") out[id] = known[id];
+  return out;
+}
+
+/** The recorded times, checked again whenever the build's id list changes (a rebuild without a restart). */
+async function whatsNewPublishedAt() {
+  const metadata = await stat(whatsNewIdsPath).catch(() => null);
+  const key = metadata?.isFile() ? `${metadata.mtimeMs}:${metadata.size}` : "none";
+  if (key === whatsNew.key) return whatsNew.value;
+  whatsNew.pending ??= (async () => {
+    try {
+      whatsNew.value = key === "none" ? undefined : await recordWhatsNew();
+      whatsNew.key = key;
+    } finally {
+      whatsNew.pending = null;
+    }
+  })();
+  await whatsNew.pending;
+  return whatsNew.value;
+}
+
 async function runtimeConfig() {
-  const [appearance, branding, orchestratorName] = await Promise.all([instanceAppearance(), instanceBranding(), instanceOrchestratorName()]);
+  const [appearance, branding, orchestratorName, whatsNewTimes] = await Promise.all([
+    instanceAppearance(), instanceBranding(), instanceOrchestratorName(), whatsNewPublishedAt().catch(() => undefined),
+  ]);
   const payload = {
     baseUrl: apiUrl, apiKey, inkHubUrl,
     ...(appearance !== undefined ? { appearance } : {}),
     ...(branding !== undefined ? { branding } : {}),
     ...(typeof orchestratorName === "string" ? { orchestratorName } : {}),
+    ...(whatsNewTimes && Object.keys(whatsNewTimes).length > 0 ? { whatsNewPublishedAt: whatsNewTimes } : {}),
   };
   // JSON in a script: never let a value close it
   return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify(payload).replace(/</g, "\\u003c")};`;
@@ -302,6 +405,9 @@ const server = createServer(async (req, res) => {
     res.end(error instanceof Error ? error.message : "Internal Server Error");
   }
 });
+
+// record the build's entries when it goes online (the deploy restarts this server), not at the first visit
+await whatsNewPublishedAt().catch(() => undefined);
 
 server.listen(port, host, () => {
   console.log(`Polpo UI production server listening on http://${host}:${port}`);
