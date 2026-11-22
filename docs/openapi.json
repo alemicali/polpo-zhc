@@ -5390,6 +5390,23 @@
                             "minimum": 0,
                             "exclusiveMinimum": true,
                             "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
                           }
                         },
                         "required": [
@@ -6064,6 +6081,23 @@
                             "minimum": 0,
                             "exclusiveMinimum": true,
                             "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
                           }
                         },
                         "required": [

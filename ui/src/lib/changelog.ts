@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-harness-gateways",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Claude Code e Codex senza chiavi nel computer, e con i gateway dei modelli",
+    summary: "La chiave del modello resta sul server di Polpo: nel computer arriva solo un segnaposto. E ora puoi usare Vercel AI Gateway, Cloudflare, OpenRouter, LiteLLM, Portkey o un tuo gateway, con un test della connessione.",
+    body: [
+      "- **Chiavi fuori dal computer**: con una chiave API o un gateway, Claude Code e Codex nel computer ricevono un segnaposto; Polpo aggiunge la chiave vera fuori dalla VM, sulle richieste al modello. Vale per ogni tipo di computer (Daytona, E2B e i prossimi). Serve l'indirizzo pubblico dell'istanza (`POLPO_PUBLIC_URL`): senza, la chiave va nella VM come prima e Impostazioni → Harness lo segnala.",
+      "- **Gateway dei modelli**: in Impostazioni → Harness scegli Vercel AI Gateway, oppure un gateway con i preset per Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey e Kong. Chiavi e header segreti vengono sempre dal vault.",
+      "- **Altri modelli**: con «modelli non Claude» Claude Code lavora anche con modelli di altri fornitori serviti in formato Anthropic.",
+      "- **Prova la connessione**: un pulsante (e ogni salvataggio) manda una piccola richiesta dal server e ti dice se funziona, quanto ci mette e, se no, cosa cambiare.",
+      "- **Chiave per agente**: un agente può usare una sua chiave, per tenere separati i costi.",
+      "",
+      "Bedrock e Vertex firmano le richieste dentro il computer, quindi le loro credenziali restano lì: per tenerle fuori, mettici davanti un gateway.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le impostazioni", to: "/config?section=harnesses" },
+  },
+  {
     id: "2026-11-22-whats-new-time",
     date: "2026-11-22",
     kind: "improved",

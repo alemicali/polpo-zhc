@@ -72,6 +72,7 @@ import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { harnessRoutes } from "./routes/harnesses.js";
+import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
@@ -191,6 +192,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       credentials: true,
     }));
   }
+
+  // ── Model relay for agent harnesses (public) ─────────────────────────
+  // Computers' Claude Code / Codex reach their model through here with placeholders instead of the
+  // key: the per-run token in the path selects the run's relay lease (src/harness/relay.ts), which
+  // swaps the credential outside the VM. Before the rate limit: long agent turns make many calls.
+  // Exposed publicly at <POLPO_PUBLIC_URL>/api/v1/harness-relay/ (docs/harnesses.md).
+  app.all(`${HARNESS_RELAY_PATH}/*`, (c) => forwardToRelay({
+    polpoDir: activePolpoDir(), path: c.req.path.slice(HARNESS_RELAY_PATH.length), request: c.req.raw,
+  }));
 
   // Rate limit API routes only (not static assets)
   app.use("/api/*", rateLimitMiddleware());
@@ -1412,6 +1422,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       savePolpoSettings(o.getPolpoDir(), config?.settings ?? {});
     },
     getNotificationRouter: () => o.getNotificationRouter(),
+    getVaultStore: () => o.getVaultStore(),
   })));
   authed.route("/config", brandingConfigRoutes(() => ({
     getConfig: () => o.getConfig(),
