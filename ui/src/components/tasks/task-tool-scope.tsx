@@ -58,35 +58,39 @@ export function TaskToolScopeCard({
   const [open, setOpen] = useState(false);
   const summary = describeToolScope(scope, connectors);
   return (
-    <Card data-testid="task-tool-scope" className="shrink-0">
-      <CardContent className="space-y-2 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="text-sm font-medium">Tools for this task</span>
-          <Badge
-            variant={scope ? "secondary" : "outline"}
-            className={cn("max-w-full truncate", !scope && "text-muted-foreground")}
-            title={summary}
-            data-testid="task-tool-scope-badge"
-          >
+    <div data-testid="task-tool-scope" className="shrink-0 space-y-1.5">
+      {/* one quiet line: inherited by default, a chip when restricted */}
+      <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Wrench className="h-3 w-3 shrink-0" />
+        <span className="shrink-0">Tools:</span>
+        {scope ? (
+          <Badge variant="secondary" className="h-5 max-w-full truncate px-1.5 text-micro" title={summary} data-testid="task-tool-scope-badge">
             {summary}
           </Badge>
-          <Button variant="outline" size="sm" className="ml-auto h-7 text-xs" disabled={!agent} onClick={() => setOpen(true)}>
-            {scope ? "Edit" : "Restrict"}
-          </Button>
-        </div>
-        {stale && stale.length > 0 && (
-          <div className="space-y-0.5 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5" data-testid="task-tool-scope-stale">
-            <p className="flex items-center gap-1 text-xs text-warning">
-              <AlertTriangle className="h-3 w-3 shrink-0" />
-              {agent?.name ?? "The agent"} no longer has part of this scope; the run gets only what is still there:
-            </p>
-            <ul className="list-disc pl-5 text-xs text-muted-foreground">
-              {stale.map((s) => <li key={s}>{s}</li>)}
-            </ul>
-          </div>
+        ) : (
+          <span className="truncate" title={summary} data-testid="task-tool-scope-badge">{summary}</span>
         )}
-      </CardContent>
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto shrink-0 p-0 text-xs"
+          disabled={!agent}
+          onClick={() => setOpen(true)}
+        >
+          {scope ? "Edit" : "Restrict"}
+        </Button>
+      </div>
+      {stale && stale.length > 0 && (
+        <div className="space-y-0.5 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5" data-testid="task-tool-scope-stale">
+          <p className="flex items-center gap-1 text-xs text-warning">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            {agent?.name ?? "The agent"} no longer has part of this scope; the run gets only what is still there:
+          </p>
+          <ul className="list-disc pl-5 text-xs text-muted-foreground">
+            {stale.map((s) => <li key={s}>{s}</li>)}
+          </ul>
+        </div>
+      )}
       {open && agent && (
         <TaskToolScopeDialog
           open={open}
@@ -97,7 +101,7 @@ export function TaskToolScopeCard({
           onSave={onSave}
         />
       )}
-    </Card>
+    </div>
   );
 }
 
