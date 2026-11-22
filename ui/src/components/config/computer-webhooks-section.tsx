@@ -105,10 +105,17 @@ function ProviderCard({ s, onChanged }: { s: ComputerWebhookStatus; onChanged: (
 export function ComputerWebhooksSection() {
   const [data, setData] = useState<{ providers: ComputerWebhookStatus[]; note: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try { setData(await computerWebhooksApi.status()); setError(null); } catch (e) { setError((e as Error).message); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  // bumped by the refresh button: the effect below loads again
+  const [version, setVersion] = useState(0);
+  const load = useCallback(() => setVersion((v) => v + 1), []);
+  useEffect(() => {
+    let alive = true;
+    computerWebhooksApi.status().then(
+      (d) => { if (alive) { setData(d); setError(null); } },
+      (e: unknown) => { if (alive) setError((e as Error).message); },
+    );
+    return () => { alive = false; };
+  }, [version]);
   return (
     <div className="space-y-4" data-testid="computer-webhooks">
       <div className="flex items-start justify-between gap-2">
@@ -119,7 +126,7 @@ export function ComputerWebhooksSection() {
             Polpo checks every 5 minutes (every 20 with them, as a safety net) and whenever a computer is used.
           </p>
         </div>
-        <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={() => void load()} aria-label="Refresh webhooks"><RefreshCw className="h-3.5 w-3.5" /></Button>
+        <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={load} aria-label="Refresh webhooks"><RefreshCw className="h-3.5 w-3.5" /></Button>
       </div>
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       {!data && !error && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}

@@ -11,7 +11,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ACTION_META, actionLabel } from "@/components/computers/computer-card";
+import { ACTION_META, actionLabel } from "@/components/computers/computer-actions";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { EngineBadge } from "@/components/shared/run-context";

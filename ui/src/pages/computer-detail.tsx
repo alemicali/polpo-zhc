@@ -19,7 +19,7 @@ import { useAgents, useEvents } from "@polpo-ai/react";
 import { ArrowLeft, Loader2, Monitor, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ACTION_META, actionLabel } from "@/components/computers/computer-card";
+import { ACTION_META, actionLabel } from "@/components/computers/computer-actions";
 import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-dialog";
 import { ComputerDialog } from "@/components/computers/computer-dialog";
 import { StatusBadge } from "@/components/computers/status-badge";
