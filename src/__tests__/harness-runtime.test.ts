@@ -456,7 +456,7 @@ describe("harness engine (tasks)", () => {
       const r = await env.handle.done;
       expect(r).toMatchObject({ exitCode: 1, stdout: "", retryable: false });
       expect(r.stderr).toContain(`Bedrock: model "${model}" not enabled for this account`);
-      expect(r.stderr).toMatch(/enable it in the Bedrock console/);
+      expect(r.stderr).toMatch(/quota for this AWS account is 0/);
       expect(r.stderr).toContain(`API Error: 403 ${providerId} is not available for this account`);
       expect(env.transcript.filter((e) => e.type === "error").map((e) => e.message)).toContain(r.stderr);
       expect(new HarnessSessionStore(env.polpoDir).get("task:t1")!.lastError).toBe(r.stderr);
