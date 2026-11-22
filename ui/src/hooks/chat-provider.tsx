@@ -4,7 +4,9 @@
  */
 
 import { useMemo } from "react";
+import { usePolpo } from "@polpo-ai/react";
 import { useChat } from "./use-polpo";
+import { useChatNavigationPersistence } from "./use-chat-navigation-persistence";
 import {
   ChatActionsContext,
   ChatSessionStateContext,
@@ -16,6 +18,9 @@ import {
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const chat = useChat();
+  const { client } = usePolpo();
+  // Reload / reopen lands on the chat this person had open (and its tabs, panels).
+  useChatNavigationPersistence(client, chat);
 
   // Split into state (reactive) and actions (stable)
   const state: ChatStateValue = useMemo(() => ({

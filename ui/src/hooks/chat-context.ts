@@ -23,6 +23,12 @@
  */
 
 import { createContext, use, useSyncExternalStore } from "react";
+import {
+  createThreadsOpenStore,
+  getChatNavigation,
+  subscribeChatNavigation,
+  updateChatNavigation,
+} from "@/lib/chat-navigation";
 import type {
   AskUserQuestion,
   MissionPreviewData,
@@ -42,31 +48,27 @@ import type {
 
 // ═══════════════════════════════════════════════════════
 //  Sidebar store — external, no context, no re-render cascade
+//  Backed by the person's chat navigation preferences (server + local copy).
 // ═══════════════════════════════════════════════════════
 
-let _sidebarOpen: boolean;
-try {
-  _sidebarOpen = localStorage.getItem("polpo-chat-sidebar") === "true";
-} catch {
-  _sidebarOpen = false;
-}
+function getSnapshot() { return getChatNavigation().sidePanelOpen ?? false; }
 
-const listeners = new Set<() => void>();
 function subscribe(cb: () => void) {
-  listeners.add(cb);
-  return () => { listeners.delete(cb); };
+  let last = getSnapshot();
+  return subscribeChatNavigation(() => {
+    const next = getSnapshot();
+    if (next === last) return;
+    last = next;
+    cb();
+  });
 }
-function getSnapshot() { return _sidebarOpen; }
 
 function setSidebarOpen(open: boolean) {
-  if (_sidebarOpen === open) return;
-  _sidebarOpen = open;
-  try { localStorage.setItem("polpo-chat-sidebar", String(open)); } catch { /* ignore */ }
-  listeners.forEach(cb => cb());
+  updateChatNavigation({ sidePanelOpen: open });
 }
 
 function toggleSidebar() {
-  setSidebarOpen(!_sidebarOpen);
+  setSidebarOpen(!getSnapshot());
 }
 
 /** Hook to read sidebar open state — only re-renders when sidebar state changes */
@@ -79,41 +81,22 @@ export const sidebarActions = { setSidebarOpen, toggleSidebar } as const;
 
 // ═══════════════════════════════════════════════════════
 //  Dedicated /chat page session sidebar store
+//  Desktop: the saved `threadsOpen` preference. Phones: per visit.
 // ═══════════════════════════════════════════════════════
 
-let _chatPageSessionsOpen = false;
-const chatPageSessionsListeners = new Set<() => void>();
-
-function chatPageSessionsSubscribe(cb: () => void) {
-  chatPageSessionsListeners.add(cb);
-  return () => { chatPageSessionsListeners.delete(cb); };
-}
-
-function getChatPageSessionsSnapshot() {
-  return _chatPageSessionsOpen;
-}
+const chatPageThreads = createThreadsOpenStore();
 
 export function setChatPageSessionsOpen(open: boolean) {
-  if (_chatPageSessionsOpen === open) return;
-  _chatPageSessionsOpen = open;
-  chatPageSessionsListeners.forEach((cb) => cb());
-}
-
-function toggleChatPageSessions() {
-  setChatPageSessionsOpen(!_chatPageSessionsOpen);
+  chatPageThreads.setOpen(open);
 }
 
 export function useChatPageSessionsOpen(): boolean {
-  return useSyncExternalStore(
-    chatPageSessionsSubscribe,
-    getChatPageSessionsSnapshot,
-    getChatPageSessionsSnapshot,
-  );
+  return chatPageThreads.useOpen();
 }
 
 export const chatPageSessionActions = {
   setOpen: setChatPageSessionsOpen,
-  toggle: toggleChatPageSessions,
+  toggle: chatPageThreads.toggle,
 } as const;
 
 // ═══════════════════════════════════════════════════════
@@ -158,7 +141,8 @@ export interface ChatActionsValue {
   consumeOpenTab: () => void;
   consumeSetDesign: (result?: { applied: boolean; description: string }) => void;
   clear: () => void;
-  loadSession: (id: string) => Promise<void>;
+  /** Open a thread; resolves false when it does not exist (deleted, stale link). */
+  loadSession: (id: string) => Promise<boolean>;
   newSession: () => void;
   deleteSession: (id: string) => Promise<void>;
   /** Rename a session (PATCH title). Silent catch — dialog handles the error UX. */

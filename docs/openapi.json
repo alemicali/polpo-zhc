@@ -227,6 +227,53 @@
             ]
           }
         ]
+      },
+      "MemberPreferences": {
+        "type": "object",
+        "properties": {
+          "chatNavigation": {
+            "type": "object",
+            "properties": {
+              "lastSessionId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastRoomId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastAgent": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "openTabs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "maxItems": 50
+              },
+              "sidePanelOpen": {
+                "type": "boolean"
+              },
+              "threadsOpen": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       }
     },
     "parameters": {}
@@ -16246,6 +16293,147 @@
                       },
                       "required": [
                         "entries"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/preferences": {
+      "get": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Get the signed-in member's dashboard preferences",
+        "responses": {
+          "200": {
+            "description": "Preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Update the signed-in member's dashboard preferences",
+        "description": "Merges the given fields into the stored preferences (per section, field by field).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chatNavigation": {
+                    "type": "object",
+                    "properties": {
+                      "lastSessionId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastRoomId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastAgent": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "openTabs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "maxItems": 50
+                      },
+                      "sidePanelOpen": {
+                        "type": "boolean"
+                      },
+                      "threadsOpen": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
                       ]
                     }
                   },
