@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ConnectorConfig, ConnectorOAuthApp, ConnectorsFile, ConnectorStatus } from "@polpo-ai/core";
+import type { ConnectorConfig, ConnectorIconAsset, ConnectorOAuthApp, ConnectorsFile, ConnectorStatus } from "@polpo-ai/core";
 
 export class ConnectorStore {
   readonly file: string;
@@ -70,6 +70,18 @@ export class ConnectorStore {
     else delete current.lastError;
     if (state.toolCount !== undefined) current.toolCount = state.toolCount;
     if (state.lastConnectedAt) current.lastConnectedAt = state.lastConnectedAt;
+    this.write(data);
+    return current;
+  }
+
+  /** The custom connector's icon metadata and when discovery last ran (does not touch updatedAt). */
+  setIcon(id: string, asset: ConnectorIconAsset | undefined, checkedAt: string): ConnectorConfig | undefined {
+    const data = this.read();
+    const current = data.connectors.find((c) => c.id === id);
+    if (!current) return undefined;
+    if (asset) current.iconAsset = asset;
+    else delete current.iconAsset;
+    current.iconCheckedAt = checkedAt;
     this.write(data);
     return current;
   }

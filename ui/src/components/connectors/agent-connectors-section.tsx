@@ -76,7 +76,7 @@ export function AgentConnectorsSection({
             return (
               <div key={connector.id} className="rounded-lg border border-border/40 bg-card/60">
                 <div data-testid={`agent-connector-${connector.id}`} className="flex items-center gap-3 px-3 py-2">
-                  <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} size="sm" />
+                  <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="flex min-w-0 items-baseline gap-1.5">
                       <span className="truncate text-sm font-medium">{connector.name}</span>

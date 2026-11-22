@@ -29,6 +29,8 @@ import { OAuthHttpError } from "./oauth-errors.js";
 import { VaultOAuthProvider, type PreregisteredClient } from "./oauth-provider.js";
 import { ConnectorSecrets, OAUTH_KEYS, resolveSecretRefs, SECRET_KEYS } from "./secrets.js";
 import { ConnectorStore } from "./store.js";
+import { ConnectorIcons } from "./icon-store.js";
+import type { IconFetcher } from "./icons.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
 import { clientMetadataUrlFor } from "./paths.js";
 import { accountFromIdToken, connectorLabel } from "./view.js";
@@ -50,6 +52,10 @@ export interface ConnectorManagerOptions {
   listTtlMs?: number;
   /** stdio connectors' working directory (default: the .polpo dir). */
   cwd?: string;
+  /** Look custom connectors' icons up on create / connect / list (the server; off in task runners). */
+  autoDiscoverIcons?: boolean;
+  /** Tests: the network for icon discovery. */
+  iconFetcher?: IconFetcher;
 }
 
 interface Connection {
@@ -100,6 +106,8 @@ function isSessionGone(err: unknown): boolean {
 
 export class ConnectorManager {
   readonly store: ConnectorStore;
+  /** Custom connectors' icons (discovered or set by the person). */
+  readonly icons: ConnectorIcons;
   secrets: ConnectorSecrets;
   private readonly connections = new Map<string, Connection>();
   private readonly connecting = new Map<string, Promise<Connection>>();
@@ -107,6 +115,15 @@ export class ConnectorManager {
   constructor(private options: ConnectorManagerOptions) {
     this.store = new ConnectorStore(options.polpoDir);
     this.secrets = new ConnectorSecrets(options.vaultStore);
+    this.icons = new ConnectorIcons({
+      polpoDir: options.polpoDir,
+      store: this.store,
+      policy: () => ({ allowPrivateNetwork: allowPrivateNetwork(this.options.settings?.()), resolve: this.options.resolveHost }),
+      autoDiscover: () => !!this.options.autoDiscoverIcons,
+      ...(options.iconFetcher ? { fetcher: options.iconFetcher } : {}),
+      onChange: (id) => this.announce(id, "updated"),
+      log: (m) => this.log(`icon ${m}`),
+    });
   }
 
   /** Swap the dependencies (the vault store may appear after setup). */
@@ -225,6 +242,8 @@ export class ConnectorManager {
       try {
         await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
         const connection: Connection = { client, transport, signature: this.signature(connector), provider };
+        // the server's icons (MCP serverInfo.icons): looked at in the background, never blocking the connection
+        try { this.icons.noteConnected(connector, client.getServerVersion()); } catch { /* icons never break a connection */ }
         client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
           connection.tools = undefined;
         });
@@ -568,6 +587,7 @@ export class ConnectorManager {
     if (connector.auth.type === "oauth") await this.revoke(connector).catch(() => undefined);
     await this.secrets.remove(id);
     this.store.remove(id);
+    this.icons.remove(id);
     this.options.emit?.({ id, status: "disconnected", action: "deleted" });
     return true;
   }
