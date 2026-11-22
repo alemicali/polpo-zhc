@@ -113,7 +113,7 @@ export function LocalModelStep({
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Local model (offline)</h2>
+          <h2 className="font-heading text-h2">Local model (offline)</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Use a model running on this computer or your network. Nothing leaves your machine and no API key is needed.
           </p>
@@ -137,7 +137,7 @@ export function LocalModelStep({
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Server address</label>
+        <label className="text-label text-muted-foreground">Server address</label>
         <div className="flex gap-2">
           <Input
             value={baseUrl}
@@ -150,7 +150,7 @@ export function LocalModelStep({
             Detect
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground">{server.hint}</p>
+        <p className="text-caption text-muted-foreground">{server.hint}</p>
       </div>
 
       {error && (
@@ -161,8 +161,8 @@ export function LocalModelStep({
       )}
 
       {discovery && discovery.models.length === 0 && !connected && (
-        <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-          <p className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+        <div className="space-y-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-xs">
+          <p className="flex items-center gap-1.5 font-medium text-warning">
             <AlertTriangle className="h-3.5 w-3.5" />
             The server did not list any model.
           </p>
@@ -177,7 +177,7 @@ export function LocalModelStep({
 
       {connected && (
         <div className="space-y-2">
-          <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+          <p className="flex items-center gap-1.5 text-sm font-medium text-success">
             <CheckCircle2 className="h-4 w-4" />
             {value.label} connected — {models.length} model{models.length !== 1 ? "s" : ""} available
           </p>
@@ -187,11 +187,11 @@ export function LocalModelStep({
                 <Cpu className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="truncate font-mono">{m.id}</span>
                 {m.tools === false && <NoToolsBadge />}
-                {m.contextWindow && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{Math.round(m.contextWindow / 1000)}k ctx</span>}
+                {m.contextWindow && <span className="ml-auto shrink-0 text-micro text-muted-foreground">{Math.round(m.contextWindow / 1000)}k ctx</span>}
               </div>
             ))}
           </div>
-          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
             <Server className="h-3 w-3" /> You choose which model to use in the next step.
           </p>
           <ContextHint preset={preset} />
@@ -205,7 +205,7 @@ export function LocalModelStep({
 export function NoToolsBadge() {
   return (
     <span
-      className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400"
+      className="shrink-0 rounded border border-warning/40 bg-warning/10 px-1 text-micro font-medium text-warning"
       title="This model does not support tool calling: it can chat, but agents using it cannot write files or run commands, so their tasks fail."
     >
       no tools
@@ -225,8 +225,8 @@ function ContextHint({ preset }: { preset: string }) {
     "openai-compatible": <>Start the server with a context size of 64k tokens or more (for llama.cpp: <code>-c 65536</code>).</>,
   };
   return (
-    <div className="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] leading-relaxed">
-      <p className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+    <div className="space-y-1 rounded-md border border-warning/30 bg-warning/5 p-3 text-caption leading-relaxed">
+      <p className="flex items-center gap-1.5 font-medium text-warning">
         <AlertTriangle className="h-3.5 w-3.5" />
         Give the model enough context
       </p>

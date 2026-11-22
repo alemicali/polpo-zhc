@@ -238,7 +238,7 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
         href={to}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center rounded-lg transition-all duration-200 relative gap-3 px-3 py-2.5 text-[13px] font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        className="flex items-center rounded-lg transition-all duration-200 relative gap-3 px-3 py-2.5 text-small font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
         <Icon className="h-[18px] w-[18px] shrink-0" />
         <span className="truncate">{label}</span>
@@ -250,7 +250,7 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
   const linkClasses = ({ isActive }: { isActive: boolean }) =>
     cn(
       "flex items-center rounded-lg transition-colors duration-200 group/link relative",
-      "gap-3 px-3 py-2.5 text-[13px] font-medium",
+      "gap-3 px-3 py-2.5 text-small font-medium",
       isActive
         ? "bg-sidebar-primary/10 text-sidebar-primary"
         : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"

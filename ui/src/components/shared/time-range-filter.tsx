@@ -60,7 +60,7 @@ export function TimeRangeFilter({
               key={option.value}
               variant={field === option.value ? "default" : "ghost"}
               size="sm"
-              className="h-6 flex-1 text-[10px]"
+              className="h-6 flex-1 text-micro"
               onClick={() => selectField(option.value)}
             >
               {option.label}

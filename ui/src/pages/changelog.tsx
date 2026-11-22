@@ -5,6 +5,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
+import { PageHeader } from "@/components/shared/page-header";
 import { ChangelogTimeline } from "@/components/whats-new/changelog-timeline";
 import { markAllChangelogSeen } from "@/hooks/use-whats-new";
 import { CHANGELOG } from "@/lib/changelog";
@@ -28,10 +29,7 @@ export function ChangelogPage() {
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/25">
               <Megaphone className="h-5 w-5" />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Novità</h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">Cosa è cambiato di recente, in breve.</p>
-            </div>
+            <PageHeader className="min-w-0 flex-1" title="Novità" description="Cosa è cambiato di recente, in breve." />
           </div>
         </header>
 
