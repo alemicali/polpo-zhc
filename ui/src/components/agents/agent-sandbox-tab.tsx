@@ -58,7 +58,7 @@ export function AgentSandboxTab() {
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
         <AgentComputerPointer defaultComputer={(agent as { defaultComputer?: string }).defaultComputer} />
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="py-3 px-4 space-y-1.5 text-xs">
             <div className="text-label text-muted-foreground">Effective sandbox</div>
             {error && <p className="text-destructive">{error}</p>}
@@ -77,7 +77,7 @@ export function AgentSandboxTab() {
         </Card>
 
         {overview && (
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="py-4 px-4">
               <SandboxEditor
                 level="agent"
@@ -112,7 +112,7 @@ function AgentComputerPointer({ defaultComputer }: { defaultComputer?: string })
   const { computers } = useComputers({ live: false });
   const name = id === "host" ? "This server (host)" : computers.find((c) => c.id === id)?.name ?? id;
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0" data-testid="agent-computer-pointer">
+    <Card className="py-0 gap-0" data-testid="agent-computer-pointer">
       <CardContent className="py-2.5 px-4 space-y-1 text-xs">
         <p className="flex flex-wrap items-center gap-1.5">
           <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
@@ -138,7 +138,7 @@ function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]
   for (const name of names) groups[toolPlacement(name)].push(name);
   const where = (p?: string) => p === "local" || !p ? "this machine, no isolation" : p === "bwrap" ? "bubblewrap" : p === "daytona" ? "Daytona VM" : p === "e2b" ? "E2B VM" : p;
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+    <Card className="py-0 gap-0">
       <CardContent className="py-3 px-4 space-y-3 text-xs">
         <div className="flex items-baseline justify-between gap-2">
           <div className="text-label text-muted-foreground">Where the tools run</div>

@@ -74,6 +74,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -2390,30 +2391,10 @@ function SessionSidebar({
           onNewGroup={() => onNewGroup()}
         />
         {/* View toggle — text labels, not icons */}
-        <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
-          <button
-            className={cn(
-              "h-6 px-2 flex items-center justify-center rounded text-caption font-medium transition-colors",
-              view === "drill"
-                ? "bg-background text-foreground shadow-card"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => setView("drill")}
-          >
-            By agent
-          </button>
-          <button
-            className={cn(
-              "h-6 px-2 flex items-center justify-center rounded text-caption font-medium transition-colors",
-              view === "flat"
-                ? "bg-background text-foreground shadow-card"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => setView("flat")}
-          >
-            All
-          </button>
-        </div>
+        <SegmentedControl size="sm" aria-label="History view" value={view} onValueChange={setView}>
+          <ToggleGroupItem value="drill">By agent</ToggleGroupItem>
+          <ToggleGroupItem value="flat">All</ToggleGroupItem>
+        </SegmentedControl>
         {/* Sidebar close button — pure close (the open action lives elsewhere) */}
         {onBack && (
           <Tooltip>

@@ -114,6 +114,7 @@ import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
+import { HarnessesSection } from "@/components/config/harnesses-section";
 import { SectionHeader } from "@/components/shared/section-header";
 
 // ── API helper (same pattern as setup.tsx) ──
@@ -219,6 +220,7 @@ const baseSections = [
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
   { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
+  { id: "harnesses", label: "Harnesses", icon: Bot },
   { id: "mcp", label: "MCP access", icon: Plug },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
@@ -1602,7 +1604,7 @@ function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
   };
 
   return (
-    <Card className="bg-card/70 border-border/40 py-0">
+    <Card className="py-0">
       <CardContent className="p-3 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -2268,7 +2270,7 @@ function MembersTab() {
         </Card>
       )}
 
-      <Card className="bg-card/80 border-border/40 py-0 gap-0">
+      <Card className="py-0 gap-0">
         <CardContent className="py-3 px-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
@@ -2953,8 +2955,8 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
           <div className="px-6 py-5">
             <Tabs value={addTab} onValueChange={(v) => setAddTab(v as "builtin" | "custom")}>
               <TabsList className="mb-3">
-                <TabsTrigger value="builtin" className="text-xs">Built-in</TabsTrigger>
-                <TabsTrigger value="custom" className="text-xs">Custom endpoint / gateway</TabsTrigger>
+                <TabsTrigger value="builtin" className="text-small">Built-in</TabsTrigger>
+                <TabsTrigger value="custom" className="text-small">Custom endpoint / gateway</TabsTrigger>
               </TabsList>
               <TabsContent value="builtin">
                 {authProviders.length > 0 ? (
@@ -3298,6 +3300,9 @@ export function ConfigPage() {
         {/* ═══ SANDBOX ═══ */}
         {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
 
+        {/* ═══ HARNESSES ═══ */}
+        {activeSection === "harnesses" && <HarnessesSection />}
+
         {/* ═══ MCP ACCESS ═══ */}
         {activeSection === "mcp" && <McpAccessSection />}
 
@@ -3477,7 +3482,7 @@ export function ConfigPage() {
             {rules.length > 0 ? (
               <div className="space-y-2">
                 {rules.map((rule) => (
-                  <Card key={rule.id} className="bg-card/80 border-border/40 py-0 gap-0">
+                  <Card key={rule.id} className="py-0 gap-0">
                     <CardContent className="pt-3 pb-3">
                       <p className="text-caption leading-relaxed text-muted-foreground mb-2.5">
                         {summarizeRule(rule)}
@@ -3629,7 +3634,7 @@ export function ConfigPage() {
                               )}
                             </div>
                             {/* Level details */}
-                            <Card className="flex-1 bg-card/60 border-border/30 py-0 gap-0">
+                            <Card className="flex-1 py-0 gap-0">
                               <CardContent className="py-2.5 px-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <Badge variant={
@@ -3720,7 +3725,7 @@ export function ConfigPage() {
                   {gates && gates.length > 0 ? (
                     <div className="space-y-2">
                       {gates.map((gate) => (
-                        <Card key={gate.id} className="bg-card/60 border-border/30 py-0 gap-0">
+                        <Card key={gate.id} className="py-0 gap-0">
                           <CardContent className="py-3 px-4">
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <span className="text-sm font-semibold">{gate.name}</span>

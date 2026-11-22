@@ -29,6 +29,8 @@ import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-re
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
 import { MISSION_EDIT } from "@polpo-ai/core";
+import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
+import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { TypedEmitter, withEventOrigin } from "./events.js";
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
@@ -1736,7 +1738,27 @@ export class Orchestrator extends TypedEmitter {
     await this.engine.renameTeam(oldName, newName);
     await this.emitTeamSnapshot("team:updated", { oldName, teamName: newName });
   }
+  /**
+   * An agent's engine (agent.engine) normalized ("polpo" → unset) and checked against the settings
+   * (harness enabled, a computer that can run it): HarnessConfigError otherwise.
+   */
+  checkAgentEngine(agent: Pick<AgentConfig, "name" | "engine" | "defaultComputer">): AgentConfig["engine"] {
+    const engine = parseAgentEngine(agent.engine, `Agent "${agent.name}": engine`);
+    if (!engine) return undefined;
+    const settings = this.config?.settings;
+    const problem = agentEngineProblem({ ...agent, engine }, settings as any, {
+      daytonaApi: daytonaApiVersion((settings?.sandbox as { providers?: Record<string, Record<string, unknown>> } | undefined)?.providers?.daytona),
+    });
+    if (problem) throw new HarnessConfigError(problem);
+    return engine;
+  }
+
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    if (agent.engine !== undefined) {
+      const engine = this.checkAgentEngine(agent);
+      agent = { ...agent, engine };
+      if (!engine) delete agent.engine;
+    }
     await this.engine.addAgent(agent, teamName);
     await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
     this.refreshDedicatedTelegramBots(agent.name);
@@ -1747,6 +1769,13 @@ export class Orchestrator extends TypedEmitter {
     return removed;
   }
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    if ("engine" in updates || "defaultComputer" in updates) {
+      const current = (await this.engine.getAgents()).find((a) => a.name === name);
+      if (current) {
+        const engine = this.checkAgentEngine({ ...current, ...updates, name } as AgentConfig);
+        if ("engine" in updates) updates = { ...updates, engine };
+      }
+    }
     const agent = await this.engine.updateAgent(name, updates);
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
     this.refreshDedicatedTelegramBots(agent.name);

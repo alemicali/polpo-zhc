@@ -82,7 +82,7 @@ browser in the VM ──socks5──▶ 127.0.0.1:1081 (forwarder) ──socks5 
 In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
 
 - `tailscale` / `tailscaled` 1.104.7: in the runner images (`scripts/build-sandbox-images.mjs`: Daytona
-  v0 snapshot, E2B template, and the Daytona v2 image `polpo-runner-vm-2`); otherwise downloaded on
+  v0 snapshot, E2B template, and the Daytona v2 image `polpo-runner-vm-3`); otherwise downloaded on
   first use from `pkgs.tailscale.com` and checked against a pinned SHA-256. Computers run on Daytona
   v0 (containers), E2B and Daytona v2 (Linux VMs that hibernate: their memory snapshot keeps
   tailscaled running, and every wake checks the tailnet again: when the ephemeral node was removed

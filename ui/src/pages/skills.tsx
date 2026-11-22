@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import {
   Tooltip,
@@ -632,40 +633,24 @@ export function SkillsPage() {
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2 flex-wrap shrink-0">
         {/* View toggle */}
-        <div className="flex items-center rounded-lg border border-border/40 bg-muted/20 p-0.5">
+        <SegmentedControl size="sm" aria-label="Skills view" value={view} onValueChange={setView}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  view === "list"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                onClick={() => setView("list")}
-              >
-                <LayoutList className="h-3.5 w-3.5" />
-              </button>
+              <ToggleGroupItem value="list" aria-label="List view">
+                <LayoutList className="h-4 w-4" />
+              </ToggleGroupItem>
             </TooltipTrigger>
             <TooltipContent className="text-xs">List view</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                  view === "grid"
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                onClick={() => setView("grid")}
-              >
-                <LayoutGrid className="h-3.5 w-3.5" />
-              </button>
+              <ToggleGroupItem value="grid" aria-label="Grid view">
+                <LayoutGrid className="h-4 w-4" />
+              </ToggleGroupItem>
             </TooltipTrigger>
             <TooltipContent className="text-xs">Grid view</TooltipContent>
           </Tooltip>
-        </div>
+        </SegmentedControl>
 
         {/* Search */}
         <div className="relative flex-1 min-w-44 max-w-xs">
@@ -674,7 +659,7 @@ export function SkillsPage() {
             placeholder="Search skills..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-xs bg-input/50 border-border/40"
+            className="pl-8 h-8 text-sm"
           />
         </div>
 

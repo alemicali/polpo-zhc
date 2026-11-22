@@ -81,6 +81,9 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
+    "@ai-sdk/harness": "1.0.190",
+    "@ai-sdk/harness-claude-code": "1.0.194",
+    "@ai-sdk/harness-codex": "1.0.192",
     "@daytona/sdk": "0.233.0",
     "@daytona/sdk-v2": "npm:@daytona/sdk@2.1.0",
     "@earendil-works/pi-agent-core": "^1.6.0",
@@ -93,6 +96,7 @@
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",
     "@types/ws": "^8.18.1",
+    "ai": "7.0.179",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "croner": "^10.0.1",

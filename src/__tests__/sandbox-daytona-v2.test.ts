@@ -48,6 +48,7 @@ const v2 = vi.hoisted(() => ({
   staleSearch: false,
   destroyedVisible: false,
   createFailures: 0,
+  processStarts: [] as Array<{ command: any; opts: any }>,
 }));
 const v0 = vi.hoisted(() => ({ created: [] as any[] }));
 const providerOptions = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
@@ -82,6 +83,19 @@ function fakeSandbox(s: FakeSb) {
       v2.execs.push({ command, opts });
       return v2.execResult ?? { processId: "p1", reason: "exited", exitCode: 0, stdout: "out\n", stderr: "err\n", output: "out\nerr\n", logs: [] };
     },
+    // background processes (agent harness bridges): a log stream, then the exit
+    process: {
+      start: async (command: any, opts: any) => {
+        v2.calls.push(`process.start ${s.id} ${JSON.stringify(command)}`);
+        v2.processStarts.push({ command, opts });
+        return fakeProcess(`proc_${v2.processStarts.length}`, s);
+      },
+      connect: (id: string) => { v2.calls.push(`process.connect ${s.id} ${id}`); return fakeProcess(id, s); },
+    },
+    ports: {
+      previewLink: async (port: number) => { v2.calls.push(`previewLink ${s.id} ${port}`); return { url: `https://${port}-${s.id}.proxy.example`, token: `tok-${s.id}`, expiresAt: "2026-11-21T11:00:00Z" }; },
+      signedPreviewLink: async (port: number, o: any) => { v2.calls.push(`signedPreviewLink ${s.id} ${port} ${o?.expiresInSeconds}`); return { url: `https://${port}-signed-${s.id}.proxy.example`, token: "t", expiresAt: "2026-11-22T10:00:00Z" }; },
+    },
     fs: {
       readBytes: async (path: string) => new TextEncoder().encode(`content of ${path}`),
       writeBytes: async (path: string, data: Uint8Array) => { v2.calls.push(`write ${path} ${data.byteLength}`); },
@@ -91,6 +105,24 @@ function fakeSandbox(s: FakeSb) {
     resetNetworkPolicy: async (o: { ifMatch: string }) => { v2.networkResets.push(o.ifMatch); s.network = undefined; return {}; },
   };
   return sb;
+}
+
+/** A started process: two log frames (stdout, stderr), eof, exit 0 — or exit lost when its VM is gone. */
+function fakeProcess(id: string, s: FakeSb) {
+  return {
+    id,
+    streamLogs: async function* () {
+      yield { type: "log", frame: { cursor: "1", channel: "stdout", data: "bridge ready\n" } };
+      yield { type: "log", frame: { cursor: "2", channel: "stderr", data: "warn\n" } };
+      yield { type: "eof", cursor: "3" };
+    },
+    wait: async () => {
+      await new Promise((r) => setTimeout(r, 10)); // the process runs a moment
+      if (s.state === "destroyed") throw Object.assign(new Error("502 BAD_GATEWAY"), { statusCode: 502 });
+      return { reason: "exited", exitCode: 0 };
+    },
+    kill: async (o: any) => { v2.calls.push(`process.kill ${id} ${o?.signal}`); },
+  };
 }
 
 function notPersistent() {
@@ -224,7 +256,7 @@ beforeEach(() => {
     ctor: [], creates: [], calls: [], execs: [], execResult: undefined, createError: undefined, searchError: undefined,
     createClass: "linux", createdState: "started", networkUpdates: [], networkResets: [], lifecycleUpdates: [], n: 0,
     snapReadyAfter: 2, snapFail: undefined, snapCreateError: undefined, restores: [], restoreError: undefined, sn: 0,
-    clock: Date.parse("2026-11-21T10:00:00Z"), staleSearch: false, destroyedVisible: false, createFailures: 0,
+    clock: Date.parse("2026-11-21T10:00:00Z"), staleSearch: false, destroyedVisible: false, createFailures: 0, processStarts: [],
   });
   v2.sandboxes.clear();
   v2.snapshots.clear();
@@ -318,6 +350,34 @@ describe("providers.daytona.api", () => {
     // @ts-expect-error plain .mjs script
     const script = await import("../../scripts/build-sandbox-images.mjs");
     expect(script.DAYTONA_V2_IMAGE).toBe(DAYTONA_V2_RUNNER_IMAGE);
+    // pnpm for agent harness bootstraps: the image bakes the version the engine activates otherwise
+    const { HARNESS_PNPM_VERSION } = await import("../adapters/harness-engine.js");
+    expect(script.PNPM_VERSION).toBe(HARNESS_PNPM_VERSION);
+    expect(script.ROOT_STEPS.some((x: string) => x.includes(`corepack prepare pnpm@${HARNESS_PNPM_VERSION} --activate`))).toBe(true);
+  });
+
+  test("the default runner image not built in the project yet: the previous one, with a warning", async () => {
+    let first = true;
+    const realCreate = v2.createError;
+    v2.createError = undefined;
+    const warnings: string[] = [];
+    const { Daytona } = await import("@daytona/sdk-v2") as any;
+    const proto = Object.getOwnPropertyDescriptor(Daytona.prototype, "v2")!.get!;
+    const spy = vi.spyOn(Daytona.prototype, "v2", "get").mockImplementation(function (this: any) {
+      const client = proto.call(this);
+      return { ...client, create: async (image: string, opts: any) => {
+        if (first && image === DAYTONA_V2_RUNNER_IMAGE) { first = false; throw Object.assign(new Error("image not found"), { code: "IMAGE_NOT_FOUND" }); }
+        return client.create(image, opts);
+      } };
+    });
+    try {
+      await remoteAdapter("daytona").create(spec(sandbox(), { onWarning: (m: string) => warnings.push(m) }));
+      expect(v2.creates.at(-1)!.image).toBe("polpo-runner-vm-2");
+      expect(warnings[0]).toMatch(/not built in this project yet: using "polpo-runner-vm-2"/);
+    } finally {
+      spy.mockRestore();
+      v2.createError = realCreate;
+    }
   });
 
   test("the build script builds the v2 image once, named, from the same steps (mocked client)", async () => {
@@ -1082,5 +1142,91 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     const start = await routes.request("/nina/start", { method: "POST" });
     expect(start.status).toBe(400);
     expect((await start.json()).error).toMatch(/not a host name or IP address: "bad host!".*Fix the computer's network rule/);
+  });
+});
+
+// ── agent harnesses on v2: processes, ports, hibernation ─────────────────
+
+describe("agent harnesses on Daytona v2", () => {
+  const nina: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona", lifecycle: { idleStopMinutes: 15 } };
+  const sb = () => sandbox({ computer: nina });
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "polpo-daytona-v2-harness-"));
+    dirs.push(dir);
+    return new ComputerManager(dir, { now: () => v2.clock, sleep: async (ms) => { v2.clock += ms; } });
+  };
+  const read = async (stream: ReadableStream<Uint8Array>) => {
+    let out = "";
+    for await (const c of stream as unknown as AsyncIterable<Uint8Array>) out += new TextDecoder().decode(c);
+    return out;
+  };
+
+  test("spawn: a detached process (bash -c, cwd, env, logs kept), stdout and stderr from its log stream, its exit", async () => {
+    const driver = await remoteAdapter("daytona").create(spec(sandbox()));
+    const p = await driver.spawn!("node bridge.mjs", { cwd: "/root/work", env: { BRIDGE_WS_PORT: "4000" } });
+    expect(v2.processStarts[0]).toEqual({ command: { argv: ["bash", "-c", "node bridge.mjs"] }, opts: { cwd: "/root/work", env: { BRIDGE_WS_PORT: "4000" }, keepLogs: "until_cleanup" } });
+    expect(await read(p.stdout)).toBe("bridge ready\n");
+    expect(await read(p.stderr)).toBe("warn\n");
+    expect(await p.wait()).toEqual({ exitCode: 0 });
+    await p.kill();
+    expect(v2.calls).toContain(`process.kill ${p.id} TERM`);
+    // reconnect by id (after a wake)
+    const again = await driver.connectProcess!(p.id);
+    expect(again.id).toBe(p.id);
+  });
+
+  test("a process whose VM is gone reads as killed (137), never a rejection", async () => {
+    const driver = await remoteAdapter("daytona").create(spec(sandbox()));
+    const p = await driver.spawn!("sleep 1000", {});
+    v2.sandboxes.get(driver.remoteId)!.s.state = "destroyed";
+    expect(await p.wait()).toEqual({ exitCode: 137 });
+  });
+
+  test("port endpoint: a signed link for long uses (no token header), the preview token header for short ones; ws:// for WebSockets", async () => {
+    const driver = await remoteAdapter("daytona").create(spec(sandbox()));
+    const id = driver.remoteId;
+    expect(await driver.portEndpoint!(4001, { protocol: "ws", ttlSeconds: 86_400 })).toEqual({
+      url: `wss://4001-signed-${id}.proxy.example`, headers: { "X-Daytona-Skip-Preview-Warning": "true" }, expiresAt: "2026-11-22T10:00:00Z",
+    });
+    expect(v2.calls).toContain(`signedPreviewLink ${id} 4001 86400`);
+    expect(await driver.portEndpoint!(4001, { protocol: "ws", ttlSeconds: 600 })).toEqual({
+      url: `wss://4001-${id}.proxy.example`, headers: { "X-Daytona-Skip-Preview-Warning": "true", "X-Daytona-Preview-Token": `tok-${id}` }, expiresAt: "2026-11-21T11:00:00Z",
+    });
+  });
+
+  test("a computer's driver passes spawn and ports through to its current VM; a held turn keeps it from hibernating as idle", async () => {
+    const m = setup();
+    const d = await m.attach(nina, sb());
+    const p = await d.spawn!("node bridge.mjs", {});
+    expect(p.id).toBe("proc_1");
+    expect((await d.portEndpoint!(4000, { protocol: "ws" })).url).toMatch(/^wss:\/\/4000-signed-sbx_1\./);
+    const release = d.hold!();
+    v2.clock += 16 * 60_000;
+    await m.idleTick([nina]);
+    expect(v2.calls.some((c) => c.startsWith("snapshot "))).toBe(false);
+    release();
+    v2.clock += 16 * 60_000;
+    await m.idleTick([nina]);
+    expect(v2.calls.some((c) => c.startsWith("snapshot "))).toBe(true);
+  });
+
+  test("hibernation: live harness sessions on the computer park (memory) before the snapshot; a reset stops them (disk)", async () => {
+    const { liveHarnessSessions } = await import("../harness/live-sessions.js");
+    liveHarnessSessions.clear();
+    const parked: string[] = [];
+    const unregister = liveHarnessSessions.register({
+      key: "task:t1", agent: "ada", computerId: "nina",
+      suspend: async (mode, reason) => { parked.push(`${mode}:${reason}:${v2.calls.filter((c) => c.startsWith("snapshot ")).length}`); },
+    });
+    liveHarnessSessions.register({ key: "task:other", agent: "bob", computerId: "other", suspend: async () => { parked.push("wrong computer"); } });
+    const m = setup();
+    await m.ensure(nina, sb());
+    await m.stop(nina);
+    // parked before any snapshot was taken
+    expect(parked).toEqual(["memory:stop:0"]);
+    await m.reset(nina, sb());
+    expect(parked).toEqual(["memory:stop:0", "disk:reset:1"]);
+    unregister();
+    liveHarnessSessions.clear();
   });
 });

@@ -89,7 +89,7 @@ export function AgentMemoryTab() {
   }
 
   return (
-    <Card className="flex flex-col flex-1 min-h-0 overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+    <Card className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between pb-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
@@ -113,10 +113,10 @@ export function AgentMemoryTab() {
         <div className="flex items-center gap-2">
           <Tabs value={view} onValueChange={(v) => setView(v as "edit" | "preview")}>
             <TabsList className="h-8">
-              <TabsTrigger value="edit" className="text-xs px-2.5 h-6 gap-1">
+              <TabsTrigger value="edit" className="text-small">
                 <Pencil className="h-3 w-3" /> Edit
               </TabsTrigger>
-              <TabsTrigger value="preview" className="text-xs px-2.5 h-6 gap-1">
+              <TabsTrigger value="preview" className="text-small">
                 <Eye className="h-3 w-3" /> Preview
               </TabsTrigger>
             </TabsList>
@@ -142,7 +142,7 @@ export function AgentMemoryTab() {
       <CardContent className="flex-1 overflow-hidden">
         {view === "edit" ? (
           <Textarea
-            className="h-full min-h-0 font-mono text-sm resize-none bg-input/50 border-border/40 focus:border-primary/50"
+            className="h-full min-h-0 font-mono text-sm resize-none"
             placeholder={`Private memory for "${agent.identity?.displayName ?? agent.name}". Write agent-specific context: preferred patterns, lessons learned, tool preferences, etc.`}
             value={content}
             onChange={(e) => { setContent(e.target.value); setDirty(true); }}

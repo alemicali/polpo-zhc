@@ -29,7 +29,40 @@ export interface RemoteDriver {
   /** Keep a running VM alive this long from now (pooled VMs wait for reuse); optional. */
   keepAlive?(ms: number): Promise<void>;
   destroy(): Promise<void>;
+  /**
+   * Start a long-running process in the VM (an agent harness's bridge): it outlives this call and
+   * this host process (and survives a memory snapshot). Optional: providers without a process API
+   * leave it out, and harnesses refuse them.
+   */
+  spawn?(command: string, opts: { cwd?: string; env?: Record<string, string> }): Promise<RemoteProcess>;
+  /** Follow a process started by spawn again (after a host restart or a wake from a snapshot). */
+  connectProcess?(id: string): Promise<RemoteProcess>;
+  /**
+   * How the host reaches a port of the VM (a harness bridge's WebSocket): a URL and the headers to
+   * send with it. `ttlSeconds`: how long the endpoint must keep working (signed links).
+   */
+  portEndpoint?(port: number, opts?: { protocol?: "http" | "https" | "ws"; ttlSeconds?: number }): Promise<RemotePortEndpoint>;
+  /**
+   * The VM is in use until the returned function is called (a harness turn: the model works in the
+   * VM without Polpo commands): keeps a computer from hibernating as idle. Optional.
+   */
+  hold?(): () => void;
 }
+
+/** A process started with RemoteDriver.spawn. */
+export interface RemoteProcess {
+  /** The provider's process id (connectProcess takes it). */
+  readonly id: string;
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  /** Its exit; a VM that went away under it (deleted, hibernated) reads as killed (137). */
+  wait(): Promise<{ exitCode: number }>;
+  kill(): Promise<void>;
+  /** Stop following its output (the process keeps running). */
+  detach(): void;
+}
+
+export interface RemotePortEndpoint { url: string; headers?: Record<string, string>; expiresAt?: string }
 
 export interface CreateSpec {
   sandbox: EffectiveSandbox;

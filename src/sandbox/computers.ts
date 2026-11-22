@@ -33,6 +33,7 @@ import { acquireFileLock } from "./file-lock.js";
 import { instanceLabel } from "./pool.js";
 import { remoteAdapter, snapshotFailed, type Hibernation, type MachineSnapshot, type RemoteAdapter, type RemoteDriver, type RemoteVmSummary } from "./remote-adapters.js";
 import { onComputerStarted, tailnetEgress, type TailnetHost, type TailnetStatus } from "./tailnet-egress.js";
+import { liveHarnessSessions } from "../harness/live-sessions.js";
 
 /** A computer's machine as a host for the tailnet runtime (commands and uploads through the provider). */
 export function driverHost(driver: RemoteDriver): TailnetHost {
@@ -689,6 +690,8 @@ export class ComputerManager {
       if (!force) throw new Error("commands are still running on it");
       this.onNotice?.(c.id, "warn", "Rotating while commands still run: they are cut");
     }
+    // agent harnesses on it detach (their bridge lives on in the snapshot) and re-attach to the new VM
+    await liveHarnessSessions.beforeVmGoes(c.id, "memory", why);
     await this.setStatus(c, "stopping", { remoteId: m.remoteId });
     try {
       await this.takeSnapshot(c, h, m.remoteId);
@@ -817,6 +820,14 @@ export class ComputerManager {
         this.touch(c, d);
       }
     };
+    // long-running processes and port endpoints go to the current VM (a new one after a wake) but
+    // do not count as a command in flight: a harness turn holds the computer instead (hold)
+    const current = async (): Promise<RemoteDriver> => {
+      const d = await fresh();
+      this.touch(c, d);
+      return d;
+    };
+    const missing = (what: string) => new Error(`Computer "${c.id}" (${c.kind}) cannot ${what}: its provider has no process API here (agent harnesses need a Daytona v2 computer)`);
     return {
       get remoteId() { return inner.remoteId; },
       exec: (command, o) => use((d) => d.exec(command, o)),
@@ -826,6 +837,44 @@ export class ComputerManager {
       resume: async () => {},
       keepAlive: async () => {},
       destroy: async () => {},
+      ...(inner.spawn ? {
+        spawn: async (command: string, o: { cwd?: string; env?: Record<string, string> }) => {
+          const d = await current();
+          if (!d.spawn) throw missing("start processes");
+          return d.spawn(command, o);
+        },
+        connectProcess: async (id: string) => {
+          const d = await current();
+          if (!d.connectProcess) throw missing("follow processes");
+          return d.connectProcess(id);
+        },
+        portEndpoint: async (port: number, o?: { protocol?: "http" | "https" | "ws"; ttlSeconds?: number }) => {
+          const d = await current();
+          if (!d.portEndpoint) throw missing("expose ports");
+          return d.portEndpoint(port, o);
+        },
+      } : {}),
+      hold: () => this.hold(c, () => inner),
+    };
+  }
+
+  /**
+   * The computer is in use until the returned function is called (a harness turn: the model works
+   * in the VM through its own process, without Polpo commands): it counts as a command in flight
+   * (an idle hibernation waits, a rotation drains it) and keeps lastUsedAt fresh.
+   */
+  hold(c: ComputerConfig, driver: () => RemoteDriver | undefined = () => undefined): () => void {
+    this.inFlight.set(c.id, (this.inFlight.get(c.id) ?? 0) + 1);
+    this.touch(c, driver(), true);
+    const beat = setInterval(() => this.touch(c, driver(), true), HEARTBEAT_MS);
+    beat.unref?.();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      clearInterval(beat);
+      this.inFlight.set(c.id, Math.max(0, (this.inFlight.get(c.id) ?? 1) - 1));
+      this.touch(c, driver());
     };
   }
 
@@ -932,6 +981,8 @@ export class ComputerManager {
   /** Its machines (leaving the tailnet first) and, where it hibernates, every snapshot of it. */
   private async removeMachines(c: ComputerConfig): Promise<void> {
     const provider = c.kind as RemoteSandboxProvider;
+    // its processes are lost: agent harnesses on it stop (their next turn starts a new bridge)
+    await liveHarnessSessions.beforeVmGoes(c.id, "disk", "reset");
     const h = await this.hibernation(c);
     const machines = await this.machines(c, h);
     // the one the state knows too (a VM made seconds ago may not be listed yet)

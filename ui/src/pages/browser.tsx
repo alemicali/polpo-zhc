@@ -717,11 +717,11 @@ export function BrowserPage() {
           className="contents"
         >
           <TabsList className="h-8 shrink-0" aria-label="App Preview mode">
-            <TabsTrigger value="browser" className="h-6 flex-none gap-1.5 px-2 text-caption">
+            <TabsTrigger value="browser" className="flex-none text-small">
               <Globe2 className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Browser</span>
             </TabsTrigger>
-            <TabsTrigger value="code" className="h-6 flex-none gap-1.5 px-2 text-caption">
+            <TabsTrigger value="code" className="flex-none text-small">
               <Code2 className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Code</span>
             </TabsTrigger>

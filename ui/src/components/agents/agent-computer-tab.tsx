@@ -27,6 +27,7 @@ import { useComputerActions } from "@/hooks/use-computer-actions";
 import { useComputers } from "@/hooks/use-computers";
 import { KIND_LABELS, computersApi, suggestComputerId, type Computer } from "@/lib/computers-api";
 import { useAgentDetail } from "./agent-detail-context";
+import { AgentEngineCard } from "./agent-engine-card";
 
 const selectClass = "h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs sm:flex-none sm:min-w-[12rem]";
 
@@ -117,7 +118,7 @@ export function AgentComputerTab() {
     <ScrollArea className="h-full">
       <div className="space-y-4 pb-bottom-nav pr-4 lg:pb-4">
         {/* Where it works now */}
-        <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-header">
+        <Card className="gap-0 py-0" data-testid="agent-computer-header">
           <CardContent className="space-y-3 px-4 py-3 text-xs">
             <div className="flex items-center gap-1.5 text-label text-muted-foreground">
               <Monitor className="h-3 w-3" /> Works on
@@ -160,6 +161,8 @@ export function AgentComputerTab() {
             )}
           </CardContent>
         </Card>
+
+        <AgentEngineCard />
 
         {error && (
           <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
@@ -219,7 +222,7 @@ export function AgentComputerTab() {
 
         {/* Add one */}
         {!loading && (
-          <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-add">
+          <Card className="gap-0 py-0" data-testid="agent-computer-add">
             <CardContent className="space-y-3 px-4 py-3 text-xs">
               <div className="text-label text-muted-foreground">Add a computer</div>
               <div className="flex flex-wrap items-center gap-2">

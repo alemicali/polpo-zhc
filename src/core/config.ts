@@ -6,7 +6,7 @@ import { getPolpoDir } from "./constants.js";
 import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -156,6 +156,11 @@ export function validateAgents(agents: any[]): void {
     }
     if (agent.defaultComputer !== undefined && (typeof agent.defaultComputer !== "string" || (agent.defaultComputer !== HOST_COMPUTER_ID && !COMPUTER_ID_PATTERN.test(agent.defaultComputer)))) {
       throw new Error(`Agent "${agent.name}": defaultComputer must be "host" or a computer id (settings.computers)`);
+    }
+    // engine: "polpo" (default) or { harness, model?, ... } (the settings check is agentEngineProblem)
+    if (agent.engine !== undefined) {
+      const engine = parseAgentEngine(agent.engine, `Agent "${agent.name}": engine`);
+      if (engine) agent.engine = engine; else delete agent.engine;
     }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.
@@ -457,6 +462,9 @@ function parseSettings(raw: any): PolpoSettings {
   }
   if (raw?.tailscale !== undefined && raw?.tailscale !== null) {
     settings.tailscale = parseTailscaleSettings(raw.tailscale);
+  }
+  if (raw?.harnesses !== undefined && raw?.harnesses !== null) {
+    settings.harnesses = parseHarnessesSettings(raw.harnesses);
   }
   if (raw?.computers !== undefined && raw?.computers !== null) {
     const computers = parseComputers(raw.computers);

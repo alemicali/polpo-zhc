@@ -1574,7 +1574,7 @@ function RunsTimeline({
           <div
             key={run.runIndex}
             className={cn(
-              "rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm overflow-hidden",
+              "rounded-lg border border-border bg-card shadow-card overflow-hidden",
               isActive && "border-l-2 border-l-primary/60",
             )}
           >
@@ -1805,7 +1805,7 @@ export function MissionDetailView({
 
       {/* Scheduling info strip */}
       {hasScheduleInfo && (
-        <div className="flex items-center gap-4 flex-wrap shrink-0 rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm px-4 py-2.5">
+        <div className="flex items-center gap-4 flex-wrap shrink-0 rounded-lg border border-border bg-card shadow-card px-4 py-2.5">
           {mission.schedule && (
             <div className="flex items-center gap-1.5 text-xs">
               <Calendar className="h-3.5 w-3.5 text-info" />

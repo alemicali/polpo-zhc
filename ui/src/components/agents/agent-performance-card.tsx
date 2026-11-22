@@ -18,7 +18,7 @@ export function AgentPerformanceCard() {
   if (taskStats.total === 0) return null;
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+    <Card className="py-0 gap-0">
       <CardContent className="pt-4 pb-4 space-y-3">
         <SectionHeader title="Performance" icon={Star} />
         <div className="flex items-center justify-between gap-2">
