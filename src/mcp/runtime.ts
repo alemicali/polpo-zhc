@@ -32,6 +32,11 @@ export function notePublicOrigin(origin: string | undefined): void {
   if (origin) notedOrigin = origin.replace(/\/+$/, "");
 }
 
+/** The public origin: POLPO_PUBLIC_URL, else the origin the dashboard or API was last reached at. */
+export function knownPublicOrigin(): string | undefined {
+  return configuredPublicUrl() || notedOrigin;
+}
+
 /** POLPO_PUBLIC_URL (no trailing slash), when set. */
 function configuredPublicUrl(): string | undefined {
   return process.env.POLPO_PUBLIC_URL?.trim().replace(/\/+$/, "") || undefined;

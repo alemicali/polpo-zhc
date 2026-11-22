@@ -262,6 +262,18 @@ export function agentEgressName(
   return c?.kind === "host" ? c.egress : undefined;
 }
 
+/**
+ * An error for an agent's computers / defaultComputer naming computers the instance does not have
+ * (`known`: the settings' computer ids; "host" is always there), else null. Used by the agents API
+ * and by Polpo's add_agent / update_agent.
+ */
+export function unknownComputersProblem(known: readonly string[], body: { computers?: readonly string[] | null; defaultComputer?: string | null }): string | null {
+  if (!body.computers && !body.defaultComputer) return null;
+  const ids = new Set([HOST_COMPUTER_ID, ...known]);
+  const unknown = [...(body.computers ?? []), ...(body.defaultComputer ? [body.defaultComputer] : [])].filter((id) => !ids.has(id));
+  return unknown.length ? `Unknown computer${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (create ${unknown.length > 1 ? "them" : "it"} first)` : null;
+}
+
 /** The agents that use a computer (as default or in their list). */
 export function computerUsers(id: string, agents: ReadonlyArray<{ name: string; computers?: string[]; defaultComputer?: string }>): { name: string; isDefault: boolean }[] {
   return agents

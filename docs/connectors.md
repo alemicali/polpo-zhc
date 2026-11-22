@@ -54,7 +54,7 @@ Catalog entries with a per-account URL (`urlTemplate`, e.g. `https://mcp.dev.azu
 
 ### Polpo's tools
 
-`connectors_list` (status, tools, who may use them; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL; for OAuth it returns the link the person opens), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed). Polpo cannot add local (stdio) connectors.
+`connectors_list` (status, tools, who may use them; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL; for OAuth it returns the link the person opens; a token or an OAuth app's secret is entered by the person from a setup link, never in chat, and Polpo waits with `setup_wait`), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed); on demand (group `connectors`): `connector_catalog`, `connector_update` (name, on/off, tool policy), `connector_test`, `connector_disconnect`. Which tools of a connector an agent gets: `add_agent` / `update_agent` `connectorTools`. Polpo cannot add local (stdio) connectors.
 
 ## OAuth
 

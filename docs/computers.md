@@ -171,8 +171,10 @@ snapshots: a missing image fails the create with the command that builds it.
   `PATCH /agents/:name` (`""` clears the default). `GET /api/v1/computers/:id/egress`: a remote
   computer's egress through Tailscale (tailnet up/down, node, direct or DERP path, proxy reachable,
   where its browser goes out now; it looks inside a running machine only).
-- Polpo: `computers_list`, `computer_create`, `computer_assign`, `computer_start`, `computer_stop`;
-  `egress_status` (proxies, and remote computers' tailnet egress).
+- Polpo: `computers_list`, `computer_save` (create or change: lifecycle, network, egress…), `computer_control`
+  (start, stop, restart, reset), `computer_delete` (the MCP server's tools, run in process), `computer_create`,
+  `computer_assign`, `computer_start`, `computer_stop`; `add_agent` / `update_agent` take `computers` and
+  `defaultComputer`; `egress_status` (proxies, and remote computers' tailnet egress).
 - MCP (`computers` toolset): `polpo_computers_list`, `polpo_computer_save`, `polpo_computer_control`,
   `polpo_computer_delete`; `polpo_agent_update` takes `defaultComputer`.
 - Event `computer:changed` `{ id, action: created | updated | deleted | status, status?, remoteId?, error?, notice? }`

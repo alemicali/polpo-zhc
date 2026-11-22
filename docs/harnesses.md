@@ -91,6 +91,13 @@ credential entry comes back as `setup_url` + `setup_id` for `polpo_setup_wait`),
 REST: `GET /api/v1/harnesses`, `GET /api/v1/harnesses/sessions?agent=&computer=`,
 `POST /api/v1/harnesses/sessions/:key/stop`, `POST /api/v1/harnesses/sessions/:key/reset { confirm: true }`.
 
+### From Polpo's chat
+
+Polpo has the same tools as the MCP server: `harnesses_get` / `harnesses_update` (secrets: a setup link, then `setup_wait`),
+`harness_sessions_list` / `harness_session_control` (group `harnesses`, loaded on demand), and `add_agent` / `update_agent`
+take `engine` and `defaultComputer`. Ask "create an agent on Claude Code with a computer" and it enables the harness if needed,
+creates a Daytona v2 computer and the agent.
+
 ## How a run works
 
 1. The task runner sees `agent.engine` and starts the harness engine (`src/adapters/harness-engine.ts`)
