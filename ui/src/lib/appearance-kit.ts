@@ -23,10 +23,21 @@ export type TokenGroup = "brand" | "surfaces" | "text" | "borders" | "sidebar" |
  * (rem 0.5–6 or px 8–96), a font weight (100–900), a letter-spacing (em -0.1–0.3, px -3–6, 0 or
  * normal) or a text case (uppercase, none, capitalize, lowercase).
  */
-export type TokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case";
+export type TokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case" | "gradient" | "opacity" | "blur";
 
-/** A mode's design tokens: any subset (radius in px, the rest CSS values). */
-export type TokenMap = Record<string, string | number>;
+/** A gradient token (buttonGradient): two colours and an angle in degrees. */
+export interface GradientValue { from: string; to: string; angle: number }
+export type TokenValue = string | number | GradientValue;
+/** A mode's design tokens: any subset (radii and blur in px, weight and opacity numbers, buttonGradient an object, the rest CSS values). */
+export type TokenMap = Record<string, TokenValue>;
+
+/** A web font to load (settings.appearance.fonts): Google Fonts by family, or an https stylesheet on an allowed host. */
+export interface WebFont {
+  family: string;
+  source: "google" | "url";
+  url?: string;
+  weights?: string;
+}
 
 export interface BootCustom {
   enabled: boolean;
@@ -34,6 +45,8 @@ export interface BootCustom {
   derive: boolean;
   light: TokenMap;
   dark: TokenMap;
+  /** Web fonts this look loads (from the instance: settings.appearance.fonts). */
+  fonts?: WebFont[];
 }
 
 /** The instance's default look as the API gives it (validated server side). */
@@ -41,6 +54,7 @@ export interface InstanceAppearance {
   theme?: BootTheme;
   palette?: string;
   custom?: { enabled?: boolean; derive?: boolean; light?: TokenMap; dark?: TokenMap };
+  fonts?: WebFont[];
 }
 
 /** The instance's branding as the API gives it (public display fields; settings.branding). */
@@ -74,6 +88,8 @@ export interface ResolvedAppearance {
   css: string | null;
   /** For <meta name="theme-color">. */
   themeColor: string;
+  /** The web fonts to load: this look's and the instance's. */
+  fonts: WebFont[];
   sources: { theme: LayerSource; palette: LayerSource; custom: LayerSource };
 }
 
@@ -85,6 +101,7 @@ interface KitElement {
   dataset: Record<string, string | undefined>;
   lastElementChild?: KitElement | null;
   setAttribute(name: string, value: string): void;
+  getAttribute?(name: string): string | null;
   remove(): void;
   appendChild(child: KitElement): unknown;
 }
@@ -94,6 +111,7 @@ interface KitDocument {
   head: KitElement;
   getElementById(id: string): KitElement | null;
   querySelector(selector: string): KitElement | null;
+  querySelectorAll?(selector: string): ArrayLike<KitElement>;
   createElement(tag: string): KitElement;
 }
 interface KitStorage { getItem(key: string): string | null }
@@ -129,6 +147,9 @@ export function appearanceKit() {
     primary: ["--primary", "brand", "color"],
     secondary: ["--secondary", "brand", "color"],
     accent: ["--accent", "brand", "color"],
+    buttonPrimaryBg: ["--button-primary-bg", "brand", "color"],
+    buttonGradient: ["--button-primary-bg", "brand", "gradient"],
+    buttonPrimaryForeground: ["--button-primary-foreground", "brand", "color"],
     background: ["--background", "surfaces", "color"],
     card: ["--card", "surfaces", "color"],
     popover: ["--popover", "surfaces", "color"],
@@ -151,6 +172,8 @@ export function appearanceKit() {
     sidebarAccentForeground: ["--sidebar-accent-foreground", "sidebar", "color"],
     sidebarBorder: ["--sidebar-border", "sidebar", "color"],
     sidebarRing: ["--sidebar-ring", "sidebar", "color"],
+    sidebarOpacity: ["--sidebar-opacity", "sidebar", "opacity"],
+    sidebarBlur: ["--sidebar-blur", "sidebar", "blur"],
     chart1: ["--chart-1", "charts", "color"],
     chart2: ["--chart-2", "charts", "color"],
     chart3: ["--chart-3", "charts", "color"],
@@ -183,6 +206,8 @@ export function appearanceKit() {
     labelTracking: ["--tracking-label", "typography", "tracking"],
     labelCase: ["--label-transform", "typography", "case"],
     radius: ["--radius", "shape", "radius"],
+    radiusCard: ["--radius-card", "shape", "radius"],
+    radiusControl: ["--radius-control", "shape", "radius"],
     shadowCard: ["--shadow-card", "shape", "shadow"],
     shadowRaised: ["--shadow-raised", "shape", "shadow"],
   };
@@ -217,7 +242,26 @@ export function appearanceKit() {
     ["statusRunning", "info"],
     ["statusAssigned", "primary"],
     ["statusQueued", "mutedForeground"],
+    // the primary button's text: readable on its gradient, else on its fill (else --primary-foreground, in CSS)
+    ["buttonPrimaryForeground", "contrast:buttonGradient"],
+    ["buttonPrimaryForeground", "contrast:buttonPrimaryBg"],
   ];
+  /** The numeric tokens' bounds (the same as APPEARANCE_NUMBER_RANGES in packages/core/src/appearance.ts). */
+  const RANGES: Record<string, [number, number]> = {
+    radius: [0, 24], radiusCard: [0, 32], radiusControl: [0, 32], headingWeight: [100, 900], sidebarOpacity: [0.5, 1], sidebarBlur: [0, 24],
+  };
+  const GRADIENT_ANGLE = 135;
+  /** The font services a web font stylesheet may come from (APPEARANCE_FONT_HOSTS on the server). */
+  const FONT_HOSTS = ["fonts.googleapis.com", "fonts.bunny.net", "use.typekit.net", "api.fontshare.com", "rsms.me"];
+  /** Where each service's font files come from (preconnected along with the stylesheet's host). */
+  const FONT_FILE_HOSTS: Record<string, string> = {
+    "fonts.googleapis.com": "https://fonts.gstatic.com",
+    "api.fontshare.com": "https://cdn.fontshare.com",
+    "use.typekit.net": "https://p.typekit.net",
+  };
+  const FONT_FAMILY_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$/;
+  const MAX_WEB_FONTS = 8;
+  const WEB_FONT_PREFIX = "polpo-webfont-";
   const STYLE_ID = "polpo-appearance-overrides";
   const KEYS = { theme: "polpo-theme", palette: "polpo-palette", custom: "polpo-appearance" };
   /** The instance the API serves, remembered per API (the project is only known after a request). */
@@ -277,12 +321,25 @@ export function appearanceKit() {
    * A token's value when valid (see TokenKind), else undefined. Numbers out of range are clamped
    * (radius 0–24, weight 100–900); sizes and trackings out of range are refused.
    */
-  function tokenValue(name: string, value: unknown): string | number | undefined {
+  function tokenValue(name: string, value: unknown): TokenValue | undefined {
     const def = TOKENS[name];
     if (!def) return undefined;
     const kind = def[2];
-    if (kind === "radius") return typeof value === "number" && isFinite(value) ? Math.min(24, Math.max(0, value)) : undefined;
-    if (kind === "weight") return typeof value === "number" && isFinite(value) ? Math.round(Math.min(900, Math.max(100, value))) : undefined;
+    if (kind === "radius" || kind === "weight" || kind === "opacity" || kind === "blur") {
+      if (typeof value !== "number" || !isFinite(value)) return undefined;
+      const range = RANGES[name] || [0, 24];
+      const n = Math.min(range[1], Math.max(range[0], value));
+      return kind === "weight" ? Math.round(n) : n;
+    }
+    if (kind === "gradient") {
+      if (!value || typeof value !== "object") return undefined;
+      const g = value as Record<string, unknown>;
+      const from = typeof g.from === "string" ? g.from.trim() : "";
+      const to = typeof g.to === "string" ? g.to.trim() : "";
+      const angle = g.angle === undefined || g.angle === null ? GRADIENT_ANGLE : g.angle;
+      if (!COLOR_RE.test(from) || !COLOR_RE.test(to) || typeof angle !== "number" || !isFinite(angle)) return undefined;
+      return { from, to, angle: Math.round(Math.min(360, Math.max(0, angle))) };
+    }
     const s = typeof value === "string" ? value.trim() : "";
     if (kind === "color") return COLOR_RE.test(s) ? s : undefined;
     if (kind === "font") return FONT_RE.test(s) ? s : undefined;
@@ -323,12 +380,90 @@ export function appearanceKit() {
     const legacy = !v.light && !v.dark && (v.primary || v.secondary || v.accent || v.text || v.fontFamily || v.radius !== undefined)
       ? normalizeTokens({ primary: v.primary, secondary: v.secondary || v.accent, text: v.text, fontFamily: v.fontFamily, radius: v.radius })
       : null;
+    const fonts = normalizeWebFonts(v.fonts);
     return {
       enabled: v.enabled === true,
       derive: v.derive !== false,
       light: normalizeTokens(v.light || legacy),
       dark: normalizeTokens(v.dark || legacy),
+      ...(fonts.length ? { fonts } : {}),
     };
+  }
+
+  /** Weights as Google Fonts takes them ("400;600;700" or "300..800"), or null. */
+  function fontWeights(raw: unknown): string | null {
+    const s = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+    const ok = (n: number) => n >= 100 && n <= 900;
+    const range = /^(\d{3})\s*\.\.\s*(\d{3})$/.exec(s);
+    if (range) {
+      const a = Number(range[1]);
+      const b = Number(range[2]);
+      return ok(a) && ok(b) && a < b ? `${a}..${b}` : null;
+    }
+    const parts = s.split(/[\s;,]+/).filter(Boolean);
+    if (!parts.length || parts.length > 9) return null;
+    const nums: number[] = [];
+    for (const p of parts) {
+      if (!/^\d{3}$/.test(p) || !ok(Number(p))) return null;
+      if (nums.indexOf(Number(p)) === -1) nums.push(Number(p));
+    }
+    return nums.sort((a, b) => a - b).join(";");
+  }
+
+  /** An https stylesheet on an allowed font host (display=swap added where the service takes it), or null. */
+  function fontUrl(raw: unknown): string | null {
+    const s = typeof raw === "string" ? raw.trim() : "";
+    if (s.length > 512 || !/^https:\/\/[^\s"'<>\\`]+$/.test(s)) return null;
+    let url: URL;
+    try { url = new URL(s); } catch { return null; }
+    url.hash = "";
+    if (url.protocol !== "https:" || url.username || url.password || url.port || FONT_HOSTS.indexOf(url.hostname) === -1) return null;
+    if ((url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.bunny.net" || url.hostname === "api.fontshare.com") && !url.searchParams.has("display")) {
+      return `${url.href}${url.search ? "&" : "?"}display=swap`;
+    }
+    return url.href;
+  }
+
+  /** One web font when valid (the server's parseWebFont rules), else null. */
+  function normalizeWebFont(value: unknown): WebFont | null {
+    if (!value || typeof value !== "object") return null;
+    const v = value as Record<string, unknown>;
+    const family = typeof v.family === "string" ? v.family.trim().replace(/\s+/g, " ") : "";
+    if (!FONT_FAMILY_RE.test(family)) return null;
+    if (v.source === "google") {
+      if (v.url) return null;
+      if (v.weights === undefined || v.weights === null || v.weights === "") return { family, source: "google" };
+      const weights = fontWeights(v.weights);
+      return weights ? { family, source: "google", weights } : null;
+    }
+    if (v.source === "url") {
+      const url = fontUrl(v.url);
+      return url ? { family, source: "url", url } : null;
+    }
+    return null;
+  }
+
+  /** The valid web fonts of one or two lists: at most 8, one per family (the first wins). */
+  function normalizeWebFonts(value: unknown, more?: unknown): WebFont[] {
+    const out: WebFont[] = [];
+    for (const list of [value, more]) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        const font = normalizeWebFont(item);
+        if (!font || out.length >= MAX_WEB_FONTS) continue;
+        if (out.some((f) => f.family.toLowerCase() === font.family.toLowerCase())) continue;
+        out.push(font);
+      }
+    }
+    return out;
+  }
+
+  /** A web font's stylesheet URL. */
+  function webFontHref(font: WebFont): string {
+    if (font.source === "google") {
+      return `https://fonts.googleapis.com/css2?family=${encodeURIComponent(font.family).replace(/%20/g, "+")}${font.weights ? `:wght@${font.weights}` : ""}&display=swap`;
+    }
+    return font.url || "";
   }
 
   function parseJson(raw: string | null): unknown {
@@ -377,6 +512,21 @@ export function appearanceKit() {
     return l > (perceptual ? 0.7 : 0.62) ? "#0f172a" : "#ffffff";
   }
 
+  /** A readable text colour on a gradient: by the average lightness of its two ends. */
+  function contrastOnGradient(g: GradientValue): string | null {
+    const a = lightness(g.from);
+    const b = lightness(g.to);
+    if (a === null || b === null) return null;
+    const limit = (c: string) => (c.charAt(0) !== "#" && !/^rgba?\(/i.test(c.trim()) ? 0.7 : 0.62);
+    return (a + b) / 2 > (limit(g.from) + limit(g.to)) / 2 ? "#0f172a" : "#ffffff";
+  }
+
+  /** A gradient's CSS; with `percent` each end is mixed with transparent (the hover state: 90%, like bg-primary/90). */
+  function gradientCss(g: GradientValue, percent?: number): string {
+    const end = (c: string) => (percent ? `color-mix(in oklab, ${c} ${percent}%, transparent)` : c);
+    return `linear-gradient(${g.angle}deg, ${end(g.from)}, ${end(g.to)})`;
+  }
+
   /** A mode's tokens with what derive adds; `derived` names the added ones. */
   function deriveTokens(tokens: TokenMap, derive: boolean): { tokens: TokenMap; derived: string[] } {
     const out: TokenMap = {};
@@ -388,8 +538,10 @@ export function appearanceKit() {
       if (out[target] !== undefined) continue;
       const contrast = rule[1].indexOf("contrast:") === 0;
       const from = out[contrast ? rule[1].slice(9) : rule[1]];
-      if (typeof from !== "string") continue;
-      const value = contrast ? contrastOn(from) : from;
+      let value: string | null;
+      if (contrast && from && typeof from === "object") value = contrastOnGradient(from);
+      else if (typeof from !== "string") continue;
+      else value = contrast ? contrastOn(from) : from;
       if (value === null) continue;
       out[target] = value;
       derived.push(target);
@@ -404,9 +556,18 @@ export function appearanceKit() {
       if (value === undefined) continue;
       const css = TOKENS[name][0];
       const kind = TOKENS[name][2];
+      if (typeof value === "object") {
+        // buttonGradient, after buttonPrimaryBg (TOKENS order): a gradient wins over a solid fill
+        lines.push(`  ${css}: ${gradientCss(value)};`);
+        lines.push(`  --button-primary-hover-bg: ${gradientCss(value, 90)};`);
+        continue;
+      }
       // a shadow is composed with Tailwind's rings (shadow-card / shadow-raised): "none" would void the list
-      const out = kind === "radius" ? `${value}px` : kind === "shadow" && value === "none" ? "0 0 #0000" : value;
+      const out = kind === "radius" || kind === "blur" ? `${value}px` : kind === "shadow" && value === "none" ? "0 0 #0000" : value;
       lines.push(`  ${css}: ${out};`);
+      if (name === "buttonPrimaryBg") lines.push(`  --button-primary-hover-bg: color-mix(in oklab, ${value} 90%, transparent);`);
+      // a backdrop-filter only when blurring: any value but none makes the sidebar a containing block
+      if (name === "sidebarBlur") lines.push(`  --sidebar-backdrop: ${typeof value === "number" && value > 0 ? `blur(${value}px)` : "none"};`);
       // the sans font is also Tailwind's --font-sans
       if (name === "fontFamily") lines.push(`  --font-sans: ${value};`);
     }
@@ -446,11 +607,16 @@ export function appearanceKit() {
     let customSource: LayerSource = "default";
     if (storedCustom && typeof storedCustom === "object") { custom = normalizeCustom(storedCustom); customSource = "browser"; }
     else if (inst && inst.custom && typeof inst.custom === "object") { custom = normalizeCustom(inst.custom); customSource = "instance"; }
+    // the instance's web fonts are part of its look (a browser's own look keeps its own fonts)
+    const instFonts = inst ? normalizeWebFonts(inst.fonts) : [];
+    if (customSource !== "browser" && instFonts.length) custom = { ...custom, fonts: instFonts };
     const dark = theme === "system" ? input.prefersDark : theme === "dark";
     const colorsFor = THEME_COLORS[palette] || THEME_COLORS[DEFAULT_PALETTE];
     const bg = custom.enabled ? (dark ? custom.dark : custom.light).background : undefined;
     return {
       theme, dark, palette, custom,
+      // this look's web fonts and the instance's (a browser's look may name an instance font)
+      fonts: normalizeWebFonts(custom.fonts, instFonts),
       css: overridesCss(custom),
       themeColor: typeof bg === "string" ? bg : colorsFor[dark ? 1 : 0],
       sources: { theme: themeSource, palette: paletteSource, custom: customSource },
@@ -493,9 +659,52 @@ export function appearanceKit() {
     }
   }
 
-  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color, font preloads. */
-  function apply(doc: KitDocument, r: ResolvedAppearance, assetBase = "/"): void {
+  /**
+   * A preconnect and a stylesheet per web font; the ones no longer used are removed. On the first
+   * paint (the inline script) the stylesheets are render-blocking like index.html's own font
+   * stylesheets, so the first frame already knows the families (font-display: swap).
+   */
+  function applyWebFonts(doc: KitDocument, fonts: WebFont[], firstPaint: boolean): void {
+    const wanted: Record<string, true> = {};
+    for (const font of fonts) {
+      const href = webFontHref(font);
+      let host = "";
+      try { host = new URL(href).hostname; } catch { continue; }
+      const id = WEB_FONT_PREFIX + slug(font.family);
+      wanted[id] = true;
+      const origins = [`https://${host}`];
+      if (FONT_FILE_HOSTS[host]) origins.push(FONT_FILE_HOSTS[host]);
+      for (const origin of origins) {
+        const pid = `${WEB_FONT_PREFIX}preconnect-${slug(origin.slice(8))}`;
+        wanted[pid] = true;
+        if (doc.getElementById(pid)) continue;
+        const pre = doc.createElement("link");
+        pre.id = pid;
+        pre.setAttribute("rel", "preconnect");
+        pre.setAttribute("href", origin);
+        if (origin !== `https://${host}`) pre.setAttribute("crossorigin", "anonymous");
+        doc.head.appendChild(pre);
+      }
+      let link = doc.getElementById(id);
+      if (!link) {
+        link = doc.createElement("link");
+        link.id = id;
+        link.setAttribute("rel", "stylesheet");
+        if (firstPaint) link.setAttribute("blocking", "render");
+        doc.head.appendChild(link);
+      }
+      if (!link.getAttribute || link.getAttribute("href") !== href) link.setAttribute("href", href);
+    }
+    const existing = doc.querySelectorAll ? doc.querySelectorAll(`link[id^="${WEB_FONT_PREFIX}"]`) : [];
+    const stale: KitElement[] = [];
+    for (let i = 0; i < existing.length; i++) if (!wanted[existing[i].id]) stale.push(existing[i]);
+    for (const el of stale) el.remove();
+  }
+
+  /** Put a resolved look on the page: the theme class, the palette, the overrides stylesheet, theme-color, fonts. */
+  function apply(doc: KitDocument, r: ResolvedAppearance, assetBase = "/", firstPaint = false): void {
     try { applyFontPreloads(doc, r.custom, assetBase); } catch { /* the look applies anyway */ }
+    try { applyWebFonts(doc, r.fonts || [], firstPaint); } catch { /* the look applies anyway */ }
     const root = doc.documentElement;
     root.classList.toggle("dark", r.dark);
     root.dataset.palette = r.palette;
@@ -556,7 +765,7 @@ export function appearanceKit() {
     let r: ResolvedAppearance | null = null;
     try {
       r = resolve(read(win, buildBaseUrl));
-      apply(win.document, r, assetBase);
+      apply(win.document, r, assetBase, true);
     } catch {
       r = null;
     }
@@ -649,6 +858,7 @@ export function appearanceKit() {
     slug, apiScope, scopedKey, isTheme, isPalette, tokenValue, normalizeTokens, normalizeCustom, lightness, contrastOn, deriveTokens,
     overridesCss, resolve, apply, read, boot, instanceDefault,
     BUNDLED_FONTS, FONT_PRELOAD_PREFIX, bundledFontsUsed,
+    RANGES, GRADIENT_ANGLE, FONT_HOSTS, WEB_FONT_PREFIX, normalizeWebFont, normalizeWebFonts, webFontHref, fontWeights, fontUrl, gradientCss, contrastOnGradient, applyWebFonts,
     BRANDING_KEY, DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, LOGO_PRELOAD_ID,
     normalizeBranding, instanceBranding, brandingTitle, brandingLogo, applyBranding, bootBranding,
   };

@@ -58,7 +58,7 @@ function CatalogCard({
 }: { entry: CatalogEntry; state: ConnectorCardState; onConnect: () => void; onManage: () => void }) {
   const primary = state === "connect" || state === "needs_setup" || state === "needs_auth" || state === "needs_reauth";
   return (
-    <div data-testid={`catalog-card-${entry.id}`} className="flex flex-col gap-3 rounded-xl border bg-card p-4 transition-colors hover:border-foreground/20">
+    <div data-testid={`catalog-card-${entry.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4 transition-colors hover:border-foreground/20">
       <div className="flex items-start gap-3">
         <ConnectorIcon catalogId={entry.id} name={entry.name} color={entry.icon?.color} />
         <div className="min-w-0 flex-1">
@@ -96,7 +96,7 @@ function ConnectorRow({
   const state = connectorState(connector);
   const needsSignIn = state === "needs_auth" || state === "needs_reauth";
   return (
-    <div data-testid={`connector-row-${connector.id}`} className="flex items-center gap-3 rounded-xl border bg-card px-3 py-3 sm:px-4">
+    <div data-testid={`connector-row-${connector.id}`} className="flex items-center gap-3 rounded-card border bg-card px-3 py-3 sm:px-4">
       <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} />
       <button type="button" onClick={onManage} className="min-w-0 flex-1 text-left">
         <span className="flex items-center gap-2">

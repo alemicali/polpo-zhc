@@ -573,7 +573,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
 
   return (
-    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-sidebar-border bg-sidebar text-sidebar-foreground px-1.5 py-3 lg:w-44 lg:px-2.5">
+    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-sidebar-border sidebar-surface text-sidebar-foreground px-1.5 py-3 lg:w-44 lg:px-2.5">
       <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
         <MoreHorizontal className="h-4 w-4 text-primary" />
         <span className="text-xs font-semibold">More</span>
