@@ -24,6 +24,7 @@ import { connectorToolAllowed, convertToolResult, mcpToolName, MAX_RESULT_TEXT, 
 import { connectorRoutes, connectorOAuthCallback, CONNECTOR_OAUTH_CALLBACK_PATH } from "../server/routes/connectors.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { clientMetadataDocument, clientMetadataUrlFor } from "../mcp/paths.js";
+import { connectorDashboardBase, connectorPublicBase } from "../mcp/runtime.js";
 import { executeConnectorTool } from "../tools/connector-tools.js";
 
 // ── a fake MCP server + authorization server ──
@@ -739,5 +740,95 @@ describe("catalog and Client ID Metadata Documents", () => {
     await manager.secrets.unset("cimd", ["oauth_client_info", "oauth_discovery"]);
     const { authorizationUrl } = await manager.startOAuth("cimd", `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`);
     expect(new URL(authorizationUrl!).searchParams.get("client_id")).toMatch(/^client-/);
+  });
+});
+
+describe("public URLs for OAuth providers (POLPO_PUBLIC_URL)", () => {
+  const PUBLIC = "https://lumea-dev.example.ts.net/lumea";
+  const PRIVATE = "https://lumea-dev.example.ts.net:3001";
+  const previous = process.env.POLPO_PUBLIC_URL;
+  beforeAll(() => { process.env.POLPO_PUBLIC_URL = PUBLIC; });
+  afterAll(() => {
+    if (previous === undefined) delete process.env.POLPO_PUBLIC_URL;
+    else process.env.POLPO_PUBLIC_URL = previous;
+  });
+
+  /** Wired like the server: the redirect URI from POLPO_PUBLIC_URL, whatever host the request came in on. */
+  function publicApp(manager: ConnectorManager) {
+    const app = new Hono();
+    app.route("/api/v1/connectors", connectorRoutes({
+      manager: () => manager,
+      settings: allowLocal,
+      redirectUri: (c) => `${connectorPublicBase(new URL(c.req.url).origin)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    }));
+    return app;
+  }
+
+  it("builds the redirect URI from POLPO_PUBLIC_URL, else the request origin; the dashboard from POLPO_DASHBOARD_URL", () => {
+    expect(connectorPublicBase(PRIVATE)).toBe(PUBLIC);
+    delete process.env.POLPO_PUBLIC_URL;
+    try {
+      expect(connectorPublicBase(`${PRIVATE}/`)).toBe(PRIVATE);
+    } finally {
+      process.env.POLPO_PUBLIC_URL = PUBLIC;
+    }
+    const dashboard = process.env.POLPO_DASHBOARD_URL;
+    process.env.POLPO_DASHBOARD_URL = "https://lumea-dev.example.ts.net:5174/";
+    try {
+      expect(connectorDashboardBase(PUBLIC)).toBe("https://lumea-dev.example.ts.net:5174");
+    } finally {
+      if (dashboard === undefined) delete process.env.POLPO_DASHBOARD_URL;
+      else process.env.POLPO_DASHBOARD_URL = dashboard;
+    }
+  });
+
+  it("oauth/start through another port: public client_id (CIMD) and redirect_uri, consistent with the metadata document; a stale client is dropped", async () => {
+    const { manager } = setup();
+    const app = publicApp(manager);
+    await add(manager, { id: "linear", name: "Linear", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    // stored by an earlier attempt made through the private port
+    await manager.secrets.patch("linear", { oauth_client_info: JSON.stringify({ client_id: `${PRIVATE}/api/v1/connectors/oauth/client-metadata.json` }) });
+    fake.cimd = true;
+    try {
+      const res = await app.request(`${PRIVATE}/api/v1/connectors/linear/oauth/start`, { method: "POST" });
+      expect(res.status).toBe(200);
+      const { data } = await res.json();
+      const url = new URL(data.authorizationUrl);
+      const doc = clientMetadataDocument(connectorPublicBase(PRIVATE));
+      expect(url.searchParams.get("client_id")).toBe(`${PUBLIC}/api/v1/connectors/oauth/client-metadata.json`);
+      expect(url.searchParams.get("redirect_uri")).toBe(`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+      expect(data.redirectUri).toBe(`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+      expect(doc.client_id).toBe(url.searchParams.get("client_id"));
+      expect(doc.redirect_uris).toEqual([url.searchParams.get("redirect_uri")]);
+      expect(JSON.parse((await manager.secrets.get("linear")).oauth_client_info!)).toMatchObject({ client_id: doc.client_id });
+    } finally {
+      fake.cimd = false;
+    }
+  });
+
+  it("registers again when the dynamically registered client has another redirect URI", async () => {
+    const { manager } = setup();
+    const app = publicApp(manager);
+    await add(manager, { id: "dcr", name: "Dcr", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    await manager.secrets.patch("dcr", { oauth_client_info: JSON.stringify({ client_id: "client-old", redirect_uris: [`${PRIVATE}${CONNECTOR_OAUTH_CALLBACK_PATH}`] }) });
+    const { data } = await (await app.request(`${PRIVATE}/api/v1/connectors/dcr/oauth/start`, { method: "POST" })).json();
+    const url = new URL(data.authorizationUrl);
+    expect(url.searchParams.get("client_id")).not.toBe("client-old");
+    expect(fake.clients.get(url.searchParams.get("client_id")!)?.redirect_uris).toEqual([`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`]);
+    // the browser gets through with the new client
+    expect((await fetch(url, { redirect: "manual" })).status).toBe(302);
+  });
+
+  it("the provider's error on the callback becomes the connector's lastError", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "denied", name: "Denied", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/denied/oauth/start", { method: "POST" })).json();
+    const state = new URL(start.data.authorizationUrl).searchParams.get("state")!;
+    const res = await app.request(`${CONNECTOR_OAUTH_CALLBACK_PATH}?state=${state}&error=invalid_client&error_description=Client+metadata+unreachable`);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("https://polpo.example.com/connectors");
+    expect(manager.store.get("denied")).toMatchObject({ status: "error", lastError: expect.stringContaining("invalid_client: Client metadata unreachable") });
+    expect((await manager.secrets.get("denied")).oauth_state).toBeUndefined();
   });
 });

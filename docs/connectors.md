@@ -72,7 +72,9 @@ The flow: `POST /connectors/:id/oauth/start` returns the authorization URL (with
 <public URL>/api/v1/connectors/oauth/callback
 ```
 
-`<public URL>` is `POLPO_PUBLIC_URL` when set (it may include a path, e.g. `https://host.ts.net/alessio`), else the origin the dashboard is reached at (forwarded host and protocol behind a proxy). `GET /api/v1/connectors/catalog` returns it as `redirectUri`. Register exactly this URI on pre-registered OAuth apps.
+`<public URL>` is `POLPO_PUBLIC_URL` when set (it may include a path, e.g. `https://host.ts.net/alessio`), else the origin the dashboard is reached at (forwarded host and protocol behind a proxy). When `POLPO_PUBLIC_URL` is set it is always used for every URL a provider must reach (redirect URI, metadata document URL and its contents), even when the dashboard calls the API through another host or port (e.g. a tailnet-only `:3001`). `GET /api/v1/connectors/catalog` returns it as `redirectUri`. Register exactly this URI on pre-registered OAuth apps.
+
+If the public URL changes, the next Connect drops a stored client that no longer matches (a metadata document URL or a registration for another redirect URI) and registers again. After the provider, the callback page links back to the dashboard: `POLPO_DASHBOARD_URL` (else `POLPO_UI_PUBLIC_URL`, else the public URL). An `error` / `error_description` returned by the provider becomes the connector's `lastError`. The server logs each attempt as `[polpo/connectors] oauth start <id>: …` / `oauth callback <id>: …` (authorization endpoint, client kind, redirect URI; never tokens or state).
 
 ### Public URL requirement (Tailscale Funnel, reverse proxies)
 

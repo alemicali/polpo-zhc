@@ -196,12 +196,15 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;",
 
 function page(title: string, message: string, back: string, ok: boolean, id?: string): string {
   const payload = JSON.stringify({ type: "polpo:connector-oauth", ok, id: id ?? null }).replace(/</g, "\\u003c");
+  // the opener is the dashboard, which may be on another origin than this callback (the public API URL)
+  const dashboardOrigin = (() => { try { return new URL(back).origin; } catch { return undefined; } })();
+  const target = dashboardOrigin ? JSON.stringify(dashboardOrigin).replace(/</g, "\\u003c") : "location.origin";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#fafafa;color:#111}
 main{max-width:420px;padding:24px;text-align:center}h1{font-size:20px}a{color:#2563eb}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}}</style></head>
 <body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(back)}">Back to Polpo</a></p></main>
-<script>try{if(window.opener){window.opener.postMessage(${payload},location.origin);setTimeout(function(){window.close()},800)}}catch(e){}</script>
+<script>try{if(window.opener){window.opener.postMessage(${payload},${target});setTimeout(function(){window.close()},800)}}catch(e){}</script>
 </body></html>`;
 }
 
@@ -219,11 +222,8 @@ export function connectorOAuthCallback(deps: { manager: () => ConnectorManager; 
       const description = c.req.query("error_description");
       const reason = [error ?? "no code", description].filter(Boolean).join(": ");
       const message = `Authorization was not completed (${reason}).`;
-      const pending = await manager.findPendingState(state);
-      if (pending) {
-        await manager.secrets.unset(pending.id, ["oauth_state", "oauth_state_expires", "oauth_code_verifier"]);
-        manager.setStatus(pending.id, "error", { error: message });
-      }
+      // the provider's error (and description) becomes the connector's lastError
+      const pending = await manager.abortOAuth(state, error ?? "no code", description);
       return c.html(page("Not connected", message, `${ui}/connectors`, false, pending?.id), 400);
     }
     try {

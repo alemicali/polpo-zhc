@@ -112,6 +112,10 @@ function installFetch() {
     if (!current) return Promise.resolve(new Response(JSON.stringify({ ok: false, error: "Connector not found" }), { status: 404 }));
     const save = (next: Connector) => { server.connectors = server.connectors.map((c) => (c.id === id ? next : c)); return next; };
     if (!action && method === "GET") return ok(current);
+    if (!action && method === "DELETE") {
+      server.connectors = server.connectors.filter((c) => c.id !== id);
+      return ok({ removed: true });
+    }
     if (!action && method === "PATCH") return ok(save({ ...current, ...body, access: body.access ? { ...current.access, ...body.access } : current.access }));
     if (action === "oauth" && method === "POST") {
       if (server.registrationFailure && !current.auth.oauth?.app) {
@@ -422,6 +426,56 @@ test("connected tab lists connectors; needs re-auth offers Reconnect", async () 
   const row = container.querySelector('[data-testid="connector-row-linear"]')!;
   expect(row.textContent).toContain(`${DEFAULT_PRODUCT_NAME} lost access to Linear`);
   expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Reconnect")).toBe(true);
+});
+
+test("a connector that never finished signing in can be managed (sign in or remove) from its card and its row", async () => {
+  installFetch();
+  server.connectors = [connector("linear")]; // needs_auth, never authorized
+  await renderPage();
+
+  const row = container.querySelector('[data-testid="connector-row-linear"]')!;
+  expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Sign in")).toBe(true);
+  expect(row.querySelector('[aria-label="Manage Linear"]')).toBeTruthy();
+
+  await act(async () => {
+    byText(/^Browse/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  });
+  await flush();
+  const card = container.querySelector('[data-testid="catalog-card-linear"]')!;
+  expect(card.querySelector('[aria-label="Sign in Linear"]')).toBeTruthy();
+  // a catalog entry nobody added has only Connect
+  expect(container.querySelector('[data-testid="catalog-card-notion"] [aria-label="Manage Notion"]')).toBeNull();
+
+  await click(card.querySelector('[aria-label="Manage Linear"]'));
+  await flush();
+  const sheet = document.querySelector('[role="dialog"]')!;
+  const labels = [...sheet.querySelectorAll("button")].map((b) => b.textContent?.trim());
+  expect(labels).toContain("Sign in");
+  expect(labels).toContain("Remove");
+  expect(labels).not.toContain("Disconnect"); // only for an authorized connector
+
+  await click([...sheet.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Remove"));
+  await click([...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button, [role="dialog"] button')].reverse().find((b) => b.textContent?.trim() === "Remove"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "DELETE" && c.path === "/linear")).toBe(true);
+  expect(server.connectors).toEqual([]);
+});
+
+test("connect (OAuth): while waiting for sign-in, Cancel and remove deletes the new connector", async () => {
+  installFetch();
+  const popup = { closed: false, location: { href: "about:blank" }, close: vi.fn(() => { popup.closed = true; }) };
+  vi.spyOn(window, "open").mockImplementation(() => popup as unknown as Window);
+  await renderPage();
+  await click(container.querySelector('[aria-label="Connect Linear"]'));
+  await flush();
+  expect(document.body.textContent).toContain("Waiting for you to sign in to Linear");
+
+  await click(inDialog("Cancel and remove"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "DELETE" && c.path === "/linear")).toBe(true);
+  expect(server.connectors).toEqual([]);
+  expect(popup.close).toHaveBeenCalled();
+  expect(document.body.textContent).not.toContain("Waiting for you to sign in");
 });
 
 // ── Detail sheet: access + tool policy ──────────────────────────────────────
