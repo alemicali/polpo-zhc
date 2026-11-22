@@ -153,7 +153,7 @@ function RejectDialog({
               Feedback (required)
             </label>
             <Textarea
-              className="mt-1 text-sm min-h-[100px] resize-none bg-input/50"
+              className="mt-1 text-sm min-h-[100px] resize-none"
               placeholder="Explain why this request is being rejected..."
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
@@ -488,7 +488,7 @@ export function ApprovalsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search approvals..."
-            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -515,7 +515,7 @@ export function ApprovalsPage() {
 
       {/* ── Approval list ── */}
       {filtered.length === 0 ? (
-        <Card className="flex-1 bg-card/60 border-border/40">
+        <Card className="flex-1">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <ShieldCheck className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">

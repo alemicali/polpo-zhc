@@ -74,7 +74,7 @@ function ParamField({
           {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm bg-input/50">
+          <SelectTrigger className="h-8 text-sm">
             <SelectValue placeholder={`Select ${param.name}...`} />
           </SelectTrigger>
           <SelectContent>
@@ -101,7 +101,7 @@ function ParamField({
           {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
         </label>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger className="h-8 text-sm bg-input/50">
+          <SelectTrigger className="h-8 text-sm">
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -124,7 +124,7 @@ function ParamField({
         {param.required && <Asterisk className="h-2 w-2 text-destructive" />}
       </label>
       <Input
-        className="h-8 text-sm font-mono bg-input/50"
+        className="h-8 text-sm font-mono"
         type={param.type === "number" ? "number" : "text"}
         placeholder={
           param.default !== undefined
@@ -431,7 +431,7 @@ export function PlaybooksPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search playbooks..."
-            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -450,7 +450,7 @@ export function PlaybooksPage() {
 
       {/* Playbook list */}
       {filtered.length === 0 ? (
-        <Card className="flex-1 bg-card/60 border-border/40">
+        <Card className="flex-1">
           <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Workflow className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">

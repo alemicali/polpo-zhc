@@ -163,7 +163,7 @@ function RightTabTrigger({ value, icon, label }: { value: RightTab; icon: React.
     <TabsTrigger
       value={value}
       title={label}
-      className="h-6 flex-none gap-1.5 px-2 text-caption"
+      className="flex-none text-small"
     >
       {icon}
       {/* Container query: only render the label when the right panel is wide

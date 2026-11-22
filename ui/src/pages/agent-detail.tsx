@@ -141,7 +141,7 @@ function AgentDetailContent() {
 
       {/* Activity heatmap */}
       {sortedTasks.length > 0 && (
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 mb-3">
+        <Card className="py-0 gap-0 mb-3">
           <CardContent className="pt-3 pb-3 overflow-x-auto">
             <ActivityHeatmap tasks={sortedTasks} />
           </CardContent>

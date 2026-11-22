@@ -129,7 +129,7 @@ function StatCard({
   subtitle?: string;
 }) {
   return (
-    <Card className="relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+    <Card className="relative overflow-hidden">
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <StatValue label={label} value={value} hint={subtitle} />
@@ -281,7 +281,7 @@ function SendDirectDialog({
               Channel ID
             </label>
             <Input
-              className="mt-1 h-8 text-sm font-mono bg-input/50"
+              className="mt-1 h-8 text-sm font-mono"
               placeholder="e.g. telegram, slack-general"
               value={channel}
               onChange={(e) => setChannel(e.target.value)}
@@ -292,7 +292,7 @@ function SendDirectDialog({
               Title
             </label>
             <Input
-              className="mt-1 h-8 text-sm bg-input/50"
+              className="mt-1 h-8 text-sm"
               placeholder="Notification title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -303,7 +303,7 @@ function SendDirectDialog({
               Body
             </label>
             <Textarea
-              className="mt-1 text-sm min-h-[80px] resize-none bg-input/50"
+              className="mt-1 text-sm min-h-[80px] resize-none"
               placeholder="Notification body (HTML supported)"
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -330,7 +330,7 @@ function SendDirectDialog({
                 Delay (seconds)
               </label>
               <Input
-                className="mt-1 h-8 text-sm bg-input/50"
+                className="mt-1 h-8 text-sm"
                 type="number"
                 min="0"
                 placeholder="0"
@@ -471,7 +471,7 @@ export function NotificationsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search notifications..."
-            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -480,7 +480,7 @@ export function NotificationsPage() {
         {/* Status filter */}
         <div className="flex max-w-full items-center gap-2 overflow-x-auto scrollbar-none pb-0.5 lg:ml-auto lg:overflow-visible lg:pb-0">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+            <SelectTrigger className="h-8 w-28 shrink-0 text-sm">
               <Filter className="h-3 w-3 mr-1.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -493,7 +493,7 @@ export function NotificationsPage() {
 
           {/* Severity filter */}
           <Select value={severityFilter} onValueChange={setSeverityFilter}>
-            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+            <SelectTrigger className="h-8 w-28 shrink-0 text-sm">
               <AlertTriangle className="h-3 w-3 mr-1.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -518,7 +518,7 @@ export function NotificationsPage() {
       </div>
 
       {/* ── Notification list ── */}
-      <Card className="flex-1 flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+      <Card className="flex-1 flex flex-col overflow-hidden">
         <CardHeader className="pb-0 pt-3 px-4 shrink-0">
           <div className="flex items-center gap-2">
             <Bell className="h-4 w-4 text-muted-foreground" />

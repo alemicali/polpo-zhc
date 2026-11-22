@@ -107,8 +107,8 @@ function ModePicker({ mode, onChange }: { mode: "browse" | "clone"; onChange: (m
     <div className="flex h-12 items-center border-b border-border/70 px-2">
       <Tabs value={mode} onValueChange={(value) => onChange(value as "browse" | "clone")}>
         <TabsList className="h-8">
-          <TabsTrigger value="browse" className="h-6 gap-1.5 text-caption"><FolderOpen className="h-3.5 w-3.5" />Browse folder</TabsTrigger>
-          <TabsTrigger value="clone" className="h-6 gap-1.5 text-caption"><CloudDownload className="h-3.5 w-3.5" />From repo URL</TabsTrigger>
+          <TabsTrigger value="browse" className="text-small"><FolderOpen className="h-3.5 w-3.5" />Browse folder</TabsTrigger>
+          <TabsTrigger value="clone" className="text-small"><CloudDownload className="h-3.5 w-3.5" />From repo URL</TabsTrigger>
         </TabsList>
       </Tabs>
     </div>

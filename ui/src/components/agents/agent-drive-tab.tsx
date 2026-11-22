@@ -177,7 +177,7 @@ export function AgentDriveTab() {
   return (
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Compass className="h-4 w-4" /> Purpose and goals
@@ -244,7 +244,7 @@ export function AgentDriveTab() {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <UserRound className="h-4 w-4" /> Who it is
@@ -273,7 +273,7 @@ export function AgentDriveTab() {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Target className="h-4 w-4" /> Goals and steps
@@ -299,7 +299,7 @@ export function AgentDriveTab() {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <CalendarClock className="h-4 w-4" /> What it will do (scheduled)
@@ -316,7 +316,7 @@ export function AgentDriveTab() {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/40">
+        <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <NotebookPen className="h-4 w-4" /> Reflections

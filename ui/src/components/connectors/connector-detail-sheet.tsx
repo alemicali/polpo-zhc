@@ -8,6 +8,7 @@ import { AlertTriangle, Bot, ExternalLink, Loader2, Plug, RefreshCw, RotateCw, T
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   agentHasAccess, connectorState, connectorsApi, toggleAgentAccess, toolLabel,
@@ -81,36 +82,32 @@ const policies = (product: string): Array<{ value: ConnectorToolPolicy; label: s
 export function PolicyControl({ tool, value, onChange, disabled }: { tool: string; value: ConnectorToolPolicy; onChange: (p: ConnectorToolPolicy) => void; disabled?: boolean }) {
   const product = productName(useInstanceBranding());
   return (
-    <div role="radiogroup" aria-label={`Policy for ${tool}`} className="inline-flex shrink-0 rounded-md border bg-muted/30 p-0.5">
+    <SegmentedControl size="sm" aria-label={`Policy for ${tool}`} value={value} onValueChange={onChange} disabled={disabled}>
       {policies(product).map((p) => {
         const active = value === p.value;
-        const button = (
-          <button
-            key={p.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            aria-label={`${p.label}${p.soon ? " (coming soon)" : ""}`}
-            disabled={disabled || (p.soon && !active)}
-            onClick={() => { if (!active) onChange(p.value); }}
-            className={cn(
-              "rounded px-2 py-0.5 text-caption font-medium transition-colors disabled:cursor-not-allowed",
-              active
-                ? p.value === "off" ? "bg-destructive/15 text-destructive" : p.value === "ask" ? "bg-warning/15 text-warning" : "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:hover:text-muted-foreground",
-            )}
-          >
-            {p.label}{p.soon ? <sup className="ml-0.5 text-micro uppercase">soon</sup> : null}
-          </button>
-        );
         return (
           <Tooltip key={p.value}>
-            <TooltipTrigger asChild><span className="inline-flex">{button}</span></TooltipTrigger>
+            <TooltipTrigger asChild>
+              <span className="inline-flex h-full">
+                <ToggleGroupItem
+                  value={p.value}
+                  aria-label={`${p.label}${p.soon ? " (coming soon)" : ""}`}
+                  disabled={disabled || (p.soon && !active)}
+                  className={cn(
+                    "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:hover:text-muted-foreground",
+                    p.value === "off" && "data-[state=on]:bg-destructive/15 data-[state=on]:text-destructive",
+                    p.value === "ask" && "data-[state=on]:bg-warning/15 data-[state=on]:text-warning",
+                  )}
+                >
+                  {p.label}{p.soon ? <sup className="ml-0.5 text-micro uppercase">soon</sup> : null}
+                </ToggleGroupItem>
+              </span>
+            </TooltipTrigger>
             <TooltipContent className="max-w-64">{p.title}</TooltipContent>
           </Tooltip>
         );
       })}
-    </div>
+    </SegmentedControl>
   );
 }
 
