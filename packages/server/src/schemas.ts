@@ -251,6 +251,13 @@ export const UpdateSettingsSchema = z.object({
     tags: z.array(z.string()).optional(),
     hostnamePrefix: z.string().optional(),
   }).nullable().optional(),
+  /**
+   * Official agent harnesses agents may run on (agent.engine): { enabled: ["claude-code" | "codex"],
+   * allowHost?, "claude-code"?: { auth: "api-key" | "bedrock" | "vertex", credentialRef: { owner, service },
+   * bedrock?: { region }, vertex?: { region, projectId }, model? }, codex?: { auth: "api-key", credentialRef, model? } }.
+   * Credentials are vault references only (a Claude subscription is refused). Replaces it; null removes it.
+   */
+  harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
 
   // General settings (Configuration → General). null goes back to the default where there is one.
   maxRetries: z.number().int().min(0).max(20).optional(),
@@ -475,6 +482,18 @@ const AgentDriveSchema = z.object({
   dayStartsAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
 }).strict();
 
+/** An agent's engine: "polpo" or an official agent harness (see @polpo-ai/core harnesses.ts). */
+export const AgentEngineSchema = z.union([
+  z.literal("polpo"),
+  z.object({
+    harness: z.enum(["claude-code", "codex"]),
+    model: z.string().max(200).optional(),
+    permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    maxBudgetUsd: z.number().positive().max(10000).optional(),
+  }),
+]);
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
@@ -497,6 +516,8 @@ export const AddAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  engine: AgentEngineSchema.nullable().optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
   /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never. */
@@ -552,6 +573,8 @@ export const UpdateAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
 });

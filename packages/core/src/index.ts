@@ -229,6 +229,8 @@ export type {
 } from "./sandbox.js";
 // Computers: a persistent machine per agent (settings.computers)
 export * from "./computers.js";
+// Agent harnesses: official agent runtimes (Claude Code, Codex) as an agent's engine
+export * from "./harnesses.js";
 export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";

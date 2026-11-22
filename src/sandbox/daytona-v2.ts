@@ -31,6 +31,7 @@ import { remoteProviderCredentials } from "./remote-providers.js";
 import {
   classifyAllowEntries, SandboxNetworkConfigError,
   type CreateSpec, type Hibernation, type MachineSnapshot, type RemoteAdapter, type RemoteDriver, type RemoteExecResult, type RemoteVmSummary, type RestoreSpec,
+  type RemoteProcess, type RemotePortEndpoint,
 } from "./remote-adapters.js";
 
 /** Size of a v2 sandbox when nothing is asked: the v0 runner snapshot's (2 vCPU, 4 GiB, 10 GiB). */
@@ -374,6 +375,113 @@ export class DaytonaV2Adapter implements RemoteAdapter {
       // activity pushes the idle timeout
       keepAlive: async () => { await sandbox.resetIdleTimer(); },
       destroy: async () => { await sandbox.delete({ timeoutSeconds: WAIT_SECONDS }); },
+      spawn: async (command, opts) => {
+        const handle = await sandbox.process.start({ argv: ["bash", "-c", command] }, {
+          ...(opts.cwd ? { cwd: opts.cwd } : {}),
+          ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
+          keepLogs: "until_cleanup",
+        });
+        return followDaytonaProcess(handle as unknown as DaytonaProcessHandleLike);
+      },
+      connectProcess: async (id) => followDaytonaProcess(sandbox.process.connect(id) as unknown as DaytonaProcessHandleLike),
+      portEndpoint: (port, opts) => daytonaV2PortEndpoint(sandbox, port, opts),
     };
   }
+}
+
+/** Preview tokens (header form) expire after about an hour: longer uses take a signed link. */
+const PREVIEW_HEADER_TTL_SECONDS = 50 * 60;
+/** Signed preview links live at most this long (the VM's wall clock is at most 24 h). */
+const MAX_SIGNED_LINK_SECONDS = 24 * 3600;
+
+/**
+ * A VM port as seen from this server: a signed preview link (the token in the host name, valid up
+ * to 24 h, no headers) when the caller needs it longer than a preview token lasts, else the
+ * preview URL with its token header. WebSocket upgrades work through both; the process must
+ * listen on 0.0.0.0 (127.0.0.1 gets a 502 from the proxy).
+ */
+export async function daytonaV2PortEndpoint(
+  sandbox: Pick<Sandbox, "ports">, port: number, opts: { protocol?: "http" | "https" | "ws"; ttlSeconds?: number } = {},
+): Promise<RemotePortEndpoint> {
+  const ws = opts.protocol === "ws";
+  const toProtocol = (url: string) => (ws ? url.replace(/^http/, "ws") : url);
+  const ttl = opts.ttlSeconds ?? MAX_SIGNED_LINK_SECONDS;
+  if (ttl > PREVIEW_HEADER_TTL_SECONDS) {
+    const link = await sandbox.ports.signedPreviewLink(port, { expiresInSeconds: Math.min(ttl, MAX_SIGNED_LINK_SECONDS) });
+    return { url: toProtocol(link.url), headers: { "X-Daytona-Skip-Preview-Warning": "true" }, expiresAt: link.expiresAt };
+  }
+  const link = await sandbox.ports.previewLink(port);
+  return {
+    url: toProtocol(link.url),
+    headers: { "X-Daytona-Skip-Preview-Warning": "true", ...(link.token ? { "X-Daytona-Preview-Token": link.token } : {}) },
+    ...(link.expiresAt ? { expiresAt: link.expiresAt } : {}),
+  };
+}
+
+const SIGNALS: Record<string, number> = { KILL: 9, TERM: 15, INT: 2, HUP: 1, QUIT: 3 };
+
+/** The parts of a Daytona v2 process handle a followed process uses. */
+export interface DaytonaProcessHandleLike {
+  readonly id: string;
+  streamLogs(options?: { signal?: AbortSignal; cursor?: string }): AsyncIterable<{ type: string; cursor?: string; frame?: { cursor?: string; channel?: string; data?: string } }>;
+  wait(): Promise<{ exitCode?: number | null; signal?: string | null }>;
+  kill(options?: { signal?: "TERM" | "KILL"; escalateAfterSeconds?: number; escalateTo?: "KILL" }): Promise<void>;
+}
+
+/**
+ * A Daytona v2 process as a RemoteProcess: stdout and stderr from its log stream (SSE, resumed
+ * from the last cursor when the connection drops), its exit from wait(). A VM that went away under
+ * it (hibernated, deleted) reads as killed: wait() resolves 137 and never rejects (an unhandled
+ * rejection there crashed the host in the spike).
+ */
+export function followDaytonaProcess(handle: DaytonaProcessHandleLike): RemoteProcess {
+  const enc = new TextEncoder();
+  let outCtl!: ReadableStreamDefaultController<Uint8Array>;
+  let errCtl!: ReadableStreamDefaultController<Uint8Array>;
+  const stdout = new ReadableStream<Uint8Array>({ start(c) { outCtl = c; } });
+  const stderr = new ReadableStream<Uint8Array>({ start(c) { errCtl = c; } });
+  const ac = new AbortController();
+  const close = () => {
+    try { outCtl.close(); } catch { /* closed */ }
+    try { errCtl.close(); } catch { /* closed */ }
+  };
+  const pump = (async () => {
+    let cursor: string | undefined;
+    for (let attempt = 0; attempt < 20 && !ac.signal.aborted; attempt++) {
+      try {
+        for await (const ev of handle.streamLogs({ signal: ac.signal, ...(cursor ? { cursor } : {}) })) {
+          if (ev.type === "log" && ev.frame) {
+            cursor = ev.frame.cursor ?? cursor;
+            const ctl = ev.frame.channel === "stderr" ? errCtl : outCtl;
+            try { ctl.enqueue(enc.encode(ev.frame.data ?? "")); } catch { /* reader gone */ }
+          } else if (ev.cursor) {
+            cursor = ev.cursor;
+          }
+          if (ev.type === "eof") return;
+        }
+        return;
+      } catch {
+        if (ac.signal.aborted) return;
+        await new Promise((r) => setTimeout(r, 500)); // a cut stream: resume from the cursor
+      }
+    }
+  })().finally(close);
+  const done = (async () => {
+    const w = await handle.wait();
+    // the last frames may arrive after the exit: give the stream a moment
+    await Promise.race([pump, new Promise((r) => setTimeout(r, 3000))]);
+    ac.abort();
+    return { exitCode: w.exitCode ?? (w.signal ? 128 + (SIGNALS[w.signal] ?? 0) : 1) };
+  })().catch(() => {
+    ac.abort();
+    return { exitCode: 137 };
+  });
+  return {
+    id: handle.id,
+    stdout,
+    stderr,
+    wait: () => done,
+    kill: async () => { await handle.kill({ signal: "TERM", escalateAfterSeconds: 3, escalateTo: "KILL" }).catch(() => undefined); },
+    detach: () => ac.abort(),
+  };
 }

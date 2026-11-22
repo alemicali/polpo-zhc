@@ -46,7 +46,7 @@ export function createActivity(): AgentActivity {
 }
 import { Agent } from "@earendil-works/pi-agent-core";
 import { cleanupSessionResources } from "@earendil-works/pi-ai";
-import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
@@ -806,66 +806,14 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve vault credentials (async) — then rebuild tools with vault included
-      // Never hand system vault namespaces ("$data", ...) to an agent.
-      const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
-      const vault = resolveAgentVault(vaultEntries);
-
-      // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
-      if (ctx?.polpoDir) {
-        allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
-      }
-
-      if (hasExtendedTools) {
-        // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
-        browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
-        allTools = await createAllTools({
-          cwd,
-          allowedTools: agentConfig.allowedTools,
-          allowedPaths: effectiveAllowedPaths,
-          browserSession: agentConfig.name,
-          browserProfileDir,
-          browserNetwork,
-          browserEgress: ctx?.browserEgress,
-          vault,
-          emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
-          outputDir,
-          whatsappStore: ctx?.whatsappStore,
-          whatsappSendMessage: ctx?.whatsappSendMessage,
-          whatsappSendMedia: ctx?.whatsappSendMedia,
-          whatsappMarkRead: ctx?.whatsappMarkRead,
-          polpoDir: ctx?.polpoDir,
-          shell,
-          fs: remoteFs,
-          sandboxProvider,
-        });
-      }
-      if (ctx?.polpoDir) {
-        allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
-        const artifactPolpoDir = ctx.polpoDir;
-        allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
-        allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
-        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
-      }
-      // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
-      // skipped with a note in the prompt, never failing the run.
-      let connectorNote = "";
-      if (ctx?.polpoDir) {
-        const polpoDir = ctx.polpoDir;
-        try {
-          connectorManager = new ConnectorManager({
-            polpoDir,
-            vaultStore: ctx.vaultStore,
-            settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
-            log: (line) => handle.onTranscript?.({ type: "log", message: line }),
-          });
-          const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools);
-          const taken = new Set(allTools.map((tool) => tool.name));
-          allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
-          connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
-        } catch { /* no connectors */ }
-      }
+      const toolset = await buildAgentToolset({
+        agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, sandboxProvider,
+        browserProfileDir, hasExtendedTools, log: (line) => handle.onTranscript?.({ type: "log", message: line }),
+      });
+      const { vault, connectorNote } = toolset;
+      const allTools = toolset.tools;
+      browserNetwork = toolset.browserNetwork;
+      connectorManager = toolset.connectorManager;
       // Progressive tool discovery: above the threshold the run starts with its essential tools plus
       // tools_search/tools_load; connector tools and optional groups are added when loaded (before the
       // next request, as a pi toolsAdded system message: inline where the provider supports it).
@@ -972,6 +920,102 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   return handle;
 }
 
+/** What an agent's run gets to work with (the native engine's tools; a harness offers them as host tools). */
+export interface AgentToolset {
+  tools: AgentTool<any>[];
+  vault: ReturnType<typeof resolveAgentVault>;
+  /** The connectors section of the prompt ("" without connectors). */
+  connectorNote: string;
+  connectorManager?: ConnectorManager;
+  browserNetwork?: BrowserNetworkGuard;
+}
+
+/**
+ * The agent's resolved tools for a run: system tools with its vault, extended tools named in
+ * allowedTools, Ink, data, artifacts, company brain, storage, and its connectors (a connector that
+ * cannot connect is skipped with a note in the prompt, never failing the run). The caller closes
+ * connectorManager and browserNetwork when the run ends.
+ */
+export async function buildAgentToolset(o: {
+  agentConfig: AgentConfig;
+  cwd: string;
+  ctx: SpawnContext;
+  effectiveAllowedPaths?: string[];
+  outputDir?: string;
+  remoteFs?: WorkspaceFileSystem;
+  shell?: WorkspaceShell;
+  sandboxProvider: string;
+  browserProfileDir: string;
+  hasExtendedTools: boolean;
+  log?: (line: string) => void;
+}): Promise<AgentToolset> {
+  const { agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, browserProfileDir } = o;
+  const sandboxProvider = o.sandboxProvider as any;
+  let browserNetwork: BrowserNetworkGuard | undefined;
+  let connectorManager: ConnectorManager | undefined;
+  // Resolve vault credentials (async) — then rebuild tools with vault included
+  // Never hand system vault namespaces ("$data", ...) to an agent.
+  const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
+  const vault = resolveAgentVault(vaultEntries);
+
+  // Rebuild tools with vault resolved
+  let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
+  if (ctx?.polpoDir) {
+    allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
+  }
+
+  if (o.hasExtendedTools) {
+    // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
+    browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
+    allTools = await createAllTools({
+      cwd,
+      allowedTools: agentConfig.allowedTools,
+      allowedPaths: effectiveAllowedPaths,
+      browserSession: agentConfig.name,
+      browserProfileDir,
+      browserNetwork,
+      browserEgress: ctx?.browserEgress,
+      vault,
+      emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
+      outputDir,
+      whatsappStore: ctx?.whatsappStore,
+      whatsappSendMessage: ctx?.whatsappSendMessage,
+      whatsappSendMedia: ctx?.whatsappSendMedia,
+      whatsappMarkRead: ctx?.whatsappMarkRead,
+      polpoDir: ctx?.polpoDir,
+      shell,
+      fs: remoteFs,
+      sandboxProvider,
+    });
+  }
+  if (ctx?.polpoDir) {
+    allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+    const artifactPolpoDir = ctx.polpoDir;
+    allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
+    allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+    allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
+  }
+  // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
+  // skipped with a note in the prompt, never failing the run.
+  let connectorNote = "";
+  if (ctx?.polpoDir) {
+    const polpoDir = ctx.polpoDir;
+    try {
+      connectorManager = new ConnectorManager({
+        polpoDir,
+        vaultStore: ctx.vaultStore,
+        settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
+        log: (line) => o.log?.(line),
+      });
+      const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools);
+      const taken = new Set(allTools.map((tool) => tool.name));
+      allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
+      connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
+    } catch { /* no connectors */ }
+  }
+  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };
+}
+
 /**
  * The result of a finished agent run, from its messages. A run whose last reply is a provider
  * error (HTTP 500, the model crashed while loading, a timeout…) failed: the agent ends it with
@@ -1030,7 +1074,7 @@ function guessMime(filePath: string): string | undefined {
  * Create a TaskOutcome from a `register_outcome` tool call.
  * Returns undefined for any other tool — outcome registration is explicit only.
  */
-function collectOutcome(toolName: string, details: Record<string, unknown>): TaskOutcome | undefined {
+export function collectOutcome(toolName: string, details: Record<string, unknown>): TaskOutcome | undefined {
   if (toolName !== "register_outcome" || !details.outcomeType || !details.outcomeLabel) {
     return undefined;
   }
