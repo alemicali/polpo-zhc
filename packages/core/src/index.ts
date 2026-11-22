@@ -151,6 +151,10 @@ export type {
   ToolGroupRule,
   ToolGroup,
   SearchHit,
+  ToolSearchRequest,
+  ToolSearchResult,
+  ToolSearchGroupCount,
+  ToolLoadResult,
   ProgressiveMetaTool,
   ProgressiveToolSetOptions,
 } from "./progressive-tools.js";

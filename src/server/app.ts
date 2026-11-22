@@ -319,6 +319,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getStore: () => o.getStore(),
     emit: (event: string, data: any) => o.emit(event as any, data),
     connectorNames: () => Object.fromEntries(connectorManagerFor(o).store.list().map((connector) => [connector.id, connectorLabel(connector)])),
+    connectorApps: () => Object.fromEntries(connectorManagerFor(o).store.list().flatMap((connector) => (connector.catalogId ? [[connector.id, connector.catalogId]] : []))),
     recordTokenUsage: async (usage) => {
       await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
