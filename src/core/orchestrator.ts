@@ -5,6 +5,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, watch, type FSWatch
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile, parseProviders } from "./config.js";
+import { orchestratorName } from "./orchestrator-name.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -1677,7 +1678,7 @@ export class Orchestrator extends TypedEmitter {
       intent: this.getGroupIntent(),
       profile: async (name) => {
         if (name === POLPO) {
-          return { id: POLPO, name: "Polpo", role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
+          return { id: POLPO, name: orchestratorName(this.getConfig()?.settings), role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
         }
         const agent = (await this.getAgents()).find(a => a.name === name);
         const id = agent?.identity;

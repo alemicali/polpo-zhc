@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 import {
-  apiGet, apiSend, enc, fail, ok, progress, short,
+  apiGet, apiSend, enc, fail, ok, orchestratorLabel, progress, short,
   type CallToolResult, type McpDeps, type Register, type ToolExtra,
 } from "./kit.js";
 
@@ -226,10 +226,12 @@ export async function chatTurn(deps: McpDeps, message: string, agent: string | u
       if ((m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim()) history.push({ role: m.role, content: m.content });
     }
   }
+  // the orchestrator by its display name (settings.orchestratorName)
+  const polpo = agent ? "" : await orchestratorLabel(deps);
   // the turn can take minutes (agents, browsing): tell clients that asked for progress it is still running
   let beats = 0;
   const heartbeat = extra?._meta?.progressToken !== undefined
-    ? setInterval(() => { void progress(extra, ++beats, undefined, `${agent ?? "Polpo"} is still working…`); }, 5000)
+    ? setInterval(() => { void progress(extra, ++beats, undefined, `${agent ?? polpo} is still working…`); }, 5000)
     : undefined;
   let res;
   try {
@@ -266,11 +268,11 @@ export async function chatTurn(deps: McpDeps, message: string, agent: string | u
   }
   const { links, note } = linksOf(deps, choice);
   if (links?.length) out.links = links;
-  return ok(turnText(out, note), out);
+  return ok(turnText(out, note, polpo || undefined), out);
 }
 
 /** The model's view of a turn: the reply, then what it waits for and how to answer. */
-export function turnText(out: TurnOutput, note?: string): string {
+export function turnText(out: TurnOutput, note?: string, polpo = "Polpo"): string {
   const parts: string[] = [];
   if (out.done) parts.push(`Done: ${Object.entries(out.done).map(([k, v]) => `${k} ${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ")}.`);
   parts.push(out.reply.trim() || (out.pending ? "" : "(no text reply)"));
@@ -281,7 +283,7 @@ export function turnText(out: TurnOutput, note?: string): string {
     const how = `Answer with polpo_answer (session_id ${out.session_id}${p.id ? `, pending_id ${p.id}` : ""}).`;
     if (p.kind === "questions") {
       const qs = (p.questions ?? []).map((q) => `- [${q.id}] ${q.question}${q.options.length ? `\n  options: ${q.options.map((o) => o.label).join(" | ")}${q.multiple ? " (several allowed)" : ""}` : ""}`).join("\n");
-      parts.push(`${out.agent ?? "Polpo"} asks:\n${qs}\nAsk the person, then ${how} with answers: [{ question_id, selected?, text? }].`);
+      parts.push(`${out.agent ?? polpo} asks:\n${qs}\nAsk the person, then ${how} with answers: [{ question_id, selected?, text? }].`);
     } else if (p.kind === "mission_preview") {
       const tasks = ((p.mission?.plan as { tasks?: Array<{ title?: string; assignTo?: string }> })?.tasks ?? []);
       parts.push(`Mission to review: "${p.mission?.name}" (${tasks.length} tasks)\n${tasks.map((t, i) => `${i + 1}. ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`).join("\n")}\n`
@@ -293,8 +295,8 @@ export function turnText(out: TurnOutput, note?: string): string {
         : `WhatsApp to ${String(m.to)}: ${short(m.message ?? m.caption ?? m.path, 600)}`;
       parts.push(`Ready to send, waiting for the person's OK:\n${summary}\n${how} action: send (with confirm: true, only after the person agreed) | refine (with feedback) | cancel.`);
     } else if (p.kind === "vault_preview") {
-      parts.push(`Polpo wants to save a secret (${p.vault?.service}, fields: ${p.vault?.fields.join(", ")}) for ${p.vault?.agent}. Secrets are never sent through MCP: `
-        + `the person enters it in the dashboard${p.dashboard_url ? ` (${p.dashboard_url})` : ""}. ${how} action: cancel, to tell Polpo.`);
+      parts.push(`${polpo} wants to save a secret (${p.vault?.service}, fields: ${p.vault?.fields.join(", ")}) for ${p.vault?.agent}. Secrets are never sent through MCP: `
+        + `the person enters it in the dashboard${p.dashboard_url ? ` (${p.dashboard_url})` : ""}. ${how} action: cancel, to tell ${polpo}.`);
     }
   }
   parts.push(`[session_id: ${out.session_id} — pass it to continue this conversation]`);

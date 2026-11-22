@@ -80,6 +80,7 @@ import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react
 import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig, BrandingConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { ORCHESTRATOR_NAME_MAX_LENGTH, getOrchestratorName, setOrchestratorName } from "@/lib/orchestrator-name";
 import { JsonBlock } from "@/components/json-block";
 import { config as appConfig, apiFetch, apiUrl } from "@/lib/config";
 import { focusSetupField, notifySetupSaved, readSetupParams } from "@/lib/setup-link";
@@ -1336,7 +1337,7 @@ function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; val
   switch (ch.type) {
     case "telegram": return [
       { label: "Chat", value: ch.chatId || "—", mono: true },
-      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? getOrchestratorName()) : "—" },
     ];
     case "slack": return [
       { label: "Webhook", value: ch.webhookUrl ? "configured" : "—" },
@@ -1353,7 +1354,7 @@ function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; val
     ];
     case "webhook": return [
       { label: "Outbound", value: ch.url ? "on" : "off" },
-      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? getOrchestratorName()) : "—" },
     ];
     case "push": return [
       { label: "Urgency", value: ch.urgency ?? "normal" },
@@ -2347,10 +2348,35 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   primaryModel: string | undefined;
   fallbackModels: string[];
   authStatus: AuthStatusResponse | null | undefined;
-  onUpdateSettings: (patch: { orchestratorModel?: string; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
+  onUpdateSettings: (patch: { orchestratorModel?: string; orchestratorName?: string | null; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
 }) {
   const { skills, isLoading: skillsLoading } = useOrchestratorSkills();
   const [reasoningSaving, setReasoningSaving] = useState(false);
+
+  // The orchestrator's display name (default "Polpo"), saved on blur / Enter; empty restores the default
+  const savedName = (settings as { orchestratorName?: string }).orchestratorName ?? "";
+  const [nameDraft, setNameDraft] = useState(savedName);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  useEffect(() => { setNameDraft(savedName); }, [savedName]);
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (next === savedName) { setNameDraft(next); setNameError(null); return; }
+    if (next.length > ORCHESTRATOR_NAME_MAX_LENGTH) {
+      setNameError(`At most ${ORCHESTRATOR_NAME_MAX_LENGTH} characters`);
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      await onUpdateSettings({ orchestratorName: next || null });
+      setOrchestratorName(next);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : "Could not save the name");
+    } finally {
+      setNameSaving(false);
+    }
+  };
 
   // Model picker dialogs
   const [orchestratorPickerOpen, setOrchestratorPickerOpen] = useState(false);
@@ -2429,6 +2455,39 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
       <section>
         <SectionHeader icon={Settings2} title="Orchestrator Settings" className="mb-3" />
         <div className="space-y-2 max-w-xl">
+          {/* Name: how the orchestrator is called in chats, groups, channels and its own prompt */}
+          <div className="rounded-lg border border-border/40 bg-card/60 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
+                {nameSaving
+                  ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  : <Pencil className="h-4 w-4 text-muted-foreground" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <label htmlFor="orchestrator-name" className="text-xs font-medium text-foreground">Name</label>
+                <p className="text-micro text-muted-foreground mt-0.5 leading-tight">
+                  What people call the orchestrator in chats, groups and channels
+                </p>
+              </div>
+              <Input
+                id="orchestrator-name"
+                aria-label="Orchestrator name"
+                className="h-8 w-40 text-xs"
+                placeholder="Polpo"
+                maxLength={ORCHESTRATOR_NAME_MAX_LENGTH}
+                value={nameDraft}
+                disabled={nameSaving}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => { void saveName(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void saveName(); }
+                  if (e.key === "Escape") { setNameDraft(savedName); setNameError(null); }
+                }}
+              />
+            </div>
+            {nameError && <p className="text-micro text-destructive mt-1.5 ml-11">{nameError}</p>}
+          </div>
+
           {/* Orchestrator Model */}
           <SettingRow
             icon={Brain}

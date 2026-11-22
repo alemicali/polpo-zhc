@@ -226,6 +226,9 @@ export const UpdateSettingsSchema = z.object({
     progressive: z.enum(["auto", "always", "never"]).optional(),
   }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
+  /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
+  orchestratorName: z.string().trim().max(40, "at most 40 characters")
+    .regex(/^[^\r\n]*$/, "a single line").nullable().optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   branding: z.object({

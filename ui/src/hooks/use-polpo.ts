@@ -17,6 +17,7 @@ import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react"
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
 import { loadInstanceBranding, setInstanceBranding, type InstanceBranding } from "@/lib/branding";
+import { setOrchestratorName } from "@/lib/orchestrator-name";
 import { toast } from "sonner";
 import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, resolveSessionKey, settleSteer, type SteerAppliedEvent } from "./use-chat-steering";
 
@@ -2573,6 +2574,8 @@ function loadProjectInfo(client: ReturnType<typeof usePolpo>["client"], force = 
     const branding = (config?.settings as { branding?: InstanceBranding } | undefined)?.branding;
     // the config answered: its branding is the instance's now (none set: the defaults)
     if (config) setInstanceBranding(branding ?? {});
+    // and its orchestrator's name (none set: "Polpo"), never derived from the branding
+    if (config) setOrchestratorName((config.settings as { orchestratorName?: unknown } | undefined)?.orchestratorName);
     const value = { project, version: health?.version, branding };
     projectInfoCache.set(key, value);
     setAppearanceScope({ project });

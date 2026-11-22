@@ -5,7 +5,7 @@
 import { useMemo } from "react";
 import { useAgents } from "@polpo-ai/react";
 import { ORCHESTRATOR_MEMBER_ID } from "@/lib/rooms-api";
-import { useInstanceBranding } from "@/lib/branding";
+import { useOrchestratorName } from "@/lib/orchestrator-name";
 
 export interface GroupMember {
   id: string;
@@ -17,11 +17,11 @@ export interface GroupMember {
   known: boolean;
 }
 
-/** Every member that can be added to a group: the orchestrator first (named after the instance's
- *  product name when the branding sets one, else Polpo), then the agents. */
+/** Every member that can be added to a group: the orchestrator first (its display name,
+ *  settings.orchestratorName, "Polpo" by default; never the branding), then the agents. */
 export function useMemberDirectory() {
   const { agents, isLoading } = useAgents();
-  const orchestratorName = useInstanceBranding()?.productName || "Polpo";
+  const orchestratorName = useOrchestratorName();
   return useMemo(() => {
     const list: GroupMember[] = [{
       id: ORCHESTRATOR_MEMBER_ID,
