@@ -6,8 +6,15 @@
  * `storage` event). Every storage access is wrapped: private mode or blocked
  * site data just means "nothing seen yet" for this visit.
  */
-import { useMemo, useSyncExternalStore } from "react";
-import { CHANGELOG, unseenEntries, unseenHighlights, type ChangelogEntry } from "@/lib/changelog";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  CHANGELOG,
+  sortChangelogByOnline,
+  unseenEntries,
+  unseenHighlights,
+  type ChangelogEntry,
+  type ChangelogPublishedAt,
+} from "@/lib/changelog";
 
 export const WHATS_NEW_STORAGE_KEY = "polpo-whats-new-seen";
 
@@ -75,16 +82,47 @@ export function useSeenChangelogIds(): ReadonlySet<string> {
   return useSyncExternalStore(subscribe, getSeen, getSeen);
 }
 
-/** Unseen entries, newest first. */
+/**
+ * When each entry went online on this instance: recorded by the UI server the first time it served
+ * a build containing it, inlined into runtime-config.js. Empty in dev (entries' own `publishedAt` apply).
+ */
+export function changelogPublishedAtMap(): ChangelogPublishedAt {
+  const raw: unknown = globalThis.__POLPO_RUNTIME_CONFIG__?.whatsNewPublishedAt;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && !Number.isNaN(new Date(value).getTime())) out[id] = value;
+  }
+  return out;
+}
+
+/** Unseen entries, newest first (by day, then by when they went online). */
 export function useUnseenChangelog(entries: ChangelogEntry[] = CHANGELOG): ChangelogEntry[] {
   const seenIds = useSeenChangelogIds();
-  return useMemo(() => unseenEntries(entries, seenIds), [entries, seenIds]);
+  return useMemo(() => sortChangelogByOnline(unseenEntries(entries, seenIds), changelogPublishedAtMap()), [entries, seenIds]);
 }
 
 /** Unseen highlighted entries (for the banner), newest first. */
 export function useUnseenHighlights(entries: ChangelogEntry[] = CHANGELOG): ChangelogEntry[] {
   const seenIds = useSeenChangelogIds();
-  return useMemo(() => unseenHighlights(entries, seenIds), [entries, seenIds]);
+  return useMemo(() => sortChangelogByOnline(unseenHighlights(entries, seenIds), changelogPublishedAtMap()), [entries, seenIds]);
+}
+
+/**
+ * The entries that arrived since the person's last visit, captured when `active` becomes true (the
+ * page mounts, the drawer opens) — before opening marks everything as seen — and kept while it stays
+ * open. Empty on a first visit (nothing seen yet: there is no "last visit" to compare with).
+ */
+export function useChangelogUnreadSnapshot(active: boolean, entries: ChangelogEntry[] = CHANGELOG): ReadonlySet<string> {
+  const seenIds = useSeenChangelogIds();
+  const capture = () => (seenIds.size === 0 ? new Set<string>() : new Set(unseenEntries(entries, seenIds).map((e) => e.id)));
+  const [snapshot, setSnapshot] = useState<ReadonlySet<string>>(() => (active ? capture() : new Set()));
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (active) setSnapshot(capture());
+  }
+  return snapshot;
 }
 
 /** True while at least one entry is unseen (nav dot). */

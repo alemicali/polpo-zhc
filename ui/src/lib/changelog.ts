@@ -14,6 +14,11 @@ export interface ChangelogEntry {
   id: string;
   /** ISO date (YYYY-MM-DD). */
   date: string;
+  /**
+   * Optional ISO datetime the entry went online, used only when this instance's UI server did not
+   * record one (dev and local builds). Deployed instances get the real time from runtime-config.js.
+   */
+  publishedAt?: string;
   kind: ChangelogKind;
   title: string;
   /** One line, shown in the banner. */
@@ -26,6 +31,20 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "2026-11-22-whats-new-time",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Le novità con l'ora in cui sono arrivate",
+    summary: "Ogni novità mostra anche l'ora in cui è andata online su questa istanza, e quelle arrivate dopo la tua ultima visita sono segnate.",
+    body: [
+      "- **Data e ora**: accanto a ogni novità vedi quando è andata online qui (es. \"22 nov 2026 · 18:52\", nel tuo fuso orario); nello stesso giorno le più recenti stanno in alto.",
+      "- **Nella barra in alto**: \"online alle 18:52\" accanto alla novità più recente.",
+      "- **Non lette**: le novità arrivate dopo la tua ultima visita hanno l'etichetta **Non letta**, così non ti perdi nulla.",
+      "",
+      "L'ora viene registrata dal primo aggiornamento successivo a questo: per le novità già presenti si vede solo il giorno.",
+    ].join("\n"),
+  },
   {
     id: "2026-11-22-task-tool-scope",
     date: "2026-11-22",
@@ -884,13 +903,74 @@ export function formatChangelogDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : DATE_FORMAT.format(date);
 }
 
-/** Entries grouped by date, newest date first (keeps the order inside a day). */
-export function groupChangelogByDate(entries: ChangelogEntry[]): { date: string; entries: ChangelogEntry[] }[] {
+/** id → ISO datetime the entry went online on this instance (recorded by the UI server). */
+export type ChangelogPublishedAt = Readonly<Record<string, string>>;
+
+/**
+ * When the entry went online: the time this instance's UI server recorded, else the entry's own
+ * `publishedAt`, else undefined (entries deployed before times were recorded show the day only).
+ */
+export function changelogPublishedAt(entry: ChangelogEntry, recorded: ChangelogPublishedAt = {}): Date | undefined {
+  for (const value of [recorded[entry.id], entry.publishedAt]) {
+    if (typeof value !== "string" || !value) continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return undefined;
+}
+
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short", year: "numeric" });
+const SHORT_DAY_FORMAT = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short" });
+const TIME_FORMAT = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" });
+
+/** "22 nov 2026 · 18:52" (local time zone). */
+export function formatChangelogDateTime(date: Date): string {
+  return `${SHORT_DATE_FORMAT.format(date).replace(/\./g, "")} · ${TIME_FORMAT.format(date)}`;
+}
+
+/** "online alle 18:52" today, else "online il 21 nov alle 18:52". */
+export function formatChangelogOnline(date: Date, now: Date = new Date()): string {
+  const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  const time = TIME_FORMAT.format(date);
+  if (sameDay) return `online alle ${time}`;
+  const day = date.getFullYear() === now.getFullYear()
+    ? SHORT_DAY_FORMAT.format(date)
+    : SHORT_DATE_FORMAT.format(date);
+  return `online il ${day.replace(/\./g, "")} alle ${time}`;
+}
+
+/**
+ * Entries grouped by date, newest date first. Inside a day, entries with a known online time come
+ * first, newest first; the others keep their order (newest first, as written).
+ */
+export function groupChangelogByDate(
+  entries: ChangelogEntry[],
+  recorded: ChangelogPublishedAt = {},
+): { date: string; entries: ChangelogEntry[] }[] {
+  const order = new Map(entries.map((entry, index) => [entry.id, index]));
+  const time = (entry: ChangelogEntry) => changelogPublishedAt(entry, recorded)?.getTime();
+  const sorted = [...entries].sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    const ta = time(a);
+    const tb = time(b);
+    if (ta !== undefined && tb !== undefined && ta !== tb) return tb - ta;
+    if (ta !== undefined && tb === undefined) return -1;
+    if (ta === undefined && tb !== undefined) return 1;
+    return order.get(a.id)! - order.get(b.id)!;
+  });
   const groups: { date: string; entries: ChangelogEntry[] }[] = [];
-  for (const entry of [...entries].sort((a, b) => b.date.localeCompare(a.date))) {
+  for (const entry of sorted) {
     const last = groups.at(-1);
     if (last?.date === entry.date) last.entries.push(entry);
     else groups.push({ date: entry.date, entries: [entry] });
   }
   return groups;
+}
+
+/**
+ * Entries newest first by when they went online: by day, then by recorded time inside a day (the
+ * order the timeline shows). For the bar, so "the newest" is the one that arrived last.
+ */
+export function sortChangelogByOnline(entries: ChangelogEntry[], recorded: ChangelogPublishedAt = {}): ChangelogEntry[] {
+  return groupChangelogByDate(entries, recorded).flatMap((day) => day.entries);
 }
