@@ -62,6 +62,7 @@ import {
 } from "./schema/registries.js";
 import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
 import { conversationChecksPg, conversationChecksSqlite } from "./schema/conversation-checks.js";
+import { schedulesPg, schedulesSqlite, leasesPg, leasesSqlite, taskWatchersPg, taskWatchersSqlite } from "./schema/scheduling.js";
 import { artifactsPg, artifactsSqlite } from "./schema/artifacts.js";
 import {
   whatsappMessagesPg, whatsappMessagesSqlite, whatsappContactsPg, whatsappContactsSqlite,
@@ -102,6 +103,7 @@ import { DrizzleAppRegistryStore } from "./stores/app-registry-store.js";
 import { DrizzleDataRegistryStore } from "./stores/data-registry-store.js";
 import { DrizzleStorageRegistryStore } from "./stores/storage-registry-store.js";
 import { DrizzleConversationCheckStore } from "./stores/conversation-check-store.js";
+import { DrizzleScheduleStore, DrizzleLeaseStore, DrizzleTaskWatcherStore } from "./stores/scheduling-store.js";
 import { DrizzleArtifactStore } from "./stores/artifact-store.js";
 import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
 import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
@@ -169,6 +171,9 @@ export interface DrizzleStores {
   chatQueueStore: ChatQueueStore;
   roomStore: RoomStore;
   conversationCheckStore: DrizzleConversationCheckStore & ConversationCheckStore;
+  scheduleStore: DrizzleScheduleStore;
+  leaseStore: DrizzleLeaseStore;
+  taskWatcherStore: DrizzleTaskWatcherStore;
   artifactStore: DrizzleArtifactStore & ArtifactStore;
 }
 
@@ -216,6 +221,9 @@ export function createPgStores(db: any): DrizzleStores {
     chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsPg, chatQueueSettingsPg, "pg"),
     roomStore: new DrizzleRoomStore(db, roomsPg, roomMessagesPg, "pg"),
     conversationCheckStore: new DrizzleConversationCheckStore(db, conversationChecksPg, "pg"),
+    scheduleStore: new DrizzleScheduleStore(db, schedulesPg, "pg"),
+    leaseStore: new DrizzleLeaseStore(db, leasesPg),
+    taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersPg, "pg"),
     artifactStore: new DrizzleArtifactStore(db, artifactsPg, "pg"),
   };
 }
@@ -264,6 +272,9 @@ export function createSqliteStores(db: any): DrizzleStores {
     chatQueueStore: new DrizzleChatQueueStore(db, chatQueueItemsSqlite, chatQueueSettingsSqlite, "sqlite"),
     roomStore: new DrizzleRoomStore(db, roomsSqlite, roomMessagesSqlite, "sqlite"),
     conversationCheckStore: new DrizzleConversationCheckStore(db, conversationChecksSqlite, "sqlite"),
+    scheduleStore: new DrizzleScheduleStore(db, schedulesSqlite, "sqlite"),
+    leaseStore: new DrizzleLeaseStore(db, leasesSqlite),
+    taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersSqlite, "sqlite"),
     artifactStore: new DrizzleArtifactStore(db, artifactsSqlite, "sqlite"),
   };
 }
@@ -305,6 +316,9 @@ export const pgSchema = {
   dataActivity: dataActivityPg,
   storageEntries: storageEntriesPg,
   conversationChecks: conversationChecksPg,
+  schedules: schedulesPg,
+  leases: leasesPg,
+  taskWatchers: taskWatchersPg,
   artifacts: artifactsPg,
   brainItems: brainItemsPg,
   whatsappMessages: whatsappMessagesPg,
@@ -350,6 +364,9 @@ export const sqliteSchema = {
   dataActivity: dataActivitySqlite,
   storageEntries: storageEntriesSqlite,
   conversationChecks: conversationChecksSqlite,
+  schedules: schedulesSqlite,
+  leases: leasesSqlite,
+  taskWatchers: taskWatchersSqlite,
   artifacts: artifactsSqlite,
   brainItems: brainItemsSqlite,
   whatsappMessages: whatsappMessagesSqlite,

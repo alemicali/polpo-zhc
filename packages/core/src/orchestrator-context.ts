@@ -22,6 +22,7 @@ import type { PolpoConfig, PolpoFileConfig, Task, AssessmentResult, ReviewContex
 import type { HookRegistry } from "./hooks.js";
 import type { Spawner } from "./spawner.js";
 import type { TaskControlStore } from "./task-control-store.js";
+import type { LeaseStore, ScheduleStore } from "./schedule-store.js";
 
 /** Progress event for individual assessment checks. */
 export interface CheckProgressEvent {
@@ -115,4 +116,8 @@ export interface OrchestratorContext {
   readonly peerStore?: PeerStore;
   /** Config persistence store (when storage is "postgres", injected by shell). */
   readonly configStore?: ConfigStore;
+  /** Schedules' runtime state (paused, next/last run, missed runs). In memory when absent. */
+  readonly scheduleStore?: ScheduleStore;
+  /** Claims shared by every process on the same storage (one run per schedule occurrence). In memory when absent. */
+  readonly leaseStore?: LeaseStore;
 }

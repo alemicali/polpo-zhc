@@ -186,6 +186,10 @@
       "types": "./dist/scheduler.d.ts",
       "import": "./dist/scheduler.js"
     },
+    "./schedule-store": {
+      "types": "./dist/schedule-store.d.ts",
+      "import": "./dist/schedule-store.js"
+    },
     "./mission-executor": {
       "types": "./dist/mission-executor.d.ts",
       "import": "./dist/mission-executor.js"
