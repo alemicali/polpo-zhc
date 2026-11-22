@@ -3,6 +3,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
 import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
+import { agentHarness, HARNESS_NAMES, parseHarnessesSettings, type HarnessesSettings } from "@polpo-ai/core/harnesses";
 import {
   UpdateSettingsSchema,
   PLAIN_SETTINGS_KEYS,
@@ -362,6 +363,23 @@ export function configRoutes(getDeps: () => {
         return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
       }
     }
+    // agent harnesses: credentials only as vault references; a harness agents use cannot be disabled
+    let harnesses: HarnessesSettings | null | undefined;
+    if (body.harnesses !== undefined) {
+      try {
+        harnesses = body.harnesses === null ? null : parseHarnessesSettings(body.harnesses);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+      const enabled = new Set(harnesses?.enabled ?? []);
+      const config = deps.getConfig();
+      const agents: Array<{ name: string; engine?: unknown }> = (config?.teams ?? []).flatMap((t: { agents?: unknown[] }) => (t.agents ?? []) as Array<{ name: string; engine?: unknown }>);
+      const stranded = agents.filter((a) => { const h = agentHarness(a)?.harness; return !!h && !enabled.has(h); });
+      if (stranded.length) {
+        const names = stranded.map((a) => `${a.name} (${HARNESS_NAMES[agentHarness(a)!.harness]})`).join(", ");
+        return c.json({ ok: false, error: `These agents run on a harness this change disables: ${names}. Move them back to Polpo's engine first.` }, 400);
+      }
+    }
     // remote computers going out through a proxy must still be able to (Tailscale, a tailnet SOCKS5 proxy)
     if (egressProxies !== undefined || tailscale !== undefined) {
       const current = deps.getConfig()?.settings;
@@ -379,6 +397,7 @@ export function configRoutes(getDeps: () => {
       const settings = config.settings ?? {};
       if (egressProxies !== undefined) settings.egressProxies = egressProxies === null || Object.keys(egressProxies).length === 0 ? undefined : egressProxies;
       if (tailscale !== undefined) settings.tailscale = tailscale === null ? undefined : tailscale;
+      if (harnesses !== undefined) settings.harnesses = harnesses === null ? undefined : harnesses;
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;

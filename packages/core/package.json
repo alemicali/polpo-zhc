@@ -262,6 +262,10 @@
       "types": "./dist/secret-redaction.d.ts",
       "import": "./dist/secret-redaction.js"
     },
+    "./harnesses": {
+      "types": "./dist/harnesses.d.ts",
+      "import": "./dist/harnesses.js"
+    },
     "./sandbox": {
       "types": "./dist/sandbox.d.ts",
       "import": "./dist/sandbox.js"

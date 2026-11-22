@@ -191,29 +191,36 @@ export function agentRoutes(getDeps: () => {
     if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
     const teamName = c.req.query("team");
 
-    await deps.addAgent({
-      name: body.name,
-      role: body.role,
-      model: body.model,
-      allowedTools: body.allowedTools,
-      systemPrompt: body.systemPrompt,
-      skills: body.skills,
-      suggestions: body.suggestions,
-      maxTurns: body.maxTurns,
-      runtime: body.runtime,
-      loops: body.loops,
-      pipeline: body.pipeline,
-      identity: body.identity,
-      reportsTo: body.reportsTo,
-      browserProfile: body.browserProfile,
-      browserEgress: body.browserEgress,
-      ...(body.computers !== undefined && { computers: body.computers }),
-      ...(body.defaultComputer ? { defaultComputer: body.defaultComputer } : {}),
-      ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
-      ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools }),
-      ...(body.learning !== undefined && { learning: body.learning }),
-      ...(body.drive !== undefined && { drive: body.drive }),
-    }, teamName);
+    try {
+      await deps.addAgent({
+        name: body.name,
+        role: body.role,
+        model: body.model,
+        allowedTools: body.allowedTools,
+        systemPrompt: body.systemPrompt,
+        skills: body.skills,
+        suggestions: body.suggestions,
+        maxTurns: body.maxTurns,
+        runtime: body.runtime,
+        loops: body.loops,
+        pipeline: body.pipeline,
+        identity: body.identity,
+        reportsTo: body.reportsTo,
+        browserProfile: body.browserProfile,
+        browserEgress: body.browserEgress,
+        ...(body.computers !== undefined && { computers: body.computers }),
+        ...(body.defaultComputer ? { defaultComputer: body.defaultComputer } : {}),
+        ...(body.engine && body.engine !== "polpo" ? { engine: body.engine } : {}),
+        ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
+        ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools }),
+        ...(body.learning !== undefined && { learning: body.learning }),
+        ...(body.drive !== undefined && { drive: body.drive }),
+      }, teamName);
+    } catch (err) {
+      // an engine the settings do not allow (harness not enabled, no computer that can run it)
+      if ((err as Error)?.name === "HarnessConfigError") return c.json({ ok: false, error: (err as Error).message, code: "VALIDATION_ERROR" }, 400);
+      throw err;
+    }
 
     return c.json({ ok: true, data: { added: true } }, 201);
   });
@@ -527,12 +534,19 @@ export function agentRoutes(getDeps: () => {
       ...(body.computers !== undefined && { computers: body.computers?.length ? body.computers : undefined }),
       // "" clears it (back to this server)
       ...(body.defaultComputer !== undefined && { defaultComputer: body.defaultComputer || undefined }),
+      // "polpo" or null: back to Polpo's own engine
+      ...(body.engine !== undefined && { engine: body.engine && body.engine !== "polpo" ? body.engine : undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
       ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),
       ...(body.team !== undefined && { team: body.team }),
     };
 
-    await deps.updateAgent(name, updates);
+    try {
+      await deps.updateAgent(name, updates);
+    } catch (err) {
+      if ((err as Error)?.name === "HarnessConfigError") return c.json({ ok: false, error: (err as Error).message, code: "VALIDATION_ERROR" }, 400);
+      throw err;
+    }
 
     const updated = (await deps.getAgents()).find(a => a.name === name);
     return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : null }, 200);

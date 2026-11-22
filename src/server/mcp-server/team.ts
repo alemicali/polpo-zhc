@@ -31,6 +31,17 @@ const agentFields = {
     .describe("Computers it may use (ids from polpo_computers_list); \"host\" (this server) always"),
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional()
     .describe("The computer its chats and tasks run on (polpo_computers_list); \"host\" or '' for this server"),
+  engine: z.union([
+    z.literal("polpo"),
+    z.object({
+      harness: z.enum(["claude-code", "codex"]).describe("The official agent runtime (it must be enabled: polpo_harnesses_get)"),
+      model: z.string().max(200).optional().describe("Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's"),
+      permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional().describe("What the runtime may do without asking (default allow-all: it works unattended in its computer)"),
+      effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort"),
+      maxBudgetUsd: z.number().positive().max(10000).optional().describe("Stop a run when its estimated spend passes this (USD)"),
+    }),
+  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex) running inside its computer "
+    + "(a Daytona v2 computer, set with defaultComputer). Credentials come from the harness settings (polpo_harnesses_update), never from here."),
 };
 
 /** An error when browserEgress names a proxy the settings do not have, else null. */
@@ -43,7 +54,7 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
     : `There is no egress proxy "${name}". ${proxies.length ? `Proxies: ${proxies.join(", ")}.` : "None is set:"} Add it with polpo_config_update egress_proxies.`;
 }
 
-type Agent = { name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string }; reportsTo?: string };
+type Agent = { name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string }; reportsTo?: string; engine?: unknown };
 
 async function loadAgent(deps: McpDeps, name: string): Promise<{ ok: true; agent: Agent } | { ok: false; status: number; error: string }> {
   const r = await apiGet(deps, `/agents/${enc(name)}`);
@@ -66,6 +77,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       `${a.name}${a.identity?.displayName ? ` (${a.identity.displayName}${a.identity.title ? `, ${a.identity.title}` : ""})` : ""}: ${a.role ?? "no role"}`,
       `model: ${a.model ?? "default"}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
+      ...(a.engine && typeof a.engine === "object" ? [`engine: ${(a.engine as { harness?: string }).harness} harness${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`] : []),
       ...(a.systemPrompt ? ["", short(a.systemPrompt, 3000)] : []),
     ].join("\n");
     return ok(text, { agent: a as Record<string, unknown> });
@@ -95,7 +107,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools, skills, identity, manager, browser egress proxy or computer (defaultComputer). Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools, skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex harness). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. It applies to its next runs.",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
@@ -109,7 +121,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, skills, identity, reportsTo, maxTurns, browserEgress).");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, skills, identity, reportsTo, maxTurns, browserEgress, defaultComputer, engine).");
     const egress = await unknownEgress(deps, patch.browserEgress);
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, body);

@@ -34,6 +34,7 @@ export const CONFIG_SECTION_TOOLS: Record<string, { read: string[]; write: strin
   mcp: { read: ["polpo_mcp_access_list"], write: ["polpo_mcp_grant_revoke", "polpo_config_update"] },
   appearance: { read: ["polpo_branding_get"], write: ["polpo_branding_update"] },
   sync: { read: ["polpo_sync_status"], write: ["polpo_sync_update", "polpo_sync_run", "polpo_sync_test", "polpo_sync_disconnect"] },
+  harnesses: { read: ["polpo_harnesses_get", "polpo_harness_sessions_list"], write: ["polpo_harnesses_update"] },
 };
 
 beforeAll(async () => {
@@ -519,5 +520,59 @@ describe("members, MCP access, cloud sync, providers", () => {
     expect((await tool("polpo_custom_provider_remove", { id: "gw", confirm: true })).structuredContent).toMatchObject({ id: "gw", removed: true });
     expect((await tool("polpo_provider_disconnect", { name: "openai" })).isError).toBe(true);
     expect(JSON.stringify(await settingsFile())).not.toContain("sk-nope");
+  });
+});
+
+describe("agent harnesses through MCP", () => {
+  it("scopes: settings need admin, session control needs work, reads need read", async () => {
+    const { toolScopeMatrix } = await import("../server/mcp.js");
+    const m = Object.fromEntries(toolScopeMatrix().map((t) => [t.name, t]));
+    expect(m.polpo_harnesses_update).toMatchObject({ scope: "polpo:admin", readOnly: false });
+    expect(m.polpo_harnesses_get).toMatchObject({ scope: "polpo:read", readOnly: true });
+    expect(m.polpo_harness_sessions_list).toMatchObject({ scope: "polpo:read", readOnly: true });
+    expect(m.polpo_harness_session_control).toMatchObject({ scope: "polpo:work", readOnly: false, destructive: true });
+  });
+
+  it("enables Claude Code on Bedrock with a vault reference, hands off the missing key, refuses a subscription", async () => {
+    const sub = await tool("polpo_harnesses_update", { enabled: ["claude-code"], claude_code: { auth: "subscription" as any, credential_ref: { owner: "agent-1", service: "x" } } });
+    expect(sub.isError).toBe(true);
+
+    const r = await tool("polpo_harnesses_update", {
+      enabled: ["claude-code"], claude_code: { auth: "bedrock", credential_ref: { owner: "agent-1", service: "bedrock" }, bedrock_region: "us-east-1", model: "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent.changed).toEqual(["enabled", "claude-code"]);
+    // the key is not in the vault yet: the person enters it in the dashboard
+    expect(r.structuredContent.setup_id).toBe("vault:agent-1:bedrock");
+    expect(r.structuredContent.setup_url).toMatch(/\/agents\/agent-1\?tab=credentials&service=bedrock/);
+    expect(JSON.stringify(r)).not.toMatch(/apiKey"\s*:/);
+    const got = await tool("polpo_harnesses_get");
+    expect(got.structuredContent.harnesses.find((h: any) => h.id === "claude-code")).toMatchObject({
+      enabled: true, auth: "bedrock", credentialRef: { owner: "agent-1", service: "bedrock" }, credentialFound: false, bedrock: { region: "us-east-1" },
+    });
+    expect((await settingsFile()).data.settings.harnesses).toMatchObject({ enabled: ["claude-code"], "claude-code": { auth: "bedrock" } });
+  });
+
+  it("sets an agent's engine through polpo_agent_update (refused without a computer that can run it), lists and controls sessions", async () => {
+    const noComputer = await tool("polpo_agent_update", { name: "agent-1", engine: { harness: "claude-code" } });
+    expect(noComputer.isError).toBe(true);
+    expect(text(noComputer)).toMatch(/allowHost|remote computer/);
+    const disabled = await tool("polpo_agent_update", { name: "agent-1", engine: { harness: "codex" } });
+    expect(text(disabled)).toMatch(/Codex is not enabled/);
+    expect((await tool("polpo_harnesses_update", { allow_host: true })).isError).toBeFalsy();
+    const set = await tool("polpo_agent_update", { name: "agent-1", engine: { harness: "claude-code", maxBudgetUsd: 3, permissionMode: "allow-all" } });
+    expect(set.isError).toBeFalsy();
+    expect(set.structuredContent.agent.engine).toEqual({ harness: "claude-code", maxBudgetUsd: 3, permissionMode: "allow-all" });
+    expect((await tool("polpo_harnesses_get")).structuredContent.harnesses.find((h: any) => h.id === "claude-code").agents).toEqual(["agent-1"]);
+    // a harness its agents use cannot be disabled
+    const strand = await tool("polpo_harnesses_update", { enabled: [] });
+    expect(text(strand)).toMatch(/agent-1 \(Claude Code\)/);
+    expect((await tool("polpo_agent_update", { name: "agent-1", engine: "polpo" })).structuredContent.agent.engine).toBeUndefined();
+
+    expect((await tool("polpo_harness_sessions_list", { agent: "agent-1" })).structuredContent.sessions).toEqual([]);
+    const missing = await tool("polpo_harness_session_control", { key: "task:none", action: "stop" });
+    expect(missing.isError).toBe(true);
+    const unconfirmed = await tool("polpo_harness_session_control", { key: "task:none", action: "reset" });
+    expect(text(unconfirmed)).toMatch(/confirm: true/);
   });
 });
