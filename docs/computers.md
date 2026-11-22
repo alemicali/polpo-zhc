@@ -32,7 +32,7 @@ Every agent has the implicit computer **`host`**: this server, with the sandbox 
 | `id` | Slug (`a-z`, `0-9`, `-`, up to 40). `host` and `ephemeral` are reserved. |
 | `name`, `description` | Shown in the dashboard. |
 | `kind` | `daytona`, `e2b`, or `host` (this server: useful with an egress proxy). Cannot change. |
-| `snapshot` / `image` | Daytona v0: a snapshot (default: the instance's `settings.sandbox.providers.daytona.snapshot`) or a Docker image (sized by `resources`). Daytona v2: `image` is an image of the Daytona project (default: the instance's `providers.daytona.image`, else the Polpo runner image `polpo-runner-vm-2`); `snapshot` is ignored. |
+| `snapshot` / `image` | Daytona v0: a snapshot (default: the instance's `settings.sandbox.providers.daytona.snapshot`) or a Docker image (sized by `resources`). Daytona v2: `image` is an image of the Daytona project (default: the instance's `providers.daytona.image`, else the Polpo runner image `polpo-runner-vm-3`); `snapshot` is ignored. |
 | `template` | E2B template (default: the instance's). |
 | `resources` | `{ cpus, memoryMb, diskMb }`: Daytona v0 with an image only (snapshots and templates have their own size); Daytona v2 always (default 2 vCPU, 4 GB, 10 GB). |
 | `lifecycle.idleStopMinutes` | Stop (Daytona v0 container), pause (E2B, Daytona v0 VM class) or hibernate (Daytona v2) after this many minutes without use. Default 15. |

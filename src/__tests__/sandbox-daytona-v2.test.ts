@@ -350,6 +350,34 @@ describe("providers.daytona.api", () => {
     // @ts-expect-error plain .mjs script
     const script = await import("../../scripts/build-sandbox-images.mjs");
     expect(script.DAYTONA_V2_IMAGE).toBe(DAYTONA_V2_RUNNER_IMAGE);
+    // pnpm for agent harness bootstraps: the image bakes the version the engine activates otherwise
+    const { HARNESS_PNPM_VERSION } = await import("../adapters/harness-engine.js");
+    expect(script.PNPM_VERSION).toBe(HARNESS_PNPM_VERSION);
+    expect(script.ROOT_STEPS.some((x: string) => x.includes(`corepack prepare pnpm@${HARNESS_PNPM_VERSION} --activate`))).toBe(true);
+  });
+
+  test("the default runner image not built in the project yet: the previous one, with a warning", async () => {
+    let first = true;
+    const realCreate = v2.createError;
+    v2.createError = undefined;
+    const warnings: string[] = [];
+    const { Daytona } = await import("@daytona/sdk-v2") as any;
+    const proto = Object.getOwnPropertyDescriptor(Daytona.prototype, "v2")!.get!;
+    const spy = vi.spyOn(Daytona.prototype, "v2", "get").mockImplementation(function (this: any) {
+      const client = proto.call(this);
+      return { ...client, create: async (image: string, opts: any) => {
+        if (first && image === DAYTONA_V2_RUNNER_IMAGE) { first = false; throw Object.assign(new Error("image not found"), { code: "IMAGE_NOT_FOUND" }); }
+        return client.create(image, opts);
+      } };
+    });
+    try {
+      await remoteAdapter("daytona").create(spec(sandbox(), { onWarning: (m: string) => warnings.push(m) }));
+      expect(v2.creates.at(-1)!.image).toBe("polpo-runner-vm-2");
+      expect(warnings[0]).toMatch(/not built in this project yet: using "polpo-runner-vm-2"/);
+    } finally {
+      spy.mockRestore();
+      v2.createError = realCreate;
+    }
   });
 
   test("the build script builds the v2 image once, named, from the same steps (mocked client)", async () => {

@@ -26,7 +26,7 @@
  */
 import type { NetworkPolicyInput, LifecyclePolicyOptions, Resources, Sandbox, SandboxState, Snapshot as SdkSnapshot } from "@daytona/sdk-v2/v2";
 import type { DaytonaV2Client } from "@daytona/sdk-v2";
-import { COMPUTER_LABEL, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_RUNNER_IMAGE, daytonaV2HibernateSettings, type DaytonaV2HibernateSettings, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
+import { COMPUTER_LABEL, DAYTONA_V2_MAX_TIMEOUT_SECONDS, DAYTONA_V2_PREVIOUS_RUNNER_IMAGE, DAYTONA_V2_RUNNER_IMAGE, daytonaV2HibernateSettings, type DaytonaV2HibernateSettings, type EffectiveSandbox, type SandboxNetwork } from "@polpo-ai/core/sandbox";
 import { remoteProviderCredentials } from "./remote-providers.js";
 import {
   classifyAllowEntries, SandboxNetworkConfigError,
@@ -154,17 +154,25 @@ export class DaytonaV2Adapter implements RemoteAdapter {
     const image = (typeof opts.image === "string" && opts.image.trim()) || instanceImage || DAYTONA_V2_RUNNER_IMAGE;
     const sandboxRegion = (typeof opts.region === "string" && opts.region.trim()) || region;
     let sandbox: Sandbox;
+    const createFrom = (name: string) => client.create(name, {
+      ...(spec.name ? { name: spec.name } : {}),
+      labels: spec.labels,
+      resources: daytonaV2Resources(spec.sandbox),
+      lifecyclePolicy: daytonaV2Lifecycle(spec, maxTimeoutSeconds),
+      ...(networkPolicy ? { networkPolicy } : {}),
+      ...(sandboxRegion ? { region: sandboxRegion } : {}),
+      ...(spec.idempotencyKey ? { idempotencyKey: spec.idempotencyKey } : {}),
+      waitSeconds: WAIT_SECONDS,
+    });
     try {
-      sandbox = await client.create(image, {
-        ...(spec.name ? { name: spec.name } : {}),
-        labels: spec.labels,
-        resources: daytonaV2Resources(spec.sandbox),
-        lifecyclePolicy: daytonaV2Lifecycle(spec, maxTimeoutSeconds),
-        ...(networkPolicy ? { networkPolicy } : {}),
-        ...(sandboxRegion ? { region: sandboxRegion } : {}),
-        ...(spec.idempotencyKey ? { idempotencyKey: spec.idempotencyKey } : {}),
-        waitSeconds: WAIT_SECONDS,
-      });
+      try {
+        sandbox = await createFrom(image);
+      } catch (err) {
+        // the default runner image of this release is not built in the project yet: the previous one
+        if (!isImageNotFound(err) || image !== DAYTONA_V2_RUNNER_IMAGE) throw err;
+        spec.onWarning?.(`Daytona v2 image "${image}" is not built in this project yet: using "${DAYTONA_V2_PREVIOUS_RUNNER_IMAGE}" (build it with \`node scripts/build-sandbox-images.mjs --provider daytona-v2\`)`);
+        sandbox = await createFrom(DAYTONA_V2_PREVIOUS_RUNNER_IMAGE);
+      }
     } catch (err) {
       if (isImageNotFound(err)) {
         throw new Error(`Daytona v2 image "${image}" not found in this project. Build it with \`node scripts/build-sandbox-images.mjs --provider daytona-v2\`, or set providers.daytona.image to an image of the project (Settings → Sandbox). (${errorCode(err).message})`);
