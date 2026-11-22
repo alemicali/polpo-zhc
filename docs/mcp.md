@@ -163,9 +163,9 @@ Group chats of people and agents (the dashboard's groups).
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_connectors_list` | Connectors with their status, auth (authorized? token set?), tool count and who may use them; with `id`, its tools and their policy. With `agent`, only the connectors granted to that agent and the tools it gets (`agent_tools`; with `id`, `agent_gets` per tool and `stale_tools`). Never secrets. | read-only |
+| `polpo_connectors_list` | Connectors with their status, auth (authorized? token set?), tool count, `icon_url` and who may use them; with `id`, its tools and their policy. With `agent`, only the connectors granted to that agent and the tools it gets (`agent_tools`; with `id`, `agent_gets` per tool and `stale_tools`). Never secrets. | read-only |
 | `polpo_connector_catalog` | Well-known remote MCP servers to add in one step, and what each needs. | read-only |
-| `polpo_connector_add` | Add from the catalog or a remote https URL (never a local process). OAuth ones return `authorization_url` for the person to open; token-based ones are finished in the dashboard (`setup_url`). | write, open world |
+| `polpo_connector_add` | Add from the catalog or a remote https URL (never a local process). A custom URL is probed first (transport, sign-in, scopes, name: see `docs/connectors.md` → "Detecting how to connect"); `detect_only: true` only returns that as `detected`, with the options and the recommended one. OAuth ones return `authorization_url` for the person to open; token-based ones are finished in the dashboard (`setup_url`). | write, open world |
 | `polpo_connector_update` | Who may use it (agents, Polpo), on or off, name, per-tool policy (`allow`, `ask`, `off`). | write, idempotent |
 | `polpo_connector_test` | Connect now and list its tools. | write, idempotent, open world |
 | `polpo_connector_connect` | A fresh OAuth link (new, or `needs_reauth`). | write, open world |

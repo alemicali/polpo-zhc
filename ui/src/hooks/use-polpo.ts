@@ -16,6 +16,7 @@ import type { ChatMessage, ChatCompletionMessage, PolpoConfig } from "@polpo-ai/
 import type { ChatCompletionChunk, ChatCompletionStream } from "@polpo-ai/react";
 import { config as appConfig } from "@/lib/config";
 import { setAppearanceScope } from "@/lib/appearance";
+import { claimInitialChatSelection } from "@/lib/chat-navigation";
 import { loadInstanceBranding, setInstanceBranding, type InstanceBranding } from "@/lib/branding";
 import { setOrchestratorName } from "@/lib/orchestrator-name";
 import { toast } from "sonner";
@@ -302,6 +303,13 @@ export interface ChatMessageWithQuestions extends Omit<ChatMessage, "segments"> 
 // Builds on the SDK's useSessions hook for session management,
 // uses chatCompletionsStream() for real-time streaming responses.
 
+/** The API said the thing does not exist (404 / NOT_FOUND). */
+function isNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { status?: unknown; code?: unknown };
+  return e.status === 404 || e.code === "NOT_FOUND";
+}
+
 const NEW_SESSION_KEY_PREFIX = "__polpo_new_session__";
 
 const createLocalNewSessionKey = () =>
@@ -352,7 +360,6 @@ export function useChat() {
   /** Selected agent for agent-direct chat mode. null = orchestrator (default). */
   const [selectedAgent, setSelectedAgentState] = useState<string | null>(null);
   const selectedAgentRef = useRef<string | null>(null);
-  const initialLoadDone = useRef(false);
   const [localNewSessionKey, setLocalNewSessionKey] = useState(createLocalNewSessionKey);
   const activeSessionKey = sessionId ?? localNewSessionKey;
   const activeSessionKeyRef = useRef(activeSessionKey);
@@ -1002,9 +1009,12 @@ export function useChat() {
   useEffect(() => { followServerTurnsRef.current = followServerTurns; }, [followServerTurns]);
 
 
-  // Load a specific session's messages
+  // Load a specific session's messages. Resolves false when the session does
+  // not exist (deleted, or a stale link); true otherwise.
   const loadSession = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<boolean> => {
+      // Opening a chat explicitly replaces the restore of the last one.
+      claimInitialChatSelection();
       activeSessionKeyRef.current = id;
       wantsNewSessionRef.current = false;
       setSessionId(id);
@@ -1015,7 +1025,7 @@ export function useChat() {
       if (streamsBySessionRef.current.has(id) || resumeAbortBySessionRef.current.has(id)) {
         // In-flight stream/resume — local state is the live source of truth.
         setMessagesLoading(false);
-        return;
+        return true;
       }
 
       // ── Warm-cache fast path (browser-tab switch semantics) ──────────
@@ -1028,7 +1038,7 @@ export function useChat() {
       // below still refreshes the active session opportunistically.
       if (loadedSessionsRef.current.has(id)) {
         setMessagesLoading(false);
-        return;
+        return true;
       }
 
       setMessagesLoading(true);
@@ -1069,9 +1079,11 @@ export function useChat() {
             }
           }
         } catch { /* offline or endpoint missing — silent */ }
-      } catch {
+        return true;
+      } catch (err) {
         updateSessionMessages(id, []);
         conversationBySessionRef.current.delete(id);
+        return !isNotFoundError(err);
       } finally {
         setMessagesLoading(false);
       }
@@ -1079,18 +1091,8 @@ export function useChat() {
     [applyServerMessages, clearSessionPending, getMessages, runResume, sessions, setSelectedAgent, setSessionId, updateSessionMessages]
   );
 
-  // Auto-select most recent non-empty session on first load
-  useEffect(() => {
-    if (initialLoadDone.current || sessionsLoading) return;
-    initialLoadDone.current = true;
-    // Skip empty/orphan sessions (placeholder-only from failed streaming)
-    const latest = sessions.find(
-      (s) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
-    );
-    if (latest) {
-      loadSession(latest.id);
-    }
-  }, [sessions, sessionsLoading, loadSession]);
+  // The first chat shown (last one this person had open, or a link) is chosen
+  // by useChatNavigationPersistence — see ChatProvider.
 
   // Re-fetch messages when the tab regains focus (server is source of truth)
   useEffect(() => {
@@ -1168,6 +1170,7 @@ export function useChat() {
 
   // Start a new empty session
   const newSession = useCallback(() => {
+    claimInitialChatSelection();
     resetToLocalNewSession();
   }, [resetToLocalNewSession]);
 

@@ -71,7 +71,7 @@ function describe(c: ConnectorConfig): string {
   const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.url;
   const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
   return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
-    + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*`;
+    + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;
 }
 
 async function oauthLink(ctx: ConnectorToolContext, id: string): Promise<string> {

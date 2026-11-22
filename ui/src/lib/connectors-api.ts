@@ -23,6 +23,23 @@ export interface ConnectorIconRef {
   color?: string;
 }
 
+/** One stored icon image of a custom connector. */
+export interface ConnectorIconImage {
+  mimeType: string;
+  hash: string;
+  width?: number;
+  height?: number;
+  src?: string;
+}
+
+/** A custom connector's discovered or uploaded icon (catalog connectors keep their bundled one). */
+export interface ConnectorIconAsset extends ConnectorIconImage {
+  source: "mcp" | "oauth" | "website" | "upload" | "url";
+  dark?: ConnectorIconImage;
+  fetchedAt: string;
+  pinned?: boolean;
+}
+
 export interface ConnectorAccess {
   /** Agent names, or "*" for every agent. */
   agents: string[] | "*";
@@ -50,6 +67,13 @@ export interface Connector {
   enabled: boolean;
   catalogId?: string;
   icon?: ConnectorIconRef;
+  /** Custom connectors: the discovered / uploaded icon's metadata. */
+  iconAsset?: ConnectorIconAsset;
+  iconCheckedAt?: string;
+  /** Where the icon is served: /connector-icons/… (catalog) or /api/v1/connectors/<id>/icon?v=… (custom). */
+  iconUrl?: string;
+  /** A custom connector's variant for dark backgrounds. */
+  iconDarkUrl?: string;
   toolTimeoutMs?: number;
   toolPolicy?: Record<string, ConnectorToolPolicy>;
   createdAt: string;
@@ -120,6 +144,31 @@ export interface ConnectorTestResult {
   connector: Connector;
 }
 
+/** The ways to sign in a probe can recommend (POST /connectors/discover). */
+export type DetectedAuth = "none" | "oauth-cimd" | "oauth-dcr" | "oauth-preregistered" | "bearer";
+
+/** How to connect to an MCP server, as the server worked it out from its URL (mirrors src/mcp/probe.ts). */
+export interface ConnectorDiscovery {
+  url: string;
+  reachable: boolean;
+  error?: string;
+  transport?: "http" | "sse";
+  authRequired?: boolean;
+  server?: { name?: string; title?: string; version?: string; websiteUrl?: string; instructions?: string };
+  resource?: { resource?: string; resourceName?: string; scopes?: string[]; authorizationServers?: string[] };
+  authorizationServer?: { issuer?: string; registration: boolean; cimd: boolean; pkceMethods: string[]; tokenAuthMethods: string[]; scopes?: string[] };
+  options: Array<{ auth: DetectedAuth; recommended: boolean; description: string }>;
+  recommendation?: {
+    transport: "http" | "sse";
+    auth: DetectedAuth;
+    recommended: true;
+    scopes: string[];
+    name?: string;
+    icon?: { dataUri: string; source: string; src?: string };
+    notes: string[];
+  };
+}
+
 /** What POST / PATCH accept (secrets are write-only). */
 export interface ConnectorInput {
   id?: string;
@@ -184,7 +233,28 @@ export const connectorsApi = {
   saveOAuthApp: (app: string, input: { clientId: string; clientSecret?: string; name?: string }) =>
     request<OAuthApp>(`/oauth-apps/${encodeURIComponent(app)}`, json("PUT", input)),
   removeOAuthApp: (app: string) => request<{ removed: boolean }>(`/oauth-apps/${encodeURIComponent(app)}`, json("DELETE")),
+  /** How to connect to an MCP server URL (transport, sign-in options, scopes, name, icon); nothing is stored. */
+  discover: (url: string, init?: { signal?: AbortSignal }) => request<ConnectorDiscovery>("/discover", { ...json("POST", { url }), ...(init?.signal ? { signal: init.signal } : {}) }),
+  refreshIcon: (id: string) => request<Connector>(`${at(id)}/icon/refresh`, json("POST")),
+  setIcon: (id: string, icon: { url: string } | { dataUri: string }) => request<Connector>(`${at(id)}/icon`, json("PUT", icon)),
+  resetIcon: (id: string) => request<Connector>(`${at(id)}/icon`, json("DELETE")),
 };
+
+/** Largest icon a person can upload (the server's limit). */
+export const MAX_ICON_BYTES = 512 * 1024;
+
+/** Where a custom connector's icon came from, in words. */
+export function iconSourceLabel(asset: ConnectorIconAsset | undefined): string {
+  if (!asset) return "No icon found: the first letter is shown";
+  const host = (() => { try { return asset.src ? new URL(asset.src).hostname : undefined; } catch { return undefined; } })();
+  switch (asset.source) {
+    case "mcp": return "From the MCP server";
+    case "oauth": return `From the sign-in metadata${host ? ` (${host})` : ""}`;
+    case "website": return `From ${host ?? "the website"}`;
+    case "upload": return "Uploaded";
+    case "url": return `From ${host ?? "a URL"}`;
+  }
+}
 
 /** Save an agent's per-connector tool selection (null: every tool of every granted connector). */
 export function saveAgentConnectorTools(agent: string, connectorTools: AgentConnectorTools | null): Promise<{ connectorTools?: AgentConnectorTools } | null> {
@@ -431,7 +501,11 @@ export interface CustomConnectorForm {
   /** "remote": an MCP server URL; "stdio": a local command (admin only). */
   kind: "remote" | "stdio";
   url: string;
+  /** Detected (or chosen) transport; undefined: guessed from the path (/sse → SSE). */
+  transport?: "http" | "sse";
   auth: CustomAuthChoice;
+  /** The detected sign-in option picked, when the URL was probed. */
+  detected?: DetectedAuth;
   bearerToken: string;
   headers: Array<{ name: string; value: string }>;
   clientId: string;
@@ -474,6 +548,7 @@ export function validateCustomConnector(form: CustomConnectorForm): Partial<Reco
     else if (rows.some((h) => !h.value)) errors.headers = "Every header needs a value";
   }
   if (form.auth === "oauth" && form.clientSecret.trim() && !form.clientId.trim()) errors.clientId = "A client secret needs its client id";
+  if (form.auth === "oauth" && form.detected === "oauth-preregistered" && !form.clientId.trim()) errors.clientId = "Enter the client id of the OAuth client you created";
   return errors;
 }
 
@@ -491,7 +566,7 @@ export function customConnectorInput(form: CustomConnectorForm): ConnectorInput 
     return { name, transport: { type: "stdio", command, args: [...inline, ...splitArgs(form.args)] }, auth: { type: "none" } };
   }
   const url = form.url.trim();
-  const transport = { type: /\/sse\/?(\?.*)?$/.test(new URL(url).pathname) ? "sse" as const : "http" as const, url };
+  const transport = { type: form.transport ?? (/\/sse\/?(\?.*)?$/.test(new URL(url).pathname) ? "sse" as const : "http" as const), url };
   switch (form.auth) {
     case "bearer":
       return { name, transport, auth: { type: "bearer" }, secrets: { bearerToken: form.bearerToken.trim() } };
@@ -515,6 +590,38 @@ export function customConnectorInput(form: CustomConnectorForm): ConnectorInput 
       return { name, transport, auth: { type: "none" } };
   }
 }
+
+/** The form's auth for a detected option. */
+export function authForDetected(auth: DetectedAuth): CustomAuthChoice {
+  return auth === "none" ? "none" : auth === "bearer" ? "bearer" : "oauth";
+}
+
+/**
+ * Prefill the form from a probe: the recommended sign-in, the transport, all the scopes, and the
+ * name unless the person typed one (`autoName`: the name the last detection filled in).
+ */
+export function applyDiscovery(form: CustomConnectorForm, discovery: ConnectorDiscovery, autoName?: string): CustomConnectorForm {
+  const rec = discovery.recommendation;
+  if (!rec) return form;
+  const keepName = form.name.trim() && form.name !== autoName;
+  return {
+    ...form,
+    ...(keepName || !rec.name ? {} : { name: rec.name }),
+    transport: rec.transport,
+    auth: authForDetected(rec.auth),
+    detected: rec.auth,
+    scopes: rec.scopes.join(" "),
+  };
+}
+
+/** One line for each detected way of signing in. */
+export const DETECTED_AUTH_LABELS: Record<DetectedAuth, string> = {
+  none: "No sign-in",
+  "oauth-cimd": "OAuth (client metadata document)",
+  "oauth-dcr": "OAuth (automatic registration)",
+  "oauth-preregistered": "OAuth with your own client",
+  bearer: "API key / bearer token",
+};
 
 // ── OAuth popup ──────────────────────────────────────────────────────────────
 

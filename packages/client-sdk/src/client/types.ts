@@ -1942,6 +1942,40 @@ export interface AuthStatusResponse {
   providers: Record<string, ProviderAuthInfo>;
 }
 
+// === Member preferences (per signed-in member, follow the person across devices) ===
+
+/** Where the person was in the chat: the open chat, tabs and panels. */
+export interface ChatNavigationPreferences {
+  /** Thread open in the chat; null = a new, unsaved chat. */
+  lastSessionId?: string | null;
+  /** Group open in the chat (wins over lastSessionId), or null. */
+  lastRoomId?: string | null;
+  /** Agent picked for the new chat when lastSessionId is null. */
+  lastAgent?: string | null;
+  /** Thread ids open as tabs, left to right. */
+  openTabs?: string[];
+  /** Right-hand chat panel shown on other pages. */
+  sidePanelOpen?: boolean;
+  /** Thread list (session sidebar) shown next to the chat. */
+  threadsOpen?: boolean;
+  /** When the preferences were last written (set by the server). */
+  updatedAt?: string;
+}
+
+export interface MemberPreferences {
+  chatNavigation?: ChatNavigationPreferences;
+}
+
+export interface MemberPreferencesPatch {
+  chatNavigation?: Omit<ChatNavigationPreferences, "updatedAt">;
+}
+
+export interface MemberPreferencesResponse {
+  /** Signed-in member the preferences belong to; null when shared (no instance auth). */
+  member: string | null;
+  preferences: MemberPreferences;
+}
+
 // === Vault Preview (interactive credential review before saving) ===
 
 export interface VaultPreviewPayload {

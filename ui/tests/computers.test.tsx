@@ -170,7 +170,7 @@ test("actions by status, labels, sort and search, form validation and body", () 
   expect(formatSnapshotSummary({ lastSnapshot: { at: new Date().toISOString(), memoryBytes: 1024 ** 3, diskBytes: 1024 ** 3 / 2 }, snapshotCount: 2 })).toBe("2 snapshots · 1.5 GB");
   expect(formatSnapshotSummary({})).toBe("—");
   // host first; then what needs attention (deleted), running, resting
-  const list = [nina(), box(), nina({ id: "old", name: "Old", status: "deleted" }), HOST];
+  const list = [nina(), box(), nina({ id: "old", name: "Old", status: "deleted", lastUsedAt: new Date(Date.now() - 60 * 60_000).toISOString() }), HOST];
   expect(sortComputers(list, "status").map((c) => c.id)).toEqual(["host", "old", "box", "nina"]);
   expect(sortComputers(list, "name").map((c) => c.id)).toEqual(["host", "box", "nina", "old"]);
   expect(sortComputers(list, "lastUsed").map((c) => c.id)).toEqual(["host", "box", "nina", "old"]);

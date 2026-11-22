@@ -247,7 +247,7 @@ export function ConnectDialog({
       <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
         <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <div className="flex items-center gap-3">
-            <ConnectorIcon catalogId={entry?.id ?? connector?.catalogId} name={name} color={entry?.icon?.color ?? connector?.icon?.color} size="lg" />
+            <ConnectorIcon catalogId={entry?.id ?? connector?.catalogId} name={name} color={entry?.icon?.color ?? connector?.icon?.color} iconUrl={connector?.iconUrl} iconDarkUrl={connector?.iconDarkUrl} size="lg" />
             <div className="min-w-0">
               <DialogTitle className="leading-tight">{another && !state.connector ? `Add another ${entry!.name} account` : `Connect ${name}`}</DialogTitle>
               <DialogDescription className="line-clamp-2">

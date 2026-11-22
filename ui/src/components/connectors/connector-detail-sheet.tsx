@@ -2,9 +2,9 @@
  * A connector's settings: status and actions (Reconnect, Test, Disconnect, Remove), who can use
  * it (Polpo, every agent, or chosen agents) and its tools with a per-tool policy.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Bot, Check, ExternalLink, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
+import { AlertTriangle, Bot, Check, ExternalLink, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
-  agentHasAccess, connectorState, connectorsApi, toggleAgentAccess, toolLabel,
+  MAX_ICON_BYTES, agentHasAccess, connectorState, connectorsApi, iconSourceLabel, toggleAgentAccess, toolLabel,
   type CatalogEntry, type Connector, type ConnectorAccess, type ConnectorTool, type ConnectorToolPolicy,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -211,6 +211,74 @@ function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onP
   );
 }
 
+/**
+ * A custom connector's icon: where it came from, look it up again, or the person's own (an uploaded
+ * image or an image URL, fetched once by the server). Catalog connectors use their official icon.
+ */
+export function ConnectorIconEditor({ connector, onChanged, disabled }: { connector: Connector; onChanged: (c: Connector) => void; disabled?: boolean }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const file = useRef<HTMLInputElement>(null);
+  const run = async (what: string, fn: () => Promise<Connector>, success?: string) => {
+    setBusy(what);
+    try {
+      onChanged(await fn());
+      if (success) toast.success(success);
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const upload = (picked: File | undefined) => {
+    if (!picked) return;
+    if (picked.size > MAX_ICON_BYTES) { toast.error("That image is too large (512 KB at most)"); return; }
+    const reader = new FileReader();
+    reader.onload = () => void run("upload", () => connectorsApi.setIcon(connector.id, { dataUri: String(reader.result) }), "Icon updated");
+    reader.readAsDataURL(picked);
+  };
+  const off = disabled || !!busy;
+  const asset = connector.iconAsset;
+  return (
+    <section className="space-y-2" data-testid="connector-icon-editor">
+      <h3 className="text-sm font-medium">Icon</h3>
+      <div className="flex items-center gap-3">
+        <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" />
+        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={asset?.src}>{iconSourceLabel(asset)}</p>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" variant="outline" disabled={off || (asset?.pinned && asset.source === "upload")} onClick={() => void run("refresh", () => connectorsApi.refreshIcon(connector.id))}>
+          {busy === "refresh" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh icon
+        </Button>
+        <Button size="sm" variant="outline" disabled={off} onClick={() => file.current?.click()}>
+          {busy === "upload" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />} Upload…
+        </Button>
+        <Button size="sm" variant="outline" disabled={off} onClick={() => setUrlOpen((v) => !v)} aria-expanded={urlOpen}>
+          <Link2 className="h-4 w-4" /> From URL…
+        </Button>
+        {asset?.pinned && (
+          <Button size="sm" variant="ghost" disabled={off} onClick={() => void run("reset", () => connectorsApi.resetIcon(connector.id), "Back to the automatic icon")}>
+            <Undo2 className="h-4 w-4" /> Automatic
+          </Button>
+        )}
+        <input ref={file} type="file" accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,image/jpeg,image/gif,image/webp" className="hidden"
+          aria-label="Upload an icon" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} />
+      </div>
+      {urlOpen && (
+        <form className="flex gap-1.5" onSubmit={(e) => {
+          e.preventDefault();
+          if (!url.trim()) return;
+          void run("url", () => connectorsApi.setIcon(connector.id, { url: url.trim() }), "Icon updated").then(() => { setUrl(""); setUrlOpen(false); });
+        }}>
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/logo.svg" inputMode="url" spellCheck={false} aria-label="Icon URL" className="h-8" />
+          <Button size="sm" type="submit" disabled={off || !url.trim()}>{busy === "url" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Use"}</Button>
+        </form>
+      )}
+    </section>
+  );
+}
+
 export function ConnectorDetailSheet({
   connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, accountCount = 0, onAddAccount,
 }: {
@@ -264,7 +332,7 @@ export function ConnectorDetailSheet({
       <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-lg">
         <SheetHeader className="border-b">
           <div className="flex items-center gap-3 pr-6">
-            <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} size="lg" />
+            <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="lg" />
             <div className="min-w-0 flex-1">
               <NameEditor
                 key={connector.id} connector={connector} disabled={!!busy}
@@ -310,6 +378,7 @@ export function ConnectorDetailSheet({
               {connector.transport.type === "stdio" && <Terminal className="h-3 w-3 shrink-0" />} {endpoint}
             </p>
           )}
+          {!connector.catalogId && <ConnectorIconEditor connector={connector} onChanged={onChanged} disabled={!!busy} />}
           {connector.lastError && state !== "connected" && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />

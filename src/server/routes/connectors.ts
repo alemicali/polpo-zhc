@@ -16,6 +16,11 @@
  *   GET    /connectors/:id/tools             the server's tools (?refresh=1), with their policy
  *   POST   /connectors/:id/oauth/start       { authorizationUrl } to open (or { authorized: true })
  *   POST   /connectors/:id/disconnect        revoke + forget the OAuth tokens
+ *   POST   /connectors/discover              { url }: how to connect to an MCP server (transport, auth, scopes, name, icon)
+ *   GET    /connectors/:id/icon              a custom connector's icon (?theme=dark; ETag, cached); 404: none (letter tile)
+ *   POST   /connectors/:id/icon/refresh      look the icon up again (custom connectors)
+ *   PUT    /connectors/:id/icon              { url } or { dataUri }: the person's own icon (pinned)
+ *   DELETE /connectors/:id/icon              back to the discovered icon
  *
  * The OAuth callback (GET /api/v1/connectors/oauth/callback) is NOT here: the browser comes back
  * from the provider without the API key, so it is mounted publicly (see `connectorOAuthCallback`)
@@ -27,6 +32,9 @@ import { CONNECTOR_CATALOG } from "../../mcp/catalog.js";
 import { ConnectorError, type ConnectorManager } from "../../mcp/manager.js";
 import { allowPrivateNetwork } from "../../mcp/net.js";
 import { applyConnectorPatch, buildConnector, ConnectorInputError, type ConnectorInput } from "../../mcp/validate.js";
+import { IconInputError } from "../../mcp/icon-store.js";
+import { guardedFetcher, type SafeFetcher } from "../../mcp/icons.js";
+import { probeConnector } from "../../mcp/probe.js";
 import { publicConnector } from "../../mcp/view.js";
 
 export { CONNECTOR_OAUTH_CALLBACK_PATH } from "../../mcp/runtime.js";
@@ -36,11 +44,13 @@ export interface ConnectorRouteDeps {
   settings: () => PolpoSettings | undefined;
   /** This instance's OAuth redirect URI as the browser reaches it (public origin + callback path). */
   redirectUri: (c: Context) => string;
+  /** Tests: the network the probe (POST /discover) uses. */
+  fetcher?: SafeFetcher;
 }
 
 function fail(c: Context, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  const status = err instanceof ConnectorInputError ? 400 : err instanceof ConnectorError ? 409 : 500;
+  const status = err instanceof ConnectorInputError || err instanceof IconInputError ? 400 : err instanceof ConnectorError ? 409 : 500;
   return c.json({ ok: false, error: message, ...(err instanceof ConnectorError && err.oauthApp ? { oauthApp: err.oauthApp } : {}) }, status);
 }
 
@@ -58,7 +68,10 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
 
   app.get("/", async (c) => {
     const manager = deps.manager();
-    const connectors = await Promise.all(manager.store.list().map(async (connector) => publicConnector(connector, await manager.secrets.keys(connector.id))));
+    const list = manager.store.list();
+    const connectors = await Promise.all(list.map(async (connector) => publicConnector(connector, await manager.secrets.keys(connector.id))));
+    // custom connectors without an icon yet (e.g. added before discovery existed): looked up in the background
+    manager.icons.ensure(list);
     return c.json({ ok: true, data: { connectors } });
   });
 
@@ -108,7 +121,76 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       manager.store.create(connector);
       if (Object.keys(secrets).length) await manager.secrets.patch(connector.id, secrets);
       manager.announce(connector.id, "created");
+      manager.icons.discoverSoon(connector.id);
       return c.json({ ok: true, data: await view(manager, connector.id) }, 201);
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  app.post("/discover", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { url?: unknown; icon?: unknown };
+    if (typeof body.url !== "string" || !body.url.trim()) return c.json({ ok: false, error: "url is required" }, 400);
+    const fetcher = deps.fetcher ?? guardedFetcher({ allowPrivateNetwork: allowPrivateNetwork(deps.settings()) });
+    const result = await probeConnector(body.url, {
+      fetch: fetcher,
+      canUseCimd: deps.redirectUri(c).startsWith("https://"),
+      icon: body.icon !== false,
+    });
+    return c.json({ ok: true, data: result });
+  });
+
+  app.get("/:id/icon", (c) => {
+    const manager = deps.manager();
+    const connector = manager.store.get(c.req.param("id"));
+    if (!connector) return c.json({ ok: false, error: "Connector not found" }, 404);
+    const image = manager.icons.read(connector, c.req.query("theme") === "dark" ? "dark" : "light");
+    if (!image) return c.json({ ok: false, error: "No icon" }, 404);
+    const etag = `"${image.hash}"`;
+    const headers: Record<string, string> = {
+      ETag: etag,
+      // the URL carries the hash (?v=): a matching one never changes
+      "Cache-Control": c.req.query("v") === image.hash ? "private, max-age=31536000, immutable" : "private, no-cache",
+      "X-Content-Type-Options": "nosniff",
+      // an SVG opened directly runs nothing and loads nothing
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+      "Content-Disposition": "inline",
+    };
+    if (c.req.header("if-none-match")?.split(/\s*,\s*/).includes(etag)) return c.body(null, 304, headers);
+    return c.body(new Uint8Array(image.bytes), 200, { ...headers, "Content-Type": image.mimeType });
+  });
+
+  app.post("/:id/icon/refresh", async (c) => {
+    const manager = deps.manager();
+    const connector = manager.store.get(c.req.param("id"));
+    if (!connector) return c.json({ ok: false, error: "Connector not found" }, 404);
+    if (connector.catalogId) return c.json({ ok: false, error: `${connector.name} is a catalog connector: it uses its official icon` }, 400);
+    await manager.icons.refresh(connector.id);
+    return c.json({ ok: true, data: await view(manager, connector.id) });
+  });
+
+  app.put("/:id/icon", async (c) => {
+    const manager = deps.manager();
+    const id = c.req.param("id");
+    if (!manager.store.get(id)) return c.json({ ok: false, error: "Connector not found" }, 404);
+    const body = await c.req.json().catch(() => ({})) as { url?: unknown; dataUri?: unknown };
+    try {
+      if (typeof body.dataUri === "string" && body.dataUri) manager.icons.setFromUpload(id, body.dataUri);
+      else if (typeof body.url === "string" && body.url.trim()) await manager.icons.setFromUrl(id, body.url.trim());
+      else throw new IconInputError("Give url (an https image) or dataUri (an uploaded image)");
+      return c.json({ ok: true, data: await view(manager, id) });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  app.delete("/:id/icon", async (c) => {
+    const manager = deps.manager();
+    const id = c.req.param("id");
+    if (!manager.store.get(id)) return c.json({ ok: false, error: "Connector not found" }, 404);
+    try {
+      await manager.icons.reset(id);
+      return c.json({ ok: true, data: await view(manager, id) });
     } catch (err) {
       return fail(c, err);
     }
@@ -130,6 +212,8 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       manager.store.update(current.id, patch);
       if (Object.keys(secrets).length) await manager.secrets.patch(current.id, secrets);
       if (reconnect) await manager.close(current.id);
+      // another server: another icon (an icon the person set stays)
+      if (patch.transport?.url && patch.transport.url !== current.transport.url) manager.icons.discoverSoon(current.id);
       if (patch.enabled === false) manager.setStatus(current.id, "disabled");
       else if (patch.enabled === true && current.status === "disabled") manager.setStatus(current.id, "disconnected");
       manager.announce(current.id, "updated");

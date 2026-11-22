@@ -9,10 +9,16 @@
  * store is mirrored to `?room=<id>` by ChatRoomRouteSync.
  */
 import { useSyncExternalStore } from "react";
+import { claimInitialChatSelection, claimInitialRoomSelection } from "@/lib/chat-navigation";
 
 interface NewGroupRequest {
   /** Agents preselected in the dialog. */
   agents: string[];
+}
+
+/** A thread a link asked to open (`/chat?session=<id>`); null id = a new chat. */
+export interface ChatSessionRequest {
+  sessionId: string | null;
 }
 
 interface ChatRoomState {
@@ -20,9 +26,11 @@ interface ChatRoomState {
   /** Title of the open room, published by the chat so headers can show it. */
   roomTitle: string | null;
   newGroup: NewGroupRequest | null;
+  /** Thread requested by a link/history entry, until the chat has opened it. */
+  sessionRequest: ChatSessionRequest | null;
 }
 
-let state: ChatRoomState = { roomId: null, roomTitle: null, newGroup: null };
+let state: ChatRoomState = { roomId: null, roomTitle: null, newGroup: null, sessionRequest: null };
 const listeners = new Set<() => void>();
 
 function update(next: Partial<ChatRoomState>) {
@@ -54,6 +62,8 @@ export function getActiveChatRoom(): string | null {
 
 /** Open a group in the chat (or pass null to go back to the normal chat). */
 export function setActiveChatRoom(roomId: string | null) {
+  // Any explicit group change replaces the restore of the last open group.
+  claimInitialRoomSelection();
   if (state.roomId === roomId) return;
   update({ roomId, roomTitle: null });
 }
@@ -78,18 +88,57 @@ export function closeNewGroup() {
   update({ newGroup: null });
 }
 
+const getSessionRequest = () => state.sessionRequest;
+
+/**
+ * Ask the chat to open a thread (null = a new chat). The chat provider opens
+ * it once the thread list is loaded, falling back with a notice when the
+ * thread no longer exists. Replaces the restore of the last open chat.
+ */
+export function requestChatSession(sessionId: string | null) {
+  claimInitialChatSelection();
+  update({ sessionRequest: { sessionId } });
+}
+
+/** Pending thread request, or null. */
+export function useChatSessionRequest(): ChatSessionRequest | null {
+  return useSyncExternalStore(subscribe, getSessionRequest, getSessionRequest);
+}
+
+export function getChatSessionRequest(): ChatSessionRequest | null {
+  return state.sessionRequest;
+}
+
+/** Called by the chat once the request is handled (only if it is still the current one). */
+export function settleChatSessionRequest(request: ChatSessionRequest) {
+  if (state.sessionRequest !== request) return;
+  update({ sessionRequest: null });
+}
+
 /** Link to a group inside the chat. */
 export function chatRoomPath(roomId: string): string {
   return `/chat?room=${encodeURIComponent(roomId)}`;
 }
 
+/** Link to a thread inside the chat. */
+export function chatSessionPath(sessionId: string): string {
+  return `/chat?session=${encodeURIComponent(sessionId)}`;
+}
+
 /**
- * Apply the one-shot chat link params (`?room=`, `?newGroup=1&agent=`) to the
- * store. Used where /chat is not kept in the URL (chat-first desktop layout).
+ * Apply the one-shot chat link params (`?room=`, `?session=`,
+ * `?newGroup=1&agent=`) to the store. Used where /chat is not kept in the URL
+ * (chat-first desktop layout).
  */
 export function applyChatLinkParams(search: string) {
   const params = new URLSearchParams(search);
   if (params.has("newGroup")) requestNewGroup(params.get("agent"));
   const room = params.get("room");
-  if (room) setActiveChatRoom(room);
+  const session = params.get("session");
+  if (room) {
+    setActiveChatRoom(room);
+  } else if (session) {
+    setActiveChatRoom(null);
+    requestChatSession(session);
+  }
 }

@@ -17,6 +17,32 @@ export interface ConnectorIcon {
   color?: string;
 }
 
+/** Where a custom connector's icon came from (catalog connectors use their bundled icon instead). */
+export type ConnectorIconSource = "mcp" | "oauth" | "website" | "upload" | "url";
+
+/** One stored icon image (the bytes are kept by the server and served at GET /connectors/:id/icon). */
+export interface ConnectorIconImage {
+  mimeType: string;
+  /** Content hash: the ETag, and the cache-busting `v` of the icon URL. */
+  hash: string;
+  width?: number;
+  height?: number;
+  /** Where the image was fetched from (absent for uploads and inline data). */
+  src?: string;
+}
+
+/**
+ * A custom connector's icon: discovered (the MCP server's `serverInfo.icons`, the OAuth metadata,
+ * the vendor's website) or set by the person (upload / URL, `pinned`: discovery leaves it alone).
+ */
+export interface ConnectorIconAsset extends ConnectorIconImage {
+  source: ConnectorIconSource;
+  /** A variant made for dark backgrounds (MCP `theme: "dark"`). */
+  dark?: ConnectorIconImage;
+  fetchedAt: string;
+  pinned?: boolean;
+}
+
 /** How the client reaches the MCP server. */
 export interface ConnectorTransport {
   /** "http": streamable HTTP, falling back to SSE automatically; "sse": legacy SSE; "stdio": a local process (admin only). */
@@ -93,6 +119,10 @@ export interface ConnectorConfig {
   catalogId?: string;
   /** Icon copied from the catalog entry. */
   icon?: ConnectorIcon;
+  /** Custom connectors: the discovered or uploaded icon (catalog connectors keep their bundled one). */
+  iconAsset?: ConnectorIconAsset;
+  /** Last icon discovery attempt (also when nothing was found), so it is not retried on every list. */
+  iconCheckedAt?: string;
   /** Tool call timeout (ms); default 60 000. */
   toolTimeoutMs?: number;
   /** Per-tool policy keyed by the server's tool name (not the prefixed one). Missing = "allow". */

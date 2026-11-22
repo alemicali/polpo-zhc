@@ -7,6 +7,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { createThreadsOpenStore } from "@/lib/chat-navigation";
 
 export type LayoutMode = "sidebar" | "chat-first";
 export type ChatFirstNavMode = "inline" | "grouped" | "more";
@@ -92,28 +93,20 @@ export function useChatFirstNavMode(): ChatFirstNavMode {
 
 // ═══════════════════════════════════════════════════════
 //  Chat-first sessions panel store (open/close the session sidebar)
+//  Desktop: the saved `threadsOpen` preference. Phones: per visit.
 // ═══════════════════════════════════════════════════════
 
-let _sessionsOpen = false;
-const sessionsListeners = new Set<() => void>();
-
-function sessionsSubscribe(cb: () => void) {
-  sessionsListeners.add(cb);
-  return () => { sessionsListeners.delete(cb); };
-}
-function getSessionsSnapshot() { return _sessionsOpen; }
+const chatFirstThreads = createThreadsOpenStore();
 
 export function setChatFirstSessionsOpen(open: boolean) {
-  if (_sessionsOpen === open) return;
-  _sessionsOpen = open;
-  sessionsListeners.forEach((cb) => cb());
+  chatFirstThreads.setOpen(open);
 }
 
 export function toggleChatFirstSessions() {
-  setChatFirstSessionsOpen(!_sessionsOpen);
+  chatFirstThreads.toggle();
 }
 
 /** Hook to read whether the chat-first session panel is open. */
 export function useChatFirstSessionsOpen(): boolean {
-  return useSyncExternalStore(sessionsSubscribe, getSessionsSnapshot, getSessionsSnapshot);
+  return chatFirstThreads.useOpen();
 }

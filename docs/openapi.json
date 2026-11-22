@@ -227,6 +227,53 @@
             ]
           }
         ]
+      },
+      "MemberPreferences": {
+        "type": "object",
+        "properties": {
+          "chatNavigation": {
+            "type": "object",
+            "properties": {
+              "lastSessionId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastRoomId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastAgent": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "openTabs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "maxItems": 50
+              },
+              "sidePanelOpen": {
+                "type": "boolean"
+              },
+              "threadsOpen": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       }
     },
     "parameters": {}
@@ -934,10 +981,10 @@
                   ]
                 }
               ],
-              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
+              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run, and `cost`: the total of every run `{ usd, tokens, runs, partial? }`), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
             },
             "required": false,
-            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run, and `cost`: the total of every run `{ usd, tokens, runs, partial? }`), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
             "name": "summary",
             "in": "query"
           },
@@ -957,10 +1004,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, failure, toolScope)."
+              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, failure, toolScope).",
+            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope).",
             "name": "slim",
             "in": "query"
           },
@@ -1419,7 +1466,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error).",
+            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error). `cost`: what every run of the task cost in all (first run, retries, continuations, directions): `{ usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun, partial, recoveredUsd? }` — `partial: true` when older runs were dropped (a task keeps its latest 20) and could not be recovered from the usage records.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16246,6 +16293,147 @@
                       },
                       "required": [
                         "entries"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/preferences": {
+      "get": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Get the signed-in member's dashboard preferences",
+        "responses": {
+          "200": {
+            "description": "Preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Update the signed-in member's dashboard preferences",
+        "description": "Merges the given fields into the stored preferences (per section, field by field).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chatNavigation": {
+                    "type": "object",
+                    "properties": {
+                      "lastSessionId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastRoomId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastAgent": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "openTabs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "maxItems": 50
+                      },
+                      "sidePanelOpen": {
+                        "type": "boolean"
+                      },
+                      "threadsOpen": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
                       ]
                     }
                   },

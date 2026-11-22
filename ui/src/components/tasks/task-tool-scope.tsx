@@ -16,6 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ConnectorIcon } from "@/components/connectors/connector-icon";
 import { connectorsApi, filterConnectorTools, toolLabel, type AgentConnectorTools, type Connector, type ConnectorTool } from "@/lib/connectors-api";
 import {
   agentBuiltinTools, agentConnectorSelection, agentConnectors, connectorScopeName, describeToolScope, draftFromScope, draftProblems,
@@ -280,6 +281,7 @@ function ConnectorScopeRow({
             aria-label={`Use ${name}`}
             onChange={(e) => onChange(e.target.checked ? "*" : undefined)}
           />
+          <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" className="h-5 w-5 rounded p-0.5" />
           <span className="min-w-0 truncate text-sm">{name}</span>
           <span className="shrink-0 font-mono text-caption text-muted-foreground">{connector.id}</span>
         </label>
