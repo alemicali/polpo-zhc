@@ -195,6 +195,8 @@ function fakeInstance() {
         { id: "notion", name: "Notion", category: "Productivity", description: "Notes and docs", url: "https://mcp.notion.com/mcp", transport: "http", auth: "oauth" },
         { id: "stripe", name: "Stripe", category: "Payments", description: "Payments", url: "https://mcp.stripe.com", transport: "http", auth: "bearer" },
         { id: "azure", name: "Azure DevOps", category: "Dev", description: "Boards", urlTemplate: "https://mcp.dev.azure.com/{organization}", transport: "http", auth: "oauth" },
+        { id: "slack", name: "Slack", category: "Communication", description: "Messages", url: "https://mcp.slack.com/mcp", transport: "http", auth: "oauth_preregistered", oauth: { app: "slack" },
+          setup: "Slack setup:\n2. Features → Agents: turn on \"Slack Model Context Protocol (MCP) Server\".", setupManifest: '{"oauth_config":{"redirect_urls":["<public URL>/api/v1/connectors/oauth/callback"]}}' },
       ],
       oauthApps: [],
     });
@@ -202,7 +204,7 @@ function fakeInstance() {
       const b = body as { catalogId?: string; url?: string; name?: string; auth?: { type: string }; access?: { agents?: string[] }; transport?: { type: string } };
       const id = b.catalogId ?? "custom";
       const authType = b.catalogId === "stripe" ? "bearer" : b.catalogId ? "oauth" : b.auth?.type ?? "none";
-      const c = { id, name: b.name ?? id, kind: "mcp", transport: { type: b.transport?.type ?? "http", url: b.url ?? `https://${id}.example.com/mcp` }, auth: { type: authType }, access: { agents: b.access?.agents ?? [], polpo: true }, enabled: true, status: authType === "oauth" ? "needs_auth" : "disconnected", secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: false } } };
+      const c = { id, ...(b.catalogId ? { catalogId: b.catalogId } : {}), name: b.name ?? id, kind: "mcp", transport: { type: b.transport?.type ?? "http", url: b.url ?? `https://${id}.example.com/mcp` }, auth: { type: authType }, access: { agents: b.access?.agents ?? [], polpo: true }, enabled: true, status: authType === "oauth" ? "needs_auth" : "disconnected", secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: false } } };
       connectors.set(id, c);
       return okData(c, 201);
     }
@@ -229,6 +231,7 @@ function fakeInstance() {
       if (!action && method === "PATCH") { Object.assign(c, body); return okData(c); }
       if (!action && method === "DELETE") { connectors.delete(c.id as string); return okData({ removed: true }); }
       if (action === "/tools") return okData({ tools: [{ name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "delete_issue", policy: "off" }] });
+      if (action === "/oauth/start" && c.id === "slack") return reply(400, { ok: false, error: 'The "slack" OAuth app is not set up' });
       if (action === "/oauth/start") return okData({ authorizationUrl: `https://auth.example.com/authorize?state=abc&c=${c.id}` });
       if (action === "/test") return okData(c.auth && (c.auth as { type: string }).type === "none" ? { ok: true, status: "connected", tools: [{ name: "ping" }], connector: c } : { ok: false, status: "needs_auth", error: "Not authorized" });
       if (action === "/disconnect") { c.status = "needs_auth"; return okData(c); }
@@ -635,6 +638,19 @@ describe("connectors", () => {
     const custom = await call(deps(f), "polpo_connector_add", { url: "https://mcp.acme.dev/mcp" });
     expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({ url: "https://mcp.acme.dev/mcp", name: "acme.dev", transport: { type: "http" } });
     expect(custom.structuredContent.connector).toMatchObject({ status: expect.any(String) });
+  });
+
+  it("an OAuth app still to set up: adding and connecting give its setup steps and app manifest", async () => {
+    const f = fakeInstance();
+    const added = await call(deps(f), "polpo_connector_add", { catalog_id: "slack" });
+    const text = added.content[0].text as string;
+    expect(text).toContain("cannot be authorized yet");
+    expect(text).toContain("Slack Model Context Protocol (MCP) Server");
+    expect(text).toContain("App manifest");
+    expect(text).toContain("/api/v1/connectors/oauth/callback");
+    expect(added.structuredContent.setup_url).toMatch(/connector=slack/);
+    const connect = await call(deps(f), "polpo_connector_connect", { id: "slack" });
+    expect(connect).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Slack Model Context Protocol (MCP) Server") }] });
   });
 
   it("detects how to connect to a custom server, and adding one uses the detection", async () => {

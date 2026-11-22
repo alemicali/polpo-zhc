@@ -814,6 +814,14 @@ describe("catalog and Client ID Metadata Documents", () => {
     expect(byId("bigquery").oauth).toMatchObject({ app: "google", scopes: ["https://www.googleapis.com/auth/bigquery"] });
     expect(byId("slack").oauth).toEqual({ app: "slack" });
     expect(byId("slack").setup).toContain('"slack" OAuth app');
+    // Slack: the MCP server feature must be turned on in the app, created from a manifest with the user scopes
+    expect(byId("slack").setup).toContain("Features → Agents");
+    expect(byId("slack").setup).toContain("Slack Model Context Protocol (MCP) Server");
+    const manifest = JSON.parse(byId("slack").setupManifest!);
+    expect(manifest.oauth_config.redirect_urls).toEqual(["<public URL>/api/v1/connectors/oauth/callback"]);
+    expect(manifest.oauth_config.scopes.user).toEqual(expect.arrayContaining(["search:read.public", "chat:write", "canvases:write", "lists:write", "users:read.email"]));
+    expect(manifest.oauth_config.scopes.user).toHaveLength(29);
+    expect(byId("figma").setupManifest).toBeUndefined();
     for (const id of ["figma", "square"]) {
       expect(byId(id)).toMatchObject({ auth: "oauth_preregistered", oauth: { app: id } });
     }

@@ -48,6 +48,39 @@ export const GOOGLE_WORKSPACE_SETUP = [
   "5. Save the client id and secret as the \"google\" OAuth app (Connectors → OAuth apps), then connect each service with one click.",
 ].join("\n");
 
+const REDIRECT_PLACEHOLDER = "<public URL>/api/v1/connectors/oauth/callback";
+
+/** User token scopes of the Slack MCP server's tools (search, messages, channels, canvases, lists…). */
+export const SLACK_USER_SCOPES = [
+  "search:read.public", "search:read.private", "search:read.mpim", "search:read.im", "search:read.files", "search:read.users",
+  "emoji:read", "chat:write",
+  "channels:history", "groups:history", "mpim:history", "im:history",
+  "channels:write", "groups:write", "im:write", "mpim:write",
+  "channels:read", "groups:read", "mpim:read",
+  "files:read", "files:write", "users:read", "users:read.email",
+  "reactions:write", "reactions:read", "canvases:read", "canvases:write", "lists:read", "lists:write",
+];
+
+/** Slack app manifest (api.slack.com/apps → Create New App → From a manifest), the redirect URL as a placeholder. */
+export const SLACK_APP_MANIFEST = JSON.stringify({
+  display_information: { name: "Polpo" },
+  oauth_config: { redirect_urls: [REDIRECT_PLACEHOLDER], scopes: { user: SLACK_USER_SCOPES } },
+}, null, 2);
+
+/** Slack's MCP server: a Slack app of your own, with the MCP server feature turned on. */
+export const SLACK_SETUP = [
+  "Slack's MCP server needs a Slack app of your own (internal to your workspace, or published in the Slack Marketplace), set up once:",
+  "1. At https://api.slack.com/apps choose Create New App → From a manifest, pick the workspace and paste the manifest shown here (the user token scopes and this instance's redirect URL are in it). Without a manifest: OAuth & Permissions → add the redirect URL " + REDIRECT_PLACEHOLDER + " and the user token scopes listed in the manifest.",
+  "2. In the app's settings open Features → Agents and turn on \"Slack Model Context Protocol (MCP) Server\". Without it the first connection fails with \"App is not enabled for Slack MCP server access\".",
+  "3. Install the app to the workspace (a workspace admin may have to approve it).",
+  "4. From Basic Information → App Credentials save the Client ID and Client Secret as the \"slack\" OAuth app, then connect.",
+].join("\n");
+
+/** Setup steps (and an app manifest) of OAuth apps that need more than the generic steps. */
+const VENDOR_SETUP: Record<string, { setup: string; manifest?: string }> = {
+  slack: { setup: SLACK_SETUP, manifest: SLACK_APP_MANIFEST },
+};
+
 /** Fallback scopes when the notes do not list them. */
 const GOOGLE_SCOPES: Record<string, string[]> = {
   gmail: ["gmail.readonly", "gmail.compose", "gmail.modify"],
@@ -149,6 +182,10 @@ export function normalizeCatalogEntry(raw: RawCatalogEntry): ConnectorCatalogEnt
         extraAuthParams: { access_type: "offline", prompt: "consent" },
       };
       entry.setup = GOOGLE_WORKSPACE_SETUP;
+    } else if (VENDOR_SETUP[raw.id]) {
+      entry.oauth = { app: raw.id };
+      entry.setup = VENDOR_SETUP[raw.id]!.setup;
+      if (VENDOR_SETUP[raw.id]!.manifest) entry.setupManifest = VENDOR_SETUP[raw.id]!.manifest;
     } else {
       entry.oauth = { app: raw.id };
       entry.setup = [

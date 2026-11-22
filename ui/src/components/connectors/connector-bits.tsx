@@ -1,9 +1,27 @@
 /** Small pieces shared by the Connectors page, the detail sheet and the agent page. */
-import { AlertTriangle, CheckCircle2, CircleDashed, KeyRound, Loader2, PauseCircle, RotateCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, KeyRound, Loader2, PauseCircle, RotateCw } from "lucide-react";
+import { errorActionUrl } from "@polpo-ai/core/error-action";
 import { Switch as SwitchPrimitive } from "radix-ui";
 import { Badge } from "@/components/ui/badge";
 import { STATE_LABEL, type ConnectorCardState } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
+
+/**
+ * "Fix it": the link an error message tells the person to open (e.g. Slack's "Please enable it
+ * here: https://api.slack.com/apps/…/app-assistant"). Nothing when the message has none.
+ */
+export function FixItLink({ message, className }: { message?: string | null; className?: string }) {
+  const url = errorActionUrl(message);
+  if (!url) return null;
+  return (
+    <a
+      href={url} target="_blank" rel="noreferrer noopener" title={url}
+      className={cn("inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline", className)}
+    >
+      Fix it on {new URL(url).hostname} <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+}
 
 /**
  * The shadcn switch (Radix primitive, the look's tokens: primary when on, input when off), with a
