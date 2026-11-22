@@ -12,7 +12,7 @@
  * These are core tools — always available to agents, no activation needed.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync,

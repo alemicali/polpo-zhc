@@ -8,7 +8,7 @@
  *   text capped at MAX_RESULT_TEXT (the rest is cut with a note).
  */
 import { createHash } from "node:crypto";
-import { Type, type TSchema } from "@sinclair/typebox";
+import { Type, type TSchema } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { matchToolPattern } from "../tools/system-tools.js";
 

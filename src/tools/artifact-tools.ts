@@ -5,7 +5,7 @@
  * Agents get them with `artifact_*` in allowedTools; they change only their own artifacts. Polpo
  * changes any. An html artifact reads data through the `polpo` bridge with its author's rights.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { applyArtifactEdits, type Artifact, type ArtifactStore, type ArtifactType } from "@polpo-ai/core/artifacts";

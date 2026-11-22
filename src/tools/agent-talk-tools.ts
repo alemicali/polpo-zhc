@@ -2,7 +2,7 @@
  * ask_agent and message_agent: an agent (or Polpo) talks to another agent during a chat, without a
  * background task. See src/server/agent-talk.ts.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ConversationCheckTarget } from "@polpo-ai/core";
 

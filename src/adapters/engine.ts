@@ -38,6 +38,7 @@ export function createActivity(): AgentActivity {
   };
 }
 import { Agent } from "@earendil-works/pi-agent-core";
+import { cleanupSessionResources } from "@earendil-works/pi-ai";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
@@ -926,6 +927,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       await workspace?.dispose().catch(() => undefined);
       await browserNetwork?.close().catch(() => undefined);
       await connectorManager?.closeAll().catch(() => undefined);
+      // provider session state keyed by the task id (Anthropic message threads, Codex sockets)
+      cleanupSessionResources(task.id);
     }
   })();
 
