@@ -10,7 +10,7 @@
  * Same proven pattern as src/assessment/llm-review.ts.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool, Message } from "@earendil-works/pi-ai";
 import { resolveModel, completeSimpleWithAuth, buildStreamOpts } from "./pi-client.js";
 import type { ReasoningLevel } from "../core/types.js";

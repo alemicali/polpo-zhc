@@ -2,7 +2,7 @@
  * Voice replies: whether chat answers on Telegram are also sent as a voice message. Off by default;
  * an agent (or Polpo) changes its own preference when someone asks ("answer me with voice notes").
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { VoiceReplyMode } from "@polpo-ai/core";
 

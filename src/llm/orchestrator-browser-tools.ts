@@ -15,7 +15,7 @@
  * with @ref ids the model uses to target click/fill.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";

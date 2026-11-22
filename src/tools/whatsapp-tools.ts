@@ -6,7 +6,7 @@
  * Messages are stored locally in `.polpo/whatsapp.db`.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { basename, extname, resolve } from "node:path";

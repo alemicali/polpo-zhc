@@ -18,7 +18,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, withHostCopy, writeBytes } from "./tool-fs.js";

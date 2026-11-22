@@ -13,7 +13,7 @@
 
 import { resolve, extname } from "node:path";
 import { readFile } from "node:fs/promises";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { assertPathAllowed } from "./path-sandbox.js";

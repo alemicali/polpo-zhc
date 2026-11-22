@@ -4,7 +4,7 @@
  * release is out". The same tools serve agents (agent chat) and Polpo (orchestrator tools); they send
  * to any Telegram group, topic or person the bots have met, wherever they were asked from.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { CHECK_NOTHING_TO_REPORT, MIN_CHECK_INTERVAL_MINUTES, type ConversationCheck, type ConversationCheckTarget } from "@polpo-ai/core";
 import { describeChats, type ChatBot, type ReachableChat } from "../core/chat-directory.js";

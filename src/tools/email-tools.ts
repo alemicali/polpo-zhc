@@ -19,7 +19,7 @@
 
 import { resolve, basename, join } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { offloadToolOutput, resolveToolOutputDir } from "./tool-output.js";

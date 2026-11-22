@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **pi-ai and pi-agent-core 1.6** (from 1.0.4). The raw API subpaths were already on `@earendil-works/pi-ai/api/<api-id>`; what changed for Polpo:
+  - Tool schemas: pi 1.6 types tool arguments through pi-schema, which understands TypeBox 1.x (`typebox`), not `@sinclair/typebox` 0.34. Every built-in tool now imports `Type` from `typebox` (same JSON Schema on the wire); `@sinclair/typebox` is no longer a dependency.
+  - Provider attribution: pi-agent-core 1.6 attributes agent-loop requests to pi (OpenRouter `HTTP-Referer`/`X-OpenRouter-Title`, NVIDIA invoke origin, OpenCode client header). Polpo turns that off, so requests carry no attribution headers, as before.
+  - Anthropic message threads: task runs (session id = task id) and chats (session id) on `api.anthropic.com` now continue the server-side thread and send only the new messages (pi's `message-threads` beta; the full request is sent whenever anything earlier changed). The thread state of a task is freed when its run ends.
+  - Switching model mid-conversation drops the earlier model's thinking blocks instead of replaying them as `<thinking>` text.
+  - OpenAI-compatible custom endpoints (not `api.openai.com`) receive the system prompt as a `system` message instead of `developer` for reasoning models (set `compat.supportsDeveloperRole` to change it).
+  - Qwen Token Plan: the new `qwen-token-plan-individual-cn` provider; pi reads the per-plan keys `QWEN_TOKEN_PLAN_{TEAM,INDIVIDUAL}[_CN]_API_KEY` first and the old `QWEN_TOKEN_PLAN[_CN]_API_KEY` as fallback.
+  - `usage.cost.total` is the provider-billed cost when the provider reports one (OpenRouter), else the catalog estimate.
+
 ## [0.6.1] — 2026-11-22 — MCP permissions and solid schedulers
 
 ### Added
