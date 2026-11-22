@@ -661,28 +661,31 @@ describe("OAuth connectors through the API", () => {
 });
 
 describe("Polpo's connector tools", () => {
-  it("adds from a custom URL, lists, changes access, and removes only when confirmed", async () => {
+  // Adding one is connector_add, the MCP server's tool run in process (polpo-mcp-bridge.ts; see mcp-primitives
+  // and polpo-tools-alignment tests): it never takes a token in chat.
+  it("lists, changes access, and removes only when confirmed", async () => {
     const { manager } = setup();
     const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => ["alice", "bob"] };
-    const added = await executeConnectorTool("connector_add", { url: `${base}/mcp`, name: "Fake", agents: ["alice"] }, ctx);
-    expect(added).toMatch(/Added Fake \[fake\].*Connected: 5 tools/s);
-    expect(await executeConnectorTool("connector_add", { url: `${base}/mcp`, name: "X", agents: ["ghost"] }, ctx)).toMatch(/Unknown agents: ghost/);
+    await add(manager, { url: `${base}/mcp`, name: "Fake", access: { agents: ["alice"] } });
+    expect(await executeConnectorTool("connector_connect", { id: "fake" }, ctx)).toMatch(/Fake is connected: 5 tools/);
     expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/Fake \[fake\] connected, 5 tools; auth none; used by agents: alice \+ Polpo/);
+    expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["ghost"] }, ctx)).toMatch(/Unknown agents: ghost/);
     expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["bob"], polpo: false }, ctx)).toMatch(/agents: alice, bob;/);
     expect(manager.store.get("fake")?.access).toEqual({ agents: ["alice", "bob"], polpo: false });
     expect(await executeConnectorTool("connector_remove", { id: "fake" }, ctx)).toMatch(/confirm/);
     expect(manager.store.get("fake")).toBeDefined();
     expect(await executeConnectorTool("connector_remove", { id: "fake", confirm: true }, ctx)).toBe("Removed Fake.");
     expect(manager.store.get("fake")).toBeUndefined();
+    expect(await executeConnectorTool("connector_add", { url: `${base}/mcp` }, ctx)).toMatch(/Unknown tool/);
   });
 
   it("returns the OAuth link for an OAuth connector", async () => {
     const { manager } = setup();
     const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => [] };
-    const out = await executeConnectorTool("connector_add", { url: `${base}/oauth-mcp`, name: "OA", auth: "oauth" }, ctx);
+    await add(manager, { url: `${base}/oauth-mcp`, name: "OA", auth: { type: "oauth" } });
+    const out = await executeConnectorTool("connector_connect", { id: "oa" }, ctx);
     expect(out).toMatch(/must open this link/);
     expect(out).toContain(`${base}/authorize?`);
-    expect(await executeConnectorTool("connector_add", { url: "http://127.0.0.1:9/x", transport: "http", name: "S" }, { ...ctx, settings: {} })).toMatch(/https/);
   });
 });
 

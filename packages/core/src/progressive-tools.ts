@@ -76,10 +76,10 @@ export const AGENT_TOOL_GROUPS: ToolGroupRule[] = [
 /** Optional areas of Polpo's own tools (src/llm/orchestrator-tools.ts): everything else stays on. */
 export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
   {
-    id: "mission-editing", label: "Mission editing, step by step (tasks, checkpoints, delays, quality gates, team, notifications of an existing mission)",
+    id: "mission-editing", label: "Mission editing, step by step (tasks, checkpoints, delays, quality gates, team, notifications of an existing mission), and waiting for a mission to finish",
     prefixes: ["add_mission_", "remove_mission_"],
     names: ["update_mission_task", "update_mission_checkpoint", "update_mission_delay", "update_mission_quality_gate",
-      "update_mission_team_member", "update_mission_notifications", "reorder_mission_tasks"],
+      "update_mission_team_member", "update_mission_notifications", "reorder_mission_tasks", "mission_wait"],
   },
   {
     id: "apps", label: "Apps (registry, services, deployments, domains)",
@@ -94,7 +94,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     id: "skills", label: "Skills and playbooks",
     names: ["list_orchestrator_skills", "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
       "install_orchestrator_skill", "list_agent_skills", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
-      "search_skills", "get_skill", "tag_skill", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
+      "search_skills", "get_skill", "tag_skill", "skill_update", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
       "run_playbook", "delete_playbook"],
   },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
@@ -105,9 +105,38 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["browser_"], names: ["egress_status"],
   },
   {
-    id: "computers", label: "Computers and sandboxes",
+    id: "computers", label: "Computers (persistent machines: create or change with lifecycle, network, egress; start, stop, restart, reset, delete; hibernation) and sandboxes",
     prefixes: ["computer_"], names: ["computers_list", "sandbox_status"],
   },
+  {
+    id: "harnesses", label: "Agent harnesses: Claude Code and Codex settings (enable, auth: API key, Bedrock, Vertex; credentials via setup link) and their sessions (list, stop, reset)",
+    names: ["harnesses_get", "harnesses_update", "harness_sessions_list", "harness_session_control"],
+  },
+  {
+    id: "connectors", label: "Connectors: catalog search, settings (name, on/off, tool policy allow/ask/off, access), test, sign out",
+    names: ["connector_catalog", "connector_update", "connector_test", "connector_disconnect"],
+  },
+  {
+    id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, Telegram verify, invites, pairing, peers, allowlist, WhatsApp QR sign-in",
+    prefixes: ["channel_"], names: ["channels_list"],
+  },
+  {
+    id: "appearance", label: "Appearance and branding: product name, tagline, logos (light, dark, frame), theme, palette, design tokens, fonts; agent avatars",
+    names: ["branding_get", "branding_update", "agent_avatar_set"],
+  },
+  {
+    id: "settings", label: "Settings: general (orchestrator name, Polpo's model, egress proxies…), LLM providers and custom ones, sandbox, policies and approval gates",
+    names: ["config_update", "providers_list", "provider_disconnect", "custom_providers_list", "custom_provider_save", "custom_provider_remove",
+      "sandbox_get", "sandbox_update", "sandbox_provider_test", "policies_get", "policies_update", "approval_gate_save", "approval_gate_delete"],
+  },
+  {
+    id: "access", label: "Members (invite, remove) and MCP access (who is connected to Polpo's MCP server, revoke)",
+    names: ["members_list", "members_invite", "members_remove", "mcp_access_list", "mcp_grant_revoke"],
+  },
+  { id: "sync", label: "Cloud sync (R2 backup of the instance): status, settings, test, run, disconnect", prefixes: ["sync_"] },
+  { id: "rooms", label: "Rooms: group chats of people and agents (list, create, change, delete, read, post, wait for replies)", prefixes: ["room_"], names: ["rooms_list"] },
+  { id: "chats", label: "Chat sessions: list, read, rename, star, delete", prefixes: ["chat_"] },
+  { id: "automation", label: "Automation extras: run a schedule now, change or delete a recurring check", names: ["schedule_run", "check_update", "check_delete"] },
   {
     id: "learning", label: "Agent learning and drive",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],

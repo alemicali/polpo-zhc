@@ -48,6 +48,7 @@ import {
 import { getCookie } from "hono/cookie";
 import { createHmac } from "node:crypto";
 import { ALL_SCOPES, SCOPES, handleMcpRequest, hasScope, resolveToolsets, toolScopeMatrix, type McpPrincipal } from "./mcp.js";
+import { setPolpoApi } from "../llm/polpo-mcp-bridge.js";
 import {
   authorizationServerMetadata, consentPage, consentScopes, CONSENT_SCOPE_FIELD, OAUTH_DEFAULT_SCOPE, OAuthError, OAuthServer, protectedResourceMetadata,
 } from "./oauth.js";
@@ -830,6 +831,29 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     if (!instanceAuth && !(await mcpKeys.any())) return { kind: "open", actor: "mcp", scopes: [...ALL_SCOPES] };
     return null;
   };
+  // The REST API called in process, by a client already authenticated (the MCP tools, and Polpo's own
+  // tools that run them: src/llm/polpo-mcp-bridge.ts); a FormData or binary body goes as is, anything else as JSON.
+  const inProcessApi = async (method: string, path: string, body?: unknown, headers?: Record<string, string>) => {
+    const form = body instanceof FormData;
+    const binary = body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
+    const res = await app.request(path, {
+      method,
+      headers: {
+        ...(body !== undefined && !form && !binary ? { "content-type": "application/json" } : {}),
+        ...trustedApiCallHeaders(),
+        ...(opts?.apiKeys?.[0] ? { authorization: `Bearer ${opts.apiKeys[0]}` } : {}),
+        ...headers,
+      },
+      ...(body !== undefined ? { body: form || binary ? body as BodyInit : JSON.stringify(body) } : {}),
+    });
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const raw = new TextDecoder().decode(bytes);
+    let parsed: unknown = raw;
+    try { parsed = JSON.parse(raw); } catch { /* not JSON */ }
+    return { status: res.status, body: parsed, headers: res.headers, bytes };
+  };
+  // Polpo's chat (web, channels) runs the MCP server's tools with it: everything MCP can do, Polpo can
+  if (orchestrator) setPolpoApi(inProcessApi);
   app.all("/mcp", async (c) => {
     const principal = await mcpPrincipal(c);
     const resourceMetadataUrl = `${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp`;
@@ -849,25 +873,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       publicUrl: publicOrigin(c),
       // where the dashboard is, when not on the API's origin (the UI server on its own port)
       dashboardUrl: process.env.POLPO_DASHBOARD_URL?.trim() || process.env.POLPO_UI_PUBLIC_URL?.trim() || undefined,
-      api: async (method, path, body, headers) => {
-        const form = body instanceof FormData;
-        const binary = body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
-        const res = await app.request(path, {
-          method,
-          headers: {
-            ...(body !== undefined && !form && !binary ? { "content-type": "application/json" } : {}),
-            ...trustedApiCallHeaders(),
-            ...(opts?.apiKeys?.[0] ? { authorization: `Bearer ${opts.apiKeys[0]}` } : {}),
-            ...headers,
-          },
-          ...(body !== undefined ? { body: form || binary ? body as BodyInit : JSON.stringify(body) } : {}),
-        });
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        const raw = new TextDecoder().decode(bytes);
-        let parsed: unknown = raw;
-        try { parsed = JSON.parse(raw); } catch { /* not JSON */ }
-        return { status: res.status, body: parsed, headers: res.headers, bytes };
-      },
+      api: inProcessApi,
     }));
   });
 
