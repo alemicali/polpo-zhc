@@ -74,7 +74,7 @@ export function McpAccessSection() {
           Apps (Claude, ChatGPT, Claude Code…) allowed on the consent page to use this instance through its MCP connector, with the scopes they were given.
           Revoking one disconnects it at once; it can connect again, asking you anew.
         </p>
-        <Card className="bg-card/80 border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="p-0">
             {access.grants.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">No app is connected.</p>
@@ -120,7 +120,7 @@ export function McpAccessSection() {
           Keys that open the connector directly. Their values are never shown here. Narrow <code className="font-mono">POLPO_MCP_KEY</code> with{" "}
           <code className="font-mono">POLPO_MCP_KEY_SCOPES</code>, or add named keys in <code className="font-mono">settings.mcp.keys</code> (values in the vault).
         </p>
-        <Card className="bg-card/80 border-border/40 py-0 gap-0">
+        <Card className="py-0 gap-0">
           <CardContent className="p-0">
             {access.keys.length === 0 ? (
               <p className="px-4 py-6 text-center text-xs text-muted-foreground">No key: only signed-in people and connected apps use the connector.</p>

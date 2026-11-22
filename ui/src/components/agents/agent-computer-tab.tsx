@@ -117,7 +117,7 @@ export function AgentComputerTab() {
     <ScrollArea className="h-full">
       <div className="space-y-4 pb-bottom-nav pr-4 lg:pb-4">
         {/* Where it works now */}
-        <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-header">
+        <Card className="gap-0 py-0" data-testid="agent-computer-header">
           <CardContent className="space-y-3 px-4 py-3 text-xs">
             <div className="flex items-center gap-1.5 text-label text-muted-foreground">
               <Monitor className="h-3 w-3" /> Works on
@@ -219,7 +219,7 @@ export function AgentComputerTab() {
 
         {/* Add one */}
         {!loading && (
-          <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-computer-add">
+          <Card className="gap-0 py-0" data-testid="agent-computer-add">
             <CardContent className="space-y-3 px-4 py-3 text-xs">
               <div className="text-label text-muted-foreground">Add a computer</div>
               <div className="flex flex-wrap items-center gap-2">

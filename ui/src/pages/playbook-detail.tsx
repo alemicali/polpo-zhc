@@ -193,19 +193,19 @@ export function PlaybookDetailPage() {
       {/* Tabs */}
       <Tabs defaultValue="graph" className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
-          <TabsTrigger value="graph" className="gap-1.5 text-xs">
+          <TabsTrigger value="graph" className="text-small">
             <Workflow className="h-3.5 w-3.5" />
             Graph
           </TabsTrigger>
-          <TabsTrigger value="tasks" className="gap-1.5 text-xs">
+          <TabsTrigger value="tasks" className="text-small">
             <ListChecks className="h-3.5 w-3.5" />
             Tasks
           </TabsTrigger>
-          <TabsTrigger value="parameters" className="gap-1.5 text-xs">
+          <TabsTrigger value="parameters" className="text-small">
             <Hash className="h-3.5 w-3.5" />
             Parameters
           </TabsTrigger>
-          <TabsTrigger value="json" className="gap-1.5 text-xs">
+          <TabsTrigger value="json" className="text-small">
             <FileJson className="h-3.5 w-3.5" />
             Raw JSON
           </TabsTrigger>
@@ -266,7 +266,7 @@ export function PlaybookDetailPage() {
           <ScrollArea className="h-full">
             <div className="max-w-2xl mx-auto py-4 pr-4 space-y-4">
               {params.length === 0 ? (
-                <Card className="bg-card/60 border-border/40">
+                <Card>
                   <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                     <Hash className="h-8 w-8 mb-3 text-muted-foreground/30" />
                     <p className="text-sm">This playbook takes no parameters</p>

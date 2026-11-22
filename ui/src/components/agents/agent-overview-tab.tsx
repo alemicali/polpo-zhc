@@ -30,7 +30,7 @@ export function AgentOverviewTab() {
         {identity?.bio && (
           <div>
             <SectionHeader title="Bio" icon={MessageSquare} />
-            <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+            <Card className="py-0 gap-0">
               <CardContent className="pt-3 pb-3">
                 <p className="text-sm text-muted-foreground leading-relaxed">{identity.bio}</p>
               </CardContent>
@@ -41,7 +41,7 @@ export function AgentOverviewTab() {
         {/* Role */}
         <div>
           <SectionHeader title="Role" icon={Shield} />
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="pt-3 pb-3">
               {agent.role ? (
                 <MessageResponse>{agent.role}</MessageResponse>
@@ -55,7 +55,7 @@ export function AgentOverviewTab() {
         {/* Personality & Tone */}
         <div>
           <SectionHeader title="Personality & Tone" icon={Heart} />
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="pt-3 pb-3 divide-y divide-border/20">
               <div className="pb-3">
                 <div className="flex items-center gap-1.5 mb-1">
@@ -86,7 +86,7 @@ export function AgentOverviewTab() {
         {/* Responsibilities */}
         <div>
           <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+          <Card className="py-0 gap-0">
             <CardContent className="pt-3 pb-3">
               {identity?.responsibilities && identity.responsibilities.length > 0 ? (
                 <div className="space-y-2">

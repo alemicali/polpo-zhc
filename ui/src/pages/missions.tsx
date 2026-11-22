@@ -7,6 +7,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -75,27 +76,17 @@ function ScheduleTypeFilter({
   onChange: (v: ScheduleType) => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 p-0.5">
+    <SegmentedControl size="sm" aria-label="Schedule type" value={value} onValueChange={onChange}>
       {scheduleTypeOptions.map((opt) => {
         const Icon = opt.icon;
-        const active = value === opt.value;
         return (
-          <button
-            key={opt.value}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-all",
-              active
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => onChange(opt.value)}
-          >
-            <Icon className="h-3 w-3" />
+          <ToggleGroupItem key={opt.value} value={opt.value}>
+            <Icon className="h-4 w-4" />
             {opt.label}
-          </button>
+          </ToggleGroupItem>
         );
       })}
-    </div>
+    </SegmentedControl>
   );
 }
 
@@ -197,7 +188,7 @@ function MissionRow({
     <div
       className={cn(
         "group relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg",
-        "bg-card/80 backdrop-blur-sm border border-border/40",
+        "bg-card border border-border shadow-card",
         "transition-all duration-200 hover:border-primary/20 cursor-pointer",
         isActive && "border-l-2 border-l-primary/60 glow-cyan",
         mission.status === "paused" && "border-l-2 border-l-warning/60 glow-amber",
@@ -580,7 +571,7 @@ export function MissionsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search missions..."
-            className="pl-8 h-8 text-sm bg-input/50 backdrop-blur-sm border-border/40 focus:border-primary/50"
+            className="pl-8 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -688,7 +679,7 @@ export function MissionsPage() {
       )}
 
       {missions.length === 0 ? (
-        <Card className="bg-card/60 backdrop-blur-sm border-border/40">
+        <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <Target className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">No missions yet</p>
