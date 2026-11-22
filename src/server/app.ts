@@ -71,6 +71,7 @@ import { preferencesRoutes } from "./routes/preferences.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
 import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
+import { harnessUsageByTask } from "@polpo-ai/core/task-cost";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { harnessRoutes } from "./routes/harnesses.js";
 import { harnessSessionViews } from "../harness/control.js";
@@ -1272,6 +1273,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/token-usage", tokenUsageRoutes(activePolpoDir, () => o.getRunStore()));
 
+  /**
+   * Harness cost per task id from the token-usage records (agent_harness, the task id as session),
+   * which are not capped: a task keeps only its latest runs, these give back the dropped ones'.
+   */
+  const harnessUsageOf = async (taskIds: string[]) => {
+    const store = databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir());
+    return harnessUsageByTask(await store.list("all").catch(() => []), taskIds);
+  };
+
   authed.route("/tasks", taskRoutes(() => ({
     taskStore: o.getStore(),
     wakeSupervisor: opts?.wakeSupervisor,
@@ -1288,6 +1298,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateTaskExpectations: (id: string, exp: any) => o.updateTaskExpectations(id, exp),
     updateTaskToolScope: (id: string, scope: unknown) => o.updateTaskToolScope(id, scope),
     taskToolScopeStale: (task: any) => o.taskToolScopeStale(task),
+    getTaskHarnessUsage: async (id: string) => (await harnessUsageOf([id]))[id],
   })));
 
   authed.route("/missions", missionRoutes(() => ({
@@ -1325,15 +1336,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (!cost?.partialTaskIds?.length) return cost;
       // a task kept only its latest runs: its harness cost comes back from the usage records
       // (agent_harness, the task id as session), which are not capped
-      const ids = new Set(cost.partialTaskIds);
-      const store = databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir());
-      const harnessUsage: Record<string, { usd: number; tokens: number }> = {};
-      for (const r of await store.list("all").catch(() => [])) {
-        if (r.source !== "agent_harness" || !r.sessionId || !ids.has(r.sessionId)) continue;
-        const u = (harnessUsage[r.sessionId] ??= { usd: 0, tokens: 0 });
-        u.usd += Number.isFinite(r.cost) ? r.cost : 0;
-        u.tokens += Number.isFinite(r.totalTokens) ? r.totalTokens : 0;
-      }
+      const harnessUsage = await harnessUsageOf(cost.partialTaskIds);
       return Object.keys(harnessUsage).length ? o.getMissionCost(mid, { harnessUsage }) : cost;
     },
     getMissionCostSummaries: (missions: any[]) => o.getMissionCostSummaries(missions),

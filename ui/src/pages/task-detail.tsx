@@ -78,7 +78,8 @@ import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { RunContextCard } from "@/components/shared/run-context";
+import { RunContextCard, TaskCostBadge } from "@/components/shared/run-context";
+import { taskCostOf } from "@/lib/task-cost";
 import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
 import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
@@ -921,6 +922,8 @@ export function TaskDetailPage() {
   const StatusIcon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
+  // what every run cost in all (retries, continuations, directions), not just the latest
+  const totalCost = taskCostOf(task);
 
   // Show dedicated Assessment tab when we have rich review data (exploration traces)
   // OR when an assessment is actively running (review state / live progress)
@@ -945,6 +948,7 @@ export function TaskDetailPage() {
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="font-heading w-full truncate text-h3 sm:w-auto sm:text-h2">{task.title}</h1>
               <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)}>{cfg.label}</Badge>
+              <TaskCostBadge cost={totalCost} size="md" />
               {phase && (
                 <Badge variant="outline" className={cn("text-xs gap-1 shrink-0", phase.color)}>
                   <phase.icon className="h-3 w-3" />
@@ -1024,7 +1028,7 @@ export function TaskDetailPage() {
       </div>
 
       {/* Where and with what it runs: engine, computer, egress, session, cost (and earlier runs) */}
-      <RunContextCard runs={task.runs} computers={computers} />
+      <RunContextCard runs={task.runs} cost={totalCost} computers={computers} />
 
       {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
       <TaskToolScopeCard
