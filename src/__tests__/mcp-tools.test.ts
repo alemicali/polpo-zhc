@@ -359,6 +359,25 @@ describe("tasks", () => {
     expect((await call(deps(f), "polpo_task_get", { id: "t1", activity: 0 })).structuredContent.runs).toEqual([]);
   });
 
+  it("what every run of a task cost in all (not the latest): polpo_task_get text and structured, polpo_tasks_list rows", async () => {
+    const f = fakeInstance();
+    const base = { computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    const runs = [
+      { ...base, runId: "k1", startedAt: "2026-11-22T10:00:00Z", status: "failed", engine: "claude-code", cost: { harnessUsd: 1.2, tokens: 9000 } },
+      { ...base, runId: "k2", startedAt: "2026-11-22T10:05:00Z", status: "completed", engine: "claude-code", continuation: true, cost: { harnessUsd: 0.3, tokens: 1000 } },
+    ];
+    f.tasks.set("t7", { id: "t7", title: "Costly task", status: "done", assignTo: "coder", description: "x", updatedAt: "2026-11-22T10:06:00Z", runs } as any);
+    const got = await call(deps(f), "polpo_task_get", { id: "t7", activity: 0 });
+    expectValidOutput(got);
+    expect(got.structuredContent.cost).toMatchObject({ usd: 1.5, harnessUsd: 1.5, tokens: 10000, runs: 2, lastRunUsd: 0.3, partial: false });
+    expect(got.structuredContent.cost.perRun.map((r: any) => [r.runId, r.usd])).toEqual([["k1", 1.2], ["k2", 0.3]]);
+    expect(got.content[0].text).toMatch(/cost: \$1\.50 in all · 2 runs · latest \$0\.30 · 10,000 tokens/);
+    const list = await call(deps(f), "polpo_tasks_list", {});
+    expectValidOutput(list);
+    expect(list.structuredContent.items.find((t: any) => t.id === "t7").cost).toEqual({ usd: 1.5, tokens: 10000, runs: 2 });
+    expect(list.content[0].text).toMatch(/t7 \[done\] Costly task → coder · \$1\.50 over 2 runs/);
+  });
+
   it("pages the activity backwards from the newest", async () => {
     const f = fakeInstance();
     const last = await call(deps(f), "polpo_task_logs", { id: "t2", limit: 20 });

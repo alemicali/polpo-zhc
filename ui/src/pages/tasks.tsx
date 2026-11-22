@@ -63,7 +63,8 @@ import { cn } from "@/lib/utils";
 import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { TaskEngineBadge } from "@/components/shared/run-context";
+import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context";
+import { taskCostSummaryOf } from "@/lib/task-cost";
 import {
   useTasksPageState,
   useTaskActions,
@@ -230,6 +231,9 @@ const TaskRow = memo(function TaskRow({
           <RotateCcw className="h-2.5 w-2.5" />{task.retries}
         </span>
       )}
+
+      {/* Total cost: every run (retries, continuations), not the latest */}
+      {fields.cost && <TaskCostBadge cost={taskCostSummaryOf(task)} />}
 
       {/* Live activity (compact) */}
       {process && (
@@ -539,6 +543,7 @@ const TaskCard = memo(function TaskCard({
                 <RotateCcw className="h-2.5 w-2.5" />{task.retries}
               </span>
             )}
+            {fields.cost && <TaskCostBadge cost={taskCostSummaryOf(task)} />}
             {fields.expectations && task.expectations.length > 0 && !assessment && (
               <span className="inline-flex items-center gap-0.5 text-micro text-muted-foreground">
                 <Wrench className="h-2.5 w-2.5" />{task.expectations.length}
@@ -1061,6 +1066,7 @@ const CARD_FIELD_LABELS: Record<keyof CardFieldVisibility, string> = {
   time: "Updated time",
   score: "Assessment score",
   retries: "Retry count",
+  cost: "Total cost",
   deps: "Dependencies",
   expectations: "Expectations",
   phase: "Phase badge",
@@ -1068,7 +1074,7 @@ const CARD_FIELD_LABELS: Record<keyof CardFieldVisibility, string> = {
 
 const CARD_FIELD_ORDER: (keyof CardFieldVisibility)[] = [
   "avatar", "identityName", "agentId", "mission", "time",
-  "phase", "score", "deps", "retries", "expectations",
+  "phase", "score", "deps", "retries", "cost", "expectations",
 ];
 
 function CardFieldSettings({

@@ -76,7 +76,8 @@ import {
   type MissionTaskDef,
 } from "@/lib/mission-data";
 import { withMeasured } from "@/lib/graph-nodes";
-import { TaskEngineBadge } from "@/components/shared/run-context";
+import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context";
+import { taskCostSummaryOf } from "@/lib/task-cost";
 import { MissionBudgetBanner, MissionCostButton } from "@/components/missions/mission-cost";
 import { useMissionCost } from "@/hooks/use-mission-cost";
 
@@ -306,6 +307,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             </Badge>
           )}
           {liveTask && <TaskEngineBadge task={liveTask} size={12} />}
+          {liveTask && <TaskCostBadge cost={taskCostSummaryOf(liveTask)} />}
           {taskDef.dependsOn && taskDef.dependsOn.length > 0 && (
             <Badge variant="secondary" className="text-micro px-1 py-0 gap-0.5">
               <GitBranch className="h-2 w-2" />
@@ -1322,6 +1324,7 @@ export function TaskStepCard({
                 </span>
               )}
               {liveTask && <TaskEngineBadge task={liveTask} size={13} />}
+              {liveTask && <TaskCostBadge cost={taskCostSummaryOf(liveTask)} />}
               {taskDef.dependsOn && taskDef.dependsOn.length > 0 && (
                 <span className="flex items-center gap-1">
                   <GitBranch className="h-3 w-3" />
@@ -1634,6 +1637,7 @@ function RunsTimeline({
                       <TaskIcon className={cn("h-3.5 w-3.5 shrink-0", cfg?.color ?? "text-muted-foreground", task.status === "in_progress" && "animate-spin")} />
                       <span className="text-sm truncate flex-1">{task.title}</span>
                       <TaskEngineBadge task={task} size={12} />
+                      <TaskCostBadge cost={taskCostSummaryOf(task)} />
                       <span className="text-micro text-muted-foreground">{task.assignTo}</span>
                       <Badge variant="outline" className={cn("text-micro", cfg?.color ?? "")}>
                         {cfg?.label ?? task.status}

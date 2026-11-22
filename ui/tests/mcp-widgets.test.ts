@@ -44,6 +44,24 @@ describe("the work card (MCP App)", () => {
     expect(root.textContent).not.toContain("resumed session");
   });
 
+  it("a task run more than once: the total of every run and the latest's; full screen lists each run with its cost", () => {
+    const root = document.createElement("div");
+    const retried = { ...failed, runs: [{ ...run, runId: "r0", cost: { harnessUsd: 1.1 } }, { ...run, runId: "r1", engine: "polpo", model: "anthropic:claude-opus-4-5", auth: undefined, cost: { modelUsd: 0.2 } }, run] };
+    const card = buildTaskCard({ task: retried as never, tasks: [done, retried] as never, now: new Date(), key });
+    renderView(root, env(card));
+    const line = root.querySelector(".cost-task")!;
+    expect(line.textContent).toContain("In all, 3 runs: $1.72");
+    expect(line.textContent).toContain("latest $0.42");
+    expect([...line.querySelectorAll("[data-brand]")].map((e) => e.getAttribute("data-brand"))).toEqual(["claude-code", "polpo"]);
+    renderView(root, env(card, { full: true }));
+    const costs = [...root.querySelectorAll(".run-cost")].map((e) => e.textContent);
+    expect(costs).toEqual(expect.arrayContaining(["$0.42 of $2", "$0.20 of $2", "$1.10 of $2"]));
+    // Italian
+    renderView(root, env(card, { locale: "it-IT" }));
+    expect(root.querySelector(".cost-task")!.textContent).toContain("Totale 3 esecuzioni: $1.72");
+    expect(root.querySelector(".cost-task")!.textContent).toContain("ultima $0.42");
+  });
+
   it("full screen adds the egress (Tailscale) and the session; the buttons call the host", () => {
     const root = document.createElement("div");
     const card = buildTaskCard({ task: failed as never, tasks: [done, failed] as never, now: new Date(), key });

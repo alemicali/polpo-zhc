@@ -300,6 +300,29 @@ describe("Tasks API", () => {
     expect(row.failure).toBeUndefined();
   });
 
+  test("what every run of a task cost in all (not the latest): the breakdown on GET /tasks/:id, the total in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Cost task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const base = { computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    await orchestrator.getStore().updateTask(id, { runs: [
+      { ...base, runId: "c1", startedAt: "2026-11-22T10:00:00.000Z", status: "failed", engine: "claude-code", cost: { harnessUsd: 0.5, tokens: 1000 }, durationMs: 1000 },
+      { ...base, runId: "c2", startedAt: "2026-11-22T10:05:00.000Z", status: "completed", engine: "claude-code", cost: { harnessUsd: 0.25, tokens: 500 } },
+      { ...base, runId: "c3", startedAt: "2026-11-22T10:09:00.000Z", status: "completed", engine: "polpo", continuation: true, cost: { modelUsd: 0.05, tokens: 300 } },
+    ] as any });
+    const full = (await (await app.request(api(`/tasks/${id}`))).json()).data;
+    expect(full.cost).toMatchObject({ currency: "USD", usd: 0.8, harnessUsd: 0.75, modelUsd: 0.05, tokens: 1800, runs: 3, lastRunUsd: 0.05, partial: false });
+    expect(full.cost.perRun.map((r: any) => [r.runId, r.usd])).toEqual([["c1", 0.5], ["c2", 0.25], ["c3", 0.05]]);
+    expect(full.cost.byEngine.map((e: any) => [e.engine, e.usd, e.runs])).toEqual([["claude-code", 0.75, 2], ["polpo", 0.05, 1]]);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    expect(slim.data.find((t: any) => t.id === id).cost).toEqual({ usd: 0.8, tokens: 1800, runs: 3 });
+    const page = await (await app.request(api("/tasks?slim=true&limit=50"))).json();
+    expect(page.data.tasks.find((t: any) => t.id === id).cost).toEqual({ usd: 0.8, tokens: 1800, runs: 3 });
+    // a task never run: no cost in the slim row, an empty one in full
+    const other = (await (await app.request(api("/tasks"), jsonReq("POST", { title: "Never run", description: "x", assignTo: "agent-1" }))).json()).data.id;
+    expect(slim.data.find((t: any) => t.id === other)?.cost).toBeUndefined();
+    expect((await (await app.request(api(`/tasks/${other}`))).json()).data.cost).toMatchObject({ usd: 0, runs: 0, partial: false });
+  });
+
   test("a failed task's reason (labelled, not retryable) as `failure`: on GET /tasks/:id and in the slim list", async () => {
     const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Failure task", description: "x", assignTo: "agent-1" }))).json();
     const id = created.data.id as string;

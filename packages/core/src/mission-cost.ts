@@ -15,19 +15,15 @@
  * its usage records (uncapped) instead — `harnessUsage` below. A task that also ran on Polpo's
  * engine and lost runs stays partial (`partial: true`): its total may be higher than shown.
  */
-import { MAX_TASK_RUNS, type RunEngine, type TaskRunContext } from "./run-context.js";
+import type { RunEngine } from "./run-context.js";
 import type { Task } from "./types.js";
+import {
+  addToCostBucket, computeTaskCost, emptyCostBucket, engineName, roundUsd, roundedBucket, runUsd, usdText, type CostBucket,
+} from "./task-cost.js";
 
-export interface MissionCostBucket {
-  /** USD: the harness estimate plus the model cost. */
-  usd: number;
-  /** The harness runtimes' own estimate (Claude Code, Codex), USD. */
-  harnessUsd: number;
-  /** The model cost the provider reported (Polpo's engine), USD. */
-  modelUsd: number;
-  tokens: number;
-  runs: number;
-}
+export { runUsd };
+
+export type MissionCostBucket = CostBucket;
 
 export interface MissionCost extends MissionCostBucket {
   currency: "USD";
@@ -68,14 +64,6 @@ export interface MissionCostSummary {
   overBudget?: boolean;
 }
 
-/** A run's cost in USD (the harness estimate, else the model cost), undefined when none recorded. */
-export function runUsd(run: Pick<TaskRunContext, "cost">): number | undefined {
-  const h = run.cost?.harnessUsd;
-  const m = run.cost?.modelUsd;
-  if (h === undefined && m === undefined) return undefined;
-  return (Number.isFinite(h) ? h! : 0) + (Number.isFinite(m) ? m! : 0);
-}
-
 /** The tasks of a mission: by mission id, else (older tasks without one) by its group name. */
 export function tasksOfMission<T extends Pick<Task, "missionId" | "group">>(mission: { id: string; name: string }, tasks: T[]): T[] {
   const group = mission.name;
@@ -83,20 +71,8 @@ export function tasksOfMission<T extends Pick<Task, "missionId" | "group">>(miss
     || (!t.missionId && (t.group === group || (t.group?.startsWith(`${group} #`) ?? false))));
 }
 
-const emptyBucket = (): MissionCostBucket => ({ usd: 0, harnessUsd: 0, modelUsd: 0, tokens: 0, runs: 0 });
-
-function add(b: MissionCostBucket, harness: number, model: number, tokens: number, runs: number): void {
-  b.harnessUsd += harness;
-  b.modelUsd += model;
-  b.usd += harness + model;
-  b.tokens += tokens;
-  b.runs += runs;
-}
-
-const round = (v: number) => Math.round(v * 1e6) / 1e6;
-function rounded<T extends MissionCostBucket>(b: T): T {
-  return { ...b, usd: round(b.usd), harnessUsd: round(b.harnessUsd), modelUsd: round(b.modelUsd) };
-}
+const round = roundUsd;
+const rounded = roundedBucket;
 
 export interface MissionCostOptions {
   budgetUsd?: number;
@@ -113,7 +89,7 @@ export interface MissionCostOptions {
 
 /** The mission's cost from its tasks' recorded runs (see the file comment). */
 export function computeMissionCost(tasks: Array<Pick<Task, "id" | "assignTo" | "runs">>, opts: MissionCostOptions = {}): MissionCost {
-  const total = emptyBucket();
+  const total = emptyCostBucket();
   const byAgent = new Map<string, MissionCostBucket>();
   const byEngine = new Map<RunEngine, MissionCostBucket>();
   let unpricedRuns = 0;
@@ -123,49 +99,34 @@ export function computeMissionCost(tasks: Array<Pick<Task, "id" | "assignTo" | "
   const partialTaskIds: string[] = [];
   const bucket = <K>(m: Map<K, MissionCostBucket>, k: K) => {
     let b = m.get(k);
-    if (!b) { b = emptyBucket(); m.set(k, b); }
+    if (!b) { b = emptyCostBucket(); m.set(k, b); }
     return b;
   };
 
+  // each task's cost (task-cost.ts), so a task's total and its mission's always agree
   for (const task of tasks) {
     const runs = task.runs ?? [];
     if (runs.length) withRuns++;
-    let taskHarness = 0;
-    let taskHarnessTokens = 0;
-    let lastHarness: TaskRunContext | undefined;
+    const usage = opts.harnessUsage?.[task.id];
+    const tc = computeTaskCost(task, usage ? { harnessUsage: usage } : {});
+    unpricedRuns += tc.unpricedRuns;
+    runsActive += tc.runsActive;
+    // the mission's total and engines are its tasks' totals and engines (recovered cost included)
+    addToCostBucket(total, tc.harnessUsd, tc.modelUsd, tc.tokens, tc.runs);
+    for (const e of tc.byEngine) addToCostBucket(bucket(byEngine, e.engine), e.harnessUsd, e.modelUsd, e.tokens, e.runs);
+    // agents: the run says which agent ran it (reassignments change it)
     for (const run of runs) {
       const h = Number.isFinite(run.cost?.harnessUsd) ? run.cost!.harnessUsd! : 0;
       const m = Number.isFinite(run.cost?.modelUsd) ? run.cost!.modelUsd! : 0;
       const tokens = Number.isFinite(run.cost?.tokens) ? run.cost!.tokens! : 0;
-      if (runUsd(run) === undefined) unpricedRuns++;
-      if (run.status === "running") runsActive++;
-      const agent = run.agent ?? task.assignTo ?? "unassigned";
-      add(total, h, m, tokens, 1);
-      add(bucket(byAgent, agent), h, m, tokens, 1);
-      add(bucket(byEngine, run.engine ?? "polpo"), h, m, tokens, 1);
-      if (run.engine && run.engine !== "polpo") {
-        taskHarness += h;
-        taskHarnessTokens += tokens;
-        lastHarness = run;
-      }
+      addToCostBucket(bucket(byAgent, run.agent ?? task.assignTo ?? "unassigned"), h, m, tokens, 1);
     }
-    if (runs.length < MAX_TASK_RUNS) continue;
-    // older runs may have been dropped: the harness part can come back from the usage records
-    const usage = opts.harnessUsage?.[task.id];
-    const allHarness = runs.every((r) => r.engine && r.engine !== "polpo");
-    if (usage && lastHarness && usage.usd > taskHarness) {
-      const extraUsd = usage.usd - taskHarness;
-      const extraTokens = Math.max(0, usage.tokens - taskHarnessTokens);
-      recovered += extraUsd;
-      const agent = lastHarness.agent ?? task.assignTo ?? "unassigned";
-      add(total, extraUsd, 0, extraTokens, 0);
-      add(bucket(byAgent, agent), extraUsd, 0, extraTokens, 0);
-      add(bucket(byEngine, lastHarness.engine), extraUsd, 0, extraTokens, 0);
-      if (allHarness) continue;
-    } else if (usage && allHarness) {
-      continue; // the usage records hold nothing more: nothing was lost
+    if (tc.recovered) {
+      const r = tc.recovered;
+      recovered += r.usd;
+      addToCostBucket(bucket(byAgent, r.agent), r.usd, 0, r.tokens, 0);
     }
-    partialTaskIds.push(task.id);
+    if (tc.partial) partialTaskIds.push(task.id);
   }
 
   const cost: MissionCost = {
@@ -223,8 +184,6 @@ export function isValidBudgetUsd(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v > 0;
 }
 
-const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
-const usdText = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
 
 /** The cost in a few lines, for text outputs (MCP, Polpo's tools). */
 export function describeMissionCost(cost: MissionCost): string {
@@ -236,7 +195,7 @@ export function describeMissionCost(cost: MissionCost): string {
     : cost.agentBudgetCapUsd !== undefined ? `no budget (the agents' harness budgets cap one run of each task at ${usdText(cost.agentBudgetCapUsd)})` : "no budget";
   const lines = [head, budget];
   if (cost.byEngine.length > 1 || cost.byAgent.length > 1) {
-    lines.push(`by engine: ${cost.byEngine.map((e) => `${ENGINE_NAMES[e.engine] ?? e.engine} ${usdText(e.usd)} (${e.runs})`).join(", ")}`);
+    lines.push(`by engine: ${cost.byEngine.map((e) => `${engineName(e.engine)} ${usdText(e.usd)} (${e.runs})`).join(", ")}`);
     lines.push(`by agent: ${cost.byAgent.map((a) => `${a.agent} ${usdText(a.usd)} (${a.runs})`).join(", ")}`);
   }
   return lines.join("\n");
