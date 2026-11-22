@@ -125,6 +125,8 @@ import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { protectPolpoDir } from "../tools/path-sandbox.js";
+import { checkTaskToolScope, requireTaskToolScope, TaskToolScopeError, type TaskToolScopeCheckHost } from "./task-tool-scope.js";
+import { connectorManagerFor } from "../mcp/runtime.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
@@ -1469,7 +1471,63 @@ export class Orchestrator extends TypedEmitter {
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
-  }): Promise<Task> { return this.engine.addTask(opts); }
+    /** Narrowing of the run's tools (validated: it may only narrow what the agent has). */
+    toolScope?: unknown;
+  }): Promise<Task> {
+    const { toolScope, ...rest } = opts;
+    if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);
+    const scope = await requireTaskToolScope(this.toolScopeHost(), opts.assignTo, toolScope, { live: true });
+    return this.engine.addTask({ ...rest, ...(scope ? { toolScope: scope } : {}) });
+  }
+
+  /** What a tool scope check needs: the agents, the connectors and their tools. */
+  toolScopeHost(): TaskToolScopeCheckHost {
+    return {
+      agents: () => this.getAgents(),
+      connectors: () => connectorManagerFor(this).store.list(),
+      listConnectorTools: async (id) => (await connectorManagerFor(this).listTools(id)).map((t) => t.name),
+    };
+  }
+
+  /**
+   * Set or clear (null) a task's tool scope. Validated against its agent: it may only narrow
+   * what the agent has (TaskToolScopeError otherwise). A running task keeps its current run.
+   */
+  async updateTaskToolScope(taskId: string, value: unknown): Promise<Task> {
+    const task = await this.getStore().getTask(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const scope = value === null || value === undefined
+      ? undefined
+      : await requireTaskToolScope(this.toolScopeHost(), task.assignTo, value, { live: true });
+    return this.getStore().updateTask(taskId, { toolScope: scope });
+  }
+
+  /**
+   * What of a task's tool scope its agent no longer has (a connector removed or no longer granted,
+   * a tool renamed or deselected on the agent): shown as stale. Empty without a scope.
+   */
+  async taskToolScopeStale(task: Pick<Task, "assignTo" | "toolScope">): Promise<string[]> {
+    if (!task.toolScope) return [];
+    try {
+      return (await checkTaskToolScope(this.toolScopeHost(), task.assignTo, task.toolScope)).problems;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Reject a mission document whose tasks' tool scopes ask for more than their agents have. */
+  private async checkMissionToolScopes(data: string | undefined): Promise<void> {
+    if (!data) return;
+    let doc: { tasks?: Array<{ title?: string; assignTo?: string; toolScope?: unknown }> };
+    try { doc = JSON.parse(data); } catch { return; }
+    const problems: string[] = [];
+    for (const t of Array.isArray(doc?.tasks) ? doc.tasks : []) {
+      if (t?.toolScope === undefined || t.toolScope === null) continue;
+      const r = await checkTaskToolScope(this.toolScopeHost(), t.assignTo, t.toolScope);
+      problems.push(...r.problems.map((p) => `task "${t.title ?? "?"}": ${p}`));
+    }
+    if (problems.length) throw new TaskToolScopeError(problems);
+  }
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.engine.updateTaskDescription(taskId, description); }
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.engine.updateTaskExpectations(taskId, expectations); }
@@ -1801,7 +1859,10 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> { return this.engine.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+    await this.checkMissionToolScopes(opts.data);
+    return this.engine.saveMission(opts);
+  }
 
   /**
    * What a mission cost so far: every recorded run of its tasks (Task.runs), by agent and engine,
@@ -1833,15 +1894,29 @@ export class Orchestrator extends TypedEmitter {
   async getMission(missionId: string): Promise<Mission | undefined> { return this.engine.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.engine.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
-  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> { return this.engine.updateMission(missionId, updates); }
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
+    await this.checkMissionToolScopes(updates.data);
+    return this.engine.updateMission(missionId, updates);
+  }
   async deleteMission(missionId: string): Promise<boolean> { return this.engine.deleteMission(missionId); }
 
   // ─── Atomic Mission Data Operations (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("@polpo-ai/core").TaskToolScope | null }): Promise<Mission> {
+    if (task.toolScope) task = { ...task, toolScope: await requireTaskToolScope(this.toolScopeHost(), task.assignTo, task.toolScope, { live: true }) ?? null };
+    if (task.toolScope === null) { const { toolScope: _drop, ...rest } = task; task = rest; }
     return this.engine.addMissionTask(missionId, task);
   }
-  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("@polpo-ai/core").TaskToolScope | null }): Promise<Mission> {
+    if (updates.toolScope) {
+      // checked against the agent it will have: the new one, else the task's current one
+      let agent = updates.assignTo;
+      if (!agent) {
+        const mission = await this.getMission(missionId);
+        try { agent = (JSON.parse(mission?.data ?? "{}") as { tasks?: Array<{ title?: string; assignTo?: string }> }).tasks?.find((t) => t.title === taskTitle)?.assignTo; } catch { /* checked by the executor */ }
+      }
+      updates = { ...updates, toolScope: await requireTaskToolScope(this.toolScopeHost(), agent, updates.toolScope, { live: true }) ?? null };
+    }
     return this.engine.updateMissionTask(missionId, taskTitle, updates);
   }
   async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {

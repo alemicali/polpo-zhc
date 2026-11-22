@@ -3,6 +3,7 @@
  * Central source of truth — used by config parser, orchestrator, and API routes.
  */
 
+import { taskToolScopeProblems } from "./task-tool-scope.js";
 import { z } from "zod";
 import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
 import { isValidISO8601Duration } from "./iso-duration.js";
@@ -211,6 +212,10 @@ const missionTaskSchema = z.object({
   sideEffects: z.boolean().optional(),
   /** Sandbox for this task's runs: may only tighten what the mission/agent allow. */
   sandbox: z.any().optional(),
+  /** Narrowing of the run's tools (connectors, their tools, built-in tools); absent: the agent's. */
+  toolScope: z.any().optional().superRefine((value, ctx) => {
+    for (const message of taskToolScopeProblems(value)) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  }),
 });
 
 // ── Mission Document Schema ─────────────────────────────────────────

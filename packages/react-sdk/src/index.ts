@@ -144,6 +144,7 @@ export type {
   LogEntry,
   RunActivityEntry,
   TaskRunContext,
+  TaskToolScope,
   TaskRunEngine,
   TaskRunSummary,
   MissionCost,

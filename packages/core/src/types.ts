@@ -171,6 +171,11 @@ export interface Task {
    * session, cost), newest last, at most MAX_TASK_RUNS. See run-context.ts.
    */
   runs?: import("./run-context.js").TaskRunContext[];
+  /**
+   * Optional narrowing of the tools this task's runs may use (connectors, their tools, built-in
+   * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
+   */
+  toolScope?: import("./task-tool-scope.js").TaskToolScope;
   createdAt: string;
   updatedAt: string;
 }
