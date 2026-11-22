@@ -11,6 +11,14 @@ import type { Task } from "@polpo-ai/react";
 const HEATMAP_WEEKS = 20;
 const DAY_NAMES = ["", "Mon", "", "Wed", "", "Fri", ""];
 
+/** Intensity steps: --chart-1 mixed into the muted cell colour, so every look recolours the scale. */
+const HEAT = [
+  "bg-[color-mix(in_oklch,var(--chart-1)_30%,var(--muted))]",
+  "bg-[color-mix(in_oklch,var(--chart-1)_55%,var(--muted))]",
+  "bg-[color-mix(in_oklch,var(--chart-1)_78%,var(--muted))]",
+  "bg-chart-1",
+] as const;
+
 type DayData = { count: number; done: number; failed: number; scores: number[] };
 
 export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
@@ -93,14 +101,14 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
     const ratio = maxCount > 0 ? data.count / maxCount : 0;
     const failRatio = data.count > 0 ? data.failed / data.count : 0;
     if (failRatio > 0.5) {
-      if (ratio > 0.7) return "bg-red-500";
-      if (ratio > 0.4) return "bg-red-500/70";
-      return "bg-red-500/40";
+      if (ratio > 0.7) return "bg-destructive";
+      if (ratio > 0.4) return "bg-destructive/70";
+      return "bg-destructive/40";
     }
-    if (ratio > 0.75) return "bg-emerald-400";
-    if (ratio > 0.5) return "bg-emerald-400/70";
-    if (ratio > 0.25) return "bg-emerald-400/50";
-    return "bg-emerald-400/30";
+    if (ratio > 0.75) return HEAT[3];
+    if (ratio > 0.5) return HEAT[2];
+    if (ratio > 0.25) return HEAT[1];
+    return HEAT[0];
   };
 
   const formatDate = (d: Date) =>
@@ -109,12 +117,12 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
   return (
     <div className="space-y-2">
       {/* Stats row */}
-      <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-4 text-caption text-muted-foreground">
         <span className="font-medium text-foreground">{totalActive} tasks</span>
         <span>in the last {HEATMAP_WEEKS} weeks</span>
         {streakDays > 0 && (
           <span className="ml-auto flex items-center gap-1">
-            <Zap className="h-3 w-3 text-amber-400" />
+            <Zap className="h-3 w-3 text-warning" />
             <span className="font-medium text-foreground">{streakDays}d</span> streak
           </span>
         )}
@@ -126,7 +134,7 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
         <div className="flex flex-col gap-[3px] pr-1.5 pt-0">
           {DAY_NAMES.map((name, i) => (
             <div key={i} className="h-[11px] flex items-center">
-              <span className="text-[9px] text-muted-foreground/60 leading-none w-5">{name}</span>
+              <span className="text-micro text-muted-foreground/60 leading-none w-5">{name}</span>
             </div>
           ))}
         </div>
@@ -164,13 +172,10 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
 
       {/* Legend */}
       <div className="flex items-center gap-1.5 justify-end">
-        <span className="text-[9px] text-muted-foreground/60">Less</span>
+        <span className="text-micro text-muted-foreground/60">Less</span>
         <div className="h-[9px] w-[9px] rounded-[2px] bg-muted/30" />
-        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/30" />
-        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/50" />
-        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400/70" />
-        <div className="h-[9px] w-[9px] rounded-[2px] bg-emerald-400" />
-        <span className="text-[9px] text-muted-foreground/60">More</span>
+        {HEAT.map((cls) => <div key={cls} className={cn("h-[9px] w-[9px] rounded-[2px]", cls)} />)}
+        <span className="text-micro text-muted-foreground/60">More</span>
       </div>
     </div>
   );

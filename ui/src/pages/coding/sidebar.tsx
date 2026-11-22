@@ -113,11 +113,11 @@ export function CodingSidebar(props: SidebarProps) {
         workspaces={props.workspaces}
       />
       <div className="flex h-10 shrink-0 items-center px-3">
-        <span className="text-[10px] font-semibold uppercase text-muted-foreground">
+        <span className="text-label text-muted-foreground">
           Projects
         </span>
         {props.workspaces.length > 0 && (
-          <span className="ml-1.5 text-[10px] tabular-nums text-muted-foreground/60">{props.workspaces.length}</span>
+          <span className="ml-1.5 text-micro tabular-nums text-muted-foreground/60">{props.workspaces.length}</span>
         )}
       </div>
 
@@ -221,7 +221,7 @@ function ProjectGroup({
 
             <span
               title={project.cwd}
-              className="flex-1 truncate text-left text-[12.5px] font-medium text-muted-foreground"
+              className="flex-1 truncate text-left text-small font-medium text-muted-foreground"
             >
               {projectLabel(project)}
             </span>
@@ -245,7 +245,7 @@ function ProjectGroup({
             onClick={onAddWorkspace}
             aria-label="Add workspace"
             title="New workspace (worktree)"
-            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11.5px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-caption font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Plus className="h-3.5 w-3.5" />
             <span className="flex-1">Add workspace</span>
@@ -320,7 +320,7 @@ function WorkspaceRow({
             <GitBranch className={cn("h-3 w-3 shrink-0", active ? "text-foreground/70" : "text-muted-foreground")} />
             <span
               className={cn(
-                "min-w-0 flex-1 truncate text-left font-mono text-[11.5px] font-medium",
+                "min-w-0 flex-1 truncate text-left font-mono text-caption font-medium",
                 active ? "text-foreground" : "text-foreground/85",
               )}
               title={branchLabel}
@@ -328,11 +328,11 @@ function WorkspaceRow({
               {branchLabel}
             </span>
             {pending ? (
-              <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-px text-[9.5px] font-medium text-amber-300/85">
+              <span className="shrink-0 rounded bg-warning/15 px-1.5 py-px text-micro font-medium text-warning/85">
                 empty
               </span>
             ) : (
-              <span className="shrink-0 rounded bg-background/70 px-1.5 py-px text-[9.5px] tabular-nums text-muted-foreground">
+              <span className="shrink-0 rounded bg-background/70 px-1.5 py-px text-micro tabular-nums text-muted-foreground">
                 {workspace.terminals.length}
               </span>
             )}
@@ -350,19 +350,19 @@ function WorkspaceRow({
           {/* Second line: workspace label (city) + PR + git stats.
               Hidden when label == branch and the tree is clean. */}
           {hasSecondLine && (
-            <div className="mt-1 flex items-center gap-2 pl-[18px] text-[10px] text-muted-foreground">
+            <div className="mt-1 flex items-center gap-2 pl-[18px] text-micro text-muted-foreground">
               {wsLabel && (
                 <span className="font-medium text-foreground/70" title={wsLabel}>{wsLabel}</span>
               )}
               {git?.pr && <PrPill state={git.pr.state} number={git.pr.number} url={git.pr.url} />}
               {git && (git.insertions > 0 || git.deletions > 0) && (
                 <span className="flex items-center gap-1 font-mono tabular-nums">
-                  {git.insertions > 0 && <span className="text-emerald-400/85">+{git.insertions}</span>}
-                  {git.deletions > 0 && <span className="text-rose-400/85">−{git.deletions}</span>}
+                  {git.insertions > 0 && <span className="text-success/85">+{git.insertions}</span>}
+                  {git.deletions > 0 && <span className="text-destructive/85">−{git.deletions}</span>}
                 </span>
               )}
-              {git && git.ahead > 0 && <span className="font-mono tabular-nums text-sky-400/80">↑{git.ahead}</span>}
-              {git && git.behind > 0 && <span className="font-mono tabular-nums text-amber-400/80">↓{git.behind}</span>}
+              {git && git.ahead > 0 && <span className="font-mono tabular-nums text-info/80">↑{git.ahead}</span>}
+              {git && git.behind > 0 && <span className="font-mono tabular-nums text-warning/80">↓{git.behind}</span>}
             </div>
           )}
         </div>
@@ -387,10 +387,10 @@ function PrPill({ state, number, url }: { state: string | undefined; number: num
   const isMerged = s === "merged";
   const isClosed = s === "closed";
   const tint = isMerged
-    ? "bg-violet-500/15 text-violet-300/90 hover:bg-violet-500/25"
+    ? "bg-chart-5/15 text-chart-5 hover:bg-chart-5/25"
     : isClosed
-      ? "bg-rose-500/15 text-rose-300/90 hover:bg-rose-500/25"
-      : "bg-emerald-500/15 text-emerald-300/90 hover:bg-emerald-500/25";
+      ? "bg-destructive/15 text-destructive/90 hover:bg-destructive/25"
+      : "bg-success/15 text-success/90 hover:bg-success/25";
   return (
     <a
       href={url}
@@ -398,7 +398,7 @@ function PrPill({ state, number, url }: { state: string | undefined; number: num
       rel="noreferrer"
       onClick={(e) => e.stopPropagation()}
       title={`PR #${number} · ${s}`}
-      className={cn("inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px text-[9.5px] font-medium transition-colors", tint)}
+      className={cn("inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px text-micro font-medium transition-colors", tint)}
     >
       {isMerged ? <GitMerge className="h-2.5 w-2.5" /> : <GitPullRequest className="h-2.5 w-2.5" />}
       <span className="tabular-nums">#{number}</span>

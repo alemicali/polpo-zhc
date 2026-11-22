@@ -63,7 +63,7 @@ export function AgentConnectorsSection({ agentName, allowedTools }: { agentName:
                     {connector.toolCount !== undefined ? ` · ${connector.toolCount} tools` : ""}
                   </p>
                   {blockedByAllowlist && (
-                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                    <p className="mt-0.5 flex items-center gap-1 text-caption text-warning">
                       <AlertTriangle className="h-3 w-3 shrink-0" />
                       Its allowed tools list has no <code className="font-mono">mcp__{connector.id}__*</code>: add it to use these tools.
                     </p>

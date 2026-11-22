@@ -21,7 +21,7 @@ export function AgentSocialsCard() {
         <SectionHeader title="Socials" icon={Globe} />
         <div className="flex flex-wrap gap-1.5">
           {Object.entries(socials).map(([platform, handle]) => (
-            <Badge key={platform} variant="secondary" className="text-[9px] font-mono gap-1">
+            <Badge key={platform} variant="secondary" className="text-micro font-mono gap-1">
               {platform}
               <span className="text-muted-foreground">{handle}</span>
             </Badge>

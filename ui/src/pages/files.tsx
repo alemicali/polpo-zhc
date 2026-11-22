@@ -78,6 +78,7 @@ import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 import { useStorage } from "@/hooks/use-storage";
 import { VolumeDialog } from "@/components/files/volume-dialog";
+import { productName, useInstanceBranding } from "@/lib/branding";
 
 // ── Types ──
 
@@ -371,18 +372,18 @@ function fileIcon(entry: FileEntry) {
 }
 
 function fileIconColor(entry: FileEntry): string {
-  if (entry.type === "directory") return "text-sky-400";
+  if (entry.type === "directory") return "text-chart-1";
   const mime = entry.mimeType ?? mimeFromPath(entry.name);
   if (!mime) return "text-muted-foreground/60";
-  if (mime.startsWith("image/")) return "text-pink-400";
-  if (mime.startsWith("audio/")) return "text-violet-400";
-  if (mime.startsWith("video/")) return "text-red-400";
-  if (mime === "application/pdf") return "text-orange-400";
-  if (mime === "text/typescript" || mime === "text/javascript") return "text-blue-400";
-  if (mime === "text/css") return "text-cyan-400";
-  if (mime === "text/html") return "text-amber-400";
-  if (mime === "application/json") return "text-emerald-400";
-  if (mime.startsWith("text/x-")) return "text-teal-400";
+  if (mime.startsWith("image/")) return "text-chart-5";
+  if (mime.startsWith("audio/")) return "text-chart-5";
+  if (mime.startsWith("video/")) return "text-chart-2";
+  if (mime === "application/pdf") return "text-chart-2";
+  if (mime === "text/typescript" || mime === "text/javascript") return "text-chart-1";
+  if (mime === "text/css") return "text-chart-1";
+  if (mime === "text/html") return "text-chart-4";
+  if (mime === "application/json") return "text-chart-3";
+  if (mime.startsWith("text/x-")) return "text-chart-3";
   if (mime.startsWith("text/")) return "text-muted-foreground/80";
   return "text-muted-foreground/60";
 }
@@ -527,14 +528,14 @@ function useInView(rootMargin = "200px"): [React.RefObject<HTMLDivElement | null
 }
 
 const EXTENSION_PALETTE: Record<string, { ink: string; chip: string }> = {
-  pdf:      { ink: "text-rose-500",    chip: "bg-rose-500/12 text-rose-500 border-rose-500/30" },
-  doc:      { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
-  docx:     { ink: "text-blue-500",    chip: "bg-blue-500/12 text-blue-500 border-blue-500/30" },
-  xls:      { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
-  xlsx:     { ink: "text-emerald-500", chip: "bg-emerald-500/12 text-emerald-500 border-emerald-500/30" },
-  zip:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
-  tar:      { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
-  gz:       { ink: "text-amber-500",   chip: "bg-amber-500/12 text-amber-500 border-amber-500/30" },
+  pdf:      { ink: "text-chart-2", chip: "bg-chart-2/12 text-chart-2 border-chart-2/30" },
+  doc:      { ink: "text-chart-1", chip: "bg-chart-1/12 text-chart-1 border-chart-1/30" },
+  docx:     { ink: "text-chart-1", chip: "bg-chart-1/12 text-chart-1 border-chart-1/30" },
+  xls:      { ink: "text-chart-3", chip: "bg-chart-3/12 text-chart-3 border-chart-3/30" },
+  xlsx:     { ink: "text-chart-3", chip: "bg-chart-3/12 text-chart-3 border-chart-3/30" },
+  zip:      { ink: "text-chart-4", chip: "bg-chart-4/12 text-chart-4 border-chart-4/30" },
+  tar:      { ink: "text-chart-4", chip: "bg-chart-4/12 text-chart-4 border-chart-4/30" },
+  gz:       { ink: "text-chart-4", chip: "bg-chart-4/12 text-chart-4 border-chart-4/30" },
 };
 
 function extensionPalette(ext: string): { ink: string; chip: string } {
@@ -551,7 +552,7 @@ function extensionPalette(ext: string): { ink: string; chip: string } {
 function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: string } }) {
   return (
     <div className="relative w-full h-full flex items-center justify-center">
-      <div className="relative w-[64%] h-[80%] rounded-md bg-background/80 border border-border/60 shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_18%)] overflow-hidden">
+      <div className="relative w-[64%] h-[80%] rounded-md bg-background/80 border border-border/60 shadow-card overflow-hidden">
         {/* corner fold */}
         <div className="absolute top-0 right-0 w-3.5 h-3.5">
           <div className="absolute inset-0 bg-muted/60" style={{ clipPath: "polygon(0 0, 100% 0, 100% 100%)" }} />
@@ -567,7 +568,7 @@ function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: 
         {/* extension chip — center-bottom */}
         <div className="absolute inset-x-0 bottom-2 flex justify-center">
           <span className={cn(
-            "px-1.5 py-px rounded font-mono text-[9px] font-bold uppercase tracking-wider border",
+            "px-1.5 py-px rounded font-mono text-micro font-bold uppercase tracking-wider border",
             accent.chip,
           )}>
             {ext || "file"}
@@ -585,15 +586,15 @@ function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: 
 function FolderGlyph({ open }: { open?: boolean }) {
   return (
     <div className="relative w-[68%] h-[68%]">
-      <svg viewBox="0 0 64 56" className="w-full h-full drop-shadow-[0_3px_4px_oklch(0.2_0.04_235_/_18%)]">
+      <svg viewBox="0 0 64 56" className="w-full h-full drop-shadow-[0_3px_4px_color-mix(in_oklch,var(--foreground)_18%,transparent)]">
         <defs>
           <linearGradient id="folder-back" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="oklch(0.78 0.07 200)" />
-            <stop offset="100%" stopColor="oklch(0.62 0.115 205)" />
+            <stop offset="0%" style={{ stopColor: "color-mix(in oklch, var(--chart-1) 60%, white)" }} />
+            <stop offset="100%" style={{ stopColor: "var(--chart-1)" }} />
           </linearGradient>
           <linearGradient id="folder-front" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="oklch(0.86 0.05 205)" />
-            <stop offset="100%" stopColor="oklch(0.7 0.1 205)" />
+            <stop offset="0%" style={{ stopColor: "color-mix(in oklch, var(--chart-1) 40%, white)" }} />
+            <stop offset="100%" style={{ stopColor: "color-mix(in oklch, var(--chart-1) 80%, white)" }} />
           </linearGradient>
         </defs>
         {/* back leaf */}
@@ -663,7 +664,7 @@ function FileThumb({
           />
         )}
         {/* play overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute inset-0 flex items-center justify-center bg-background/20 opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center shadow-md ring-1 ring-border/40">
             <Play className="h-3.5 w-3.5 fill-foreground text-foreground translate-x-px" />
           </div>
@@ -674,15 +675,15 @@ function FileThumb({
 
   if (category === "audio") {
     return (
-      <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-500/8 to-fuchsia-500/8">
+      <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-chart-5/8 to-chart-5/5">
         {/* faux waveform */}
         <div className="flex items-end gap-px h-1/2 px-3">
           {[3, 6, 4, 8, 5, 9, 6, 4, 7, 3, 6, 5, 8, 4, 7].map((h, i) => (
-            <span key={i} className="w-1 rounded-full bg-violet-500/60" style={{ height: `${h * 8}%` }} />
+            <span key={i} className="w-1 rounded-full bg-chart-5/60" style={{ height: `${h * 8}%` }} />
           ))}
         </div>
-        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center ring-1 ring-violet-500/30">
-          <Music className="h-2.5 w-2.5 text-violet-500" />
+        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center ring-1 ring-chart-5/30">
+          <Music className="h-2.5 w-2.5 text-chart-5" />
         </div>
       </div>
     );
@@ -717,7 +718,7 @@ function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu
         "group flex flex-col items-center gap-1.5 p-2 rounded-xl cursor-pointer select-none",
         "transition-[background-color,box-shadow,transform] duration-150",
         selected
-          ? "bg-primary/10 ring-1 ring-primary/40 shadow-[0_0_20px_oklch(0.6_0.115_205_/_22%)]"
+          ? "bg-primary/10 ring-1 ring-primary/40 shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_22%,transparent)]"
           : "hover:bg-accent/30",
       )}
     >
@@ -726,21 +727,21 @@ function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu
           "relative aspect-square w-full overflow-hidden rounded-lg",
           "bg-card/60 border border-border/50",
           isPreviewable
-            ? "shadow-[0_2px_6px_-2px_oklch(0.18_0.04_235_/_15%)]"
+            ? "shadow-card"
             : "",
-          "transition-shadow duration-150 group-hover:shadow-[0_6px_14px_-4px_oklch(0.18_0.04_235_/_22%)]",
+          "transition-shadow duration-150 group-hover:shadow-raised",
         )}
       >
         <FileThumb entry={entry} path={path} category={category} inView={inView} />
       </div>
       <span
-        className="text-[11px] text-center leading-tight max-w-full font-medium px-0.5 line-clamp-2 break-words"
+        className="text-caption text-center leading-tight max-w-full font-medium px-0.5 line-clamp-2 break-words"
         title={entry.name}
       >
         {entry.name}
       </span>
       {entry.size != null && (
-        <span className="text-[9px] text-muted-foreground/60 font-mono tabular-nums -mt-1">
+        <span className="text-micro text-muted-foreground/60 font-mono tabular-nums -mt-1">
           {formatSize(entry.size)}
         </span>
       )}
@@ -788,7 +789,7 @@ function RootItem({
         <Icon className="h-4 w-4 shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="font-medium truncate">{root.name}</div>
-          <div className="text-[10px] opacity-60 truncate">{root.description}</div>
+          <div className="text-micro opacity-60 truncate">{root.description}</div>
         </div>
       </button>
       {onSettings && (
@@ -904,6 +905,7 @@ function InlineRename({
 // ── Main page ──
 
 export function FilesPage() {
+  const product = productName(useInstanceBranding());
   const [searchParams, setSearchParams] = useSearchParams();
   const [roots, setRoots] = useState<RootDir[]>([]);
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -1336,10 +1338,10 @@ export function FilesPage() {
               {entry.name}
               {entry.type === "directory" && <span className="text-muted-foreground/40">/</span>}
             </span>
-            <span className="text-[11px] text-muted-foreground/60 tabular-nums shrink-0 w-16 text-right hidden sm:block">
+            <span className="text-caption text-muted-foreground/60 tabular-nums shrink-0 w-16 text-right hidden sm:block">
               {formatSize(entry.size)}
             </span>
-            <span className="text-[11px] text-muted-foreground/50 shrink-0 w-20 text-right hidden lg:block">
+            <span className="text-caption text-muted-foreground/50 shrink-0 w-20 text-right hidden lg:block">
               {formatDate(entry.modifiedAt)}
             </span>
             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -1440,7 +1442,7 @@ export function FilesPage() {
                 {entry.type === "directory" && <span className="text-muted-foreground/40">/</span>}
               </div>
               {(entry.size != null || entry.modifiedAt) && (
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground/60 mt-0.5">
+                <div className="flex items-center gap-2 text-caption text-muted-foreground/60 mt-0.5">
                   {entry.size != null && <span className="tabular-nums">{formatSize(entry.size)}</span>}
                   {entry.size != null && entry.modifiedAt && <span className="opacity-50">·</span>}
                   {entry.modifiedAt && <span>{formatDate(entry.modifiedAt)}</span>}
@@ -1728,7 +1730,7 @@ export function FilesPage() {
         >
           <div className="flex flex-col h-full">
             <div className="p-2 flex flex-col gap-1 flex-1">
-              <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              <div className="px-2 py-1.5 text-label text-muted-foreground/60">
                 Volumes
               </div>
               {roots.map(root => (
@@ -1756,7 +1758,7 @@ export function FilesPage() {
               </button>
             </div>
             {activeRoot && (activeRoot.totalFiles != null || activeRoot.totalSize != null) && (
-              <div className="px-3 py-2 border-t border-border/30 text-[10px] text-muted-foreground/60 space-y-0.5">
+              <div className="px-3 py-2 border-t border-border/30 text-micro text-muted-foreground/60 space-y-0.5">
                 <div className="flex items-center justify-between">
                   <span>{(activeRoot.totalFiles ?? 0).toLocaleString()} files</span>
                   <span>{formatSize(activeRoot.totalSize)}</span>
@@ -1798,11 +1800,11 @@ export function FilesPage() {
           )}
 
           {/* Status bar */}
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/10 text-[11px] text-muted-foreground shrink-0">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/10 text-caption text-muted-foreground shrink-0">
             <FolderOpen className="h-3 w-3" />
             <span>{dirCount} folder{dirCount !== 1 && "s"}, {fileCount} file{fileCount !== 1 && "s"}</span>
             {search && (
-              <Badge variant="outline" className="text-[9px] h-4 ml-1">filtered</Badge>
+              <Badge variant="outline" className="text-micro h-4 ml-1">filtered</Badge>
             )}
           </div>
 
@@ -1824,7 +1826,7 @@ export function FilesPage() {
                     {/* Create folder inline row */}
                     {creatingFolder && (
                       <div className="flex items-center gap-3 px-3 py-2 border-b border-border/30 bg-accent/10">
-                        <FolderPlus className="h-4 w-4 text-sky-400 shrink-0" />
+                        <FolderPlus className="h-4 w-4 text-chart-1 shrink-0" />
                         <InlineRename
                           initialName="New Folder"
                           onConfirm={handleCreateFolder}
@@ -1884,7 +1886,7 @@ export function FilesPage() {
             ? deleteTarget.info.empty ? "Delete empty directory?" : "Delete directory and all contents?"
             : "Delete file?"}
         description={deleteTarget?.inspecting
-          ? "Polpo is checking the directory contents before allowing deletion."
+          ? `${product} is checking the directory contents before allowing deletion.`
           : deleteTarget?.info?.type === "directory"
             ? deleteTarget.info.empty
               ? <span>The directory <span className="font-mono text-foreground">{deleteTarget.entry.name}</span> is empty and will be permanently deleted.</span>

@@ -6,9 +6,11 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Star } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { StatValue } from "@/components/shared/stat-value";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-context";
+
+const STAT = "flex-1 items-center text-center";
 
 export function AgentPerformanceCard() {
   const { state: { taskStats } } = useAgentDetail();
@@ -20,33 +22,19 @@ export function AgentPerformanceCard() {
       <CardContent className="pt-4 pb-4 space-y-3">
         <SectionHeader title="Performance" icon={Star} />
         <div className="flex items-center justify-between gap-2">
-          <div className="text-center flex-1">
-            <p className="text-lg font-bold font-mono">{taskStats.total}</p>
-            <p className="text-[10px] text-muted-foreground">Total</p>
-          </div>
+          <StatValue size="sm" className={STAT} label="Total" value={taskStats.total} />
           {taskStats.successRate != null && (
-            <div className="text-center flex-1">
-              <p className={cn("text-lg font-bold font-mono", taskStats.successRate >= 70 ? "text-emerald-400" : "text-amber-400")}>
-                {taskStats.successRate}%
-              </p>
-              <p className="text-[10px] text-muted-foreground">Success</p>
-            </div>
+            <StatValue size="sm" className={STAT} label="Success" value={`${taskStats.successRate}%`} tone={taskStats.successRate >= 70 ? "success" : "warning"} />
           )}
           {taskStats.avgScore != null && (
-            <div className="text-center flex-1">
-              <p className="text-lg font-bold font-mono">{taskStats.avgScore.toFixed(1)}<span className="text-xs text-muted-foreground font-normal">/5</span></p>
-              <p className="text-[10px] text-muted-foreground">Avg</p>
-            </div>
+            <StatValue
+              size="sm" className={STAT} label="Avg"
+              value={<>{taskStats.avgScore.toFixed(1)}<span className="text-xs font-normal text-muted-foreground">/5</span></>}
+            />
           )}
-          <div className="text-center flex-1">
-            <p className="text-lg font-bold font-mono text-emerald-400">{taskStats.done}</p>
-            <p className="text-[10px] text-muted-foreground">Done</p>
-          </div>
+          <StatValue size="sm" className={STAT} label="Done" value={taskStats.done} tone="success" />
           {taskStats.failed > 0 && (
-            <div className="text-center flex-1">
-              <p className="text-lg font-bold font-mono text-red-400">{taskStats.failed}</p>
-              <p className="text-[10px] text-muted-foreground">Failed</p>
-            </div>
+            <StatValue size="sm" className={STAT} label="Failed" value={taskStats.failed} tone="destructive" />
           )}
         </div>
         {taskStats.done + taskStats.failed > 0 && (

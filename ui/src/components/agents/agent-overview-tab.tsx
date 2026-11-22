@@ -59,8 +59,8 @@ export function AgentOverviewTab() {
             <CardContent className="pt-3 pb-3 divide-y divide-border/20">
               <div className="pb-3">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <Heart className="h-3 w-3 text-pink-400" />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Personality</span>
+                  <Heart className="h-3 w-3 text-chart-2" />
+                  <span className="text-label text-muted-foreground">Personality</span>
                 </div>
                 {identity?.personality ? (
                   <p className="text-xs text-muted-foreground leading-relaxed">{identity.personality}</p>
@@ -70,8 +70,8 @@ export function AgentOverviewTab() {
               </div>
               <div className="pt-3">
                 <div className="flex items-center gap-1.5 mb-1">
-                  <MessageSquare className="h-3 w-3 text-sky-400" />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Communication Tone</span>
+                  <MessageSquare className="h-3 w-3 text-info" />
+                  <span className="text-label text-muted-foreground">Communication Tone</span>
                 </div>
                 {identity?.tone ? (
                   <p className="text-xs text-muted-foreground leading-relaxed">{identity.tone}</p>
@@ -106,13 +106,13 @@ export function AgentOverviewTab() {
                           {resp.priority && (
                             <Badge
                               variant="outline"
-                              className={cn("text-[8px] capitalize", responsibilityPriorityColors[resp.priority])}
+                              className={cn("text-micro capitalize", responsibilityPriorityColors[resp.priority])}
                             >
                               {resp.priority}
                             </Badge>
                           )}
                         </div>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">{resp.description}</p>
+                        <p className="text-caption text-muted-foreground leading-relaxed">{resp.description}</p>
                       </div>
                     );
                   })}
