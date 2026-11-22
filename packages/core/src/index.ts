@@ -31,6 +31,8 @@ export type {
 // ── Store Interfaces ─────────────────────────────────────────────────────
 export type { TaskStore } from "./task-store.js";
 export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
+// Where and with what a task run executed (engine, computer, egress, session, cost)
+export * from "./run-context.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";

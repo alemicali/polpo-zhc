@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
+import { EngineBadge } from "@/components/shared/run-context";
+import { agentEngineId } from "@/lib/run-context";
 
 export function AgentHeroCard() {
   const { state: { agent, process, teamColorIndex, isRefreshing }, actions: { refetch } } = useAgentDetail();
@@ -53,6 +55,7 @@ export function AgentHeroCard() {
             {identity?.displayName && identity.displayName !== agent.name && (
               <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
             )}
+            <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={14} className="mt-0.5 text-caption" />
           </div>
         </div>
 

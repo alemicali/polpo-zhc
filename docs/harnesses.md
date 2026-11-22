@@ -131,6 +131,35 @@ creates a Daytona v2 computer and the agent.
 8. At the end the runtime stops (its bridge exits); its conversation stays in the VM, and a
    continuation of the task ("continue" direction) resumes it.
 
+## Where and with what a run executed
+
+Every run of a task is recorded on the task, in `runs` (newest last, at most 20; no secret ever:
+the authentication kind and region, never the credential or its vault reference):
+
+| Field | Meaning |
+|---|---|
+| `engine`, `model` | `polpo`, `claude-code` or `codex`; the model id (the agent's on Polpo's engine, the harness model otherwise) |
+| `auth` | `{ kind: "bedrock" \| "vertex" \| "api-key", region? }` (harnesses) |
+| `permissionMode`, `effort`, `budgetUsd` | The harness options of the run |
+| `computer` | `{ id, name?, kind: host \| daytona \| e2b \| ephemeral, provider?, daytonaApi?: v0 \| v2, remoteId? }` (`remoteId`: the VM the run used) |
+| `sandbox` | `{ provider, ephemeral, fallbackFrom? }` |
+| `egress` | `{ mode: "direct" }` or `{ mode: "proxy", proxy, tailscale? }` |
+| `session` | `{ resumed, bootstrapMs, sessionId }` (harnesses: a continuation resumes the conversation) |
+| `cost` | `{ harnessUsd?, modelUsd?, tokens? }`: the harness's own estimate (Claude Code), or the model cost the provider reports to Polpo's engine |
+| `status`, `startedAt`, `endedAt`, `durationMs`, `exitCode`, `continuation` | The run itself |
+
+The orchestrator writes what it knows when it spawns the run; the engine reports the session, the VM
+and the cost while it runs (`AgentActivity.runContext`) and the orchestrator merges it; the entry is
+closed when the run ends. `GET /api/v1/tasks/:id` returns `runs`, the slim list `lastRun`;
+`polpo_task_get` and `polpo_task_logs` return them structured (`runs`) and as one line per run. The
+dashboard shows them on the task page (Run card, with the earlier runs) and as small marks on the
+tasks list, mission tasks, agents, computers and the event feed.
+
+A harness run's transcript is the same run log as Polpo's engine (`GET /api/v1/agents/processes/:taskId/activity`,
+`polpo_task_logs`, the task's Execution tab): `assistant`, `reasoning`, `tool_use` / `tool_result`
+(the runtime's own tools in lower case, e.g. `write`, `bash`; Polpo's tools with `host: true`),
+`log` lines (session started / resumed / detached) and one `usage` entry per turn (tokens, `costUsd`).
+
 ## Hibernation and resume
 
 A Daytona v2 computer hibernates when idle (memory and disk snapshot, VM deleted) and rotates before

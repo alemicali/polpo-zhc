@@ -17,6 +17,8 @@ function fakeInstance() {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
   const tasks = new Map<string, Task>();
   const missions = new Map<string, Mission>();
+  /** Other tasks' run logs (as GET /agents/processes/:id/activity returns them). */
+  const logs = new Map<string, Array<Record<string, unknown>>>();
   const schedules = new Map<string, { missionId: string; expression: string; recurring: boolean; enabled: boolean; nextRunAt?: string }>();
   const activity: Array<Record<string, unknown>> = Array.from({ length: 45 }, (_, i) => ({ type: "assistant", ts: `2026-11-21T10:00:${String(i).padStart(2, "0")}Z`, text: `step ${i + 1}` }));
   let settings: Record<string, unknown> = { orchestratorModel: "anthropic:claude-opus-5-5", reasoning: "medium", maxRetries: 2, notifications: { channels: { ops: { type: "telegram", botToken: "[REDACTED]" } }, rules: [{ id: "r1", name: "Failures", events: ["task:failed"], channels: ["ops"] }] }, approvalGates: [{ id: "g1", name: "Deploy", hook: "task:complete", handler: "human" }] };
@@ -48,7 +50,7 @@ function fakeInstance() {
       const patched = calls.filter((c) => c.method === "PATCH" && c.path === `/api/v1/agents/${name}`).reduce((a, c) => ({ ...a, ...(c.body as object) }), {});
       return okData({ name, role: name === "coach" ? "Health coach" : "x", model: "anthropic:claude-opus-5-5", ...patched });
     }
-    if ((m = p.match(/^\/agents\/processes\/([^/]+)\/activity$/))) return okData(m[1] === "t2" ? activity : []);
+    if ((m = p.match(/^\/agents\/processes\/([^/]+)\/activity$/))) return okData(m[1] === "t2" ? activity : (logs.get(m[1]!) ?? []));
     if (p === "/tasks" && method === "GET") {
       let all = [...tasks.values()];
       if (q.get("status")) all = all.filter((t) => t.status === q.get("status"));
@@ -148,7 +150,7 @@ function fakeInstance() {
     ] });
     return reply(404, { ok: false, error: `No route ${method} ${p}` });
   });
-  return { api, calls, tasks, missions, schedules, logo: () => logo };
+  return { api, calls, tasks, missions, schedules, logs, logo: () => logo };
 }
 
 type Fake = ReturnType<typeof fakeInstance>;
@@ -285,6 +287,48 @@ describe("tasks", () => {
     expect(progress.map((e) => e.params.message)).toEqual(["t2: in_progress", "t2: done"]);
     expect(progress[0].params.progressToken).toBe("p1");
     expect(events.at(-1).result.structuredContent).toMatchObject({ reached: true, task: { status: "done" } });
+  });
+
+  it("a harness run (Claude Code): its transcript, Polpo tools (host) and usage in the logs; where and with what it ran in get and logs", async () => {
+    const f = fakeInstance();
+    const run = {
+      runId: "r1", startedAt: "2026-11-22T14:55:55.499Z", endedAt: "2026-11-22T14:56:22.828Z", status: "completed", engine: "claude-code",
+      model: "us.anthropic.claude-haiku-4-5-20251001-v1:0", auth: { kind: "bedrock", region: "us-east-1" }, permissionMode: "allow-all",
+      computer: { id: "coder-box", kind: "daytona", provider: "daytona", daytonaApi: "v2", remoteId: "vm-1" },
+      sandbox: { provider: "daytona", ephemeral: false }, egress: { mode: "proxy", proxy: "home", tailscale: true },
+      session: { resumed: false, bootstrapMs: 14800 }, cost: { harnessUsd: 0.0723, tokens: 144585 }, budgetUsd: 2, durationMs: 26626, exitCode: 0,
+    };
+    f.tasks.set("t9", { id: "t9", title: "Verify Claude Code", status: "done", assignTo: "coder", description: "Write hello.txt", updatedAt: "2026-11-22T14:56:23Z", runs: [run] } as any);
+    // the run log as the runner writes it for a harness run (lumea, task M5hgPb1B0ORvFKD7lgJgg)
+    f.logs.set("t9", [
+      { _run: true, runId: "r1", taskId: "t9", agentName: "coder", startedAt: "2026-11-22T14:55:55.499Z" },
+      { ts: "2026-11-22T14:55:55.534Z", event: "spawned" },
+      { ts: "2026-11-22T14:56:13.597Z", type: "log", message: "Claude Code session started in 14.8 s on coder-box" },
+      { ts: "2026-11-22T14:56:18.724Z", type: "assistant", text: "Creo il file hello.txt" },
+      { ts: "2026-11-22T14:56:18.830Z", type: "tool_use", tool: "write", toolId: "c1", input: { file_path: "hello.txt", content: "ciao" } },
+      { ts: "2026-11-22T14:56:18.840Z", type: "tool_result", toolId: "c1", tool: "write", content: "{\"type\":\"create\"}" },
+      { ts: "2026-11-22T14:56:21.000Z", type: "tool_use", tool: "register_outcome", toolId: "c2", input: { type: "text", label: "hello" }, host: true },
+      { ts: "2026-11-22T14:56:22.156Z", type: "usage", harness: "claude-code", inputTokens: 144154, outputTokens: 431, cacheReadTokens: 95726, cacheWriteTokens: 48411, totalTokens: 144585, costUsd: 0.07225835 },
+      { ts: "2026-11-22T14:56:22.828Z", event: "done", data: { status: "completed", exitCode: 0, duration: 26626 } },
+    ]);
+    const logs = await call(deps(f), "polpo_task_logs", { id: "t9" });
+    expectValidOutput(logs);
+    expect(logs.structuredContent.total).toBe(9);
+    expect(logs.structuredContent.items.find((e: any) => e.tool === "register_outcome")).toMatchObject({ host: true });
+    const text = logs.content[0].text as string;
+    expect(text).toMatch(/tool_use: write \{"file_path":"hello\.txt"/);
+    expect(text).toMatch(/tool_use: register_outcome \(Polpo tool\)/);
+    expect(text).toMatch(/usage: 144154 in, 431 out, 95726 cache read, \$0\.0723 \(claude-code\)/);
+    expect(text).toMatch(/log: Claude Code session started in 14\.8 s/);
+    expect(text).toMatch(/runs:\n- r1 \[completed\] Claude Code us\.anthropic\.claude-haiku[^\n]* via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
+    expect(logs.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", computer: expect.objectContaining({ id: "coder-box" }) })]);
+
+    const got = await call(deps(f), "polpo_task_get", { id: "t9", activity: 0 });
+    expectValidOutput(got);
+    expect(got.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", auth: { kind: "bedrock", region: "us-east-1" }, session: { resumed: false, bootstrapMs: 14800 } })]);
+    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] Claude Code/);
+    // a task on Polpo's engine without runs recorded yet: an empty list
+    expect((await call(deps(f), "polpo_task_get", { id: "t1", activity: 0 })).structuredContent.runs).toEqual([]);
   });
 
   it("pages the activity backwards from the newest", async () => {

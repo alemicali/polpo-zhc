@@ -180,6 +180,7 @@ snapshots: a missing image fails the create with the command that builds it.
 - Event `computer:changed` `{ id, action: created | updated | deleted | status, status?, remoteId?, error?, notice? }`
   (`status` includes `hibernated`; `notice`: e.g. a v2 VM that vanished and was restored).
 - The API's computer view adds `lastSnapshot { at, diskBytes?, memoryBytes? }` and `notice` (Daytona v2).
+- Each task run records the computer it used (`Task.runs[].computer`: id, kind, Daytona v0/v2, the VM id) and its egress (direct, or the proxy and whether through Tailscale): see [harnesses.md](harnesses.md#where-and-with-what-a-run-executed). The task page links to the computer; the Computers page shows the agents' engines and the harness sessions on each computer.
 - Dashboard: **Computers** page; an agent's computers (status, Start/Stop/Restart/Reset, default, add or create one for it) are in its **Computer** tab.
 
 ## Migration: computer `nina` for `sitoinchat` (lumea)

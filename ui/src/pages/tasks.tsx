@@ -63,6 +63,7 @@ import { cn } from "@/lib/utils";
 import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { TaskEngineBadge } from "@/components/shared/run-context";
 import {
   useTasksPageState,
   useTaskActions,
@@ -192,6 +193,7 @@ const TaskRow = memo(function TaskRow({
           <span className="text-micro text-muted-foreground truncate">
             {fields.identityName && identity?.displayName ? identity.displayName : task.assignTo}
           </span>
+          <TaskEngineBadge task={task} agentEngine={(agent as { engine?: unknown } | undefined)?.engine} size={12} />
         </div>
       )}
 
@@ -495,6 +497,7 @@ const TaskCard = memo(function TaskCard({
                   </span>
                 )}
               </div>
+              <TaskEngineBadge task={task} agentEngine={(agent as { engine?: unknown } | undefined)?.engine} size={12} className="ml-auto" />
             </div>
           )}
 

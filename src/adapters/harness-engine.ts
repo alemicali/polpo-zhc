@@ -74,13 +74,17 @@ export interface OpenedMachine {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "skill";
 
-/** The runtime's file edits as activity (Claude Code Write/Edit/MultiEdit, Codex apply_patch/write_file). */
-function fileOfToolCall(toolName: string, input: unknown): { path: string; created: boolean } | undefined {
+/**
+ * The runtime's file edits as activity (Claude Code Write/Edit/MultiEdit, Codex apply_patch/write_file).
+ * The AI SDK harness reports the runtime's tools in lower case ("write", "edit"), so names match
+ * whatever their case.
+ */
+export function fileOfToolCall(toolName: string, input: unknown): { path: string; created: boolean } | undefined {
   const i = (input ?? {}) as Record<string, unknown>;
   const path = typeof i.file_path === "string" ? i.file_path : typeof i.path === "string" ? i.path : undefined;
   if (!path) return undefined;
-  if (/^(Write|write_file|create_file)$/.test(toolName)) return { path, created: true };
-  if (/^(Edit|MultiEdit|NotebookEdit|edit_file|apply_patch)$/.test(toolName)) return { path, created: false };
+  if (/^(write|write_file|create_file)$/i.test(toolName)) return { path, created: true };
+  if (/^(edit|multiedit|multi_edit|notebookedit|notebook_edit|edit_file|apply_patch)$/i.test(toolName)) return { path, created: false };
   return undefined;
 }
 
@@ -259,6 +263,11 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       // ── credentials: explicit, from the settings' vault reference ──
       const auth: ResolvedHarnessAuth = await resolveHarnessAuth(engine, harnessesSettingsOf(settings), ctx.vaultStore);
       secrets = auth.secrets;
+      // where and with what this run executes (the task's run context; no secrets)
+      activity.runContext = {
+        ...(auth.model ? { model: auth.model } : {}),
+        ...(opened.remoteId?.() ? { remoteId: opened.remoteId!() } : {}),
+      };
 
       // ── the machine: pnpm for the bootstrap, credential files ──
       const pnpm = await machine.exec(ENSURE_PNPM, {});
@@ -322,6 +331,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         const t0 = Date.now();
         const s = await runtime.createSession({ ...(sessionId ? { sessionId } : {}), ...(from ? { resumeFrom: from } : {}), sandbox, abortSignal: abort.signal });
         const ms = Date.now() - t0;
+        const vm = opened!.remoteId?.();
+        activity.runContext = {
+          ...activity.runContext,
+          ...(vm ? { remoteId: vm } : {}),
+          session: { resumed: !!from, bootstrapMs: ms, sessionId: s.sessionId },
+        };
         transcript({ type: "log", message: `${name} session ${from ? "resumed" : "started"} in ${Math.round(ms / 100) / 10} s on ${opened!.computerId}` });
         await status({
           state: "idle", sessionId: s.sessionId, pid: process.pid, remoteId: opened!.remoteId?.(),
@@ -421,6 +436,15 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
 
       const account = async (r: HarnessTurnResult) => {
         activity.totalTokens += r.usage.totalTokens;
+        const prevCost = activity.runContext?.cost;
+        activity.runContext = {
+          ...activity.runContext,
+          cost: {
+            ...prevCost,
+            tokens: activity.totalTokens,
+            ...(r.costUsd !== undefined ? { harnessUsd: (prevCost?.harnessUsd ?? 0) + r.costUsd } : {}),
+          },
+        };
         const cur = store.get(key);
         await status({
           state: "idle", turns: (cur?.turns ?? 0) + 1, costUsd: (cur?.costUsd ?? 0) + (r.costUsd ?? 0), resumable: true,

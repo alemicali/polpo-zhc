@@ -11,6 +11,8 @@ import { Cpu, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { BrandIcon } from "@/components/shared/brand-icon";
+import { authBrand, AUTH_LABELS, engineBrand, engineLabel } from "@/lib/run-context";
 import {
   HARNESS_NAMES, harnessesApi,
   type AgentHarnessEngine, type HarnessEffort, type HarnessesOverview, type HarnessId, type HarnessPermissionMode, type HarnessSession,
@@ -58,6 +60,20 @@ export function AgentEngineCard() {
     <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-engine-card">
       <CardContent className="space-y-3 px-4 py-3 text-xs">
         <div className="flex items-center gap-1.5 text-label text-muted-foreground"><Cpu className="h-3 w-3" /> Engine</div>
+        {/* the engine it runs on now, with its mark (and how the harness authenticates) */}
+        <div className="flex items-center gap-2 text-small" data-testid="agent-engine-current">
+          <BrandIcon name={engineBrand(current?.harness)} size={20} />
+          <span className="font-medium">{engineLabel(current?.harness)}</span>
+          {current?.model && <span className="text-muted-foreground">{current.model}</span>}
+          {(() => {
+            const auth = current ? overview.harnesses.find((h) => h.id === current.harness)?.auth : undefined;
+            return auth ? (
+              <span className="inline-flex items-center gap-1 text-muted-foreground" title={`Authenticates with ${AUTH_LABELS[auth] ?? auth}`}>
+                <BrandIcon name={authBrand(auth, current?.harness)} size={14} /> {AUTH_LABELS[auth] ?? auth}
+              </span>
+            ) : null;
+          })()}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
             aria-label="Engine" className={selectClass}

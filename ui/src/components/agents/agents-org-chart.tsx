@@ -29,6 +29,8 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgentsPage } from "./agents-page-context";
 import { getTeamColor } from "./agents-team-colors";
 import { cn } from "@/lib/utils";
+import { EngineBadge } from "@/components/shared/run-context";
+import { agentEngineId } from "@/lib/run-context";
 
 // ─── Custom node data types ─────────────────────────────
 
@@ -110,6 +112,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
           <p className="text-caption text-muted-foreground line-clamp-2 leading-snug">{agent.identity?.title ?? agent.role}</p>
         )}
         <div className="flex items-center gap-1.5 flex-wrap">
+          <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={12} className="text-micro" />
           {agent.model && <Badge variant="secondary" className="text-micro px-1.5 py-0 font-mono">{agent.model}</Badge>}
           {!!agent.volatile && (
             <Badge variant="outline" className="text-micro px-1.5 py-0 text-warning border-warning/30">

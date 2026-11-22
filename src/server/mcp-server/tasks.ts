@@ -2,6 +2,7 @@
  * Tasks: list, read, create, update, retry, kill, direct, wait for and read the activity of.
  */
 import { z } from "zod";
+import { describeTaskRun, type TaskRunContext } from "@polpo-ai/core/run-context";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
   encodeCursor, enc, fail, limitParam, looseObject, ok, pageOutput, progress, qs, short, sleep,
@@ -24,6 +25,8 @@ type FullTask = TaskRow & {
   result?: { exitCode?: number; duration?: number; stdout?: string; stderr?: string; assessment?: { passed?: boolean; globalScore?: number; feedback?: string } };
   outcomes?: Array<{ type?: string; label?: string; path?: string; url?: string; text?: string }>;
   sideEffects?: boolean;
+  /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
+  runs?: TaskRunContext[];
 };
 
 export const taskLine = (t: TaskRow) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`;
@@ -35,12 +38,26 @@ const summarize = (t: TaskRow) => ({
   ...(t.phase ? { phase: t.phase } : {}),
 });
 
-/** One activity entry of a run log as a line. */
-function activityLine(e: Record<string, unknown>): string {
+/** One activity entry of a run log as a line (Polpo's engine and agent harnesses alike). */
+export function activityLine(e: Record<string, unknown>): string {
   const ts = typeof e.ts === "string" ? e.ts.slice(11, 19) : typeof e.timestamp === "string" ? (e.timestamp as string).slice(11, 19) : "";
+  if (e._run) return `run ${String(e.runId ?? "")} started${typeof e.startedAt === "string" ? ` ${e.startedAt}` : ""}`;
   const type = String(e.type ?? e.event ?? "entry");
-  const body = e.type === "tool_use" ? `${String(e.name ?? e.tool ?? "tool")} ${short(JSON.stringify(e.input ?? {}), 160)}`
-    : short(e.text ?? e.content ?? e.message ?? e.summary ?? e.result ?? e.output ?? "", 240);
+  // a harness's Polpo tools run on the Polpo server (host: true)
+  const host = e.host ? " (Polpo tool)" : "";
+  let body: string;
+  if (e.type === "tool_use") body = `${String(e.name ?? e.tool ?? "tool")}${host} ${short(JSON.stringify(e.input ?? {}), 160)}`;
+  else if (e.type === "tool_result") body = `${String(e.tool ?? "tool")}${e.isError ? " (error)" : ""} ${short(e.content ?? e.text ?? "", 200)}`;
+  else if (e.type === "usage") {
+    const n = (k: string) => (typeof e[k] === "number" ? (e[k] as number) : 0);
+    body = `${n("inputTokens")} in, ${n("outputTokens")} out, ${n("cacheReadTokens")} cache read${typeof e.costUsd === "number" ? `, $${(e.costUsd as number).toFixed(4)}` : ""}${e.harness ? ` (${String(e.harness)})` : ""}`;
+  } else if (e.event === "activity" && e.data && typeof e.data === "object") {
+    const d = e.data as { toolCalls?: number; totalTokens?: number; lastTool?: string };
+    body = `${d.toolCalls ?? 0} tool calls, ${d.totalTokens ?? 0} tokens${d.lastTool ? `, last ${d.lastTool}` : ""}`;
+  } else if (e.event === "done" && e.data && typeof e.data === "object") {
+    const d = e.data as { status?: string; exitCode?: number; duration?: number };
+    body = `${d.status ?? ""} exit ${d.exitCode ?? "?"}${d.duration !== undefined ? `, ${Math.round(d.duration / 1000)} s` : ""}`;
+  } else body = short(e.text ?? e.content ?? e.message ?? e.summary ?? e.result ?? e.output ?? "", 240);
   return `${ts ? `${ts} ` : ""}${type}${body ? `: ${body}` : ""}`;
 }
 
@@ -111,7 +128,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       id: z.string().min(1).describe("The task's id (polpo_tasks_list)"),
       activity: z.number().int().min(0).max(50).optional().describe("How many recent activity entries to include (default 10, 0 for none)"),
     },
-    outputSchema: { task: looseObject, recent_activity: z.array(looseObject).optional() },
+    outputSchema: { task: looseObject, runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"), recent_activity: z.array(looseObject).optional() },
     annotations: READ,
   }, async ({ id, activity }) => {
     const loaded = await loadTask(deps, id);
@@ -136,9 +153,14 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(res.assessment?.feedback ? [`feedback: ${short(res.assessment.feedback, 600)}`] : []),
       ...(res.stdout ? [`output: ${short(res.stdout, 1500)}`] : [])] : []),
       ...(t.outcomes?.length ? ["", "outcomes:", ...t.outcomes.map((o) => `- ${o.type ?? "?"}: ${o.label ?? ""} ${o.path ?? o.url ?? short(o.text, 120)}`)] : []),
+      ...(t.runs?.length ? ["", "runs (where and with what):", ...t.runs.map((r) => `- ${describeTaskRun(r)}`)] : []),
       ...(recent.length ? ["", "recent activity:", ...recent.map(activityLine)] : []),
     ];
-    return ok(lines.join("\n"), { task: t as Record<string, unknown>, ...(n > 0 ? { recent_activity: recent } : {}) });
+    return ok(lines.join("\n"), {
+      task: t as Record<string, unknown>,
+      runs: (t.runs ?? []) as unknown as Array<Record<string, unknown>>,
+      ...(n > 0 ? { recent_activity: recent } : {}),
+    });
   });
 
   tool("tasks", "polpo_task_create", {
@@ -336,25 +358,28 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
 
   tool("tasks", "polpo_task_logs", {
     title: "Read a task's activity",
-    description: "The activity of a task's runs (what its agent did: messages, tool calls, results), newest last. Returns the latest entries; "
-      + "page backwards to older ones with cursor.",
+    description: "The activity of a task's runs (what its agent did: messages, tool calls, results, usage), newest last, for Polpo's engine and "
+      + "agent harnesses (Claude Code, Codex: their Polpo tools are marked host: true). Returns the latest entries; page backwards to older ones "
+      + "with cursor. `runs` says where and with what each run executed.",
     inputSchema: {
       id: z.string().min(1).describe("The task's id"),
       limit: limitParam(30, 200),
       cursor: cursorParam(),
     },
-    outputSchema: { ...pageOutput(looseObject) },
+    outputSchema: { ...pageOutput(looseObject), runs: z.array(looseObject).optional() },
     annotations: READ,
   }, async ({ id, limit, cursor }) => {
     const c = decodeCursor(cursor);
     if (!c) return fail(BAD_CURSOR);
-    const r = await apiGet(deps, `/agents/processes/${enc(id)}/activity`);
+    const [r, t] = await Promise.all([apiGet(deps, `/agents/processes/${enc(id)}/activity`), loadTask(deps, id)]);
     if (!r.ok) return apiError(r, `Reading the activity of ${id}`);
     const all = (Array.isArray(r.data) ? r.data : []) as Array<Record<string, unknown>>;
+    const runs = t.ok ? (t.task.runs ?? []) : [];
+    const runsOut = runs.length ? { runs: runs as unknown as Array<Record<string, unknown>> } : {};
+    const runLines = runs.length ? `\n\nruns:\n${runs.map((x) => `- ${describeTaskRun(x)}`).join("\n")}` : "";
     if (all.length === 0) {
-      const t = await loadTask(deps, id);
       if (!t.ok && t.status === 404) return notFound(id);
-      return ok(`No activity yet for ${id}.`, { items: [], next_cursor: null, total: 0 });
+      return ok(`No activity yet for ${id}.${runLines}`, { items: [], next_cursor: null, total: 0, ...runsOut });
     }
     const n = limit ?? 30;
     // cursor.o = how many of the newest entries were already returned
@@ -363,6 +388,6 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     const start = Math.max(0, end - n);
     const items = all.slice(start, end);
     const next = start > 0 ? encodeCursor({ o: all.length - start }) : null;
-    return ok(`${items.map(activityLine).join("\n")}${next ? `\n(older entries: cursor ${next})` : ""}`, { items, next_cursor: next, total: all.length });
+    return ok(`${items.map(activityLine).join("\n")}${next ? `\n(older entries: cursor ${next})` : ""}${skip === 0 ? runLines : ""}`, { items, next_cursor: next, total: all.length, ...runsOut });
   });
 }

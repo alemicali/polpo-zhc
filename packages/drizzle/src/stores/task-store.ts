@@ -115,6 +115,7 @@ export class DrizzleTaskStore implements TaskStore {
       priority: row.priority ? Number(row.priority) : undefined,
       sideEffects: row.sideEffects ? Boolean(row.sideEffects) : undefined,
       revisionCount: row.revisionCount ?? undefined,
+      ...(row.runs != null ? { runs: deserializeJson(row.runs, undefined, d) } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -150,6 +151,7 @@ export class DrizzleTaskStore implements TaskStore {
     if (task.priority !== undefined) v.priority = String(task.priority);
     if (task.sideEffects !== undefined) v.sideEffects = task.sideEffects ? 1 : 0;
     if (task.revisionCount !== undefined) v.revisionCount = task.revisionCount;
+    if (task.runs !== undefined) v.runs = serializeJson(task.runs, d);
     if (task.createdAt !== undefined) v.createdAt = task.createdAt;
     if (task.updatedAt !== undefined) v.updatedAt = task.updatedAt;
     return v;
@@ -482,6 +484,7 @@ export class DrizzleTaskStore implements TaskStore {
       priority: r.priority,
       sideEffects: r.side_effects,
       revisionCount: r.revision_count,
+      runs: r.runs,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

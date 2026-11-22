@@ -125,8 +125,56 @@ export interface Task {
   notifications?: ScopedNotificationRules;
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects?: boolean;
+  /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
+  runs?: TaskRunContext[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** The engine a run used: Polpo's own, or an agent harness. */
+export type TaskRunEngine = "polpo" | "claude-code" | "codex";
+
+/** Where and with what a task run executed (no secrets). */
+export interface TaskRunContext {
+  runId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: "running" | "completed" | "failed" | "killed";
+  /** The run continued the previous one (a "continue" direction). */
+  continuation?: boolean;
+  engine: TaskRunEngine;
+  model?: string;
+  /** The harness authentication kind (never the credential). */
+  auth?: { kind: "api-key" | "bedrock" | "vertex"; region?: string };
+  permissionMode?: string;
+  effort?: string;
+  computer: {
+    /** "host", a computer id, or "ephemeral". */
+    id: string;
+    name?: string;
+    kind: "host" | "daytona" | "e2b" | "ephemeral";
+    provider?: "daytona" | "e2b";
+    daytonaApi?: "v0" | "v2";
+    remoteId?: string;
+  };
+  sandbox?: { provider: string; ephemeral: boolean; fallbackFrom?: string };
+  egress: { mode: "direct" | "proxy"; proxy?: string; tailscale?: boolean };
+  session?: { resumed: boolean; bootstrapMs?: number; sessionId?: string };
+  cost?: { harnessUsd?: number; modelUsd?: number; tokens?: number };
+  budgetUsd?: number;
+  durationMs?: number;
+  exitCode?: number;
+}
+
+/** The latest run in a slim task row (list badges). */
+export interface TaskRunSummary {
+  engine: TaskRunEngine;
+  model?: string;
+  computerId: string;
+  computerName?: string;
+  computerKind: TaskRunContext["computer"]["kind"];
+  provider?: string;
+  status: TaskRunContext["status"];
 }
 
 /**
@@ -155,6 +203,8 @@ export interface TaskSlim {
       checksCount?: number;
     };
   };
+  /** Where and with what the latest run executed. */
+  lastRun?: TaskRunSummary;
 }
 
 export interface TaskResult {
@@ -1327,6 +1377,19 @@ export interface RunActivityEntry {
   content?: string;
   /** Whether the tool call errored (present on tool_result entries) */
   isError?: boolean;
+
+  /** Lifecycle / harness log line (type "log"; errors of type "error"). */
+  message?: string;
+  /** An agent harness's Polpo tool (it runs on the Polpo server, not in the runtime). */
+  host?: boolean;
+  /** Usage entries (type "usage"): the harness that reported them and the turn's tokens and cost. */
+  harness?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
 
   /** Present on the header line only */
   _run?: boolean;

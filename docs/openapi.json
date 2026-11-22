@@ -881,10 +881,10 @@
                   ]
                 }
               ],
-              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
+              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
             },
             "required": false,
-            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
             "name": "summary",
             "in": "query"
           },
