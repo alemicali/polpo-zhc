@@ -81,11 +81,11 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-md border-border/60 shadow-lg shadow-black/[0.03]">
+      <Card className="w-full max-w-md border-border/60 shadow-raised">
         <CardContent className="pt-6 pb-6 px-6 space-y-6">
           <div className="text-center space-y-2">
             <BrandMark className="mx-auto h-12 w-12 rounded-lg text-xl" />
-            <h1 className="text-2xl font-semibold tracking-tight">Sign in to {productName(branding)}</h1>
+            <h1 className="font-heading text-h1">Sign in to {productName(branding)}</h1>
             <p className="text-sm text-muted-foreground">
               Enter the admin email for this instance.
             </p>
@@ -103,7 +103,7 @@ export function LoginPage() {
           ) : (
             <form onSubmit={submit} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <label className="text-label text-muted-foreground">
                   Email
                 </label>
                 <Input

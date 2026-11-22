@@ -192,7 +192,7 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
           {starred && (
             <Star
               aria-label="Starred"
-              className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+              className="h-3 w-3 shrink-0 fill-warning text-warning"
             />
           )}
           <span className="max-w-[140px] truncate leading-none">{truncated}</span>

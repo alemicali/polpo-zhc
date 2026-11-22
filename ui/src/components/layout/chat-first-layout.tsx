@@ -233,7 +233,7 @@ function ChatPanelHeader() {
         <BrandMark className="h-7 w-7 rounded-md text-sm" />
         <div className="min-w-0">
           <h2 className="truncate text-sm font-bold tracking-tight">{productName(branding)}</h2>
-          <p className="truncate text-[9px] font-mono uppercase text-muted-foreground/50 leading-none">
+          <p className="truncate text-micro font-mono uppercase text-muted-foreground/50 leading-none">
             {productTagline(branding)}
           </p>
         </div>
@@ -289,7 +289,7 @@ function HeaderTabButton({ tab, active, onSelect }: {
       className={cn(
         "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 transition-colors",
         active
-          ? "bg-background text-foreground shadow-sm"
+          ? "bg-background text-foreground shadow-card"
           : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
       )}
     >
@@ -325,7 +325,7 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
                 className={cn(
                   "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 transition-colors",
                   activeTab
-                    ? "bg-background text-foreground shadow-sm"
+                    ? "bg-background text-foreground shadow-card"
                     : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
                 )}
               >
@@ -335,7 +335,7 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-44">
-              <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+              <DropdownMenuLabel className="text-label text-muted-foreground/70">
                 {group.label}
               </DropdownMenuLabel>
               {group.tabs.map(tab => {
@@ -387,7 +387,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
         <TooltipContent side="bottom" className="text-xs">Page navigation</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+        <DropdownMenuLabel className="text-label text-muted-foreground/70">
           Chat-first navigation
         </DropdownMenuLabel>
         {navModeOptions.map(option => {
@@ -401,7 +401,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
               <Icon className="mt-0.5 h-4 w-4" />
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium leading-tight">{option.label}</span>
-                <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">{option.description}</span>
+                <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">{option.description}</span>
               </span>
               {mode === option.value && <Check className="mt-0.5 h-3.5 w-3.5 text-primary" />}
             </DropdownMenuItem>
@@ -507,7 +507,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50">
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70">
               Mode
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
@@ -523,7 +523,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               {theme === "system" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1.5">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
               <PaletteIcon className="h-3 w-3" /> Palette
             </DropdownMenuLabel>
             {PALETTES.map((p) => {
@@ -541,7 +541,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block leading-tight">{p.name}</span>
-                    <span className="block text-[10px] text-muted-foreground/70 leading-tight">{p.blurb}</span>
+                    <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
                   </span>
                   {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
                 </DropdownMenuItem>
