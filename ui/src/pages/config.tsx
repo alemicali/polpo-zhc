@@ -80,7 +80,7 @@ import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo,
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
-import { config as appConfig, apiUrl } from "@/lib/config";
+import { config as appConfig, apiFetch, apiUrl } from "@/lib/config";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -718,7 +718,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
 
   const loadProfiles = useCallback(async () => {
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "Could not load WhatsApp profiles");
       setProfiles(data.data?.profiles ?? []);
@@ -750,7 +750,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
+        const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error ?? "Could not read WhatsApp login status");
         const next = data.data?.session as WhatsAppLoginSessionInfo;
@@ -770,7 +770,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -791,7 +791,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
   const cancelLogin = async () => {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     try {
-      await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
+      await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
         method: "POST",
         credentials: "include",
       });
@@ -806,7 +806,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -1716,7 +1716,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     setTesting(name);
     setTestResults((prev) => ({ ...prev, [name]: null }));
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
       const data = await res.json();
       setTestResults((prev) => ({
         ...prev,
@@ -3251,7 +3251,7 @@ export function ConfigPage() {
               toast.success("Branding updated");
             }}
             onUploadLogo={async (file, variant) => {
-              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, {
+              const response = await apiFetch(`${appConfig.baseUrl}/api/v1/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, {
                 method: "POST",
                 headers: {
                   "Content-Type": file.type,
@@ -3893,7 +3893,7 @@ function CloudSyncPanel() {
   const fetchCfg = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error("config");
       setCfg(body.data as SyncCfg);
@@ -3913,7 +3913,7 @@ function CloudSyncPanel() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.ok) setHistory(body.data as SyncHistoryEntry[]);
     } catch { /* ignore */ }
@@ -3924,7 +3924,7 @@ function CloudSyncPanel() {
    * server-side process completes (active comes back null). */
   const fetchActive = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) return null;
       return body.data as ActiveSync | null;
@@ -3972,7 +3972,7 @@ function CloudSyncPanel() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -3993,7 +3993,7 @@ function CloudSyncPanel() {
   const clearConfig = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4014,7 +4014,7 @@ function CloudSyncPanel() {
   const test = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "test failed");
       toast.success("R2 connection OK");
@@ -4027,7 +4027,7 @@ function CloudSyncPanel() {
 
   const cancelSync = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
       if (res.ok) toast.message("Cancelling…");
     } catch { /* ignore */ }
   };
@@ -4041,7 +4041,7 @@ function CloudSyncPanel() {
     let summary = { files: 0, bytes: 0 };
     let result: { ok: boolean; error?: string } = { ok: false };
     try {
-      const res = await fetch(apiUrl(`/api/v1/sync/${kind}`), {
+      const res = await apiFetch(apiUrl(`/api/v1/sync/${kind}`), {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4335,7 +4335,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4458,7 +4458,7 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
   const save = async (nextEnabled?: boolean) => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },

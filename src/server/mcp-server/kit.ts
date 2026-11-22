@@ -88,12 +88,12 @@ export const TOOLSETS = {
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
   channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (sending needs messages scope, rules admin scope)" },
   computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
+  settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, notification channels' setup (secrets never; changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
   vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs vault scope)" },
   apps: { default: false, description: "Registered apps (start, stop, restart) and browser profiles" },
-  settings: { default: false, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, notification channels' setup (secrets never; changes need admin scope)" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
 

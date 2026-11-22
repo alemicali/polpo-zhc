@@ -178,6 +178,10 @@ const upsertRuleRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Rule saved",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "The id in the body does not match the URL",
+    },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
       description: "No configuration loaded",
@@ -228,6 +232,10 @@ const upsertGateRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Gate saved",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "The id in the body does not match the URL",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -505,7 +513,7 @@ export function configRoutes(getDeps: () => {
     const { id } = c.req.valid("param");
     const ruleBody = c.req.valid("json");
     if (ruleBody.id !== id) {
-      return c.json({ ok: false, error: "Rule id in body must match URL param" }, 500);
+      return c.json({ ok: false, error: "Rule id in body must match URL param" }, 400);
     }
 
     const result = await mutateConfig(deps, (config) => {
@@ -554,7 +562,7 @@ export function configRoutes(getDeps: () => {
     const { id } = c.req.valid("param");
     const gateBody = c.req.valid("json");
     if (gateBody.id !== id) {
-      return c.json({ ok: false, error: "Gate id in body must match URL param" }, 500);
+      return c.json({ ok: false, error: "Gate id in body must match URL param" }, 400);
     }
 
     const result = await mutateConfig(deps, (config) => {

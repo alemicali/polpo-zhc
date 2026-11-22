@@ -4,9 +4,8 @@
  * MCP access (OAuth grants), notification channels' setup, cloud sync, and LLM providers
  * (disconnect, custom providers' non-secret definition).
  *
- * The "settings" toolset, off by default (the default toolsets stay within clients' tool limits):
- * an instance turns it on in settings.mcp.toolsets (or POLPO_MCP_TOOLSETS), a connector URL with
- * ?toolsets=…,settings. Reads need polpo:read (members and MCP access: polpo:admin, they name
+ * The "settings" toolset, on by default (a connector URL or settings.mcp.toolsets can leave it out).
+ * Reads need polpo:read (members and MCP access: polpo:admin, they name
  * people); changes polpo:admin. Secrets never pass through here: API keys, bot tokens, webhook URLs, R2 keys are
  * entered in the dashboard, and the tools give setup_url (the right Configuration section). Vault
  * references ({ owner, service }) are not secrets and may be set.
@@ -138,25 +137,25 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
       network: z.object({
         mode: z.enum(["deny", "allowlist", "open", "unrestricted"]),
         allow: z.array(z.string().min(1)).optional().describe("allowlist: hosts like example.com, *.example.com, example.com:22"),
-      }).strict().nullable().optional(),
+      }).strict().nullable().optional().describe("What sandboxes may reach: deny, allowlist, open (public only) or unrestricted"),
       resources: z.object({
         cpus: z.number().positive().optional(), memoryMb: z.number().int().positive().optional(),
         diskMb: z.number().int().positive().optional(), timeoutMin: z.number().int().positive().optional(),
-      }).strict().nullable().optional(),
+      }).strict().nullable().optional().describe("CPU, memory, disk and time limits of a sandbox"),
       chat_idle_minutes: z.number().int().min(1).nullable().optional().describe("Chat workspaces close after this idle time"),
       confine_external_content: z.boolean().nullable().optional().describe("Agents reading external content run at least in bwrap"),
       allow_local: z.boolean().nullable().optional().describe("With confine_external_content: Polpo itself may still run locally"),
       chat_remote: z.boolean().nullable().optional().describe("Chats may run on remote providers (Daytona, E2B)"),
-      isolation: z.enum(["reuse", "fresh", "shared"]).nullable().optional(),
+      isolation: z.enum(["reuse", "fresh", "shared"]).nullable().optional().describe("reuse a released sandbox, a fresh one per run, or one shared by concurrent runs"),
       lifecycle: z.object({
         onRelease: z.enum(["pool", "destroy"]).optional(), stopAfterIdleMinutes: z.number().int().min(0).optional(),
         deleteAfterStopMinutes: z.number().int().min(0).optional(),
-      }).strict().nullable().optional(),
+      }).strict().nullable().optional().describe("After a run: pool or destroy the sandbox, idle stop, deletion"),
       warm: z.object({ daytona: z.number().int().min(0).max(20).optional(), e2b: z.number().int().min(0).max(20).optional() }).strict().nullable().optional()
         .describe("Remote VMs kept ready per provider (they cost money)"),
       volumes: z.array(z.object({
         name: z.string().regex(/^[a-z][a-z0-9_-]{1,62}$/), access: z.enum(["read-only", "read-write"]).optional(), writeBack: z.enum(["auto", "manual"]).optional(),
-      }).strict()).nullable().optional(),
+      }).strict()).nullable().optional().describe("Persistent volumes runs mount, by name"),
       providers: z.object({ daytona: daytonaInput.nullable().optional(), e2b: e2bInput.nullable().optional() }).strict().optional()
         .describe("Remote providers' options (merged; null removes a provider)"),
     },
@@ -214,7 +213,7 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_sandbox_provider_test", {
     title: "Test a remote sandbox provider",
     description: "Check that a remote sandbox provider (daytona, e2b) answers with its configured key: says whether it works and why not.",
-    inputSchema: { provider: z.enum(["daytona", "e2b"]) },
+    inputSchema: { provider: z.enum(["daytona", "e2b"]).describe("The remote provider") },
     outputSchema: { provider: z.string(), result: z.unknown() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async ({ provider }) => {
@@ -259,13 +258,13 @@ function registerPolicyTools(tool: Register, deps: McpDeps): void {
           target: z.string().min(1).optional().describe("agent: its name; human: a channel"),
           timeoutMs: z.number().int().min(0).optional(), notifyChannels: z.array(z.string().min(1)).optional(),
         }).strict()).min(1),
-      }).strict().nullable().optional(),
+      }).strict().nullable().optional().describe("Who handles repeated failures, level by level; null removes it"),
       sla: z.object({
         warningThreshold: z.number().min(0).max(1).optional().describe("Fraction of the deadline elapsed before a warning (0–1)"),
         checkIntervalMs: z.number().int().min(1000).optional(),
         warningChannels: z.array(z.string().min(1)).optional(), violationChannels: z.array(z.string().min(1)).optional(),
         violationAction: z.enum(["notify", "fail"]).optional(),
-      }).strict().nullable().optional(),
+      }).strict().nullable().optional().describe("SLA monitoring; null removes it"),
     },
     outputSchema: { changed: z.array(z.string()), escalation_policy: z.unknown().nullable(), sla: z.unknown().nullable() },
     annotations: UPDATE,
@@ -296,16 +295,16 @@ function registerPolicyTools(tool: Register, deps: McpDeps): void {
       + "approved, automatically (handler auto, with a condition) or by a person (handler human, notified on channels). Same id replaces it. "
       + "Needs the admin scope.",
     inputSchema: {
-      id: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'"),
-      name: z.string().min(1).max(120),
-      handler: z.enum(["auto", "human"]),
-      hook: z.enum(GATE_HOOKS),
+      id: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'").describe("The gate's id (an existing one to replace it)"),
+      name: z.string().min(1).max(120).describe("A readable name"),
+      handler: z.enum(["auto", "human"]).describe("auto: approved when the condition holds; human: a person decides"),
+      hook: z.enum(GATE_HOOKS).describe("Where work stops"),
       condition: z.string().min(1).max(2000).optional().describe("An expression on the event that must hold for the gate to apply"),
       notify_channels: z.array(z.string().min(1)).optional().describe("Channels that hear about it (polpo_channels_list)"),
-      timeout_ms: z.number().int().min(0).optional(),
+      timeout_ms: z.number().int().min(0).optional().describe("How long to wait for an answer (ms)"),
       timeout_action: z.enum(["approve", "reject"]).optional().describe("What happens when nobody answers in time"),
-      priority: z.number().int().optional(),
-      max_revisions: z.number().int().min(0).optional(),
+      priority: z.number().int().optional().describe("Higher runs first when several gates apply"),
+      max_revisions: z.number().int().min(0).optional().describe("How many times the work may be sent back"),
       include_outcomes: z.boolean().optional().describe("Show the task's outcomes to the approver"),
     },
     outputSchema: { gate: gateItem, created: z.boolean() },
@@ -334,7 +333,7 @@ function registerPolicyTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_approval_gate_delete", {
     title: "Delete an approval gate",
     description: "Delete an approval gate (polpo_policies_get lists them): work no longer stops there. Needs confirm: true.",
-    inputSchema: { id: z.string().min(1), confirm: confirmParam("delete the gate") },
+    inputSchema: { id: z.string().min(1).describe("The gate's id"), confirm: confirmParam("delete the gate") },
     outputSchema: { id: z.string(), deleted: z.boolean() },
     annotations: DESTRUCTIVE,
   }, async ({ id, confirm }) => {
@@ -371,7 +370,7 @@ function registerMemberTools(tool: Register, deps: McpDeps): void {
     title: "Add a member",
     description: "Let a person sign in to the dashboard: adds their email, and by default emails them a sign-in link. Needs the admin scope.",
     inputSchema: {
-      email: z.string().email(),
+      email: z.string().email().describe("Their email address"),
       send_invite: z.boolean().optional().describe("Email them a sign-in link (default true; needs sign-in on and email set up)"),
     },
     outputSchema: { email: z.string(), invited: z.boolean(), invite_error: z.string().optional(), members: z.array(z.object({ email: z.string() })) },
@@ -387,7 +386,7 @@ function registerMemberTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_members_remove", {
     title: "Remove a member",
     description: "Stop a person from signing in to the dashboard (the last member cannot be removed). Needs confirm: true.",
-    inputSchema: { email: z.string().email(), confirm: confirmParam("remove the member") },
+    inputSchema: { email: z.string().email().describe("The member's email"), confirm: confirmParam("remove the member") },
     outputSchema: { email: z.string(), removed: z.boolean(), members: z.array(z.object({ email: z.string() })) },
     annotations: DESTRUCTIVE,
   }, async ({ email, confirm }) => {
@@ -496,7 +495,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
       + "setup_url), the schedule (cron) and excluded paths. Needs the admin scope.",
     inputSchema: {
       endpoint: z.string().url().optional().describe("The R2 S3 endpoint (https://<account>.r2.cloudflarestorage.com)"),
-      bucket: z.string().min(1).optional(),
+      bucket: z.string().min(1).optional().describe("The R2 bucket"),
       prefix: z.string().optional().describe("A folder inside the bucket ('' for the root)"),
       schedule: z.object({ enabled: z.boolean(), cron: z.string().min(1).describe("e.g. '0 3 * * *'") }).nullable().optional().describe("null removes it"),
       excludes: z.array(z.string().min(1)).optional().describe("Paths (globs) never synced: replaces the list"),
@@ -559,8 +558,8 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
       + "the background (follow it with polpo_sync_status).",
     inputSchema: {
       direction: z.enum(["push", "pull"]).describe("push: workspace → R2; pull: R2 → workspace (overwrites local files)"),
-      mode: z.enum(["copy", "sync"]).optional(),
-      dry_run: z.boolean().optional(),
+      mode: z.enum(["copy", "sync"]).optional().describe("copy (default): add and update newer files; sync: an exact mirror, deleting extras"),
+      dry_run: z.boolean().optional().describe("Only list what would happen"),
       confirm: confirmParam("run it (after the person agreed)"),
     },
     outputSchema: { started: z.boolean(), finished: z.boolean(), direction: z.string(), mode: z.string(), dry_run: z.boolean(), result: z.unknown().optional() },
@@ -637,7 +636,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
       + "stored key). Needs the admin scope.",
     inputSchema: {
       id: z.string().min(2).max(41).regex(/^[a-z0-9][a-z0-9-]*$/, "lowercase letters, digits and dashes").describe("The provider's id (models are id:model)"),
-      provider: customProviderInput,
+      provider: customProviderInput.describe("The definition (only the fields given change on an existing provider)"),
     },
     outputSchema: { id: z.string(), created: z.boolean(), provider: looseObject, warnings: z.array(z.string()), needs_key: z.boolean(), setup_url: z.string() },
     annotations: UPDATE,
@@ -670,7 +669,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_custom_provider_remove", {
     title: "Remove a custom LLM provider",
     description: "Remove a custom provider and its stored key: agents and settings using its models fail until they pick another. Needs confirm: true.",
-    inputSchema: { id: z.string().min(1), confirm: confirmParam("remove the provider") },
+    inputSchema: { id: z.string().min(1).describe("The provider's id"), confirm: confirmParam("remove the provider") },
     outputSchema: { id: z.string(), removed: z.boolean(), warnings: z.array(z.string()) },
     annotations: DESTRUCTIVE,
   }, async ({ id, confirm }) => {
@@ -721,7 +720,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
       + "answers, sessions). Only the fields given change. Bot tokens, API keys, webhook URLs and secret headers are never sent here: the "
       + "result lists what is missing and setup_url, where the person enters them. Needs the admin scope.",
     inputSchema: {
-      name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'"),
+      name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'").describe("The channel's name (an existing one to change it)"),
       type: z.enum(CHANNEL_TYPES).optional().describe("Needed for a new channel"),
       chat_id: z.string().min(1).optional().describe("Telegram / WhatsApp: the chat"),
       to: z.array(z.string().email()).optional().describe("Email: recipients"),
@@ -733,7 +732,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
       vapid_subject: z.string().min(1).optional().describe("Push: mailto: or https: contact"),
       vapid_public_key: z.string().min(1).optional().describe("Push: the public key"),
       ttl: z.number().int().min(0).optional().describe("Push: seconds a notification is kept"),
-      urgency: z.enum(["very-low", "low", "normal", "high"]).optional(),
+      urgency: z.enum(["very-low", "low", "normal", "high"]).optional().describe("Push: delivery urgency"),
       gateway: gatewayInput.nullable().optional().describe("Inbound messages: replaces the gateway settings; null turns them off"),
     },
     outputSchema: { channel: looseObject, created: z.boolean(), needs_secrets: z.array(z.string()), setup_url: z.string() },
@@ -772,7 +771,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_channel_remove", {
     title: "Remove a notification channel",
     description: "Remove a notification channel and its saved secrets: rules that use it stop notifying there. Needs confirm: true.",
-    inputSchema: { name: z.string().min(1), confirm: confirmParam("remove the channel") },
+    inputSchema: { name: z.string().min(1).describe("The channel's name"), confirm: confirmParam("remove the channel") },
     outputSchema: { name: z.string(), removed: z.boolean(), rules_using_it: z.array(z.string()) },
     annotations: DESTRUCTIVE,
   }, async ({ name, confirm }) => {

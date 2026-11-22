@@ -185,11 +185,10 @@ Enable them with `settings.mcp.toolsets` / `POLPO_MCP_TOOLSETS` (e.g. `default,b
 | `watchers` | `polpo_watchers_list`, `polpo_watcher_create` (when a task reaches a status: create a task, run a mission or notify; never a shell command), `polpo_watcher_delete` (`confirm: true`) | read-only / write / destructive |
 | `vault` (needs `polpo:vault`, also to read) | `polpo_vault_list` (each agent's entries: service, type, label and the names of the fields, never values; `setup_url` to add or change one), `polpo_vault_delete` (`confirm: true`; not entries shared from another agent) | read-only / destructive |
 | `apps` | `polpo_apps_list` (services, whether they run, URLs, deployments, domains), `polpo_app_control` (start; stop and restart need `confirm: true`), `polpo_browser_profiles_list`, `polpo_browser_profile_clear` (`confirm: true`) | read-only / destructive |
-| `settings` (changes need `polpo:admin`) | The rest of Configuration, below | |
 
-### settings (off by default; changes need `polpo:admin`)
+### settings (on by default; changes need `polpo:admin`)
 
-Every other section of the dashboard's Configuration page, as direct tools (no `polpo_ask`). Off by default so the default toolsets stay within clients' tool limits: enable it with `settings.mcp.toolsets` (`["default", "settings"]`), `POLPO_MCP_TOOLSETS` or a connector URL `?toolsets=…,settings`. Secrets never pass through: the tools return `setup_url`, the right Configuration section.
+Every other section of the dashboard's Configuration page, as direct tools (no `polpo_ask`). A client without the admin scope sees only the reads (members and MCP access not even those). A connector URL can leave the toolset out (`?toolsets=core,tasks`), an instance with `settings.mcp.toolsets`. Secrets never pass through: the tools return `setup_url`, the right Configuration section.
 
 | Tool | What it does | Annotations |
 |---|---|---|
@@ -264,7 +263,7 @@ An instance chooses the toolsets it offers:
 - **`settings.mcp.toolsets`** in `.polpo/polpo.json`, e.g. `{ "settings": { "mcp": { "toolsets": ["default", "admin"] } } }`;
 - **`POLPO_MCP_TOOLSETS`** in the environment (comma-separated; it wins over the settings).
 
-Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, `computers`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `settings`, `admin`), `default` (the toolsets on by default, about 95 tools) or `all`. Without either, the default toolsets are offered.
+Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, `computers`, `settings`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 125 tools for a full-access client) or `all`. Without either, the default toolsets are offered.
 
 For example, the defaults plus the company brain and the vault: `POLPO_MCP_TOOLSETS=default,brain,vault`.
 

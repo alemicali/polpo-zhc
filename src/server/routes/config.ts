@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { parseAppearanceSettings } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings } from "@polpo-ai/core";
 import { redactPolpoConfig } from "../security.js";
 import { loadPolpoConfig, savePolpoConfig, generatePolpoConfigDefault } from "../../core/config.js";
 import { detectProviders, moveEnvEntries, takeApiWrittenEnvKeys } from "../../setup/index.js";
@@ -325,7 +325,7 @@ export function publicConfigRoutes(
     let appearance: unknown = {};
     try {
       const raw = loadPolpoConfig(getPolpoDir(activeWorkDir))?.settings?.appearance;
-      appearance = raw ? parseAppearanceSettings(raw) : {};
+      appearance = raw ? sanitizeAppearanceSettings(raw).value : {};
     } catch {
       appearance = {};
     }

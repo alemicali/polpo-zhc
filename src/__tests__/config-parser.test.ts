@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseConfig, generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
@@ -241,13 +241,22 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       });
     });
 
-    it("refuses an appearance that could break out of the stylesheet", async () => {
-      const bad = (appearance: object) => writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance } });
-      await expect(parseConfig(bad({ palette: "nope" }))).rejects.toThrow(/settings\.appearance\.palette/);
-      await expect(parseConfig(bad({ custom: { enabled: true, light: { primary: "red;}" } } }))).rejects.toThrow(/custom\.light\.primary must be a colour/);
-      await expect(parseConfig(bad({ custom: { enabled: true, dark: { fontFamily: "x; } body {" } } }))).rejects.toThrow(/fontFamily/);
-      await expect(parseConfig(bad({ custom: { enabled: true, dark: { radius: 40 } } }))).rejects.toThrow(/radius/);
-      await expect(parseConfig(bad({ custom: { enabled: true, dark: { nope: "#fff" } } }))).rejects.toThrow(/unknown token nope/);
+    it("ignores the invalid part of an appearance with a warning, never refusing to start", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const appearance = {
+        theme: "purple", palette: "mono", extra: 1,
+        custom: { enabled: true, light: { primary: "red;}", background: "#ffffff", radius: 40 }, dark: { fontFamily: "x; } body {", nope: "#fff", ring: "#000000" } },
+      };
+      const config = await parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance } }));
+      expect(config.settings.appearance).toEqual({ palette: "mono", custom: { enabled: true, light: { background: "#ffffff" }, dark: { ring: "#000000" } } });
+      const message = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      for (const part of ["theme", "extra", "custom.light.primary", "custom.light.radius", "fontFamily", "unknown token nope"]) expect(message).toContain(part);
+      warn.mockRestore();
+      // not an object at all: ignored too
+      const silent = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const plain = await parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance: "dark" } }));
+      expect(plain.settings.appearance).toBeUndefined();
+      silent.mockRestore();
     });
 
     it("throws on invalid logLevel", async () => {

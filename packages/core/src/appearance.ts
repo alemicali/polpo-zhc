@@ -194,3 +194,45 @@ export function parseAppearanceSettings(raw: unknown, path = "settings.appearanc
 export function isEmptyAppearance(a: AppearanceSettings | undefined): boolean {
   return !a || (a.theme === undefined && a.palette === undefined && a.custom === undefined);
 }
+
+/**
+ * The valid part of a raw appearance (from the config file), and what was dropped: a bad theme,
+ * palette, flag or token is left out (its default applies), never the whole look, and never an
+ * error — a cosmetic mistake must not stop the instance. The API refuses bad input instead
+ * (parseAppearanceSettings).
+ */
+export function sanitizeAppearanceSettings(raw: unknown, path = "settings.appearance"): { value: AppearanceSettings; problems: string[] } {
+  const problems: string[] = [];
+  if (raw === undefined || raw === null) return { value: {}, problems };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { value: {}, problems: [`${path} must be an object`] };
+  const r = raw as Record<string, unknown>;
+  const value: AppearanceSettings = {};
+  const attempt = (fn: () => void) => { try { fn(); } catch (err) { problems.push(err instanceof Error ? err.message : String(err)); } };
+  attempt(() => { Object.assign(value, parseAppearanceSettings({ theme: r.theme }, path)); });
+  attempt(() => { Object.assign(value, parseAppearanceSettings({ palette: r.palette }, path)); });
+  for (const k of Object.keys(r)) if (!["theme", "palette", "custom"].includes(k)) problems.push(`${path}: unknown field ${k}`);
+  if (r.custom !== undefined && r.custom !== null) {
+    if (typeof r.custom !== "object" || Array.isArray(r.custom)) {
+      problems.push(`${path}.custom must be an object`);
+    } else {
+      const c = r.custom as Record<string, unknown>;
+      const custom: AppearanceCustom = { enabled: c.enabled === true };
+      if (c.enabled !== undefined && typeof c.enabled !== "boolean") problems.push(`${path}.custom.enabled must be true or false`);
+      if (c.derive === false) custom.derive = false;
+      else if (c.derive !== undefined && c.derive !== true) problems.push(`${path}.custom.derive must be true or false`);
+      for (const mode of ["light", "dark"] as const) {
+        const tokens = c[mode];
+        if (tokens === undefined || tokens === null) continue;
+        if (typeof tokens !== "object" || Array.isArray(tokens)) { problems.push(`${path}.custom.${mode} must be an object of tokens`); continue; }
+        const out: Record<string, unknown> = {};
+        for (const [name, v] of Object.entries(tokens as Record<string, unknown>)) {
+          attempt(() => { Object.assign(out, parseAppearanceTokens({ [name]: v }, `${path}.custom.${mode}`)); });
+        }
+        if (Object.keys(out).length) custom[mode] = out as AppearanceTokens;
+      }
+      for (const k of Object.keys(c)) if (!["enabled", "derive", "light", "dark"].includes(k)) problems.push(`${path}.custom: unknown field ${k}`);
+      value.custom = custom;
+    }
+  }
+  return { value, problems };
+}

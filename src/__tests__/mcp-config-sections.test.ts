@@ -37,7 +37,6 @@ export const CONFIG_SECTION_TOOLS: Record<string, { read: string[]; write: strin
 beforeAll(async () => {
   process.env.POLPO_PUBLIC_URL = PUBLIC;
   process.env.POLPO_MCP_KEY = MCP_KEY;
-  process.env.POLPO_MCP_TOOLSETS = "all";
   tmpDir = await mkdtemp(join(tmpdir(), "polpo-mcp-config-"));
   await mkdir(join(tmpDir, ".polpo"), { recursive: true });
   await writeFile(join(tmpDir, ".polpo", "polpo.json"), JSON.stringify({
@@ -54,7 +53,6 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.POLPO_PUBLIC_URL;
   delete process.env.POLPO_MCP_KEY;
-  delete process.env.POLPO_MCP_TOOLSETS;
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -80,7 +78,10 @@ async function oauthToken(subject: string): Promise<string> {
 
 describe("every Configuration section through MCP", () => {
   it("has a read tool and, where editable, write tools, with the right scopes", async () => {
-    const { toolScopeMatrix } = await import("../server/mcp.js");
+    const { toolScopeMatrix, TOOLSETS, resolveToolsets } = await import("../server/mcp.js");
+    // on by default: every section is reachable without configuring toolsets
+    expect(TOOLSETS.settings.default).toBe(true);
+    expect(resolveToolsets()).toContain("settings");
     const m = Object.fromEntries(toolScopeMatrix().map((t) => [t.name, t]));
     for (const [section, { read, write }] of Object.entries(CONFIG_SECTION_TOOLS)) {
       expect(read.length, section).toBeGreaterThan(0);
@@ -220,6 +221,17 @@ describe("policies", () => {
     expect(got.escalation_policy).toMatchObject({ name: "Default" });
     expect(got.sla).toMatchObject({ warningThreshold: 0.75 });
     expect((await tool("polpo_policies_update", { sla: null })).structuredContent.sla).toBeNull();
+  });
+
+  it("answers 400, not 500, when a rule's or gate's id in the body is not the URL's", async () => {
+    const put = (path: string, body: unknown) => app.request(`/api/v1/config/${path}`, {
+      method: "PUT", headers: { authorization: `Bearer ${MCP_KEY}`, "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    const rule = await put("rules/r1", { id: "other", events: ["task:failed"], channels: ["x"] });
+    expect(rule.status).toBe(400);
+    expect((await rule.json()).error).toMatch(/must match/);
+    const gate = await put("gates/g1", { id: "other", name: "G", handler: "auto", hook: "task:complete" });
+    expect(gate.status).toBe(400);
   });
 });
 

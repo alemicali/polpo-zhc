@@ -5,7 +5,7 @@ import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, P
 import { getPolpoDir } from "./constants.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { parseAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -404,7 +404,9 @@ function parseSettings(raw: any): PolpoSettings {
     };
   }
   if (raw?.appearance !== undefined && raw?.appearance !== null) {
-    const appearance = parseAppearanceSettings(raw.appearance);
+    // a cosmetic mistake never stops the instance: the invalid part is left out, with a warning
+    const { value: appearance, problems } = sanitizeAppearanceSettings(raw.appearance);
+    if (problems.length) console.warn(`[polpo] Ignoring invalid appearance settings in polpo.json (defaults apply): ${problems.join("; ")}`);
     if (!isEmptyAppearance(appearance)) settings.appearance = appearance;
   }
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;

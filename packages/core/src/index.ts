@@ -249,7 +249,7 @@ export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egres
 export {
   APPEARANCE_THEMES, APPEARANCE_PALETTES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, APPEARANCE_TOKEN_GROUPS, APPEARANCE_COLOR, APPEARANCE_HEX,
   APPEARANCE_FONT, APPEARANCE_SHADOW, APPEARANCE_FONT_PRESETS, APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX,
-  parseAppearanceSettings, parseAppearanceTokens, parseAppearanceToken, isEmptyAppearance,
+  parseAppearanceSettings, parseAppearanceTokens, sanitizeAppearanceSettings, parseAppearanceToken, isEmptyAppearance,
 } from "./appearance.js";
 export type {
   AppearanceTheme, AppearancePalette, AppearanceColors, AppearanceCustom, AppearanceSettings, AppearanceTokens, AppearanceTokenName,

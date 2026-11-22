@@ -34,7 +34,7 @@ Every member can edit Configuration (members have no roles), so every member see
 - `custom.light` / `custom.dark`: any subset of the tokens below. A token not given keeps the palette's value.
 - `custom.derive` (default `true`): fill the tokens not given from those given (see Derivation).
 
-Values are checked by the config loader, the REST route and MCP alike:
+Values are checked by the REST route and MCP, which refuse invalid input (400), and by the config loader, which ignores the invalid part of a hand-edited `polpo.json` with a warning in the log (the rest applies; the instance always starts):
 
 - **colours**: `#rgb`, `#rrggbb`, `#rrggbbaa`, `oklch(…)`, `oklab(…)`, `lab(…)`, `lch(…)`, `hsl(…)`, `rgb(…)` (the syntaxes the dashboard's CSS uses);
 - **fonts**: a CSS font stack of names, commas and quotes, at most 200 characters (no `;`, braces, `url(`…). The dashboard loads Satoshi, IBM Plex Sans, JetBrains Mono and Newsreader; other families need to be installed on the viewer's device (no web-font loading);
