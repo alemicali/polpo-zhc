@@ -841,6 +841,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       resourceMetadataUrl,
       toolsets: resolveToolsets(process.env.POLPO_MCP_TOOLSETS, orchestrator.getConfig()?.settings?.mcp?.toolsets),
       publicUrl: publicOrigin(c),
+      // where the dashboard is, when not on the API's origin (the UI server on its own port)
+      dashboardUrl: process.env.POLPO_DASHBOARD_URL?.trim() || process.env.POLPO_UI_PUBLIC_URL?.trim() || undefined,
       api: async (method, path, body, headers) => {
         const form = body instanceof FormData;
         const binary = body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;

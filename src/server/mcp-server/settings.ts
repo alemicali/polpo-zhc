@@ -16,6 +16,7 @@ import {
   DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, looseObject, ok, short,
   type McpDeps, type Register,
 } from "./kit.js";
+import { setupHandoff, setupHandoffs } from "./setup.js";
 
 const SANDBOX_PROVIDERS = ["local", "bwrap", "docker", "daytona", "e2b"] as const;
 /** Lifecycle hooks an approval gate can stop at (packages/server/src/schemas.ts, LifecycleHookSchema). */
@@ -206,8 +207,8 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
     return ok([
       changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).",
       ...(ignored.length ? [`Not accepted (invalid, left as before): ${ignored.join(", ")}.`] : []),
-      ...(missingKey.length ? [`${missingKey.join(", ")} has no API key yet: the person picks its vault entry at ${setup}.`] : []),
-    ].join(" "), { changed, settings, ignored, setup_url: setup });
+      ...(missingKey.length ? [`${missingKey.join(", ")} has no API key yet. ${setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`).next_step}`] : []),
+    ].join(" "), { changed, settings, ignored, ...(missingKey.length ? setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`) : { setup_url: setup }) });
   });
 
   tool("settings", "polpo_sandbox_provider_test", {
@@ -218,7 +219,7 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async ({ provider }) => {
     const r = await apiSend(deps, "POST", `/sandbox/providers/${provider}/test`);
-    if (!r.ok) return apiError(r, `Testing ${provider}`, r.status === 400 ? `The person picks its API key's vault entry at ${dashboardLink(deps, "/config?section=sandbox")}.` : undefined);
+    if (!r.ok) return apiError(r, `Testing ${provider}`, r.status === 400 ? setupHandoff(deps, { kind: "sandbox", item: provider, field: "credential" }, `${provider} API key (a vault entry)`).next_step : undefined);
     return ok(`${provider}: ${JSON.stringify(r.data)}`, { provider, result: r.data });
   });
 }
@@ -481,12 +482,13 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     if (!c.ok) return apiError(c, "Reading the sync settings");
     const sync = syncView(c.data as SyncConfig);
     const runs = h.ok && Array.isArray(h.data) ? h.data.slice(0, history ?? 5) : [];
+    const handoff = sync.configured ? { setup_url: setup } : setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys");
     return ok([
-      sync.configured ? `R2: ${JSON.stringify(sync.r2)}` : `Not set up: the person enters the R2 keys at ${setup}`,
+      sync.configured ? `R2: ${JSON.stringify(sync.r2)}` : `Not set up. ${(handoff as { next_step: string }).next_step}`,
       `schedule: ${sync.schedule ? JSON.stringify(sync.schedule) : "none"} · excludes: ${(sync.excludes as string[]).join(", ") || "none"}`,
       `running: ${a.ok && a.data ? JSON.stringify(a.data) : "no"}`,
       ...(runs.length ? [`latest runs: ${runs.map((r) => short(JSON.stringify(r), 160)).join("; ")}`] : []),
-    ].join("\n"), { sync, active: a.ok ? a.data ?? null : null, history: runs, setup_url: setup });
+    ].join("\n"), { sync, active: a.ok ? a.data ?? null : null, history: runs, ...handoff });
   });
 
   tool("settings", "polpo_sync_update", {
@@ -511,7 +513,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     const c = cur.data as SyncConfig;
     const body: Record<string, unknown> = {};
     if (endpoint !== undefined || bucket !== undefined || prefix !== undefined) {
-      if (!c.r2) return fail(`Cloud sync is not set up: the person enters the R2 keys first, at ${setup}.`);
+      if (!c.r2) return fail(`Cloud sync is not set up: the R2 keys come first. ${setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys").next_step}`);
       // the stored keys stay: the masked secret is restored by the server
       body.r2 = { endpoint: endpoint ?? c.r2.endpoint, accessKeyId: c.r2.accessKeyId, secretAccessKey: c.r2.secretAccessKey, bucket: bucket ?? c.r2.bucket, prefix: prefix ?? c.r2.prefix ?? "" };
     }
@@ -662,8 +664,9 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     const p = saved.ok ? view(saved.data as Record<string, unknown>) : { id };
     const warnings = ((r.data as { warnings?: string[] } | null)?.warnings) ?? [];
     const needsKey = saved.ok ? !(saved.data as { configured?: boolean }).configured : false;
-    return ok(`${exists ? "Updated" : "Created"} provider ${id}.${warnings.length ? ` ${warnings.join(" ")}` : ""}${needsKey ? ` It has no key yet: the person enters it at ${setup}.` : ""}`,
-      { id, created: !exists, provider: p, warnings, needs_key: needsKey, setup_url: setup });
+    const handoff = needsKey ? setupHandoff(deps, { kind: "custom-provider", item: id, field: "apiKey" }, `API key for ${id}`) : { setup_url: setup };
+    return ok(`${exists ? "Updated" : "Created"} provider ${id}.${warnings.length ? ` ${warnings.join(" ")}` : ""}${needsKey ? ` It has no key yet. ${(handoff as { next_step: string }).next_step}` : ""}`,
+      { id, created: !exists, provider: p, warnings, needs_key: needsKey, ...handoff });
   });
 
   tool("settings", "polpo_custom_provider_remove", {
@@ -691,7 +694,8 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     if (confirm !== true) return fail(`Disconnecting ${name} removes its key: its models stop working. Ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "DELETE", `/providers/${enc(name)}/disconnect`);
     if (!r.ok) return apiError(r, `Disconnecting ${name}`);
-    return ok(`Disconnected ${name}. To connect it again: ${setup}`, { name, disconnected: true, setup_url: setup });
+    const handoff = setupHandoff(deps, { kind: "provider", item: name, field: "apiKey" }, `${name} API key`);
+    return ok(`Disconnected ${name}. To connect it again: ${handoff.setup_url}`, { name, disconnected: true, ...handoff });
   });
 }
 
@@ -715,10 +719,11 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("settings", "polpo_channel_save", {
     title: "Save a notification channel",
-    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, webhook, push): its non-secret fields "
-      + "(chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options) and the inbound gateway (who may write, which agent "
-      + "answers, sessions). Only the fields given change. Bot tokens, API keys, webhook URLs and secret headers are never sent here: the "
-      + "result lists what is missing and setup_url, where the person enters them. Needs the admin scope.",
+    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, webhook, push): its fields "
+      + "(chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options), the inbound gateway (who may write, which agent "
+      + "answers, sessions). Only the fields given change. Secrets (bot token, API key, webhook URL, secret headers) never pass through "
+      + "MCP — what is typed into an MCP client stays in its conversation history: the result lists the ones still missing with setup_url, "
+      + "the dashboard link that opens this channel, and the steps for the person. Saved secrets are kept and never returned. Needs the admin scope.",
     inputSchema: {
       name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'").describe("The channel's name (an existing one to change it)"),
       type: z.enum(CHANNEL_TYPES).optional().describe("Needed for a new channel"),
@@ -758,14 +763,18 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "PUT", `/config/channels/${enc(a.name)}`, next);
     if (!r.ok) {
       return apiError(r, `Saving channel ${a.name}`, r.status === 400 && /secret|Re-enter/i.test(r.error)
-        ? `Changing where the channel sends drops its saved secrets: the person enters them again at ${setup}.`
+        ? `Changing where the channel sends drops its saved secrets: the person enters them again at ${dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`)}.`
         : "Nothing was saved. Fix the field named in the error.");
     }
     const saved = ((r.data as { settings?: Settings })?.settings?.notifications?.channels?.[a.name] ?? next) as Record<string, unknown>;
-    const needs = (CHANNEL_REQUIRED_SECRETS[String(saved.type)] ?? []).filter((oneOf) => !oneOf.some((k) => saved[k])).map((oneOf) => oneOf.join(" or "));
-    return ok(`${current ? "Updated" : "Created"} channel ${a.name} (${String(saved.type)}).${needs.length ? ` It still needs ${needs.join(", ")}: the person enters ${needs.length > 1 ? "them" : "it"} at ${setup}.` : ""}`
-      + `${current ? " Test it with polpo_channel_test." : ""}`,
-    { channel: channelView(a.name, saved), created: !current, needs_secrets: needs, setup_url: setup });
+    const missing = (CHANNEL_REQUIRED_SECRETS[String(saved.type)] ?? []).filter((oneOf) => !oneOf.some((k) => saved[k]));
+    const needs = missing.map((oneOf) => oneOf.join(" or "));
+    const handoff = missing.length
+      ? setupHandoffs(deps, missing.map((oneOf) => ({ target: { kind: "channel" as const, item: a.name, field: oneOf.join("|") }, what: oneOf.join(" or ") })))
+      : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
+    return ok(`${current ? "Updated" : "Created"} channel ${a.name} (${String(saved.type)}).`
+      + `${missing.length ? ` It still needs ${needs.join(", ")} (secrets never pass through MCP). ${(handoff as { next_step: string }).next_step}` : ` Test it with polpo_channel_test.`}`,
+    { channel: channelView(a.name, saved), created: !current, needs_secrets: needs, ...handoff });
   });
 
   tool("settings", "polpo_channel_remove", {

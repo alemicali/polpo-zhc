@@ -12,9 +12,10 @@ import {
 } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
 import {
-  BAD_CURSOR, READ, TOOLSET_NAMES, UPDATE, apiError, apiGet, apiSend, cursorParam, fail, limitParam, normalizeScopes, ok, page, pageOutput, qs, short,
+  BAD_CURSOR, READ, TOOLSET_NAMES, UPDATE, dashboardLink, apiError, apiGet, apiSend, cursorParam, fail, limitParam, normalizeScopes, ok, page, pageOutput, qs, short,
   type McpDeps, type Register, type ResolveHost,
 } from "./kit.js";
+import { setupHandoff } from "./setup.js";
 
 /** Largest logo accepted (the dashboard's upload limit). */
 export const MAX_LOGO_BYTES = 4 * 1024 * 1024;
@@ -357,7 +358,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
           name: z.string().min(1).max(80), key_ref: vaultRefInput.describe("The vault entry holding the key's value"),
           scopes: z.array(z.string().min(1)).optional().describe("polpo:read, polpo:work, polpo:files, polpo:messages, polpo:connectors, polpo:computers, polpo:vault, polpo:admin"),
         })).optional().describe("Named MCP keys: replaces them all"),
-      }).nullable().optional().describe("Polpo's own MCP server: toolsets and named keys; null removes the settings"),
+      }).nullable().optional().describe("Polpo's own MCP server: toolsets and named keys (the keys given change); null removes the settings"),
       connectors: z.object({
         allowPrivateNetwork: z.boolean().optional(), toolTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
       }).strict().nullable().optional().describe("Connectors on private addresses and their default tool timeout; null: the defaults"),
@@ -398,7 +399,10 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       return fail("Nothing to change: give orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, tailscale, mcp or connectors.");
     }
     const missing = await missingVaultRefs(deps, refs);
-    if (missing.length) return fail(`No vault entry ${missing.join(", ")}. The person adds it in the dashboard (${dashboard("/agents")}); list entries with polpo_vault_list.`);
+    if (missing.length) {
+      const [owner, service] = missing[0].split("/");
+      return fail(`Nothing was changed: no vault entry ${missing.join(", ")}. ${setupHandoff(deps, { kind: "vault", item: owner, field: service }, `${service} credentials of ${owner}`).next_step} Then call this again.`);
+    }
     if (!allow_unlisted) {
       const specs = [
         ...(typeof orchestrator_model === "string" ? [orchestrator_model] : orchestrator_model ? [orchestrator_model.primary, ...(orchestrator_model.fallbacks ?? [])] : []),
@@ -526,7 +530,10 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     { changed, branding: now, appearance });
   });
 
-  const providerItem = z.object({ name: z.string(), configured: z.boolean(), source: z.string().optional(), env_var: z.string().optional() });
+  const providerItem = z.object({
+    name: z.string(), configured: z.boolean(), source: z.string().optional(), env_var: z.string().optional(),
+    setup_url: z.string().optional().describe("Without a key: the link that opens its key form"), setup_id: z.string().optional(), next_step: z.string().optional(),
+  });
 
   tool("config", "polpo_providers_list", {
     title: "List model providers",
@@ -548,7 +555,11 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       .sort((a, b) => Number(b.configured) - Number(a.configured) || a.name.localeCompare(b.name));
     const p = page(all, limit ?? 50, cursor);
     if (!p) return fail(BAD_CURSOR);
-    const setup = dashboard("/config?section=providers");
+    const setup = dashboardLink(deps, "/config?section=providers");
+    // each provider without a key: the link that opens its key form, and what to wait for
+    for (const item of p.items as Array<Record<string, unknown>>) {
+      if (!item.configured) Object.assign(item, setupHandoff(deps, { kind: "provider", item: String(item.name), field: "apiKey" }, `${String(item.name)} API key`));
+    }
     return ok(`${p.items.map((x) => `- ${x.name}: ${x.configured ? `configured (${x.source})` : "no key"}`).join("\n") || "No providers match."}`
       + `${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}\nTo add or change a key: ${setup}`, { ...p, setup_url: setup });
   });

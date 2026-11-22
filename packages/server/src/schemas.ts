@@ -279,7 +279,7 @@ export const UpdateSettingsSchema = z.object({
     allowPrivateNetwork: z.boolean().optional(),
     toolTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
   }).strict().nullable().optional(),
-  /** Polpo's own MCP server: toolsets offered and named keys (their values only as vault references). */
+  /** Polpo's own MCP server: toolsets offered and named keys (vault references); the keys given change, null removes it. */
   mcp: z.object({
     toolsets: z.array(z.string().trim().min(1)).optional(),
     keys: z.array(z.object({
@@ -314,7 +314,7 @@ export const PLAIN_SETTINGS_KEYS = [
   "maxRetries", "logLevel", "maxConcurrency", "taskTimeout", "staleThreshold", "maxFixAttempts", "maxQuestionRounds",
   "maxResolutionAttempts", "maxAssessmentRetries", "defaultQualityThreshold", "autoCorrectExpectations", "enableScheduler",
   "enableVolatileTeams", "volatileCleanup", "logRetentionDays", "emailAllowedDomains", "voiceReplies", "defaultRetryPolicy",
-  "connectors", "mcp", "escalationPolicy", "sla",
+  "connectors", "escalationPolicy", "sla",
 ] as const;
 
 // ── Notification rule (full top-level, with action passthrough) ───────

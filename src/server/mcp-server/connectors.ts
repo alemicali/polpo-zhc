@@ -10,6 +10,7 @@ import {
   page, pageOutput, short,
   type McpDeps, type Register,
 } from "./kit.js";
+import { setupHandoff } from "./setup.js";
 import { unknownAgents } from "./tasks.js";
 
 type Connector = {
@@ -60,7 +61,7 @@ async function loadConnector(deps: McpDeps, id: string) {
 const notFound = (id: string) => fail(`There is no connector "${id}". List them with polpo_connectors_list.`);
 
 export function registerConnectorTools(tool: Register, deps: McpDeps): void {
-  const setupUrl = (_id?: string) => dashboardLink(deps, "/connectors");
+  const setupUrl = (id?: string, field?: string) => (id ? setupHandoff(deps, { kind: "connector", item: id, ...(field ? { field } : {}) }, "connector's credentials").setup_url : dashboardLink(deps, "/connectors"));
 
   /** The OAuth link to open (or that it is authorized already). */
   async function oauthStart(id: string): Promise<{ ok: true; url?: string; authorized: boolean } | { ok: false; error: string; status: number }> {
@@ -184,8 +185,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     const v = view(c);
     const setup = setupUrl(c.id);
     if (c.auth.type === "bearer" || c.auth.type === "headers") {
-      return ok(`Added ${c.name} [${c.id}]. It needs a token: the person enters it in the dashboard (${setup}); secrets never go through this connector. Then polpo_connector_test.`,
-        { connector: v, setup_url: setup, next: "Enter the token in the dashboard, then polpo_connector_test" });
+      const h = setupHandoff(deps, { kind: "connector", item: c.id, field: c.auth.type === "bearer" ? "bearerToken" : "headers" }, "token");
+      return ok(`Added ${c.name} [${c.id}]. It needs a token (secrets never go through this connector). ${h.next_step}`,
+        { connector: v, ...h, next: "Enter the token in the dashboard, then polpo_setup_wait and polpo_connector_test" });
     }
     if (c.auth.type === "oauth") {
       const start = await oauthStart(c.id);

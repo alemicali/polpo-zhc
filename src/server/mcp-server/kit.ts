@@ -52,8 +52,13 @@ export interface McpDeps {
   principal?: McpPrincipal;
   /** The toolsets this instance offers (settings.mcp.toolsets / POLPO_MCP_TOOLSETS); default: every toolset that is on by default. */
   toolsets?: readonly string[];
-  /** The dashboard's public URL, for links (e.g. where to enter a secret). */
+  /** The instance's public URL (the API's origin), for links to its files and assets. */
   publicUrl?: string;
+  /**
+   * The dashboard's public URL (POLPO_DASHBOARD_URL, else POLPO_UI_PUBLIC_URL), for links where a
+   * person enters a secret; without it, publicUrl (the dashboard on the API's origin).
+   */
+  dashboardUrl?: string;
   /** How often wait tools look again (ms, default 1000). */
   pollIntervalMs?: number;
   /** For fetching remote files (logo URLs); default: global fetch. */
@@ -88,7 +93,7 @@ export const TOOLSETS = {
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
   channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (sending needs messages scope, rules admin scope)" },
   computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
-  settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, notification channels' setup (secrets never; changes need admin scope)" },
+  settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, channels end to end (setup with write-only secrets, routes, Telegram invites, pairings and allowlist, WhatsApp sign-in) (changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
@@ -326,7 +331,8 @@ export function pageBackwards<T>(items: T[], limit: number, cursor: string | und
 
 /** A link into the dashboard (absolute when the public URL is known). */
 export function dashboardLink(deps: McpDeps, path: string): string {
-  return deps.publicUrl ? `${deps.publicUrl.replace(/\/+$/, "")}${path}` : path;
+  const base = deps.dashboardUrl || deps.publicUrl;
+  return base ? `${base.replace(/\/+$/, "")}${path}` : path;
 }
 
 /** Output schema pieces. */
