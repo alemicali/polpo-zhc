@@ -181,20 +181,13 @@ export const ALL_OUTCOME_TOOL_NAMES: OutcomeToolName[] = ["register_outcome"];
  *
  * @param cwd - Working directory
  * @param allowedPaths - Sandbox paths
- * @param allowedTools - Optional filter
+ * @param _allowedTools - Ignored: register_outcome is always included, whatever the agent's
+ *   allowedTools (the task prompt and the harness instructions always tell the agent to use it;
+ *   without it a run ended "done" with no outcome)
  * @param outputDir - Per-task output directory for deliverables
  * @param fs - Where the agent's files live (default: this machine's disk)
  */
-export function createOutcomeTools(cwd: string, allowedPaths?: string[], allowedTools?: string[], outputDir?: string, fs?: FileSystem): AgentTool<any>[] {
+export function createOutcomeTools(cwd: string, allowedPaths?: string[], _allowedTools?: string[], outputDir?: string, fs?: FileSystem): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
-
-  const factories: Record<OutcomeToolName, () => AgentTool<any>> = {
-    register_outcome: () => createRegisterOutcomeTool(cwd, sandbox, toolFs(fs), outputDir),
-  };
-
-  const names = allowedTools
-    ? ALL_OUTCOME_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
-    : ALL_OUTCOME_TOOL_NAMES;
-
-  return names.map(n => factories[n]());
+  return [createRegisterOutcomeTool(cwd, sandbox, toolFs(fs), outputDir)];
 }

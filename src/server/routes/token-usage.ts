@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { TOKEN_USAGE_RANGES, tokenUsageRangeStart } from "@polpo-ai/core/token-usage";
 import type { RunStore } from "../../core/run-store.js";
 import {
   FileTokenUsageStore,
@@ -7,34 +8,29 @@ import {
 } from "../../stores/file-token-usage-store.js";
 import { databaseStoresFor } from "../../core/storage.js";
 
-const VALID_RANGES = new Set<TokenUsageRange>(["today", "24h", "7d", "30d", "all"]);
-const RANGE_MS: Record<Exclude<TokenUsageRange, "all" | "today">, number> = {
-  "24h": 24 * 60 * 60 * 1_000,
-  "7d": 7 * 24 * 60 * 60 * 1_000,
-  "30d": 30 * 24 * 60 * 60 * 1_000,
-};
+const VALID_RANGES = new Set<string>(TOKEN_USAGE_RANGES);
 
-function rangeCutoff(range: TokenUsageRange): number {
-  if (range === "all") return 0;
-  if (range === "today") {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return start.getTime();
-  }
-  return Date.now() - RANGE_MS[range];
-}
-
+/**
+ * GET /token-usage?range=&taskId=
+ * - range: 1h, today, 24h, 7d (default), 30d or all; anything else is a 400 (never a silent 7d).
+ * - taskId: only that task: its runs' tokens (activity logs, else the run records) and its harness
+ *   cost (agent_harness records carry the task id as their session). Chat usage belongs to no task.
+ */
 export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => RunStore): OpenAPIHono {
   const app = new OpenAPIHono();
 
   app.get("/", async (c) => {
-    const requested = c.req.query("range") as TokenUsageRange | undefined;
-    const range = requested && VALID_RANGES.has(requested) ? requested : "7d";
+    const requested = c.req.query("range");
+    if (requested && !VALID_RANGES.has(requested)) {
+      return c.json({ ok: false, error: `range must be one of ${TOKEN_USAGE_RANGES.join(", ")}` }, 400);
+    }
+    const range = (requested as TokenUsageRange | undefined) ?? "7d";
+    const taskId = c.req.query("taskId")?.trim() || undefined;
     const store = databaseStoresFor(getPolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(getPolpoDir());
-    const records = await store.list(range);
-    const cutoff = rangeCutoff(range);
+    const records = (await store.list(range)).filter((r) => !taskId || (r.source === "agent_harness" && r.sessionId === taskId));
+    const cutoff = tokenUsageRangeStart(range);
     const taskEvents = (await readTaskTokenEvents(getPolpoDir()))
-      .filter((event) => Date.parse(event.timestamp) >= cutoff);
+      .filter((event) => Date.parse(event.timestamp) >= cutoff && (!taskId || event.taskId === taskId));
 
     // agent harness runs (Claude Code, Codex) record their cost; their tokens are counted with the tasks
     const harnessCost = records.filter((r) => r.source === "agent_harness").reduce((total, r) => total + r.cost, 0);
@@ -52,7 +48,7 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
       const runs = [
         ...await getRunStore().getActiveRuns(),
         ...await getRunStore().getTerminalRuns(),
-      ].filter((run) => Date.parse(run.updatedAt) >= cutoff);
+      ].filter((run) => Date.parse(run.updatedAt) >= cutoff && (!taskId || run.taskId === taskId));
       taskTokens = runs.reduce((total, run) => total + (run.activity?.totalTokens ?? 0), 0);
     }
 
@@ -60,6 +56,7 @@ export function tokenUsageRoutes(getPolpoDir: () => string, getRunStore: () => R
       ok: true,
       data: {
         range,
+        ...(taskId ? { taskId } : {}),
         ...chat,
         cost: chat.cost + harnessCost,
         totalTokens: chat.totalTokens + taskTokens,
